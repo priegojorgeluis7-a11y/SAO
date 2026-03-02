@@ -1,0 +1,386 @@
+// lib/features/operations/widgets/caption_editor_widget.dart
+import 'package:flutter/material.dart';
+import '../../../ui/sao_ui.dart';
+
+class CaptionEditorWidget extends StatefulWidget {
+  const CaptionEditorWidget({
+    super.key,
+    required this.initialCaption,
+    required this.evidenceId,
+    this.onSaveCaption,
+    this.onCancel,
+    this.maxLines = 3,
+  });
+
+  final String initialCaption;
+  final String evidenceId;
+  final Function(String caption)? onSaveCaption;
+  final VoidCallback? onCancel;
+  final int maxLines;
+
+  @override
+  State<CaptionEditorWidget> createState() => _CaptionEditorWidgetState();
+}
+
+class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
+  late TextEditingController _controller;
+  bool _isEditing = false;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialCaption);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> _saveCaption() async {
+    if (_controller.text.trim() == widget.initialCaption) {
+      // Sin cambios
+      _cancelEdit();
+      return;
+    }
+
+    setState(() => _isSaving = true);
+
+    try {
+      // Simular delay de guardado
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      widget.onSaveCaption?.call(_controller.text.trim());
+      
+      if (mounted) {
+        setState(() {
+          _isEditing = false;
+          _isSaving = false;
+        });
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                SizedBox(width: SaoSpacing.sm),
+                Text('Pie de foto actualizado'),
+              ],
+            ),
+            backgroundColor: SaoColors.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(SaoRadii.sm),
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: SaoColors.error,
+          ),
+        );
+      }
+    }
+  }
+
+  void _cancelEdit() {
+    _controller.text = widget.initialCaption;
+    setState(() => _isEditing = false);
+    widget.onCancel?.call();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(SaoRadii.lg),
+        border: Border.all(
+          color: _isEditing ? SaoColors.primary : SaoColors.border,
+          width: _isEditing ? 2 : 1,
+        ),
+        boxShadow: [
+          if (_isEditing)
+            BoxShadow(
+              color: SaoColors.primary.withOpacity(0.15),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+        ],
+      ),
+      padding: EdgeInsets.all(SaoSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Pie de Foto',
+                style: SaoTypography.bodyTextBold.copyWith(fontSize: 14),
+              ),
+              if (!_isEditing)
+                Tooltip(
+                  message: 'Editar pie de foto',
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => setState(() => _isEditing = true),
+                      borderRadius: BorderRadius.circular(4),
+                      child: Padding(
+                        padding: EdgeInsets.all(SaoSpacing.xs),
+                        child: Icon(
+                          Icons.edit_rounded,
+                          color: SaoColors.gray600,
+                          size: 18,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+
+          SizedBox(height: SaoSpacing.sm),
+
+          // Content
+          if (_isEditing)
+            Column(
+              children: [
+                TextField(
+                  controller: _controller,
+                  maxLines: widget.maxLines,
+                  decoration: InputDecoration(
+                    hintText: 'Describe lo que ves en esta imagen...',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(SaoRadii.sm),
+                      borderSide: BorderSide(
+                        color: SaoColors.border,
+                        width: 1,
+                      ),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(SaoRadii.sm),
+                      borderSide: BorderSide(
+                        color: SaoColors.border,
+                        width: 1,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(SaoRadii.sm),
+                      borderSide: BorderSide(
+                        color: SaoColors.primary,
+                        width: 2,
+                      ),
+                    ),
+                    contentPadding: EdgeInsets.all(SaoSpacing.sm),
+                    filled: true,
+                    fillColor: SaoColors.gray50,
+                  ),
+                  style: SaoTypography.bodyText.copyWith(fontSize: 13),
+                ),
+                SizedBox(height: SaoSpacing.sm),
+                // Action buttons
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.flex-end,
+                  children: [
+                    TextButton(
+                      onPressed: _isSaving ? null : _cancelEdit,
+                      style: TextButton.styleFrom(
+                        foregroundColor: SaoColors.gray600,
+                      ),
+                      child: Text('Cancelar'),
+                    ),
+                    SizedBox(width: SaoSpacing.sm),
+                    FilledButton(
+                      onPressed: _isSaving ? null : _saveCaption,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: SaoColors.primary,
+                      ),
+                      child: _isSaving
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white,
+                                    ),
+                                  ),
+                                ),
+                                SizedBox(width: SaoSpacing.xs),
+                                Text('Guardando...'),
+                              ],
+                            )
+                          : Text('Guardar'),
+                    ),
+                  ],
+                ),
+              ],
+            )
+          else
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(SaoSpacing.sm),
+              decoration: BoxDecoration(
+                color: SaoColors.gray50,
+                borderRadius: BorderRadius.circular(SaoRadii.sm),
+              ),
+              child: _controller.text.isEmpty
+                  ? Text(
+                      'Sin descripción',
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray500,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  : Text(
+                      _controller.text,
+                      style: SaoTypography.bodyText.copyWith(
+                        fontSize: 13,
+                        color: SaoColors.gray800,
+                        height: 1.4,
+                      ),
+                    ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Version simple inline para usar en galería de evidencias
+class InlineCaptionEditor extends StatefulWidget {
+  const InlineCaptionEditor({
+    super.key,
+    required this.caption,
+    required this.onSave,
+  });
+
+  final String caption;
+  final Function(String) onSave;
+
+  @override
+  State<InlineCaptionEditor> createState() => _InlineCaptionEditorState();
+}
+
+class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
+  late TextEditingController _controller;
+  bool _isEditing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.caption);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _toggleEdit() {
+    if (_isEditing && _controller.text != widget.caption) {
+      widget.onSave(_controller.text);
+    }
+    if (!_isEditing) {
+      setState(() => _isEditing = true);
+    } else {
+      setState(() => _isEditing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isEditing) {
+      return SizedBox(
+        height: 80,
+        child: TextField(
+          controller: _controller,
+          maxLines: null,
+          expands: true,
+          decoration: InputDecoration(
+            hintText: 'Descripción de la imagen...',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(SaoRadii.sm),
+              borderSide: BorderSide(
+                color: SaoColors.primary,
+                width: 2,
+              ),
+            ),
+            contentPadding: EdgeInsets.all(SaoSpacing.sm),
+            filled: true,
+            fillColor: Colors.white,
+            suffixIcon: Padding(
+              padding: EdgeInsets.all(SaoSpacing.xs),
+              child: IconButton(
+                icon: Icon(
+                  Icons.check_rounded,
+                  color: SaoColors.success,
+                  size: 20,
+                ),
+                onPressed: _toggleEdit,
+              ),
+            ),
+          ),
+          style: SaoTypography.caption,
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: _toggleEdit,
+      child: Container(
+        padding: EdgeInsets.all(SaoSpacing.sm),
+        decoration: BoxDecoration(
+          color: SaoColors.gray50,
+          borderRadius: BorderRadius.circular(SaoRadii.sm),
+          border: Border.all(color: SaoColors.border),
+        ),
+        child: widget.caption.isEmpty
+            ? Text(
+                'Haz clic para agregar descripción',
+                style: SaoTypography.caption.copyWith(
+                  fontSize: 12,
+                  color: SaoColors.gray500,
+                  fontStyle: FontStyle.italic,
+                ),
+              )
+            : Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      widget.caption,
+                      style: SaoTypography.caption.copyWith(
+                        fontSize: 12,
+                        color: SaoColors.gray700,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  SizedBox(width: SaoSpacing.xs),
+                  Icon(
+                    Icons.edit_rounded,
+                    size: 14,
+                    color: SaoColors.gray600,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+}

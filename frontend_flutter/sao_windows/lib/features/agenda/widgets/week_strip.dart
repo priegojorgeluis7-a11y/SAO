@@ -1,0 +1,191 @@
+// lib/features/agenda/widgets/week_strip.dart
+
+import 'package:flutter/material.dart';
+
+class WeekStrip extends StatelessWidget {
+  final DateTime selectedDay;
+  final int weekOffset;
+  final ValueChanged<int> onChangeWeek;
+  final ValueChanged<DateTime> onSelectDay;
+
+  const WeekStrip({
+    super.key,
+    required this.selectedDay,
+    required this.weekOffset,
+    required this.onChangeWeek,
+    required this.onSelectDay,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final base = DateTime(now.year, now.month, now.day)
+        .add(Duration(days: weekOffset * 7));
+    final startOfWeek =
+        base.subtract(Duration(days: (base.weekday - 1) % 7));
+    final days = List.generate(7, (i) => startOfWeek.add(Duration(days: i)));
+
+    return Container(
+      color: Colors.white,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: () => onChangeWeek(-1),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  tooltip: 'Semana anterior',
+                ),
+                Expanded(
+                  child: Center(
+                    child: Text(
+                      _getWeekLabel(days.first, days.last),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                        color: Color(0xFF6B7280),
+                      ),
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => onChangeWeek(1),
+                  icon: const Icon(Icons.chevron_right_rounded),
+                  tooltip: 'Semana siguiente',
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 76,
+            child: ListView.separated(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              scrollDirection: Axis.horizontal,
+              itemCount: days.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (_, i) {
+                final d = days[i];
+                final isSelected = d.year == selectedDay.year &&
+                    d.month == selectedDay.month &&
+                    d.day == selectedDay.day;
+
+                final isToday = d.year == now.year &&
+                    d.month == now.month &&
+                    d.day == now.day;
+
+                final label = _dowShort(d.weekday);
+
+                return InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => onSelectDay(d),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 160),
+                    curve: Curves.easeInOut,
+                    width: 64,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(16),
+                      color: isSelected
+                          ? const Color(0xFF1E40AF)
+                          : const Color(0xFFF9FAFB),
+                      border: Border.all(
+                        color: isSelected
+                            ? const Color(0xFF1E40AF)
+                            : const Color(0xFFE5E7EB),
+                        width: isSelected ? 2 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          label,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 12,
+                            color: isSelected
+                                ? Colors.white
+                                : const Color(0xFF6B7280),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${d.day}',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            color: isSelected
+                                ? Colors.white
+                                : const Color(0xFF111827),
+                          ),
+                        ),
+                        if (isToday && !isSelected)
+                          Container(
+                            margin: const EdgeInsets.only(top: 4),
+                            width: 4,
+                            height: 4,
+                            decoration: const BoxDecoration(
+                              color: Color(0xFF1E40AF),
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const Divider(height: 0),
+        ],
+      ),
+    );
+  }
+
+  String _dowShort(int weekday) {
+    switch (weekday) {
+      case 1:
+        return 'LUN';
+      case 2:
+        return 'MAR';
+      case 3:
+        return 'MIE';
+      case 4:
+        return 'JUE';
+      case 5:
+        return 'VIE';
+      case 6:
+        return 'SÁB';
+      case 7:
+        return 'DOM';
+      default:
+        return '';
+    }
+  }
+
+  String _getWeekLabel(DateTime start, DateTime end) {
+    if (start.month == end.month) {
+      return '${start.day} - ${end.day} ${_monthShort(start.month)} ${start.year}';
+    }
+    return '${start.day} ${_monthShort(start.month)} - ${end.day} ${_monthShort(end.month)} ${start.year}';
+  }
+
+  String _monthShort(int month) {
+    const months = [
+      'Ene',
+      'Feb',
+      'Mar',
+      'Abr',
+      'May',
+      'Jun',
+      'Jul',
+      'Ago',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dic'
+    ];
+    return months[month - 1];
+  }
+}

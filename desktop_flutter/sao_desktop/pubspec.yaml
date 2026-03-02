@@ -1,0 +1,68 @@
+name: sao_desktop
+description: SAO Desktop - Sistema de Administración y Control
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.2.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # State Management
+  flutter_riverpod: ^2.5.1
+  
+  # Local Database
+  drift: ^2.14.1
+  sqlite3_flutter_libs: ^0.5.18
+  path_provider: ^2.1.1
+  path: ^1.8.3
+  
+  # PDF Generation & Printing
+  pdf: ^3.10.0
+  printing: ^5.11.0
+  
+  # Utilities
+  intl: ^0.19.0
+  uuid: ^4.2.2
+  
+  # Icons
+  cupertino_icons: ^1.0.6
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  
+  flutter_lints: ^3.0.1
+  drift_dev: ^2.14.1
+  build_runner: ^2.4.7
+
+flutter:
+  uses-material-design: true
+
+  # ============================================================
+  # ASSETS: Iconos, Imágenes, Catálogos JSON
+  # ============================================================
+  assets:
+    - assets/
+    - assets/icons/
+    - assets/images/
+    - assets/catalogos.json
+
+  # ============================================================
+  # FONTS: Tipografía centralizada (Inter)
+  # ============================================================
+  # fonts:
+  #   - family: Inter
+  #     fonts:
+  #       - asset: assets/fonts/Inter-Regular.ttf
+  #       - asset: assets/fonts/Inter-Medium.ttf
+  #         weight: 500
+  #       - asset: assets/fonts/Inter-SemiBold.ttf
+  #         weight: 600
+  #       - asset: assets/fonts/Inter-Bold.ttf
+  #         weight: 700
+  #
+  # NOTA: Descomentar cuando se agreguen los archivos de fuentes
+  # Descargar Inter desde: https://fonts.google.com/specimen/Inter

@@ -1,0 +1,218 @@
+[
+  {
+    "topic_id": "galibos_ferroviarios",
+    "type": "Técnico",
+    "name": "Gálibos ferroviarios",
+    "description": "Revisión de alturas/ancho de estructuras"
+  },
+  {
+    "topic_id": "accesos_y_pasos_vehiculares",
+    "type": "Técnico",
+    "name": "Accesos y pasos vehiculares",
+    "description": "Conectividad vial"
+  },
+  {
+    "topic_id": "caminos_de_servicio",
+    "type": "Técnico",
+    "name": "Caminos de servicio",
+    "description": "Acceso y mantenimiento"
+  },
+  {
+    "topic_id": "cruces_peatonales_puentes",
+    "type": "Técnico",
+    "name": "Cruces peatonales / puentes",
+    "description": "Ubicación y diseño"
+  },
+  {
+    "topic_id": "infraestructura_electrica_cfe",
+    "type": "Técnico",
+    "name": "Infraestructura eléctrica / CFE",
+    "description": "Afectación de líneas"
+  },
+  {
+    "topic_id": "hidraulica_conagua",
+    "type": "Técnico",
+    "name": "Hidráulica / CONAGUA",
+    "description": "Drenaje y cauces"
+  },
+  {
+    "topic_id": "infraestructura_ferroviaria_existente",
+    "type": "Técnico",
+    "name": "Infraestructura ferroviaria existente",
+    "description": "Concesionarios y operación"
+  },
+  {
+    "topic_id": "tenencia_de_la_tierra",
+    "type": "Social/Agrario",
+    "name": "Tenencia de la tierra",
+    "description": "Propiedad/posesión"
+  },
+  {
+    "topic_id": "avaluos_y_pagos",
+    "type": "Social/Agrario",
+    "name": "Avalúos y pagos",
+    "description": "Valor m² y compensación"
+  },
+  {
+    "topic_id": "asambleas_ejidales",
+    "type": "Social/Agrario",
+    "name": "Asambleas ejidales",
+    "description": "COP/quórum/procedimiento"
+  },
+  {
+    "topic_id": "inconformidades_comunitarias",
+    "type": "Social/Agrario",
+    "name": "Inconformidades comunitarias",
+    "description": "Quejas y bloqueos"
+  },
+  {
+    "topic_id": "arbolado_vegetacion",
+    "type": "Ambiental",
+    "name": "Arbolado / vegetación",
+    "description": "Tala/reforestación"
+  },
+  {
+    "topic_id": "fauna_local",
+    "type": "Ambiental",
+    "name": "Fauna local",
+    "description": "Protección de animales"
+  },
+  {
+    "topic_id": "cauces_y_cuerpos_de_agua",
+    "type": "Ambiental",
+    "name": "Cauces y cuerpos de agua",
+    "description": "CONAGUA"
+  },
+  {
+    "topic_id": "sitios_arqueologicos_inah",
+    "type": "Patrimonial",
+    "name": "Sitios arqueológicos / INAH",
+    "description": "Protección patrimonial"
+  },
+  {
+    "topic_id": "residuos_y_escombros",
+    "type": "Ambiental",
+    "name": "Residuos y escombros",
+    "description": "Manejo de materiales"
+  },
+  {
+    "topic_id": "coordinacion_interinstitucional",
+    "type": "Administrativo",
+    "name": "Coordinación interinstitucional",
+    "description": "Alineación dependencias"
+  },
+  {
+    "topic_id": "documentacion_pendiente",
+    "type": "Administrativo",
+    "name": "Documentación pendiente",
+    "description": "Oficios y actas"
+  },
+  {
+    "topic_id": "protocolos_de_seguridad",
+    "type": "Administrativo",
+    "name": "Protocolos de seguridad",
+    "description": "Riesgos y restricciones"
+  },
+  {
+    "topic_id": "consulta_previa",
+    "type": "Indígena",
+    "name": "Consulta previa",
+    "description": "Derecho de participación"
+  },
+  {
+    "topic_id": "lengua_y_traductores",
+    "type": "Indígena",
+    "name": "Lengua y traductores",
+    "description": "Comprensión cultural"
+  },
+  {
+    "topic_id": "actos_y_acuerdos_finales",
+    "type": "Indígena",
+    "name": "Actos y acuerdos finales",
+    "description": "Firma final"
+  },
+  {
+    "topic_id": "calcetines_oe",
+    "type": "Técnico",
+    "name": "Calcetines/OE",
+    "description": "Estabilización taludes"
+  },
+  {
+    "topic_id": "franja_de_proteccion",
+    "type": "Técnico",
+    "name": "Franja de protección",
+    "description": "Límites de seguridad"
+  },
+  {
+    "topic_id": "interferencias_inmobiliarias",
+    "type": "Social/Agrario",
+    "name": "Interferencias inmobiliarias",
+    "description": "Viviendas afectadas"
+  },
+  {
+    "topic_id": "gestion_catastral",
+    "type": "Administrativo",
+    "name": "Gestión catastral",
+    "description": "Delimitación predial"
+  },
+  {
+    "topic_id": "permisos_de_acceso",
+    "type": "Social/Agrario",
+    "name": "Permisos de acceso",
+    "description": "Autorización para ingreso"
+  },
+  {
+    "topic_id": "conflictos_ambientales",
+    "type": "Ambiental",
+    "name": "Conflictos ambientales",
+    "description": "Llantas, basureros"
+  },
+  {
+    "topic_id": "seguimiento_a_oficios",
+    "type": "Administrativo",
+    "name": "Seguimiento a oficios",
+    "description": "Cumplimiento de acuerdos"
+  },
+  {
+    "topic_id": "participacion_comunitaria",
+    "type": "Social/Agrario",
+    "name": "Participación comunitaria",
+    "description": "Comités y vocerías"
+  },
+  {
+    "topic_id": "viaductos_y_tuneles",
+    "type": "Técnico",
+    "name": "Viaductos y túneles",
+    "description": "Ajustes estructurales"
+  },
+  {
+    "topic_id": "ajustes_de_trazo",
+    "type": "Administrativo",
+    "name": "Ajustes de trazo",
+    "description": "Cambios"
+  },
+  {
+    "topic_id": "marcaje_en_campo",
+    "type": "Técnico",
+    "name": "Marcaje en campo",
+    "description": "Señalización de BDT"
+  },
+  {
+    "topic_id": "reubicaciones",
+    "type": "Social/Agrario",
+    "name": "Reubicaciones",
+    "description": "Escuelas, cercos, bodegas"
+  },
+  {
+    "topic_id": "actores_locales",
+    "type": null,
+    "name": "Actores locales",
+    "description": null
+  },
+  {
+    "topic_id": "comunicacion_social",
+    "type": null,
+    "name": "Comunicación social",
+    "description": null
+  }
+]

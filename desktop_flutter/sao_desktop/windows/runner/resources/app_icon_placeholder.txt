@@ -1,0 +1,2 @@
+// Placeholder icon file - replace with actual .ico file
+// This is a text placeholder, not a real icon

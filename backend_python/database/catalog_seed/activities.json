@@ -1,0 +1,8 @@
+[
+  {"activity_id":"CAM","name":"Caminamiento","description":"Recorrido físico en campo para verificar DDV, accesos y afectaciones."},
+  {"activity_id":"REU","name":"Reunión","description":"Coordinación técnica, social o institucional."},
+  {"activity_id":"ASP","name":"Asamblea Protocolizada","description":"Acto formal agrario para aprobar acuerdos y Convenio de Ocupación Previa COP."},
+  {"activity_id":"CIN","name":"Consulta Indígena","description":"Proceso de participación conforme al Convenio 169."},
+  {"activity_id":"SOC","name":"Socialización","description":"Presentación y sensibilización comunitaria."},
+  {"activity_id":"AIN","name":"Acompañamiento Institucional","description":"Supervisión y documentación interinstitucional."}
+]

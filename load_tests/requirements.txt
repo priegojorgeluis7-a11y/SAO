@@ -1,0 +1,13 @@
+# Load Testing Framework Requirements
+
+# Locust - Load testing framework
+locust==2.15.1
+
+# HTTP requests library
+requests==2.31.0
+
+# For metrics collection (optional)
+prometheus-client==0.17.1
+
+# CLI enhancements
+click==8.1.7

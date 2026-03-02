@@ -1,0 +1,36 @@
+# SAO Backend dependencies
+# - Keep versions pinned for reproducible builds.
+# - Grouped by responsibility and sorted alphabetically within each group.
+
+# Web Framework (runtime)
+fastapi==0.135.1
+python-multipart==0.0.22
+uvicorn[standard]==0.30.0
+
+# Database (runtime)
+alembic==1.13.0
+psycopg2-binary==2.9.9
+sqlalchemy==2.0.25
+
+# Validation & Serialization (runtime)
+email-validator>=2.0.0
+pydantic==2.7.4
+pydantic-settings==2.1.0
+
+# Authentication & Security (runtime)
+passlib[bcrypt]==1.7.4
+bcrypt==3.2.2
+PyJWT==2.9.0
+python-jose[cryptography]==3.3.0
+
+# Utilities / Integrations (runtime)
+google-cloud-storage==2.18.2
+python-dotenv==1.0.0
+
+# Testing (dev/test)
+pytest==7.4.3
+pytest-cov==4.1.0
+httpx==0.28.1
+
+# ASGI toolkit (runtime, explicit pin for FastAPI compatibility)
+starlette==0.52.1

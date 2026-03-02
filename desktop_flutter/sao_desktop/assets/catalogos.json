@@ -1,0 +1,182 @@
+{
+  "version": "v1_2026_02_18",
+  "activities": [
+    { "id": "CAM", "name": "Caminamiento" },
+    { "id": "REU", "name": "Reunión" },
+    { "id": "ASP", "name": "Asamblea Protocolizada" },
+    { "id": "CIN", "name": "Consulta Indígena" },
+    { "id": "SOC", "name": "Socialización" },
+    { "id": "AIN", "name": "Acompañamiento Institucional" }
+  ],
+  "subcategoriesByActivity": {
+    "CAM": [
+      { "id": "CAM_DDV", "name": "Verificación de DDV" },
+      { "id": "CAM_MAR", "name": "Marcaje de afectaciones" },
+      { "id": "CAM_ACC", "name": "Revisión de accesos / BDT" },
+      { "id": "CAM_SEG", "name": "Seguimiento técnico" }
+    ],
+    "REU": [
+      { "id": "REU_TEC", "name": "Técnica / Interinstitucional" },
+      { "id": "REU_EJI", "name": "Ejidal / Comisariado" },
+      { "id": "REU_MUN", "name": "Municipal / Estatal / Protección Civil" },
+      { "id": "REU_SEG", "name": "Seguimiento / Evaluación" },
+      { "id": "REU_INF", "name": "Informativa" },
+      { "id": "REU_MES", "name": "Mesa Técnica" }
+    ],
+    "ASP": [
+      { "id": "ASP_1AP", "name": "1ª Asamblea Protocolizada (1AP)" },
+      { "id": "ASP_1AP_PER", "name": "1ª Asamblea Protocolizada Permanente" },
+      { "id": "ASP_2AP", "name": "2ª Asamblea Protocolizada (2AP)" },
+      { "id": "ASP_2AP_PER", "name": "2ª Asamblea Protocolizada Permanente" },
+      { "id": "ASP_INF", "name": "Asamblea Informativa" }
+    ],
+    "CIN": [
+      { "id": "CIN_INF", "name": "Etapa Informativa" },
+      { "id": "CIN_CON", "name": "Etapa de Construcción de Acuerdos" },
+      { "id": "CIN_ACT", "name": "Etapa de Actos y Acuerdos" }
+    ],
+    "SOC": [
+      { "id": "SOC_PRE", "name": "Presentación Comunitaria" },
+      { "id": "SOC_DIF", "name": "Difusión de Información" },
+      { "id": "SOC_ATN", "name": "Atención a Inquietudes" }
+    ],
+    "AIN": [
+      { "id": "AIN_TEC", "name": "Técnico" },
+      { "id": "AIN_SOC", "name": "Social" },
+      { "id": "AIN_DOC", "name": "Documental" }
+    ]
+  },
+  "purposesBySubcategory": {
+    "CAM_DDV": [
+      { "id": "AFEC_VER_CAM", "name": "Verificación de afectaciones" }
+    ],
+    "CAM_MAR": [
+      { "id": "DDV_MAR_CAM", "name": "Marcaje o actualización de DDV / trazo" }
+    ],
+    "CAM_ACC": [
+      { "id": "ACC_ALT_CAM", "name": "Análisis de accesos y pasos alternos" }
+    ],
+    "REU_INF": [
+      { "id": "PRS_GEN_REU", "name": "Presentación general del proyecto" },
+      { "id": "DOC_CONV_REU", "name": "Entrega de documentación / Convocatorias" }
+    ],
+    "REU_TEC": [
+      { "id": "CONC_FER_REU", "name": "Coordinación con concesionarios ferroviarios" },
+      { "id": "COOR_INST_REU", "name": "Coordinación institucional" }
+    ],
+    "REU_SEG": [
+      { "id": "SOC_CON_REU", "name": "Atención a inconformidades o conflictos" },
+      { "id": "PLAN_ACT_REU", "name": "Planeación de nuevas actividades" },
+      { "id": "SEG_DOC_REU", "name": "Seguimiento administrativo / documental" }
+    ],
+    "ASP_1AP": [
+      { "id": "PRS_GEN_ASP", "name": "Presentación general del proyecto" },
+      { "id": "DOC_CONV_ASP", "name": "Entrega de documentación / Convocatorias" }
+    ],
+    "ASP_2AP": [
+      { "id": "COP_FIR_ASP", "name": "Obtención de anuencia o firma de COP" }
+    ],
+    "CIN_INF": [
+      { "id": "PRS_GEN_CIN", "name": "Presentación general del proyecto" },
+      { "id": "DOC_CONV_CIN", "name": "Entrega de documentación / Convocatorias" }
+    ],
+    "CIN_CON": [
+      { "id": "SOC_CON_CIN", "name": "Atención a inconformidades o conflictos" }
+    ],
+    "SOC_PRE": [
+      { "id": "PRS_GEN_SOC", "name": "Presentación general del proyecto" }
+    ],
+    "SOC_ATN": [
+      { "id": "SOC_CON_SOC", "name": "Atención a inconformidades o conflictos" }
+    ],
+    "AIN_DOC": [
+      { "id": "SEG_DOC_AIN", "name": "Seguimiento administrativo / documental" }
+    ]
+  },
+  "topics": [
+    { "id": "galibos_ferroviarios", "name": "Gálibos ferroviarios" },
+    { "id": "accesos_y_pasos_vehiculares", "name": "Accesos y pasos vehiculares" },
+    { "id": "infraestructura_electrica_cfe", "name": "Infraestructura eléctrica / CFE" },
+    { "id": "hidraulica_conagua", "name": "Hidráulica / CONAGUA" },
+    { "id": "tenencia_de_la_tierra", "name": "Tenencia de la tierra" },
+    { "id": "avaluos_y_pagos", "name": "Avalúos y pagos" },
+    { "id": "asambleas_ejidales", "name": "Asambleas ejidales" },
+    { "id": "inconformidades_comunitarias", "name": "Inconformidades comunitarias" },
+    { "id": "arbolado_vegetacion", "name": "Arbolado / vegetación" },
+    { "id": "fauna_local", "name": "Fauna local" },
+    { "id": "sitios_arqueologicos_inah", "name": "Sitios arqueológicos / INAH" },
+    { "id": "coordinacion_interinstitucional", "name": "Coordinación interinstitucional" },
+    { "id": "documentacion_pendiente", "name": "Documentación pendiente" },
+    { "id": "consulta_previa", "name": "Consulta previa" },
+    { "id": "lengua_y_traductores", "name": "Lengua y traductores" },
+    { "id": "actos_y_acuerdos_finales", "name": "Actos y acuerdos finales" }
+  ],
+  "suggestedTopicsByActivity": {
+    "CAM": [
+      "galibos_ferroviarios",
+      "accesos_y_pasos_vehiculares",
+      "infraestructura_electrica_cfe",
+      "hidraulica_conagua",
+      "tenencia_de_la_tierra"
+    ],
+    "REU": [
+      "coordinacion_interinstitucional",
+      "documentacion_pendiente",
+      "inconformidades_comunitarias",
+      "asambleas_ejidales"
+    ],
+    "ASP": [
+      "asambleas_ejidales",
+      "avaluos_y_pagos",
+      "tenencia_de_la_tierra"
+    ],
+    "CIN": [
+      "consulta_previa",
+      "lengua_y_traductores",
+      "actos_y_acuerdos_finales"
+    ],
+    "SOC": [
+      "inconformidades_comunitarias",
+      "arbolado_vegetacion",
+      "fauna_local"
+    ],
+    "AIN": [
+      "coordinacion_interinstitucional",
+      "documentacion_pendiente",
+      "hidraulica_conagua"
+    ]
+  },
+  "attendeesInstitutional": [
+    { "id": "AST1", "name": "ARTF" },
+    { "id": "AST2", "name": "SEDATU" },
+    { "id": "AST3", "name": "Defensa (SEDENA)" },
+    { "id": "AST4", "name": "RAN" },
+    { "id": "AST5", "name": "PA" },
+    { "id": "AST8", "name": "INAH" },
+    { "id": "AST9", "name": "INPI" },
+    { "id": "AST10", "name": "CONAGUA" }
+  ],
+  "attendeesLocal": [
+    { "id": "AST13", "name": "Gobierno Municipal" },
+    { "id": "AST14", "name": "Gobierno Estatal" },
+    { "id": "AST15", "name": "Comisariado Ejidal" },
+    { "id": "AST11", "name": "Kansas" },
+    { "id": "AST12", "name": "Ferromex" },
+    { "id": "AST17", "name": "Vinculación SICT" }
+  ],
+  "results": [
+    { "id": "R01", "name": "R01 - Actividad realizada conforme al programa" },
+    { "id": "R02", "name": "R02 - Asamblea con quórum legal y acuerdos aprobados" },
+    { "id": "R04", "name": "R04 - Firma de acta informativa / COP" },
+    { "id": "R05", "name": "R05 - Se obtienen anuencias / permisos" },
+    { "id": "R06", "name": "R06 - Se ajusta superficie o valor de afectación" },
+    { "id": "R07", "name": "R07 - Nuevas afectaciones identificadas" },
+    { "id": "R08", "name": "R08 - Solicitud canalizada a dependencia" },
+    { "id": "R03", "name": "R03 - Sin quórum / segunda convocatoria programada" },
+    { "id": "R10", "name": "R10 - Proceso en revisión / sin acuerdo final" },
+    { "id": "R11", "name": "R11 - Sin acuerdos / reunión informativa únicamente" },
+    { "id": "R09", "name": "R09 - Se acuerda mantenimiento o intervención" },
+    { "id": "R12", "name": "R12 - Se programa nueva reunión o seguimiento" }
+  ],
+  "matrizRiesgo": ["Bajo", "Medio", "Alto", "Prioritario"]
+}

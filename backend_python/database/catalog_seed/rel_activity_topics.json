@@ -1,0 +1,206 @@
+[
+  {
+    "activity_id": "CAM",
+    "topic_id": "galibos_ferroviarios"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "accesos_y_pasos_vehiculares"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "caminos_de_servicio"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "cruces_peatonales_puentes"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "infraestructura_electrica_cfe"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "hidraulica_conagua"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "infraestructura_ferroviaria_existente"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "tenencia_de_la_tierra"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "avaluos_y_pagos"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "arbolado_vegetacion"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "cauces_y_cuerpos_de_agua"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "sitios_arqueologicos_inah"
+  },
+  {
+    "activity_id": "CAM",
+    "topic_id": "residuos_y_escombros"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "galibos_ferroviarios"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "accesos_y_pasos_vehiculares"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "infraestructura_electrica_cfe"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "hidraulica_conagua"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "infraestructura_ferroviaria_existente"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "avaluos_y_pagos"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "asambleas_ejidales"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "inconformidades_comunitarias"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "reubicaciones"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "actores_locales"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "coordinacion_interinstitucional"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "documentacion_pendiente"
+  },
+  {
+    "activity_id": "REU",
+    "topic_id": "protocolos_de_seguridad"
+  },
+  {
+    "activity_id": "ASP",
+    "topic_id": "tenencia_de_la_tierra"
+  },
+  {
+    "activity_id": "ASP",
+    "topic_id": "avaluos_y_pagos"
+  },
+  {
+    "activity_id": "ASP",
+    "topic_id": "asambleas_ejidales"
+  },
+  {
+    "activity_id": "ASP",
+    "topic_id": "inconformidades_comunitarias"
+  },
+  {
+    "activity_id": "ASP",
+    "topic_id": "reubicaciones"
+  },
+  {
+    "activity_id": "ASP",
+    "topic_id": "comunicacion_social"
+  },
+  {
+    "activity_id": "CIN",
+    "topic_id": "consulta_previa"
+  },
+  {
+    "activity_id": "CIN",
+    "topic_id": "lengua_y_traductores"
+  },
+  {
+    "activity_id": "CIN",
+    "topic_id": "actos_y_acuerdos_finales"
+  },
+  {
+    "activity_id": "CIN",
+    "topic_id": "inconformidades_comunitarias"
+  },
+  {
+    "activity_id": "CIN",
+    "topic_id": "arbolado_vegetacion"
+  },
+  {
+    "activity_id": "CIN",
+    "topic_id": "sitios_arqueologicos_inah"
+  },
+  {
+    "activity_id": "SOC",
+    "topic_id": "inconformidades_comunitarias"
+  },
+  {
+    "activity_id": "SOC",
+    "topic_id": "comunicacion_social"
+  },
+  {
+    "activity_id": "SOC",
+    "topic_id": "arbolado_vegetacion"
+  },
+  {
+    "activity_id": "SOC",
+    "topic_id": "fauna_local"
+  },
+  {
+    "activity_id": "SOC",
+    "topic_id": "residuos_y_escombros"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "coordinacion_interinstitucional"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "documentacion_pendiente"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "protocolos_de_seguridad"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "coordinacion_interinstitucional"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "documentacion_pendiente"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "protocolos_de_seguridad"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "seguimiento_a_oficios"
+  },
+  {
+    "activity_id": "AIN",
+    "topic_id": "participacion_comunitaria"
+  }
+]

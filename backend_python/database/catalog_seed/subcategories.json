@@ -1,0 +1,31 @@
+[
+  {"subcategory_id":"CAM_DDV","activity_id":"CAM","name":"Verificación de DDV","description":"Revisión de límites del DDV en campo."},
+  {"subcategory_id":"CAM_MAR","activity_id":"CAM","name":"Marcaje de afectaciones","description":"Señalamiento físico de áreas afectadas."},
+  {"subcategory_id":"CAM_ACC","activity_id":"CAM","name":"Revisión de accesos / BDT","description":"Confirmación de caminos y bienes distintos a la tierra."},
+  {"subcategory_id":"CAM_SEG","activity_id":"CAM","name":"Seguimiento técnico","description":"Monitoreo y control de avances."},
+
+  {"subcategory_id":"REU_TEC","activity_id":"REU","name":"Técnica / Interinstitucional","description":"Coordinación entre dependencias."},
+  {"subcategory_id":"REU_EJI","activity_id":"REU","name":"Ejidal / Comisariado","description":"Diálogo con autoridades ejidales."},
+  {"subcategory_id":"REU_MUN","activity_id":"REU","name":"Municipal / Estatal / Protección Civil","description":"Vinculación con gobiernos locales."},
+  {"subcategory_id":"REU_SEG","activity_id":"REU","name":"Seguimiento / Evaluación","description":"Revisión de cumplimiento de acuerdos."},
+  {"subcategory_id":"REU_INF","activity_id":"REU","name":"Informativa","description":"Presentación de avances."},
+  {"subcategory_id":"REU_MES","activity_id":"REU","name":"Mesa Técnica","description":"Análisis puntual de temas técnicos/sociales."},
+
+  {"subcategory_id":"ASP_1AP","activity_id":"ASP","name":"1ª Asamblea Protocolizada (1AP)","description":"Convocatoria inicial, presentación del proyecto."},
+  {"subcategory_id":"ASP_1AP_PER","activity_id":"ASP","name":"1ª Asamblea Protocolizada Permanente","description":"Continúa otro día con quórum legal."},
+  {"subcategory_id":"ASP_2AP","activity_id":"ASP","name":"2ª Asamblea Protocolizada (2AP)","description":"Con las personas que asistan se da el quórum legal."},
+  {"subcategory_id":"ASP_2AP_PER","activity_id":"ASP","name":"2ª Asamblea Protocolizada Permanente","description":"Continúa otro día."},
+  {"subcategory_id":"ASP_INF","activity_id":"ASP","name":"Asamblea Informativa","description":"Sesión explicativa previa."},
+
+  {"subcategory_id":"CIN_INF","activity_id":"CIN","name":"Etapa Informativa","description":"Difusión del proyecto."},
+  {"subcategory_id":"CIN_CON","activity_id":"CIN","name":"Etapa de Construcción de Acuerdos","description":"Definición de compromisos."},
+  {"subcategory_id":"CIN_ACT","activity_id":"CIN","name":"Etapa de Actos y Acuerdos","description":"Firma de actas finales."},
+
+  {"subcategory_id":"SOC_PRE","activity_id":"SOC","name":"Presentación Comunitaria","description":"Exposición general."},
+  {"subcategory_id":"SOC_DIF","activity_id":"SOC","name":"Difusión de Información","description":"Entrega de materiales."},
+  {"subcategory_id":"SOC_ATN","activity_id":"SOC","name":"Atención a Inquietudes","description":"Gestión de dudas o quejas."},
+
+  {"subcategory_id":"AIN_TEC","activity_id":"AIN","name":"Técnico","description":"Supervisión de obras/trazos."},
+  {"subcategory_id":"AIN_SOC","activity_id":"AIN","name":"Social","description":"Seguimiento a compromisos."},
+  {"subcategory_id":"AIN_DOC","activity_id":"AIN","name":"Documental","description":"Registro y evidencias oficiales."}
+]

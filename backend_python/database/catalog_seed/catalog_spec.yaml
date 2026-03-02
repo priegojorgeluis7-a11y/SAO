@@ -1,0 +1,65 @@
+catalog:
+  versioning:
+    enabled: true
+    tables_require: [version_id, is_active, updated_at]
+  entities:
+    projects:
+      pk: project_id
+      fields: [name]
+    activities:
+      pk: activity_id
+      fields: [name, description]
+    subcategories:
+      pk: subcategory_id
+      fk:
+        activity_id: activities.activity_id
+      fields: [name, description]
+    purposes:
+      pk: purpose_id
+      fk:
+        activity_id: activities.activity_id
+        subcategory_id: subcategories.subcategory_id
+      fields: [name]
+    topics:
+      pk: topic_id
+      fields: [type, name, description]
+    rel_activity_topics:
+      pk: [activity_id, topic_id]
+      fk:
+        activity_id: activities.activity_id
+        topic_id: topics.topic_id
+    results:
+      pk: result_id
+      fields: [name, category, severity_default]
+    attendees:
+      pk: attendee_id
+      fields: [type, name, description]
+
+  project_overrides:
+    table: proj_catalog_override
+    pk: [project_id, entity_type, entity_id]
+    fields:
+      - is_enabled
+      - display_name_override
+      - sort_order_override
+      - color_override
+      - severity_override
+      - rules_json
+
+effective_catalog_rules:
+  wizard_filters:
+    subcategories: "WHERE activity_id = :activity_id"
+    purposes: "WHERE activity_id = :activity_id AND (subcategory_id = :subcategory_id OR subcategory_id IS NULL)"
+    topics: "JOIN rel_activity_topics ON activity_id = :activity_id"
+  validations:
+    - if: { activity_id: "CIN" }
+      require: { subcategory_id_in: ["CIN_INF", "CIN_CON", "CIN_ACT"] }
+    - if: { result_id: "R03" }
+      require: ["segunda_convocatoria_fecha"]
+    - if: { result_id: "R08" }
+      require: ["dependencia_destino"]
+  result_severity_default:
+    green: ["R01", "R02", "R04", "R05"]
+    yellow: ["R06", "R07", "R08"]
+    red: ["R03", "R10", "R11"]
+    blue: ["R09", "R12"]

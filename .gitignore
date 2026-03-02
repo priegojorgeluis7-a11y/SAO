@@ -3,6 +3,8 @@
 Thumbs.db
 .vscode/
 .idea/
+.vs/
+.claude/
 
 # Python
 **/__pycache__/

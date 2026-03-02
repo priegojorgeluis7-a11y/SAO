@@ -1,0 +1,34 @@
+[
+  {"purpose_id":"PRS_GEN_REU","name":"Presentación general del proyecto","activity_id":"REU","subcategory_id":"REU_INF"},
+  {"purpose_id":"DOC_CONV_REU","name":"Entrega de documentación / Convocatorias","activity_id":"REU","subcategory_id":"REU_INF"},
+  {"purpose_id":"SOC_CON_REU","name":"Atención a inconformidades o conflictos","activity_id":"REU","subcategory_id":"REU_SEG"},
+  {"purpose_id":"CONC_FER_REU","name":"Coordinación con concesionarios ferroviarios","activity_id":"REU","subcategory_id":"REU_TEC"},
+  {"purpose_id":"COOR_INST_REU","name":"Coordinación institucional","activity_id":"REU","subcategory_id":"REU_TEC"},
+  {"purpose_id":"PLAN_ACT_REU","name":"Planeación de nuevas actividades","activity_id":"REU","subcategory_id":"REU_SEG"},
+  {"purpose_id":"SEG_DOC_REU","name":"Seguimiento administrativo / documental","activity_id":"REU","subcategory_id":"REU_SEG"},
+
+  {"purpose_id":"PRS_GEN_ASP","name":"Presentación general del proyecto","activity_id":"ASP","subcategory_id":"ASP_1AP"},
+  {"purpose_id":"DOC_CONV_ASP","name":"Entrega de documentación / Convocatorias","activity_id":"ASP","subcategory_id":"ASP_1AP"},
+  {"purpose_id":"COP_FIR_ASP","name":"Obtención de anuencia o firma de COP","activity_id":"ASP","subcategory_id":"ASP_2AP"},
+  {"purpose_id":"AVAL_VAL_ASP","name":"Validación o ajuste de avalúos","activity_id":"ASP","subcategory_id":null},
+
+  {"purpose_id":"AFEC_VER_CAM","name":"Verificación de afectaciones","activity_id":"CAM","subcategory_id":"CAM_DDV"},
+  {"purpose_id":"DDV_MAR_CAM","name":"Marcaje o actualización de DDV / trazo","activity_id":"CAM","subcategory_id":"CAM_MAR"},
+  {"purpose_id":"GAL_REV_CAM","name":"Revisión técnica de gálibos / cruces","activity_id":"CAM","subcategory_id":null},
+  {"purpose_id":"ACC_ALT_CAM","name":"Análisis de accesos y pasos alternos","activity_id":"CAM","subcategory_id":"CAM_ACC"},
+  {"purpose_id":"AMB_PAT_CAM","name":"Atención ambiental o patrimonial","activity_id":"CAM","subcategory_id":null},
+
+  {"purpose_id":"IND_CONS_CIN","name":"Atención a comunidades indígenas","activity_id":"CIN","subcategory_id":null},
+  {"purpose_id":"PRS_GEN_CIN","name":"Presentación general del proyecto","activity_id":"CIN","subcategory_id":"CIN_INF"},
+  {"purpose_id":"DOC_CONV_CIN","name":"Entrega de documentación / Convocatorias","activity_id":"CIN","subcategory_id":"CIN_INF"},
+  {"purpose_id":"SOC_CON_CIN","name":"Atención a inconformidades o conflictos","activity_id":"CIN","subcategory_id":"CIN_CON"},
+
+  {"purpose_id":"PRS_GEN_SOC","name":"Presentación general del proyecto","activity_id":"SOC","subcategory_id":"SOC_PRE"},
+  {"purpose_id":"AMB_PAT_SOC","name":"Atención ambiental o patrimonial","activity_id":"SOC","subcategory_id":null},
+  {"purpose_id":"SOC_CON_SOC","name":"Atención a inconformidades o conflictos","activity_id":"SOC","subcategory_id":"SOC_ATN"},
+
+  {"purpose_id":"SEG_DOC_AIN","name":"Seguimiento administrativo / documental","activity_id":"AIN","subcategory_id":"AIN_DOC"},
+  {"purpose_id":"COOR_INST_AIN","name":"Coordinación institucional","activity_id":"AIN","subcategory_id":null},
+  {"purpose_id":"AMB_PAT_AIN","name":"Atención ambiental o patrimonial","activity_id":"AIN","subcategory_id":null},
+  {"purpose_id":"PLAN_ACT_AIN","name":"Planeación de nuevas actividades","activity_id":"AIN","subcategory_id":null}
+]

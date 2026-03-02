@@ -1,0 +1,5 @@
+Method,Name,Error,Occurrences
+POST,/evidences/upload-init,"ConnectionResetError(10054, 'Se ha forzado la interrupción de una conexión existente por el host remoto', None, 10054, None)",1
+PUT,/gcs/signed-url,"gaierror(11001, 'getaddrinfo failed')",31258
+POST,/evidences/upload-init,"ConnectionAbortedError(10053, 'Se ha anulado una conexión establecida por el software en su equipo host', None, 10053, None)",2
+POST,/evidences/[id]/upload-complete,HTTPError('404 Client Error: Not Found for url: /evidences/[id]/upload-complete'),10367

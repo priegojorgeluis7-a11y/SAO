@@ -1,0 +1,17 @@
+[
+  {"result_id":"R01","name":"Actividad realizada conforme al programa","category":"Ejecución regular o exitosa","severity_default":"green"},
+  {"result_id":"R02","name":"Asamblea con quórum legal y acuerdos aprobados","category":"Ejecución regular o exitosa","severity_default":"green"},
+  {"result_id":"R04","name":"Firma de acta informativa / COP","category":"Ejecución regular o exitosa","severity_default":"green"},
+  {"result_id":"R05","name":"Se obtienen anuencias / permisos","category":"Ejecución regular o exitosa","severity_default":"green"},
+
+  {"result_id":"R06","name":"Se ajusta superficie o valor de afectación","category":"Reajustes o cambios técnicos","severity_default":"yellow"},
+  {"result_id":"R07","name":"Nuevas afectaciones identificadas","category":"Reajustes o cambios técnicos","severity_default":"yellow"},
+  {"result_id":"R08","name":"Solicitud canalizada a dependencia","category":"Reajustes o cambios técnicos","severity_default":"yellow"},
+
+  {"result_id":"R03","name":"Sin quórum / segunda convocatoria programada","category":"Casos sociales o administrativos","severity_default":"red"},
+  {"result_id":"R10","name":"Proceso en revisión / sin acuerdo final","category":"Casos sociales o administrativos","severity_default":"red"},
+  {"result_id":"R11","name":"Sin acuerdos / reunión informativa únicamente","category":"Casos sociales o administrativos","severity_default":"red"},
+
+  {"result_id":"R09","name":"Se acuerda mantenimiento o intervención","category":"Seguimiento y compromisos interinstitucionales","severity_default":"blue"},
+  {"result_id":"R12","name":"Se programa nueva reunión o seguimiento","category":"Seguimiento y compromisos interinstitucionales","severity_default":"blue"}
+]

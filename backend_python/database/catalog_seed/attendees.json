@@ -1,0 +1,19 @@
+[
+  {"attendee_id":"AST1","type":"Dependencia","name":"ARTF","description":"Agencia Reguladora del Transporte Ferroviario"},
+  {"attendee_id":"AST2","type":"Dependencia","name":"SEDATU","description":"Secretaría de Desarrollo Agrario"},
+  {"attendee_id":"AST3","type":"Dependencia","name":"Defensa (SEDENA)","description":"Secretaría de la Defensa Nacional"},
+  {"attendee_id":"AST4","type":"Dependencia","name":"RAN","description":"Registro Agrario Nacional"},
+  {"attendee_id":"AST5","type":"Dependencia","name":"PA","description":"Procuraduría Agraria"},
+  {"attendee_id":"AST6","type":"Dependencia","name":"INDAABIN","description":"Instituto de Administración y Avalúos de Bienes Nacionales"},
+  {"attendee_id":"AST7","type":"Dependencia","name":"FIFONAFE","description":"Fideicomiso Fondo Nacional de Fomento Ejidal"},
+  {"attendee_id":"AST8","type":"Dependencia","name":"INAH","description":"Antropología e Historia"},
+  {"attendee_id":"AST9","type":"Dependencia","name":"INPI","description":"Pueblos Indígenas"},
+  {"attendee_id":"AST10","type":"Dependencia","name":"CONAGUA","description":"Comisión Nacional del Agua"},
+  {"attendee_id":"AST11","type":"Concesionario","name":"Kansas","description":"Concesionario ferroviario"},
+  {"attendee_id":"AST12","type":"Concesionario","name":"Ferromex","description":"Concesionario ferroviario"},
+  {"attendee_id":"AST13","type":"Autoridad","name":"Gobierno Municipal","description":"Ayuntamientos"},
+  {"attendee_id":"AST14","type":"Autoridad","name":"Gobierno Estatal","description":"Gobiernos estatales"},
+  {"attendee_id":"AST15","type":"Social","name":"Comisariado Ejidal","description":"Representación ejidal"},
+  {"attendee_id":"AST16","type":"Seguridad","name":"Guardia Nacional","description":"Seguridad en campo"},
+  {"attendee_id":"AST17","type":"Equipo","name":"Vinculación SICT","description":"Coordinación social y gestiones"}
+]
