@@ -275,48 +275,48 @@ flutter test
 
 ## 🌟 Roadmap
 
-### ✅ Fase 1: Fundamentos (Semana 1-2)
+### ✅ Fase 1: Fundamentos (Semana 1)
 - [x] Backend FastAPI + Auth JWT
 - [x] RBAC básico
 - [x] Móvil: Login y token refresh
 
-### ✅ Fase 2: Catálogos (Semana 3-4)
+### ✅ Fase 2: Catálogos (Semana 2)
 - [x] Versionado Draft→Publish
 - [x] API de descarga
 - [x] Seed initial (v1.0.0)
 
-### ✅ Fase 3: Form Builder (Semana 5-6)
+### ✅ Fase 3: Form Builder (Semana 3)
 - [x] DynamicFormBuilder widget
 - [x] EAV storage (activity_fields)
 - [x] Validaciones dinámicas
 
-### ✅ Fase 4: Workflow Engine (Semana 7-8)
+### ✅ Fase 4: Workflow Engine (Semana 4)
 - [x] WorkflowService
 - [x] Transiciones configurables
 - [x] Activity log
 
-### ✅ Fase 5: Sync (Semana 9-10)
+### ✅ Fase 5: Sync (Semana 5)
 - [x] Push/Pull incremental
 - [x] Conflict resolution
 - [x] Background sync
 
-### 🔄 Fase 6: Eventos (Semana 11-12)
+### 🔄 Fase 6: Eventos (Semana 5)
 - [ ] API eventos
 - [ ] Reportar desde móvil
 - [ ] Convertir evento → actividad
 
-### 🔄 Fase 7: Escritorio (Semana 13-16)
+### 🔄 Fase 7: Escritorio (Semana 6)
 - [ ] Setup Flutter Windows
 - [ ] Catalog CRUD
 - [ ] Form Builder visual
 - [ ] Workflow editor
 
-### ⏳ Fase 8: Evidencias (Semana 17)
+### ⏳ Fase 8: Evidencias (Semana 6)
 - [ ] MinIO/S3 integration
 - [ ] Upload multipart
 - [ ] Compresión imágenes
 
-### ⏳ Fase 9: Reportes (Semana 18)
+### ⏳ Fase 9: Reportes (Semana 7)
 - [ ] Templates Jinja2
 - [ ] Generación PDF
 - [ ] Audit log viewer
@@ -325,10 +325,10 @@ flutter test
 
 ## 👥 Equipo
 
-- **Backend**: [Tu Nombre]
-- **App Móvil**: [Tu Nombre]
-- **Desktop**: [Tu Nombre]
-- **DevOps**: [Tu Nombre]
+- **Backend**: [JL]
+- **App Móvil**: [JL]
+- **Desktop**: [JL]
+- **DevOps**: [JL]
 
 ---
 
@@ -341,10 +341,10 @@ Propietario © 2026 SAO. Todos los derechos reservados.
 ## 📞 Soporte
 
 Para dudas o reportes de bugs:
-- Email: soporte@sao.mx
+- Email:
 - Issues: [GitHub Issues](https://github.com/tu-org/sao/issues)
 
 ---
 
-**Última actualización:** 2026-02-17  
+**Última actualización:** 2026-02-03  
 **Versión:** 1.0.0-alpha
