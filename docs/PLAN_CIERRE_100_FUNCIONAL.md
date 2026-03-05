@@ -13,7 +13,7 @@
 | Fase | Estado | Inicio | Cierre | Observaciones |
 |---|---|---|---|---|
 | Fase 0 - Freeze y baseline | COMPLETADA | 2026-03-05 | 2026-03-05 | Baseline tecnico confirmado con evidencia de pruebas y E2E staging. |
-| Fase 1 - CI/CD end-to-end | EN CURSO (BLOQUEO EXTERNO DE EVIDENCIA) | 2026-03-05 | - | Workflows listos y validaciones locales en verde; pendiente evidencia de run en `main` (URLs/SHA/timestamp) con acceso GitHub Actions. |
+| Fase 1 - CI/CD end-to-end | EN CURSO (BLOQUEO TECNICO EN PIPELINE) | 2026-03-05 | - | Evidencia remota en `main` ya capturada: Backend CI (`22736601995`) y Flutter CI (`22736601947`) sobre `b7f49a1`; ambos en `failure`, por lo que falta estabilizar workflows para cierre. |
 | Fase 2 - Cobertura desktop no-auth | EN CURSO | 2026-03-05 | - | Cobertura ampliada en `catalog` y `reports` (+20 tests acumulados), bug de exportacion cross-platform corregido, suite desktop en verde. |
 | Fase 3 - Estabilizacion mobile suite | COMPLETADA | 2026-03-05 | 2026-03-05 | `flutter test` global mobile en verde (`All tests passed`, 223 tests). |
 | Fase 4 - Consolidacion documental | PENDIENTE | - | - | Se ejecuta al cerrar Fases 1-3. |
@@ -30,7 +30,7 @@
 
 1. Ejecutar checklist de habilitacion CI/CD (secrets + permisos + primer run en `main`).
   Documento operativo: `docs/CI_CD_CIERRE_CHECKLIST.md`.
-2. Registrar evidencia del primer pipeline exitoso (URL run + SHA + timestamp) desde entorno con acceso a GitHub Actions del repo.
+2. Corregir fallos de `Backend CI` y `Flutter CI` en `main` y registrar primera corrida totalmente exitosa (URL run + SHA + timestamp).
 3. Completar cobertura desktop no-auth restante y registrar delta por modulo (catalog/review/reports).
 4. Revisar diagnostico de cumplimiento contra flujo objetivo:
   `docs/DIAGNOSTICO_FLUJO_100_FUNCIONAL_2026-03-05.md`.

@@ -42,6 +42,10 @@
 - ✅ Revalidación actual de `flutter test` móvil en verde: `All tests passed` (223 tests)
 - ✅ Desktop Fase 2 (avance): nuevos tests en `catalog`/`reports` + fix de exportación cross-platform; `flutter test` desktop en verde (`All tests passed`, 82 tests)
 - ✅ Cobertura desktop actualizada por módulo (`flutter test --coverage`): `catalog` 10.57% (267/2526), `review` 74.42% (32/43), `reports` 36.52% (237/649)
+- ⚠️ Evidencia remota GitHub Actions capturada en `main` para commit `b7f49a1d43ef140630e014a0cffefb4b1eb1069e`:
+	- `Backend CI` run `22736601995`: `failure` (job `test` fallido; `Deploy to Cloud Run` skipped)
+	- `Flutter CI` run `22736601947`: `failure` (job `analyze-and-test` fallido)
+	- Estado Fase 1 CI/CD: sigue EN CURSO por bloqueo técnico de pipeline (ya no por falta de acceso/evidencia).
 
 > Esta métrica refleja **estado de ejecución de pruebas hoy**, no porcentaje de cierre funcional del producto.
 

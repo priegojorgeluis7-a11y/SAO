@@ -66,9 +66,19 @@
 - [ ] Timestamp UTC de ejecucion.
 - [ ] Confirmacion de estado de servicio post-deploy (`/health`=200).
 
-Nota de bloqueo externo (2026-03-05):
-- Desde este entorno no hay acceso autenticado a GitHub Actions del repo (`gh` no instalado y API REST publica retorna `404`), por lo que no es posible adjuntar URLs/SHA/timestamp de runs de `main` en este momento.
-- Estado de Fase 1: tecnicamente preparado y validado localmente; pendiente evidencia remota de ejecucion en `main`.
+Evidencia remota verificada (2026-03-05):
+- Repositorio: `priegojorgeluis7-a11y/SAO`
+- Branch: `main`
+- Commit evaluado por CI: `b7f49a1d43ef140630e014a0cffefb4b1eb1069e`
+- Backend CI run: `https://github.com/priegojorgeluis7-a11y/SAO/actions/runs/22736601995`
+  - Job `test`: `failure`
+  - Job `Deploy to Cloud Run`: `skipped` (bloqueado por fallo previo)
+- Flutter CI run: `https://github.com/priegojorgeluis7-a11y/SAO/actions/runs/22736601947`
+  - Job `analyze-and-test`: `failure`
+
+Conclusión Fase 1 al corte:
+- Bloqueo de acceso a Actions: RESUELTO.
+- Bloqueo actual: TECNICO (workflows en `failure`), pendiente corregir errores de pipeline para marcar Fase 1 como cerrada.
 
 ---
 
