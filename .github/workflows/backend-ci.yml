@@ -73,20 +73,21 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 1) Sanitiza PROJECT_ID por si el secret trae espacios/newlines
           PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
           echo "Using project: $PROJECT_ID"
-
-          # 2) (Opcional) fija config para evitar sorpresas
           gcloud config set project "$PROJECT_ID"
 
           IMAGE="us-central1-docker.pkg.dev/${PROJECT_ID}/sao/sao-api:${{ github.sha }}"
 
-          # 3) Fuerza staging bucket (el que ya autorizaste)
-          gcloud builds submit backend/ \
+          BUILD_ID="$(gcloud builds submit backend/ \
             --tag "$IMAGE" \
             --project "$PROJECT_ID" \
-            --gcs-source-staging-dir "gs://sao-prod-488416_cloudbuild/source"
+            --gcs-source-staging-dir "gs://sao-prod-488416_cloudbuild/source" \
+            --async \
+            --format='value(id)')"
+
+          echo "Build ID: $BUILD_ID"
+          gcloud builds wait "$BUILD_ID" --project "$PROJECT_ID"
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
@@ -94,10 +95,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
+
           gcloud run deploy "$SERVICE_NAME" \
             --image "$IMAGE" \
             --region "$REGION" \
-            --project "$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')" \
+            --project "$PROJECT_ID" \
             --platform managed \
             --quiet
 
