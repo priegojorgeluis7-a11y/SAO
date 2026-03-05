@@ -69,21 +69,26 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Build and push image
+        shell: bash
         run: |
-          IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/sao/sao-api:${{ github.sha }}"
+          set -euo pipefail
+
+          # 1) Sanitiza PROJECT_ID por si el secret trae espacios/newlines
+          PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
+          echo "Using project: $PROJECT_ID"
+
+          # 2) (Opcional) fija config para evitar sorpresas
+          gcloud config set project "$PROJECT_ID"
+
+          IMAGE="us-central1-docker.pkg.dev/${PROJECT_ID}/sao/sao-api:${{ github.sha }}"
+
+          # 3) Fuerza staging bucket (el que ya autorizaste)
           gcloud builds submit backend/ \
             --tag "$IMAGE" \
-            --project "${{ secrets.GCP_PROJECT_ID }}"
-          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+            --project "$PROJECT_ID" \
+            --gcs-source-staging-dir "gs://sao-prod-488416_cloudbuild/source"
 
-      - name: Deploy to Cloud Run
-        run: |
-          gcloud run deploy "$SERVICE_NAME" \
-            --image "$IMAGE" \
-            --region "$REGION" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
-            --platform managed \
-            --quiet
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
       - name: Smoke test production
         run: |
