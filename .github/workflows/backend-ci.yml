@@ -90,6 +90,17 @@ jobs:
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
+      - name: Deploy to Cloud Run
+        shell: bash
+        run: |
+          set -euo pipefail
+          gcloud run deploy "$SERVICE_NAME" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')" \
+            --platform managed \
+            --quiet
+
       - name: Smoke test production
         run: |
           SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
