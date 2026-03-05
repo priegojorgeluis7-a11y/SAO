@@ -102,17 +102,24 @@ jobs:
             --quiet
 
       - name: Smoke test production
+        shell: bash
         run: |
+          set -euo pipefail
+          PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
+
           SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
             --region "$REGION" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --project "$PROJECT_ID" \
             --format='value(status.url)')"
+
           if [ -z "$SERVICE_URL" ]; then
             echo "Unable to resolve Cloud Run service URL"
             exit 1
           fi
+
           HEALTH_URL="$SERVICE_URL/health"
           ID_TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+
           for i in $(seq 1 6); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               -H "Authorization: Bearer $ID_TOKEN" \
@@ -124,5 +131,6 @@ jobs:
             echo "Attempt $i: status $STATUS — waiting 10s…"
             sleep 10
           done
+
           echo "Smoke test failed after 60s"
           exit 1
