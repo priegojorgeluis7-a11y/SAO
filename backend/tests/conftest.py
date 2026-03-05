@@ -6,6 +6,8 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
@@ -47,6 +49,12 @@ engine = create_engine(
     poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+
+@compiles(PGUUID, "sqlite")
+def _compile_uuid_sqlite(_type, _compiler, **_kw):
+    # CI uses SQLite for tests; map PostgreSQL UUID columns to CHAR(36).
+    return "CHAR(36)"
 
 
 @pytest.fixture(scope="function")
