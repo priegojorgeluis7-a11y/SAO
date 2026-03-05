@@ -1,4 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
+from typing import Literal
+from pydantic import field_validator
 
 
 class LoginRequest(BaseModel):
@@ -18,3 +20,28 @@ class TokenResponse(BaseModel):
 
 class RefreshRequest(BaseModel):
     refresh_token: str = Field(..., min_length=1)
+
+
+class SignupRequest(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=255)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=256)
+    role: Literal["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"]
+    invite_code: str = Field(..., min_length=1, max_length=256)
+
+
+class SignupResponse(BaseModel):
+    user_id: str
+    email: EmailStr
+    role: str
+
+
+class UpdatePinRequest(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=6)
+
+    @field_validator("pin")
+    @classmethod
+    def validate_pin_digits(cls, value: str) -> str:
+        if not value.isdigit():
+            raise ValueError("PIN must contain only digits")
+        return value

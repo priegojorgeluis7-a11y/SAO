@@ -88,7 +88,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
         SnackBar(
           content: Row(
             children: [
-              Icon(Icons.check_circle_rounded, color: Colors.white),
+              Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary),
               SizedBox(width: SaoSpacing.md),
               Text('Actividad aprobada', style: TextStyle(fontWeight: FontWeight.w600)),
             ],
@@ -212,7 +212,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
 
   Widget _buildReasonChip(String reason) {
     return ActionChip(
-      label: Text(reason, style: SaoTypography.chipText.copyWith(fontSize: 11)),
+      label: Text(reason, style: SaoTypography.chipText),
       onPressed: () => _reviewCommentsController.text = reason,
       backgroundColor: SaoColors.gray100,
       shape: RoundedRectangleBorder(
@@ -240,7 +240,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
         SnackBar(
           content: Row(
             children: [
-              Icon(Icons.info_outline_rounded, color: Colors.white),
+              Icon(Icons.info_outline_rounded, color: SaoColors.onPrimary),
               SizedBox(width: AppSpacing.md),
               Text('Notificación enviada al ingeniero'),
             ],
@@ -394,10 +394,10 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Theme.of(context).colorScheme.shadow.withOpacity(0.05),
             blurRadius: 8,
             offset: Offset(0, 2),
           ),
@@ -582,18 +582,18 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     if (_selectedActivity == null) {
       return Container(
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).colorScheme.surface,
           borderRadius: BorderRadius.circular(16),
         ),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.touch_app_rounded, size: 64, color: Colors.grey[300]),
+                Icon(Icons.touch_app_rounded, size: 64, color: SaoColors.gray300),
               SizedBox(height: 16),
               Text(
                 'Selecciona una actividad',
-                style: TextStyle(fontSize: 16, color: Colors.grey[600]),
+                  style: SaoTypography.bodyText.copyWith(color: SaoColors.gray600),
               ),
             ],
           ),
@@ -606,11 +606,11 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Theme.of(context).colorScheme.shadow.withOpacity(0.05),
             blurRadius: 10,
             offset: Offset(0, 2),
           ),
@@ -640,7 +640,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                       SizedBox(height: AppSpacing.xs),
                       Text(
                         activity.activity.title,
-                        style: AppTypography.bodyTextBold.copyWith(fontSize: 16),
+                        style: AppTypography.bodyTextBold,
                         maxLines: 2,
                       ),
                     ],

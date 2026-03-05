@@ -14,7 +14,7 @@ class WizardResult {
   final List<String> attendeeIds;
 
   final String resultId; // R01, R07, etc.
-  final List<String> evidencePaths; // mock (luego será real)
+  final List<String> evidencePaths;
   final bool evidenceSent; // por ahora false
 
   const WizardResult({

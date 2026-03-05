@@ -63,6 +63,9 @@ class TokenData {
 /// Stores JWT access and refresh tokens securely on device
 class TokenStorage {
   static const String _tokenDataKey = 'auth_token_data';
+  static const String _legacyAccessTokenKey = 'access_token';
+  static const String _legacyRefreshTokenKey = 'refresh_token';
+  static const String _legacyCurrentUserKey = 'current_user';
 
   final FlutterSecureStorage _storage;
   TokenData? _cachedTokenData;
@@ -175,6 +178,9 @@ class TokenStorage {
   /// Clear all stored tokens
   Future<void> clear() async {
     await _storage.delete(key: _tokenDataKey);
+    await _storage.delete(key: _legacyAccessTokenKey);
+    await _storage.delete(key: _legacyRefreshTokenKey);
+    await _storage.delete(key: _legacyCurrentUserKey);
     _cachedTokenData = null;
   }
 

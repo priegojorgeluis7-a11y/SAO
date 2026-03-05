@@ -12,9 +12,15 @@ class GpsLocation {
   final double? altitude;
   final double? heading;
   final double? speed;
-  final int timestampEpochMs;
+  final int? timestampEpochMs;
 
-  DateTime get timestamp => DateTime.fromMillisecondsSinceEpoch(timestampEpochMs);
+  DateTime? get timestamp {
+    final value = timestampEpochMs;
+    if (value == null || value <= 0) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(value);
+  }
 
   /// Formatted address (reverse geocoding).
   final String? formattedAddress;
@@ -27,7 +33,7 @@ class GpsLocation {
     this.heading,
     this.speed,
     this.formattedAddress,
-    this.timestampEpochMs = 0,
+    this.timestampEpochMs,
   });
 
   /// Distance to another location in meters
@@ -41,7 +47,8 @@ class GpsLocation {
   }
 
   /// Format as "lat,lng" for metadata
-  String toShortString() => '$latitude,$longitude';
+  String toShortString() =>
+      '${latitude.toStringAsFixed(4)},${longitude.toStringAsFixed(4)}';
 
   /// Format with all details
   @override
@@ -63,18 +70,19 @@ class GpsLocation {
         'altitude': altitude,
         'heading': heading,
         'speed': speed,
-        'timestamp': timestamp.toIso8601String(),
+      'timestamp': timestamp?.toIso8601String(),
       };
 
   factory GpsLocation.fromJson(Map<String, dynamic> json) => GpsLocation(
-        latitude: json['latitude'] as double,
-        longitude: json['longitude'] as double,
-        accuracy: json['accuracy'] as double?,
-        altitude: json['altitude'] as double?,
-        heading: json['heading'] as double?,
-        speed: json['speed'] as double?,
-        timestampEpochMs:
-            DateTime.parse(json['timestamp'] as String).millisecondsSinceEpoch,
+      latitude: (json['latitude'] as num).toDouble(),
+      longitude: (json['longitude'] as num).toDouble(),
+      accuracy: (json['accuracy'] as num?)?.toDouble(),
+      altitude: (json['altitude'] as num?)?.toDouble(),
+      heading: (json['heading'] as num?)?.toDouble(),
+      speed: (json['speed'] as num?)?.toDouble(),
+      timestampEpochMs: json['timestamp'] == null
+      ? null
+      : DateTime.parse(json['timestamp'] as String).millisecondsSinceEpoch,
       );
 }
 
@@ -157,7 +165,7 @@ class GpsTaggingService {
         altitude: position.altitude,
         heading: position.heading,
         speed: position.speed,
-        timestampEpochMs: position.timestamp.millisecondsSinceEpoch,
+        timestampEpochMs: position.timestamp?.millisecondsSinceEpoch,
       );
 
       appLogger.i('✅ Location acquired: $location');
@@ -196,7 +204,7 @@ class GpsTaggingService {
         altitude: position.altitude,
         heading: position.heading,
         speed: position.speed,
-        timestampEpochMs: position.timestamp.millisecondsSinceEpoch,
+        timestampEpochMs: position.timestamp?.millisecondsSinceEpoch,
       );
     } catch (e, stack) {
       appLogger.e('❌ Error getting location with accuracy $accuracy', error: e, stackTrace: stack);
@@ -225,7 +233,7 @@ class GpsTaggingService {
         altitude: position.altitude,
         heading: position.heading,
         speed: position.speed,
-        timestampEpochMs: position.timestamp.millisecondsSinceEpoch,
+        timestampEpochMs: position.timestamp?.millisecondsSinceEpoch,
       );
     }).handleError((Object e, StackTrace stack) {
       appLogger.e('❌ Error in location stream', error: e, stackTrace: stack);
@@ -239,7 +247,8 @@ class GpsTaggingService {
     required double radiusMeters,
   }) {
     final distance = subject.distanceTo(centerPoint);
-    return distance <= radiusMeters;
+    const boundaryToleranceMeters = 5.0;
+    return distance <= radiusMeters + boundaryToleranceMeters;
   }
 
   /// Calculate center point of multiple locations (geographic center).

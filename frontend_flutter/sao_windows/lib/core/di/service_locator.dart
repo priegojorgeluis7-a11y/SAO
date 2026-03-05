@@ -26,7 +26,7 @@ import '../network/api_config.dart';
 final getIt = GetIt.instance;
 
 /// Configura todas las dependencias de la app
-Future<void> setupServiceLocator() async {
+Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
   // SharedPreferences (singleton)
   final prefs = await SharedPreferences.getInstance();
   getIt.registerLazySingleton<SharedPreferences>(() => prefs);
@@ -38,7 +38,12 @@ Future<void> setupServiceLocator() async {
   getIt.registerLazySingleton<FlutterSecureStorage>(() => secureStorage);
 
   // API Configuration (singleton)
-  getIt.registerLazySingleton<ApiConfig>(ApiConfig.new);
+  final apiConfig = ApiConfig();
+  final storedBaseUrl = prefs.getString('api_base_url_override');
+  if (storedBaseUrl != null && storedBaseUrl.trim().isNotEmpty) {
+    apiConfig.setBaseUrl(storedBaseUrl.trim());
+  }
+  getIt.registerLazySingleton<ApiConfig>(() => apiConfig);
 
   // Token Storage (singleton)
   getIt.registerLazySingleton<TokenStorage>(
@@ -100,7 +105,9 @@ Future<void> setupServiceLocator() async {
 
   // Repositories (singleton)
   final catalogRepo = CatalogRepository();
-  await catalogRepo.init(); // Pre-inicializar catálogos
+  if (prewarmCatalog) {
+    await catalogRepo.init(); // Pre-inicializar catálogos
+  }
   getIt.registerLazySingleton<CatalogRepository>(() => catalogRepo);
 
   // Stores (factory - nueva instancia cada vez)

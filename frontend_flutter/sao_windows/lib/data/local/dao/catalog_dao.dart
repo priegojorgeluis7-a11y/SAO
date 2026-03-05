@@ -18,6 +18,10 @@ part 'catalog_dao.g.dart';
 class CatalogDao extends DatabaseAccessor<AppDb> with _$CatalogDaoMixin {
   CatalogDao(super.db);
 
+  Future<List<CatActivity>> getAllActivities() {
+    return select(catActivities).get();
+  }
+
   Future<List<CatActivity>> getEnabledActivities() {
     return (select(catActivities)
           ..where((t) => t.isEnabled.equals(true))

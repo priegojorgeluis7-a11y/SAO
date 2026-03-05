@@ -29,13 +29,14 @@ LazyDatabase _openConnection() {
     PendingUploads,
     SyncQueue, SyncState,
     LocalEvents,
+    AgendaAssignments,
   ],
 )
 class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -65,6 +66,10 @@ class AppDb extends _$AppDb {
           if (from < 5) {
             await m.createTable(localEvents);
             await _createEventsIndexes();
+          }
+          if (from < 6) {
+            await m.createTable(agendaAssignments);
+            await _createAgendaAssignmentsIndexes();
           }
         },
         beforeOpen: (details) async {
@@ -180,6 +185,7 @@ class AppDb extends _$AppDb {
 
     await _createCatalogEffectiveIndexes();
     await _createPendingUploadsIndexes();
+    await _createAgendaAssignmentsIndexes();
   }
 
   Future<void> _createCatalogEffectiveIndexes() async {
@@ -224,6 +230,21 @@ class AppDb extends _$AppDb {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_local_events_severity '
       'ON local_events(severity);',
+    );
+  }
+
+  Future<void> _createAgendaAssignmentsIndexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_agenda_assignments_project_time '
+      'ON agenda_assignments(project_id, start_at, end_at);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_agenda_assignments_resource '
+      'ON agenda_assignments(resource_id);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_agenda_assignments_sync_status '
+      'ON agenda_assignments(sync_status);',
     );
   }
 }

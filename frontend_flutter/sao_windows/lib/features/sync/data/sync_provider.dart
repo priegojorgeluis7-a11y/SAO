@@ -1,4 +1,6 @@
 // lib/features/sync/data/sync_provider.dart
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../data/local/app_db.dart';
 import '../../../core/di/service_locator.dart';
@@ -70,8 +72,10 @@ final syncServiceProvider = Provider<SyncService>((ref) => getIt<SyncService>())
 /// StateNotifier que controla la ejecución del sync push.
 class SyncStateNotifier extends StateNotifier<AsyncValue<SyncResult?>> {
   final SyncService _service;
+  final SyncRepository _repository;
 
-  SyncStateNotifier(this._service) : super(const AsyncValue.data(null));
+  SyncStateNotifier(this._service, this._repository)
+      : super(const AsyncValue.data(null));
 
   /// Ejecuta el push de todos los items pendientes.
   Future<void> sync() async {
@@ -83,11 +87,47 @@ class SyncStateNotifier extends StateNotifier<AsyncValue<SyncResult?>> {
       state = AsyncValue.error(e, st);
     }
   }
+
+  Future<void> resolveConflictUseLocal(String queueItemId) async {
+    state = const AsyncValue.loading();
+    try {
+      final result = await _service.resolveConflictUseLocal(queueItemId);
+      state = AsyncValue.data(result);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
+
+  Future<void> resolveConflictUseServer(String queueItemId) async {
+    state = const AsyncValue.loading();
+    try {
+      final row = await _repository.getQueueItem(queueItemId);
+      if (row == null) {
+        state = AsyncValue.data(SyncResult.empty());
+        return;
+      }
+
+      final payload = jsonDecode(row.payloadJson) as Map<String, dynamic>;
+      final projectId = (payload['project_id'] ?? '').toString();
+      if (projectId.isEmpty) {
+        throw StateError('project_id no disponible para resolver conflicto');
+      }
+
+      await _service.resolveConflictUseServer(
+        queueItemId: queueItemId,
+        projectId: projectId,
+      );
+      state = AsyncValue.data(SyncResult.empty());
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
+  }
 }
 
 /// Provider del estado del sync push (idle / loading / data / error)
 final syncStateProvider =
     StateNotifierProvider<SyncStateNotifier, AsyncValue<SyncResult?>>((ref) {
   final service = ref.watch(syncServiceProvider);
-  return SyncStateNotifier(service);
+  final repository = ref.watch(syncRepositoryProvider);
+  return SyncStateNotifier(service, repository);
 });

@@ -6,26 +6,45 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.pool import StaticPool
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import sessionmaker
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./test.db")
+os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 os.environ.setdefault("GCS_BUCKET", "test-bucket")
 os.environ.setdefault("CORS_ORIGINS", "http://localhost:8000,http://localhost:3000")
 
+# Import ALL model modules so Base.metadata.create_all() creates every table.
+import app.models.activity  # noqa: F401
+import app.models.audit_log  # noqa: F401
+import app.models.catalog  # noqa: F401
 import app.models.catalog_effective  # noqa: F401
+import app.models.event  # noqa: F401
+import app.models.evidence  # noqa: F401
+import app.models.front  # noqa: F401
+import app.models.location  # noqa: F401
+import app.models.observation  # noqa: F401
+import app.models.permission  # noqa: F401
+import app.models.project  # noqa: F401
+import app.models.project_location_scope  # noqa: F401
+import app.models.reject_reason  # noqa: F401
+import app.models.role  # noqa: F401
+import app.models.user_role_scope  # noqa: F401
 from app.core.database import Base, get_db
+from app.core.rate_limit import rate_limiter
 from app.core.security import get_password_hash
 from app.main import app
 from app.models.user import User, UserStatus
 
-# Test database (SQLite in-memory)
-TEST_DATABASE_URL = "sqlite:///./test.db"
+# Test database — true in-memory con StaticPool para que todas las
+# conexiones (TestClient + fixture db) compartan la misma DB.
+TEST_DATABASE_URL = "sqlite:///:memory:"
 
 engine = create_engine(
     TEST_DATABASE_URL,
     connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
 )
 TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
@@ -51,6 +70,13 @@ def client(db):
     app.dependency_overrides[get_db] = override_get_db
     yield TestClient(app)
     app.dependency_overrides.clear()
+
+
+@pytest.fixture(autouse=True)
+def reset_rate_limiter():
+    rate_limiter.reset()
+    yield
+    rate_limiter.reset()
 
 
 @pytest.fixture

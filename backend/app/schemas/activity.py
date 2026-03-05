@@ -1,6 +1,7 @@
 """Activity schemas - Official v1 Contract"""
 
 from datetime import datetime
+from typing import Any
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -95,6 +96,10 @@ class ActivityDTO(BaseModel):
     longitude: str | None = None
     title: str | None = None
     description: str | None = None
+    flags: dict[str, bool] = Field(default_factory=lambda: {
+        "gps_mismatch": False,
+        "catalog_changed": False,
+    })
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
@@ -129,3 +134,17 @@ class ActivitySyncPullResponse(BaseModel):
     activities: list[ActivityDTO]
     latest_sync_version: int
     has_more: bool
+
+
+class ActivityFlagsUpdate(BaseModel):
+    """Partial update for structured review flags. Omitted fields are left unchanged."""
+    gps_mismatch: bool | None = None
+    catalog_changed: bool | None = None
+
+
+class ActivityTimelineItem(BaseModel):
+    """Single audit timeline row for an activity."""
+    at: datetime
+    actor: str | None = None
+    action: str
+    details: dict[str, Any] | None = None

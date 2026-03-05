@@ -45,9 +45,15 @@ class CapturedEvidence {
   final CompressionStats? compressionStats;
 
   /// Timestamp when captured (epoch millis for const compatibility)
-  final int capturedAtEpochMs;
+  final int? capturedAtEpochMs;
 
-  DateTime get capturedAt => DateTime.fromMillisecondsSinceEpoch(capturedAtEpochMs);
+  DateTime? get capturedAt {
+    final value = capturedAtEpochMs;
+    if (value == null || value <= 0) {
+      return null;
+    }
+    return DateTime.fromMillisecondsSinceEpoch(value);
+  }
 
   const CapturedEvidence({
     required this.localPath,
@@ -58,7 +64,7 @@ class CapturedEvidence {
     this.description = '',
     this.isCompressed = false,
     this.compressionStats,
-    this.capturedAtEpochMs = 0,
+    this.capturedAtEpochMs,
   });
 
   /// Get display name
@@ -68,10 +74,10 @@ class CapturedEvidence {
   String get fileSizeDisplay => ImageCompressionService.formatFileSize(sizeBytes);
 
   /// Get GPS location string for display
-  String? get gpsDisplay => gpsLocation?.toShortString();
+  String get gpsDisplay => gpsLocation?.toShortString() ?? '';
 
   /// Whether evidence is ready to submit (has description)
-  bool get isReadyForSubmit => description.trim().isNotEmpty;
+  bool get isReadyForSubmit => sizeBytes > 0 && description.trim().isNotEmpty;
 
   bool get isPhoto => mimeType.startsWith('image/');
   bool get isVideo => mimeType.startsWith('video/');
@@ -109,7 +115,7 @@ class CapturedEvidence {
         'gpsLocation': gpsLocation?.toJson(),
         'description': description,
         'isCompressed': isCompressed,
-        'capturedAt': capturedAt.toIso8601String(),
+        'capturedAt': capturedAt?.toIso8601String(),
       };
 }
 

@@ -1,5 +1,6 @@
 // lib/features/activities/wizard/widgets/catalog_dropdown.dart
 import 'package:flutter/material.dart';
+import '../../../../ui/theme/sao_typography.dart';
 
 /// Dropdown genérico para catálogos con modelo CatalogItem
 class CatalogDropdown<T> extends StatelessWidget {
@@ -45,7 +46,7 @@ class CatalogDropdown<T> extends StatelessWidget {
           itemLabel(x),
           overflow: TextOverflow.ellipsis,
           maxLines: 2,
-          style: const TextStyle(fontSize: 14),
+          style: SaoTypography.bodyText,
         ),
       )),
       
@@ -59,8 +60,7 @@ class CatalogDropdown<T> extends StatelessWidget {
               const SizedBox(width: 8),
               Text(
                 'Agregar nuevo...',
-                style: TextStyle(
-                  fontSize: 14,
+                style: SaoTypography.bodyTextBold.copyWith(
                   fontWeight: FontWeight.w600,
                   color: Theme.of(context).primaryColor,
                 ),

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/data_mode.dart';
@@ -5,6 +7,7 @@ import '../database/app_database.dart';
 import '../models/activity_model.dart';
 import '../catalog/activity_status.dart';
 import 'backend_api_client.dart';
+import 'review_decision_outbox.dart';
 
 final activityRepositoryProvider = Provider<ActivityRepository>((ref) {
   final db = ref.watch(databaseProvider);
@@ -14,15 +17,105 @@ final activityRepositoryProvider = Provider<ActivityRepository>((ref) {
 class ActivityRepository {
   final AppDatabase _db;
   final BackendApiClient _apiClient = const BackendApiClient();
+  final ReviewDecisionOutbox _reviewOutbox = ReviewDecisionOutbox.shared;
 
   ActivityRepository(this._db);
 
-  // Obtener actividades pendientes de revisión
-  Stream<List<ActivityWithDetails>> watchPendingReview() {
-    if (AppDataMode.useMocks) {
-      return Stream.value(_buildMockActivities());
+  Future<List<RejectionPlaybookItem>> getRejectPlaybook({String? projectId}) async {
+    final baseUrl = AppDataMode.backendBaseUrl.trim();
+    if (baseUrl.isEmpty) {
+      return const [
+        RejectionPlaybookItem(
+          reasonCode: 'PHOTO_BLUR',
+          label: 'Foto borrosa',
+          severity: 'MED',
+          requiresComment: false,
+        ),
+        RejectionPlaybookItem(
+          reasonCode: 'GPS_MISMATCH',
+          label: 'GPS no coincide',
+          severity: 'HIGH',
+          requiresComment: true,
+        ),
+        RejectionPlaybookItem(
+          reasonCode: 'MISSING_INFO',
+          label: 'Falta información',
+          severity: 'MED',
+          requiresComment: true,
+        ),
+      ];
     }
 
+    final query = (projectId != null && projectId.trim().isNotEmpty)
+        ? '?project_id=${Uri.encodeQueryComponent(projectId.trim())}'
+        : '';
+    final decoded = await _apiClient.getJson('/api/v1/review/reject-playbook$query');
+    if (decoded is! Map<String, dynamic>) {
+      return const [];
+    }
+
+    final items = decoded['items'];
+    if (items is! List) {
+      return const [];
+    }
+
+    return items
+        .whereType<Map<String, dynamic>>()
+        .map((item) => RejectionPlaybookItem(
+              reasonCode: (item['reason_code'] ?? '').toString(),
+              label: (item['label'] ?? '').toString(),
+              severity: (item['severity'] ?? 'MED').toString(),
+              requiresComment: (item['requires_comment'] as bool?) ?? false,
+            ))
+        .where((item) => item.reasonCode.isNotEmpty)
+        .toList();
+  }
+
+  Future<void> updateEvidenceCaption(String evidenceId, String caption) async {
+    final baseUrl = AppDataMode.backendBaseUrl.trim();
+    if (baseUrl.isEmpty) {
+      return;
+    }
+    await _apiClient.patchJson('/api/v1/review/evidence/$evidenceId', {
+      'description': caption,
+    });
+  }
+
+  Future<List<ActivityTimelineEntry>> getActivityTimeline(String activityId) async {
+    final baseUrl = AppDataMode.backendBaseUrl.trim();
+    if (baseUrl.isEmpty) {
+      return const [];
+    }
+
+    final decoded = await _apiClient.getJson('/api/v1/activities/$activityId/timeline');
+    if (decoded is! List) {
+      return const [];
+    }
+
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map((item) {
+          final atRaw = item['at']?.toString();
+          final at = DateTime.tryParse(atRaw ?? '') ?? DateTime.now();
+          final detailsRaw = item['details'];
+          final details = detailsRaw is Map<String, dynamic>
+              ? detailsRaw
+              : detailsRaw is Map
+                  ? detailsRaw.cast<String, dynamic>()
+                  : null;
+
+          return ActivityTimelineEntry(
+            at: at,
+            actor: item['actor']?.toString(),
+            action: (item['action'] ?? '').toString(),
+            details: details,
+          );
+        })
+        .toList(growable: false);
+  }
+
+  // Obtener actividades pendientes de revisión
+  Stream<List<ActivityWithDetails>> watchPendingReview() {
     return _watchPendingReviewFromBackendOrDb();
   }
 
@@ -55,38 +148,51 @@ class ActivityRepository {
     if (baseUrl.isEmpty) return null;
 
     try {
-      final decoded = await _apiClient.getJson('/api/v1/activities/pending-review');
-      if (decoded is! List) return null;
+      final decoded = await _apiClient.getJson('/api/v1/review/queue');
+      if (decoded is! Map<String, dynamic>) return null;
+      final items = decoded['items'];
+      if (items is! List) return null;
 
       final now = DateTime.now();
       final result = <ActivityWithDetails>[];
 
-      for (final item in decoded) {
+      for (final item in items) {
         if (item is! Map<String, dynamic>) continue;
-        final activityId = (item['id'] ?? '').toString();
+        final activityId = item['id']?.toString() ?? '';
         if (activityId.isEmpty) continue;
 
-        final activityTypeName = (item['activityTypeName'] ?? 'Actividad').toString();
-        final activityTypeCode = (item['activityTypeCode'] ?? 'ACT').toString().toUpperCase();
-        final status = (item['status'] ?? ActivityStatus.pendingReview).toString();
+        final activityTypeCode = (item['activity_type'] ?? 'ACT').toString().toUpperCase();
+        final activityTypeName = activityTypeCode;
+        final rawStatus = (item['status'] ?? 'PENDIENTE_REVISION').toString();
+        final status = switch (rawStatus) {
+          'APROBADO' => ActivityStatus.approved,
+          'RECHAZADO' => ActivityStatus.rejected,
+          _ => ActivityStatus.pendingReview,
+        };
+        final pkLabel = (item['pk'] ?? '').toString();
+        final frontName = (item['front'] ?? 'Sin frente').toString();
+        final municipalityName = (item['municipality'] ?? 'Sin municipio').toString();
+        final gpsMismatch = (item['gps_critical'] as bool?) ?? false;
+        final catalogChanged = (item['catalog_change_pending'] as bool?) ?? false;
+        final checklistIncomplete = (item['checklist_incomplete'] as bool?) ?? false;
 
         final activity = Activity(
           id: activityId,
-          projectId: (item['projectId'] ?? 'proj-backend').toString(),
-          activityTypeId: (item['activityTypeId'] ?? 'act-type-backend').toString(),
+          projectId: (item['project_id'] ?? 'proj-backend').toString(),
+          activityTypeId: 'act-type-$activityTypeCode',
           assignedTo: (item['assignedTo'] ?? 'usr-backend').toString(),
-          frontId: (item['frontId'] as String?),
-          municipalityId: (item['municipalityId'] as String?),
-          title: (item['title'] ?? activityTypeName).toString(),
-          description: item['description']?.toString(),
+          frontId: null,
+          municipalityId: null,
+          title: activityTypeName,
+          description: pkLabel,
           status: status,
-          executedAt: DateTime.tryParse((item['executedAt'] ?? '').toString()),
+          executedAt: DateTime.tryParse((item['created_at'] ?? '').toString()),
           reviewedAt: DateTime.tryParse((item['reviewedAt'] ?? '').toString()),
           reviewedBy: item['reviewedBy']?.toString(),
           reviewComments: item['reviewComments']?.toString(),
-          latitude: (item['latitude'] as num?)?.toDouble(),
-          longitude: (item['longitude'] as num?)?.toDouble(),
-          createdAt: DateTime.tryParse((item['createdAt'] ?? '').toString()) ?? now,
+          latitude: null,
+          longitude: null,
+          createdAt: DateTime.tryParse((item['created_at'] ?? '').toString()) ?? now,
         );
 
         final type = ActivityType(
@@ -106,13 +212,13 @@ class ActivityRepository {
         );
 
         final municipality = Municipality(
-          id: (item['municipalityId'] ?? 'mun-backend').toString(),
-          name: (item['municipality'] ?? 'Sin municipio').toString(),
+          id: municipalityName.toLowerCase().replaceAll(' ', '-'),
+          name: municipalityName,
           state: (item['state'] ?? 'N/A').toString(),
         );
 
         final evidences = <Evidence>[];
-        final evidenceCount = (item['evidenceCount'] as num?)?.toInt() ?? 0;
+        final evidenceCount = (item['evidence_count'] as num?)?.toInt() ?? 0;
         for (var index = 0; index < evidenceCount; index++) {
           evidences.add(Evidence(
             id: 'ev-$activityId-$index',
@@ -127,8 +233,18 @@ class ActivityRepository {
           activity: activity,
           activityType: type,
           assignedUser: user,
+          front: Front(
+            id: frontName.toLowerCase().replaceAll(' ', '-'),
+            name: frontName,
+            projectId: activity.projectId,
+          ),
           municipality: municipality,
           evidences: evidences,
+          flags: ActivityFlags(
+            gpsMismatch: gpsMismatch,
+            catalogChanged: catalogChanged,
+            checklistIncomplete: checklistIncomplete,
+          ),
         ));
       }
 
@@ -136,159 +252,6 @@ class ActivityRepository {
     } catch (_) {
       return null;
     }
-  }
-
-  List<ActivityWithDetails> _buildMockActivities() {
-    final now = DateTime.now();
-
-    ActivityWithDetails item({
-      required String id,
-      required String projectId,
-      required String projectFront,
-      required String activityName,
-      required String activityCode,
-      required String subcategory,
-      required String purpose,
-      required String pk,
-      required String state,
-      required String municipality,
-      required String riskKeyword,
-      required String result,
-      required String status,
-      required String assignedName,
-      int evidenceCount = 0,
-      required DateTime createdAt,
-    }) {
-      final activityTypeId = 'act-type-$activityCode-${id.toLowerCase()}';
-      final activity = Activity(
-        id: id,
-        projectId: projectId,
-        activityTypeId: activityTypeId,
-        assignedTo: 'usr-$id',
-        frontId: 'front-$projectFront',
-        municipalityId: 'mun-${municipality.toLowerCase().replaceAll(' ', '-')}',
-        title: '$activityName – $subcategory',
-        description: '$purpose. $pk. Riesgo $riskKeyword.',
-        status: status,
-        reviewComments: result,
-        executedAt: createdAt,
-        createdAt: createdAt,
-      );
-
-      final evidences = List.generate(
-        evidenceCount,
-        (index) => Evidence(
-          id: 'ev-$id-$index',
-          activityId: id,
-          filePath: 'mock://evidence/$id/$index.jpg',
-          fileType: 'IMAGE',
-          capturedAt: createdAt.add(Duration(minutes: index)),
-        ),
-      );
-
-      return ActivityWithDetails(
-        activity: activity,
-        activityType: ActivityType(
-          id: activityTypeId,
-          name: activityName,
-          code: activityCode,
-          projectId: projectId,
-        ),
-        assignedUser: User(
-          id: 'usr-$id',
-          email: '${assignedName.toLowerCase().replaceAll(' ', '.')}@sao.local',
-          fullName: assignedName,
-          role: 'ENGINEER',
-          status: 'ACTIVE',
-          createdAt: now,
-        ),
-        front: Front(
-          id: 'front-$projectFront',
-          name: projectFront,
-          projectId: projectId,
-        ),
-        municipality: Municipality(
-          id: 'mun-${municipality.toLowerCase().replaceAll(' ', '-')}',
-          name: municipality,
-          state: state,
-        ),
-        evidences: evidences,
-      );
-    }
-
-    return [
-      item(
-        id: 'ACT-MOCK-TMQ-PRIORITARIO',
-        projectId: 'TMQ',
-        projectFront: 'TMQ',
-        activityName: 'Caminamiento',
-        activityCode: 'CAM',
-        subcategory: 'Verificación de DDV',
-        purpose: 'Marcaje o actualización de DDV / trazo',
-        pk: 'PK 10+200 – 10+800',
-        state: 'Querétaro',
-        municipality: 'Pedro Escobedo',
-        riskKeyword: 'prioritario',
-        result: 'Proceso en revisión / sin acuerdo final',
-        status: ActivityStatus.pendingReview,
-        assignedName: 'Juan Ingeniero',
-        evidenceCount: 2,
-        createdAt: now.subtract(const Duration(days: 10)),
-      ),
-      item(
-        id: 'ACT-MOCK-TAP-MEDIO',
-        projectId: 'TAP',
-        projectFront: 'TAP',
-        activityName: 'Reunión',
-        activityCode: 'REU',
-        subcategory: 'Técnica / Interinstitucional',
-        purpose: 'Coordinación institucional',
-        pk: 'PK 21+450',
-        state: 'Hidalgo',
-        municipality: 'Tizayuca',
-        riskKeyword: 'medio',
-        result: 'Actividad realizada conforme al programa',
-        status: ActivityStatus.approved,
-        assignedName: 'María Coordinadora',
-        evidenceCount: 1,
-        createdAt: now.subtract(const Duration(days: 3)),
-      ),
-      item(
-        id: 'ACT-MOCK-TMQ-ALTO',
-        projectId: 'TMQ',
-        projectFront: 'TMQ',
-        activityName: 'Asamblea Protocolizada',
-        activityCode: 'ASP',
-        subcategory: '1ª Asamblea Protocolizada (1AP)',
-        purpose: 'Obtención de anuencia o firma de COP',
-        pk: 'PK 34+100 – 34+600',
-        state: 'Oaxaca',
-        municipality: 'Tehuantepec',
-        riskKeyword: 'alto',
-        result: 'Sin quórum / segunda convocatoria programada',
-        status: ActivityStatus.needsFix,
-        assignedName: 'Carlos Supervisor',
-        createdAt: now.subtract(const Duration(days: 6)),
-      ),
-      item(
-        id: 'ACT-MOCK-TAP-BAJO',
-        projectId: 'TAP',
-        projectFront: 'TAP',
-        activityName: 'Consulta Indígena',
-        activityCode: 'CIN',
-        subcategory: 'Etapa Informativa',
-        purpose: 'Presentación general del proyecto',
-        pk: 'PK 18+900',
-        state: 'Estado de México',
-        municipality: 'Temascalapa',
-        riskKeyword: 'bajo',
-        result: 'Se programa nueva reunión o seguimiento',
-        status: ActivityStatus.pendingReview,
-        assignedName: 'Ana Facilitadora',
-        evidenceCount: 1,
-        createdAt: now.subtract(const Duration(days: 1)),
-      ),
-    ];
   }
 
   // Obtener detalles de una actividad
@@ -327,6 +290,7 @@ class ActivityRepository {
       front: front,
       municipality: muni,
       evidences: evidences,
+      flags: const ActivityFlags(),
     );
   }
 
@@ -343,6 +307,24 @@ class ActivityRepository {
 
   // Aprobar actividad
   Future<void> approveActivity(String activityId, String reviewerId) async {
+    final baseUrl = AppDataMode.backendBaseUrl.trim();
+    final path = '/api/v1/review/activity/$activityId/decision';
+    final payload = {
+      'decision': 'APPROVE',
+      'comment': '',
+      'field_resolutions': <Map<String, dynamic>>[],
+      'apply_to_similar': false,
+    };
+    if (baseUrl.isNotEmpty) {
+      try {
+        await _apiClient.postJson(path, payload);
+        unawaited(_reviewOutbox.flush());
+        return;
+      } catch (_) {
+        _reviewOutbox.enqueue(path: path, payload: payload);
+      }
+    }
+
     await (_db.update(_db.activities)..where((a) => a.id.equals(activityId)))
         .write(ActivitiesCompanion(
       status: const Value(ActivityStatus.approved),
@@ -367,7 +349,27 @@ class ActivityRepository {
     String activityId,
     String reviewerId,
     String comments,
+    [String? rejectReasonCode]
   ) async {
+    final baseUrl = AppDataMode.backendBaseUrl.trim();
+    final path = '/api/v1/review/activity/$activityId/decision';
+    final payload = {
+      'decision': 'REJECT',
+      'reject_reason_code': (rejectReasonCode ?? 'MISSING_INFO'),
+      'comment': comments,
+      'field_resolutions': <Map<String, dynamic>>[],
+      'apply_to_similar': false,
+    };
+    if (baseUrl.isNotEmpty) {
+      try {
+        await _apiClient.postJson(path, payload);
+        unawaited(_reviewOutbox.flush());
+        return;
+      } catch (_) {
+        _reviewOutbox.enqueue(path: path, payload: payload);
+      }
+    }
+
     await (_db.update(_db.activities)..where((a) => a.id.equals(activityId)))
         .write(ActivitiesCompanion(
       status: const Value(ActivityStatus.rejected),
@@ -393,6 +395,25 @@ class ActivityRepository {
     String reviewerId,
     String comments,
   ) async {
+    final baseUrl = AppDataMode.backendBaseUrl.trim();
+    final path = '/api/v1/review/activity/$activityId/decision';
+    final payload = {
+      'decision': 'REJECT',
+      'reject_reason_code': 'MISSING_INFO',
+      'comment': comments,
+      'field_resolutions': <Map<String, dynamic>>[],
+      'apply_to_similar': false,
+    };
+    if (baseUrl.isNotEmpty) {
+      try {
+        await _apiClient.postJson(path, payload);
+        unawaited(_reviewOutbox.flush());
+        return;
+      } catch (_) {
+        _reviewOutbox.enqueue(path: path, payload: payload);
+      }
+    }
+
     await (_db.update(_db.activities)..where((a) => a.id.equals(activityId)))
         .write(ActivitiesCompanion(
       status: const Value(ActivityStatus.needsFix),
@@ -418,4 +439,18 @@ class ActivityRepository {
           ..where((r) => r.isActive.equals(true)))
         .get();
   }
+}
+
+class RejectionPlaybookItem {
+  final String reasonCode;
+  final String label;
+  final String severity;
+  final bool requiresComment;
+
+  const RejectionPlaybookItem({
+    required this.reasonCode,
+    required this.label,
+    required this.severity,
+    required this.requiresComment,
+  });
 }

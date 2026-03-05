@@ -186,6 +186,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       isLoading: isLoading,
                       icon: _tutorialMode ? Icons.school_outlined : Icons.login,
                     ),
+                    const SizedBox(height: SaoSpacing.md),
+                    TextButton(
+                      onPressed: isLoading ? null : () => context.go('/auth/signup'),
+                      child: const Text('Crear cuenta'),
+                    ),
                   ],
                 ),
               ),

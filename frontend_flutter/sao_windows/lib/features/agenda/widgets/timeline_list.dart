@@ -1,6 +1,8 @@
 // lib/features/agenda/widgets/timeline_list.dart
 
 import 'package:flutter/material.dart';
+import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
 import 'agenda_mini_card.dart';
@@ -33,7 +35,7 @@ class TimelineList extends StatelessWidget {
         final slotItems = _filterItemsByHour(h);
 
         return Container(
-          color: Colors.white,
+          color: SaoColors.surface,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -43,11 +45,7 @@ class TimelineList extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 4, left: 12),
                   child: Text(
                     '${h.toString().padLeft(2, '0')}:00',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF6B7280),
-                    ),
+                    style: SaoTypography.monoSmall.copyWith(color: SaoColors.gray500),
                   ),
                 ),
               ),
@@ -84,7 +82,7 @@ class TimelineList extends StatelessWidget {
                         decoration: const BoxDecoration(
                           border: Border(
                             top: BorderSide(
-                              color: Color(0xFFE5E7EB),
+                              color: SaoColors.border,
                               width: 1,
                             ),
                           ),
@@ -130,7 +128,7 @@ class TimelineList extends StatelessWidget {
               children: [
                 CircleAvatar(
                   radius: 20,
-                  backgroundColor: const Color(0xFF3B82F6),
+                  backgroundColor: SaoColors.info,
                   backgroundImage: resource.avatarUrl != null
                       ? NetworkImage(resource.avatarUrl!)
                       : null,
@@ -138,9 +136,8 @@ class TimelineList extends StatelessWidget {
                       ? Text(
                           resource.initials,
                           style: const TextStyle(
-                            fontSize: 16,
                             fontWeight: FontWeight.w900,
-                            color: Colors.white,
+                            color: SaoColors.onPrimary,
                           ),
                         )
                       : null,
@@ -152,17 +149,11 @@ class TimelineList extends StatelessWidget {
                     children: [
                       Text(
                         resource.name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.w700,
-                          fontSize: 16,
-                        ),
+                        style: SaoTypography.bodyTextBold.copyWith(color: SaoColors.primary),
                       ),
                       Text(
                         resource.roleLabel,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          color: Color(0xFF6B7280),
-                        ),
+                        style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray500),
                       ),
                     ],
                   ),
@@ -172,10 +163,7 @@ class TimelineList extends StatelessWidget {
             const Divider(height: 24),
             Text(
               item.title,
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w900,
-              ),
+              style: SaoTypography.frontTitle.copyWith(fontWeight: FontWeight.w900),
             ),
             const SizedBox(height: 8),
             _DetailRow(
@@ -215,15 +203,12 @@ class _DetailRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: const Color(0xFF6B7280)),
+        Icon(icon, size: 16, color: SaoColors.gray500),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             label,
-            style: const TextStyle(
-              fontSize: 14,
-              color: Color(0xFF374151),
-            ),
+            style: SaoTypography.bodyText.copyWith(color: SaoColors.primaryLight),
           ),
         ),
       ],

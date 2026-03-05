@@ -1,10 +1,12 @@
 """Evidence API endpoints for upload and download URL workflows."""
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_permission, verify_project_access
 from app.core.database import get_db
+from app.core.rate_limit import enforce_rate_limit
+from app.core.config import settings
 from app.models.user import User
 from app.schemas.evidence import (
     UploadInitRequest,
@@ -22,9 +24,17 @@ router = APIRouter(prefix="/evidences", tags=["evidences"])
 @router.post("/upload-init", response_model=UploadInitResponse, status_code=status.HTTP_200_OK)
 def upload_init(
     request: UploadInitRequest,
+    http_request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_permission("activity.edit")),
 ):
+    enforce_rate_limit(
+        http_request,
+        scope="evidences.upload_init",
+        limit=settings.RATE_LIMIT_EVIDENCE_UPLOAD_INIT_PER_MINUTE,
+        window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+    )
+
     service = EvidenceService(db)
     activity = service.get_activity_or_404(request.activityId)
 
@@ -71,3 +81,25 @@ def get_download_url(
         signedUrl=signed_url,
         expiresAt=expires_at,
     )
+
+
+@router.put("/local-upload/{evidence_id}", status_code=status.HTTP_200_OK)
+async def local_upload(
+    evidence_id: str,
+    http_request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_permission("activity.edit")),
+):
+    """Receive a raw file PUT and save it to LOCAL_UPLOADS_DIR.
+    Only available when EVIDENCE_STORAGE_BACKEND=local.
+    This endpoint acts as a local replacement for GCS presigned PUT URLs.
+    """
+    if settings.EVIDENCE_STORAGE_BACKEND != "local":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Local upload endpoint not available in this environment",
+        )
+    body = await http_request.body()
+    service = EvidenceService(db)
+    service.save_local_upload(evidence_id, body)
+    return {"ok": True}

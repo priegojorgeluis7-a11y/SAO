@@ -46,14 +46,12 @@ def build_alembic_config(base_dir: Path) -> Config:
 
 def run_common_seeds() -> None:
     from app.core.database import SessionLocal
-    from app.seeds.catalog_tmq_v1 import seed_catalog_tmq_v1
     from app.seeds.initial_data import run_all_seeds
 
     logging.info("Running seeds")
     db = SessionLocal()
     try:
         run_all_seeds(db)
-        seed_catalog_tmq_v1(db)
     except Exception:
         db.rollback()
         raise

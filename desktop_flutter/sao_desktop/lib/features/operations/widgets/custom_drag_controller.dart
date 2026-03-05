@@ -66,7 +66,7 @@ class CustomDragController {
                   child: Material(
                     elevation: 12,
                     borderRadius: BorderRadius.circular(8),
-                    color: Colors.white,
+                    color: Theme.of(context).colorScheme.surface,
                     child: Opacity(
                       opacity: 0.85,
                       child: Transform.scale(

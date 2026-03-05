@@ -23,6 +23,7 @@ class TodayActivity {
   final DateTime? horaInicio;
   final DateTime? horaFin;
   final String? gpsLocation;
+  final bool isUnplanned; // true when saved with origin==unplanned
 
   const TodayActivity({
     required this.id,
@@ -36,6 +37,7 @@ class TodayActivity {
     this.horaInicio,
     this.horaFin,
     this.gpsLocation,
+    this.isUnplanned = false,
   });
 
   TodayActivity copyWith({
@@ -43,6 +45,7 @@ class TodayActivity {
     DateTime? horaInicio,
     DateTime? horaFin,
     String? gpsLocation,
+    bool? isUnplanned,
   }) {
     return TodayActivity(
       id: id,
@@ -56,6 +59,7 @@ class TodayActivity {
       horaInicio: horaInicio ?? this.horaInicio,
       horaFin: horaFin ?? this.horaFin,
       gpsLocation: gpsLocation ?? this.gpsLocation,
+      isUnplanned: isUnplanned ?? this.isUnplanned,
     );
   }
 }

@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 from app.models.catalog_effective import (
     CatActivity,
     CatAttendee,
+    CatProject,
     CatPurpose,
     CatResult,
     CatSubcategory,
@@ -33,14 +34,44 @@ class EffectiveCatalogService:
         """Return timezone-aware UTC datetime."""
         return datetime.now(timezone.utc)
 
-    def resolve_current_version_id(self) -> str:
+    def resolve_current_version_id(self, project_id: str | None = None) -> str:
         """
-        Lee la versión marcada como is_current=true en catalog_version.
+        Resuelve la versión efectiva actual.
+
+        Prioridad:
+        1) Si viene project_id: usar cat_projects.version_id para ese proyecto.
+        2) Fallback legacy: fila con is_current=true en catalog_version.
 
         Raises:
             HTTPException 404: tabla existe pero no hay ninguna versión marcada.
             HTTPException 503: la tabla no existe o fallo de DB (migraciones pendientes).
         """
+        normalized_project = (project_id or "").strip().upper()
+        if normalized_project:
+            try:
+                project_row = (
+                    self.db.query(CatProject)
+                    .filter(
+                        CatProject.project_id == normalized_project,
+                        CatProject.is_active.is_(True),
+                    )
+                    .first()
+                )
+            except Exception as exc:
+                logger.error(
+                    "DB error querying cat_projects for project_id=%s: %s",
+                    normalized_project,
+                    exc,
+                    exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="Catalog project mapping unavailable. Run pending migrations.",
+                )
+
+            if project_row and project_row.version_id:
+                return project_row.version_id
+
         try:
             row = self.db.execute(
                 text("SELECT version_id FROM catalog_version WHERE is_current = true LIMIT 1")
@@ -72,10 +103,10 @@ class EffectiveCatalogService:
             )
         return row[0]
 
-    def resolve_version_id(self, version_id: str | None) -> str:
+    def resolve_version_id(self, version_id: str | None, project_id: str | None = None) -> str:
         if version_id:
             return version_id
-        return self.resolve_current_version_id()
+        return self.resolve_current_version_id(project_id=project_id)
 
     def _load_overrides(self, project_id: str, version_id: str) -> dict[tuple[str, str], ProjCatalogOverride]:
         rows = (
@@ -111,7 +142,9 @@ class EffectiveCatalogService:
         if rows:
             logger.debug("Fetched %d rows from '%s' for version_id=%s", len(rows), table, version_id)
             return rows
-        # Fallback: no rows for this version, return all (version-agnostic seed)
+        # Fallback: version has no base rows (override-only version or unseeded project).
+        # Return the canonical shared rows so overrides can be applied on top.
+        # Cross-project isolation is enforced at resolve_current_version_id via cat_projects.
         try:
             fallback = self.db.query(model).all()
         except Exception as exc:
@@ -123,7 +156,8 @@ class EffectiveCatalogService:
                 detail=f"Catalog table '{table}' unavailable.",
             )
         logger.warning(
-            "No rows in '%s' for version_id=%s, returning all %d rows (version fallback)",
+            "No rows in '%s' for version_id=%s — using %d shared rows as base. "
+            "If this is an unseeded project, bootstrap via POST /api/v1/projects.",
             table,
             version_id,
             len(fallback),
@@ -166,7 +200,7 @@ class EffectiveCatalogService:
         return name_effective, is_enabled_effective, sort_order_effective, color_effective
 
     def get_effective_catalog(self, project_id: str, version_id: str | None = None) -> dict:
-        version_id = self.resolve_version_id(version_id)
+        version_id = self.resolve_version_id(version_id, project_id=project_id)
         logger.info(
             "Building effective catalog: project_id=%s version_id=%s", project_id, version_id
         )

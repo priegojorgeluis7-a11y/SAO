@@ -390,10 +390,10 @@ class _LeftInbox extends StatelessWidget {
                               const Gap(2),
                               Text(
                                 '${it.pk} • ${it.engineer}',
-                                style: TextStyle(
-                                  color: SaoColors.gray600,
-                                  fontSize: 12,
-                                ),
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .bodySmall
+                                    ?.copyWith(color: SaoColors.gray600),
                               ),
                               const Gap(6),
                               Row(
@@ -402,10 +402,10 @@ class _LeftInbox extends StatelessWidget {
                                   const Gap(4),
                                   Text(
                                     'Sincronizado hace ${it.syncedAgo}',
-                                    style: TextStyle(
-                                      color: SaoColors.gray500,
-                                      fontSize: 12,
-                                    ),
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .bodySmall
+                                        ?.copyWith(color: SaoColors.gray500),
                                   ),
                                 ],
                               ),
@@ -486,7 +486,7 @@ class _CenterForm extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // PK + Alerta GPS (CRÍTICO)
-            Text('PK reportado', style: _labelStyle()),
+            Text('PK reportado', style: _labelStyle(context)),
             const Gap(6),
             _ValuePill(text: item.pk),
             const Gap(10),
@@ -666,7 +666,10 @@ class _RightEvidence extends StatelessWidget {
                         const Gap(8),
                         Text(
                           'Mapa: Trazo de vía + Ubicación del reporte',
-                          style: TextStyle(color: SaoColors.gray600, fontSize: 12),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: SaoColors.gray600),
                         ),
                       ],
                     ),
@@ -817,7 +820,10 @@ class _Panel extends StatelessWidget {
                       const Gap(2),
                       Text(
                         subtitle,
-                        style: TextStyle(color: SaoColors.gray600, fontSize: 12),
+                        style: Theme.of(context)
+                            .textTheme
+                            .bodySmall
+                            ?.copyWith(color: SaoColors.gray600),
                       ),
                     ],
                   ),
@@ -905,11 +911,10 @@ class _FilterChip extends StatelessWidget {
         ),
         child: Text(
           label,
-          style: TextStyle(
-            color: selected ? SaoColors.actionPrimary : SaoColors.gray800,  // 🎯 Texto azul marino cuando selected
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            fontSize: 12,
-          ),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: selected ? SaoColors.actionPrimary : SaoColors.gray800,  // 🎯 Texto azul marino cuando selected
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
         ),
       ),
     );
@@ -979,7 +984,10 @@ class _RiskPill extends StatelessWidget {
           const Gap(8),
           Text(
             text,
-            style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 11),
+            style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: color,
+                  fontWeight: FontWeight.w700,
+                ),
           ),
         ],
       ),
@@ -1010,7 +1018,10 @@ class _Pill extends StatelessWidget {
           const Gap(6),
           Text(
             text,
-            style: TextStyle(color: SaoColors.gray800, fontWeight: FontWeight.w600, fontSize: 12),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: SaoColors.gray800,
+                  fontWeight: FontWeight.w600,
+                ),
           ),
         ],
       ),
@@ -1033,12 +1044,11 @@ class _ValuePill extends StatelessWidget {
       ),
       child: Text(
         text,
-        style: TextStyle(
-          color: SaoColors.actionPrimary,  // 🎯 Texto azul marino
-          fontWeight: FontWeight.w800,
-          fontSize: 16,
-          letterSpacing: 0.3,
-        ),
+        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              color: SaoColors.actionPrimary,  // 🎯 Texto azul marino
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.3,
+            ),
       ),
     );
   }
@@ -1075,7 +1085,10 @@ class _KeyValueRow extends StatelessWidget {
             width: 92,
             child: Text(
               k,
-              style: TextStyle(color: SaoColors.gray600, fontSize: 12),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: SaoColors.gray600),
             ),
           ),
           Expanded(
@@ -1090,7 +1103,15 @@ class _KeyValueRow extends StatelessWidget {
   }
 }
 
-TextStyle _labelStyle() => TextStyle(color: SaoColors.gray600, fontSize: 12, fontWeight: FontWeight.w600);
+TextStyle _labelStyle(BuildContext context) =>
+    Theme.of(context).textTheme.bodySmall?.copyWith(
+          color: SaoColors.gray600,
+          fontWeight: FontWeight.w600,
+        ) ??
+    const TextStyle(
+      color: SaoColors.gray600,
+      fontWeight: FontWeight.w600,
+    );
 
 InputDecoration _fieldDeco({
   required String label,

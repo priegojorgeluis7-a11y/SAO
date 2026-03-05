@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/exceptions.dart';
+import '../../../core/auth/pin_storage.dart';
 import '../../../core/utils/logger.dart';
 import '../data/auth_repository.dart';
 import '../data/models/login_request.dart';
@@ -13,12 +14,24 @@ class AuthState {
   final bool isAuthenticated;
   final bool tutorialMode;
 
+  /// true → mostrar pantalla de PIN (sin red, tokens existen, PIN configurado).
+  final bool requiresPinUnlock;
+
+  /// true → redirigir a /auth/pin-setup después del login online.
+  final bool needsPinSetup;
+
+  /// true → sesión restaurada offline con PIN (sin validar contra servidor).
+  final bool isOfflineSession;
+
   const AuthState({
     this.user,
     this.isLoading = false,
     this.error,
     this.isAuthenticated = false,
     this.tutorialMode = false,
+    this.requiresPinUnlock = false,
+    this.needsPinSetup = false,
+    this.isOfflineSession = false,
   });
 
   const AuthState.initial()
@@ -26,25 +39,56 @@ class AuthState {
         isLoading = false,
         error = null,
         isAuthenticated = false,
-        tutorialMode = false;
+        tutorialMode = false,
+        requiresPinUnlock = false,
+        needsPinSetup = false,
+        isOfflineSession = false;
 
   const AuthState.loading()
       : user = null,
         isLoading = true,
         error = null,
-      isAuthenticated = false,
-      tutorialMode = false;
+        isAuthenticated = false,
+        tutorialMode = false,
+        requiresPinUnlock = false,
+        needsPinSetup = false,
+        isOfflineSession = false;
 
-    const AuthState.authenticated(this.user, {this.tutorialMode = false})
+  const AuthState.authenticated(this.user, {this.tutorialMode = false, this.needsPinSetup = false})
       : isLoading = false,
         error = null,
-        isAuthenticated = true;
+        isAuthenticated = true,
+        requiresPinUnlock = false,
+        isOfflineSession = false;
 
   const AuthState.unauthenticated([this.error])
       : user = null,
         isLoading = false,
-      isAuthenticated = false,
-      tutorialMode = false;
+        isAuthenticated = false,
+        tutorialMode = false,
+        requiresPinUnlock = false,
+        needsPinSetup = false,
+        isOfflineSession = false;
+
+  /// Estado de PIN bloqueado: tokens existen pero sin red.
+  const AuthState.pinLocked(this.user)
+      : isLoading = false,
+        error = null,
+        isAuthenticated = false,
+        tutorialMode = false,
+        requiresPinUnlock = true,
+        needsPinSetup = false,
+        isOfflineSession = false;
+
+  /// Sesión offline restaurada exitosamente con PIN correcto.
+  const AuthState.offlineAuthenticated(this.user)
+      : isLoading = false,
+        error = null,
+        isAuthenticated = true,
+        tutorialMode = false,
+        requiresPinUnlock = false,
+        needsPinSetup = false,
+        isOfflineSession = true;
 
   AuthState copyWith({
     User? user,
@@ -52,6 +96,9 @@ class AuthState {
     String? error,
     bool? isAuthenticated,
     bool? tutorialMode,
+    bool? requiresPinUnlock,
+    bool? needsPinSetup,
+    bool? isOfflineSession,
   }) {
     return AuthState(
       user: user ?? this.user,
@@ -59,6 +106,9 @@ class AuthState {
       error: error,
       isAuthenticated: isAuthenticated ?? this.isAuthenticated,
       tutorialMode: tutorialMode ?? this.tutorialMode,
+      requiresPinUnlock: requiresPinUnlock ?? this.requiresPinUnlock,
+      needsPinSetup: needsPinSetup ?? this.needsPinSetup,
+      isOfflineSession: isOfflineSession ?? this.isOfflineSession,
     );
   }
 
@@ -71,7 +121,10 @@ class AuthState {
           isLoading == other.isLoading &&
           error == other.error &&
           isAuthenticated == other.isAuthenticated &&
-          tutorialMode == other.tutorialMode;
+          tutorialMode == other.tutorialMode &&
+          requiresPinUnlock == other.requiresPinUnlock &&
+          needsPinSetup == other.needsPinSetup &&
+          isOfflineSession == other.isOfflineSession;
 
   @override
   int get hashCode =>
@@ -79,15 +132,20 @@ class AuthState {
       isLoading.hashCode ^
       error.hashCode ^
       isAuthenticated.hashCode ^
-      tutorialMode.hashCode;
+      tutorialMode.hashCode ^
+      requiresPinUnlock.hashCode ^
+      needsPinSetup.hashCode ^
+      isOfflineSession.hashCode;
 }
 
 /// Auth controller - manages authentication state
 class AuthController extends StateNotifier<AuthState> {
   final AuthRepository _repository;
+  final PinStorage? _pinStorage;
 
-  AuthController(this._repository) : super(const AuthState.initial()) {
-    // Bootstrap authentication on initialization
+  AuthController(this._repository, {PinStorage? pinStorage})
+      : _pinStorage = pinStorage,
+        super(const AuthState.initial()) {
     bootstrap();
   }
 
@@ -99,16 +157,24 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       appLogger.d('Bootstrapping authentication');
 
-      final isAuthenticated = await _repository.bootstrap();
+      final result = await _repository.bootstrap();
 
-      if (isAuthenticated) {
-        // Fetch current user
-        final user = await _repository.getCurrentUser();
-        state = AuthState.authenticated(user);
-        appLogger.i('Bootstrap complete - user authenticated: ${user.email}');
-      } else {
-        state = const AuthState.unauthenticated();
-        appLogger.d('Bootstrap complete - no authentication');
+      switch (result) {
+        case BootstrapResult.authenticated:
+          final user = await _repository.getCurrentUser();
+          state = AuthState.authenticated(user);
+          appLogger.i('Bootstrap complete - user authenticated: ${user.email}');
+
+        case BootstrapResult.pinLocked:
+          final cachedJson = await _repository.getCachedUserJson();
+          final cachedUser =
+              cachedJson != null ? User.fromJson(cachedJson) : null;
+          state = AuthState.pinLocked(cachedUser);
+          appLogger.i('Bootstrap complete - PIN unlock required');
+
+        case BootstrapResult.unauthenticated:
+          state = const AuthState.unauthenticated();
+          appLogger.d('Bootstrap complete - no authentication');
       }
     } catch (e) {
       appLogger.e('Bootstrap error: $e');
@@ -132,8 +198,14 @@ class AuthController extends StateNotifier<AuthState> {
       // Fetch current user after successful login
       final user = await _repository.getCurrentUser();
 
-      state = AuthState.authenticated(user, tutorialMode: tutorialMode);
-      appLogger.i('Login successful: ${user.email}');
+      // If no PIN is configured yet, prompt setup
+      final pinConfigured = await _repository.isPinConfigured();
+      state = AuthState.authenticated(
+        user,
+        tutorialMode: tutorialMode,
+        needsPinSetup: !pinConfigured,
+      );
+      appLogger.i('Login successful: ${user.email} (needsPinSetup=${!pinConfigured})');
     } on InvalidCredentialsException catch (e) {
       appLogger.w('Invalid credentials: $e');
       state = const AuthState.unauthenticated('Invalid email or password');
@@ -158,20 +230,84 @@ class AuthController extends StateNotifier<AuthState> {
     state = state.copyWith(tutorialMode: enabled);
   }
 
-  /// Logout - clear authentication state and tokens
+  /// Logout - clear authentication state, tokens and PIN data
   Future<void> logout() async {
     try {
       appLogger.i('Logout initiated');
 
       await _repository.logout();
+      await _pinStorage?.clearAll();
 
       state = const AuthState.unauthenticated();
       appLogger.i('Logout complete');
     } catch (e) {
       appLogger.e('Error during logout: $e');
-      // Still set state to unauthenticated even if there's an error
       state = const AuthState.unauthenticated();
     }
+  }
+
+  /// Intenta desbloquear la sesión offline con el PIN ingresado.
+  Future<void> loginWithPin(String pin) async {
+    if (_pinStorage == null) {
+      state = const AuthState.unauthenticated('PIN no configurado');
+      return;
+    }
+
+    state = const AuthState.loading();
+
+    try {
+      final isValid = await _pinStorage.verifyPin(pin);
+      if (!isValid) {
+        final cachedJson = await _repository.getCachedUserJson();
+        final cachedUser =
+            cachedJson != null ? User.fromJson(cachedJson) : null;
+        state = AuthState.pinLocked(cachedUser)
+            .copyWith(error: 'PIN incorrecto. Intenta de nuevo.');
+        return;
+      }
+
+      final cachedJson = await _repository.getCachedUserJson();
+      if (cachedJson == null) {
+        state = const AuthState.unauthenticated('Sesión expirada. Inicia sesión en línea.');
+        return;
+      }
+
+      final user = User.fromJson(cachedJson);
+      state = AuthState.offlineAuthenticated(user);
+      appLogger.i('PIN correcto — sesión offline restaurada: ${user.email}');
+    } catch (e) {
+      appLogger.e('loginWithPin error: $e');
+      state = const AuthState.unauthenticated('Error al verificar PIN');
+    }
+  }
+
+  /// Guarda un nuevo PIN tras login online exitoso.
+  Future<void> setupPin(String pin) async {
+    try {
+      if (_pinStorage != null) {
+        await _pinStorage.savePin(pin);
+        appLogger.i('PIN configurado exitosamente');
+      }
+      // Quitar el flag needsPinSetup sin cambiar el resto del estado
+      if (state.isAuthenticated) {
+        state = state.copyWith(needsPinSetup: false);
+      }
+    } catch (e) {
+      appLogger.e('setupPin error: $e');
+    }
+  }
+
+  /// Descarta la configuración de PIN sin guardarlo.
+  void skipPinSetup() {
+    if (state.isAuthenticated) {
+      state = state.copyWith(needsPinSetup: false);
+    }
+  }
+
+  /// Elimina el PIN actual (para reconfigurar).
+  Future<void> clearPin() async {
+    await _pinStorage?.clearAll();
+    appLogger.i('PIN eliminado');
   }
 
   /// Refresh current user data

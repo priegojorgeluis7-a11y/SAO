@@ -1,6 +1,7 @@
 """Database seed routines for initial SAO bootstrap data."""
 
 from datetime import date
+import os
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -9,9 +10,11 @@ from app.core.security import get_password_hash
 from app.models.front import Front
 from app.models.permission import Permission
 from app.models.project import Project, ProjectStatus
+from app.models.reject_reason import RejectReason
 from app.models.role import Role
 from app.models.user import User, UserStatus
 from app.models.user_role_scope import UserRoleScope
+from app.seeds.mexico_locations import seed_mexico_locations_catalog
 
 
 def _create_if_missing(db: Session, model, lookup_filters: dict, create_kwargs: dict) -> tuple[object, bool]:
@@ -197,6 +200,57 @@ def seed_project_tmq(db: Session):
     db.commit()
 
 
+def seed_reject_reasons(db: Session):
+    """Crear razones de rechazo base (idempotente)."""
+    default_reasons = [
+        {
+            "reason_code": "FOTO_BORROSA",
+            "label": "Foto borrosa o ilegible",
+            "severity": "MED",
+            "requires_comment": False,
+        },
+        {
+            "reason_code": "GPS_NO_COINCIDE",
+            "label": "GPS no coincide con ubicación declarada",
+            "severity": "HIGH",
+            "requires_comment": True,
+        },
+        {
+            "reason_code": "FALTA_INFORMACION",
+            "label": "Falta información requerida",
+            "severity": "MED",
+            "requires_comment": True,
+        },
+        {
+            "reason_code": "FOTO_INSUFICIENTE",
+            "label": "Cantidad de fotos insuficiente",
+            "severity": "MED",
+            "requires_comment": False,
+        },
+        {
+            "reason_code": "DATOS_INCONSISTENTES",
+            "label": "Datos inconsistentes con el frente",
+            "severity": "HIGH",
+            "requires_comment": True,
+        },
+    ]
+    inserted = 0
+    for r in default_reasons:
+        _, created = _create_if_missing(
+            db,
+            RejectReason,
+            lookup_filters={"reason_code": r["reason_code"]},
+            create_kwargs={**r, "is_active": True},
+        )
+        if created:
+            inserted += 1
+    db.commit()
+    if inserted:
+        print(f"[OK] Created {inserted} reject reason(s)")
+    else:
+        print("[SKIP] Reject reasons already seeded")
+
+
 def seed_admin_user(db: Session):
     """Crear usuario admin"""
     admin, created = _create_if_missing(
@@ -240,14 +294,27 @@ def run_all_seeds(db: Session):
     seed_roles(db)
     seed_permissions(db)
     seed_role_permissions(db)
+    processed_locations, inserted_locations = seed_mexico_locations_catalog(db)
+    print(
+        f"[OK] Mexico locations catalog processed={processed_locations} inserted={inserted_locations}"
+    )
     seed_project_tmq(db)
     seed_admin_user(db)
+    seed_reject_reasons(db)
 
-    # Catálogo efectivo (tablas catalog_version, cat_activities, etc.)
-    # Requiere que la migración d3e4f5a6b7c8 esté aplicada.
-    from app.seeds.effective_catalog_tmq_v1 import seed_effective_catalog_tmq
-    from app.seeds.catalog_tmq_v1 import seed_catalog_tmq_v1
-    seed_catalog_tmq_v1(db)
-    seed_effective_catalog_tmq(db)
+    skip_effective_catalog_seed = os.getenv("SAO_SKIP_EFFECTIVE_CATALOG_SEED", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    if skip_effective_catalog_seed:
+        print("[WARN] Skipping effective catalog seed (SAO_SKIP_EFFECTIVE_CATALOG_SEED enabled)")
+    else:
+        # Catálogo efectivo (tablas catalog_version, cat_activities, etc.)
+        # Requiere que la migración d3e4f5a6b7c8 esté aplicada.
+        from app.seeds.effective_catalog_tmq_v1 import seed_effective_catalog_tmq
+        seed_effective_catalog_tmq(db)
 
     print("\n[OK] Seeds completed successfully!\n")

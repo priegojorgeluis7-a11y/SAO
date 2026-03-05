@@ -175,3 +175,47 @@ gcloud run services update sao-api `
   --region $REGION `
   --min-instances 1
 ```
+
+## 12) Flujo E2E en staging (operativo → review → pull)
+
+Script incluido: `backend/scripts/e2e_staging_flow.py`
+
+Valida en orden:
+1. Login de operativo y supervisor.
+2. Operativo hace `POST /api/v1/sync/push` con actividad de prueba.
+3. Supervisor aprueba en `POST /api/v1/review/activity/{id}/decision`.
+4. Operativo hace `POST /api/v1/sync/pull` y verifica `execution_state=COMPLETADA`.
+
+### Ejecución (Cloud Run privado con gcloud)
+
+```powershell
+cd D:\SAO\backend
+python scripts/e2e_staging_flow.py `
+  --base-url "https://<tu-servicio-cloud-run>" `
+  --project-id "TMQ" `
+  --operativo-email "operativo.demo@sao.mx" `
+  --operativo-password "<password-operativo>" `
+  --supervisor-email "supervisor.demo@sao.mx" `
+  --supervisor-password "<password-supervisor>" `
+  --cloud-run-private `
+  --verbose
+```
+
+### Ejecución (si el servicio no requiere identity token)
+
+```powershell
+cd D:\SAO\backend
+python scripts/e2e_staging_flow.py `
+  --base-url "https://<tu-servicio-cloud-run>" `
+  --project-id "TMQ" `
+  --operativo-email "operativo.demo@sao.mx" `
+  --operativo-password "<password-operativo>" `
+  --supervisor-email "supervisor.demo@sao.mx" `
+  --supervisor-password "<password-supervisor>"
+```
+
+### Criterio de éxito
+
+- El script termina con exit code `0`.
+- Imprime `✅ E2E flow passed`.
+- Reporta `Final execution_state: COMPLETADA`.

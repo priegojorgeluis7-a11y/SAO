@@ -117,3 +117,37 @@ def require_permission(permission_code: str):
         return current_user
 
     return _permission_dependency
+
+
+def user_has_any_role(user: User, role_names: list[str], db: Session) -> bool:
+    normalized = [name.strip().upper() for name in role_names if name and name.strip()]
+    if not normalized:
+        return False
+
+    role_row = (
+        db.query(Role.id)
+        .join(UserRoleScope, UserRoleScope.role_id == Role.id)
+        .filter(
+            UserRoleScope.user_id == user.id,
+            Role.name.in_(normalized),
+        )
+        .first()
+    )
+    return role_row is not None
+
+
+def require_any_role(role_names: list[str]):
+    """FastAPI dependency factory to enforce one-of role checks."""
+
+    def _role_dependency(
+        current_user: User = Depends(get_current_user),
+        db: Session = Depends(get_db),
+    ) -> User:
+        if not user_has_any_role(current_user, role_names, db):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Missing required role. Expected one of: {', '.join(role_names)}",
+            )
+        return current_user
+
+    return _role_dependency

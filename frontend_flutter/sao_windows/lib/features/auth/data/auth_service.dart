@@ -1,6 +1,8 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:crypto/crypto.dart';
+import 'dart:convert';
 import '../../../core/config/app_config.dart';
 import '../../../core/services/connectivity_service.dart';
 import '../../../core/utils/logger.dart';
@@ -15,6 +17,7 @@ class AuthService {
   static const String _refreshTokenKey = 'refresh_token';
   static const String _lastUserKey = 'last_user';
   static const String _biometricEnabledKey = 'biometric_enabled';
+  static const String _offlinePinHashKey = 'offline_pin_hash';
 
   late final Dio _dio;
   final FlutterSecureStorage _secureStorage;
@@ -210,9 +213,58 @@ class AuthService {
     await _secureStorage.delete(key: _refreshTokenKey);
   }
 
+  String _hashPin(String pin, String email) {
+    final payload = '$email:$pin';
+    return sha256.convert(utf8.encode(payload)).toString();
+  }
+
+  Future<bool> hasOfflinePinConfigured() async {
+    final hash = await _secureStorage.read(key: _offlinePinHashKey);
+    return hash != null && hash.isNotEmpty;
+  }
+
+  Future<void> setupOfflinePin(String pin) async {
+    final online = await isOnline;
+    if (!online) {
+      throw Exception('Se requiere conexión para registrar PIN');
+    }
+
+    if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+      throw Exception('El PIN debe tener 4 a 6 dígitos numéricos');
+    }
+
+    await _dio.put<dynamic>('/auth/me/pin', data: {'pin': pin});
+
+    final email = (await getLastUser())?.trim();
+    if (email == null || email.isEmpty) {
+      throw Exception('No se pudo asociar el PIN al usuario actual');
+    }
+
+    final hashed = _hashPin(pin, email);
+    await _secureStorage.write(key: _offlinePinHashKey, value: hashed);
+  }
+
+  Future<bool> loginOfflineWithPin(String pin) async {
+    if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+      return false;
+    }
+
+    final hasTokensSaved = await hasTokens();
+    if (!hasTokensSaved) return false;
+
+    final email = (await getLastUser())?.trim();
+    if (email == null || email.isEmpty) return false;
+
+    final savedHash = await _secureStorage.read(key: _offlinePinHashKey);
+    if (savedHash == null || savedHash.isEmpty) return false;
+
+    return _hashPin(pin, email) == savedHash;
+  }
+
   /// Limpia todo (incluyendo último usuario)
   Future<void> clearAll() async {
     await clearTokens();
+    await _secureStorage.delete(key: _offlinePinHashKey);
     await _prefs.remove(_lastUserKey);
     await _prefs.remove(_biometricEnabledKey);
   }

@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../../../catalog/data/catalog_fields_repository.dart';
 import '../../../../core/utils/logger.dart';
+import '../../../../ui/theme/sao_colors.dart';
 import '../../../../ui/theme/sao_typography.dart';
 import '../models/dynamic_form_state.dart';
 import 'form_field_renderers.dart';
@@ -125,11 +126,11 @@ class _DynamicFormBuilderState extends State<DynamicFormBuilder> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.error_outline, color: Colors.red, size: 48),
+                const Icon(Icons.error_outline, color: SaoColors.error, size: 48),
                 const SizedBox(height: 16),
                 Text(
                   'Error loading form',
-                  style: SaoTypography.titleMedium.copyWith(color: Colors.red),
+                  style: SaoTypography.titleMedium.copyWith(color: SaoColors.error),
                 ),
                 const SizedBox(height: 8),
                 Text(

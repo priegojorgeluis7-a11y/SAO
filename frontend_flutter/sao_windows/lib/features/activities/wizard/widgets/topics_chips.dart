@@ -44,14 +44,14 @@ class TopicsChips extends StatelessWidget {
           label: Text(topic.name),
           selected: isSelected,
           onSelected: (_) => onToggle(topic.id),
-          backgroundColor: const Color(0xFFF3F4F6),
-          selectedColor: const Color(0xFF1F2937),
+          backgroundColor: AppColors.gray100,
+          selectedColor: AppColors.primary,
           labelStyle: TextStyle(
-            color: isSelected ? const Color(0xFFFFFFFF) : const Color(0xFF374151),
+            color: isSelected ? AppColors.onPrimary : AppColors.primaryLight,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
           ),
           side: BorderSide(
-            color: isSelected ? const Color(0xFF1F2937) : const Color(0xFFE5E7EB),
+            color: isSelected ? AppColors.primary : AppColors.border,
           ),
         );
       }).toList(),

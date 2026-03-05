@@ -120,28 +120,34 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
   Widget _buildErrorWidget() {
     return Container(
       color: SaoColors.gray100,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(
-            Icons.broken_image_rounded,
-            size: 64,
-            color: SaoColors.gray500,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(SaoSpacing.md),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.broken_image_rounded,
+                size: 64,
+                color: SaoColors.gray500,
+              ),
+              SizedBox(height: SaoSpacing.md),
+              Text(
+                'No se pudo cargar la evidencia',
+                style: SaoTypography.bodyText.copyWith(
+                  color: SaoColors.gray600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: SaoSpacing.sm),
+              TextButton.icon(
+                onPressed: () => setState(() {}),
+                icon: Icon(Icons.refresh_rounded),
+                label: Text('Reintentar'),
+              ),
+            ],
           ),
-          SizedBox(height: SaoSpacing.md),
-          Text(
-            'No se pudo cargar la evidencia',
-            style: SaoTypography.bodyText.copyWith(
-              color: SaoColors.gray600,
-            ),
-          ),
-          SizedBox(height: SaoSpacing.sm),
-          TextButton.icon(
-            onPressed: () => setState(() {}),
-            icon: Icon(Icons.refresh_rounded),
-            label: Text('Reintentar'),
-          ),
-        ],
+        ),
       ),
     );
   }

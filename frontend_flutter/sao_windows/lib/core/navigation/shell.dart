@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 
 import '../../features/home/home_page.dart';
+import '../../ui/theme/sao_colors.dart';
 import '../../features/sync/sync_center_page.dart';
 
 class Shell extends StatefulWidget {
@@ -17,7 +18,7 @@ class _ShellState extends State<Shell> {
   // ✅ Estado global (luego lo conectas a Drift/User prefs)
   final String _selectedProject = 'TMQ';
 
-  // ✅ Mock: luego lo conectamos a Drift (vencidas, urgentes, sync pendientes)
+  // ✅ Pendiente conectar a Drift (vencidas, urgentes, sync pendientes)
   final int urgentCount = 1;
 
   @override
@@ -90,7 +91,7 @@ class _Badge extends StatelessWidget {
             width: 10,
             height: 10,
             decoration: BoxDecoration(
-              color: const Color(0xFFD32F2F),
+              color: SaoColors.riskPriority,
               borderRadius: BorderRadius.circular(99),
               border: Border.all(color: Colors.white, width: 2),
             ),

@@ -168,10 +168,61 @@ class ActivityService:
         """Get the latest sync_version across all activities"""
         result = self.db.query(Activity.sync_version).order_by(Activity.sync_version.desc()).first()
         return result[0] if result else 0
-    
+
+    def _compute_flags(self, activity: Activity) -> dict[str, bool]:
+        return {
+            "gps_mismatch": bool(activity.gps_mismatch),
+            "catalog_changed": bool(activity.catalog_changed),
+        }
+
+    def patch_flags(
+        self,
+        uuid: str,
+        gps_mismatch: bool | None,
+        catalog_changed: bool | None,
+    ) -> Activity:
+        """Set structured review flags on an activity without touching other fields."""
+        activity = self.get_activity_by_uuid(uuid, include_deleted=False)
+        if not activity:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Activity with uuid {uuid} not found",
+            )
+        if gps_mismatch is not None:
+            activity.gps_mismatch = gps_mismatch
+        if catalog_changed is not None:
+            activity.catalog_changed = catalog_changed
+        activity.updated_at = self._utc_now()
+        activity.increment_sync_version()
+        self.db.commit()
+        self.db.refresh(activity)
+        return activity
+
     def to_dto(self, activity: Activity) -> ActivityDTO:
         """Convert Activity model to ActivityDTO"""
-        return ActivityDTO.model_validate(activity)
+        payload = {
+            "uuid": activity.uuid,
+            "id": activity.id,
+            "project_id": activity.project_id,
+            "front_id": activity.front_id,
+            "pk_start": activity.pk_start,
+            "pk_end": activity.pk_end,
+            "execution_state": activity.execution_state,
+            "assigned_to_user_id": activity.assigned_to_user_id,
+            "created_by_user_id": activity.created_by_user_id,
+            "catalog_version_id": activity.catalog_version_id,
+            "activity_type_code": activity.activity_type_code,
+            "latitude": activity.latitude,
+            "longitude": activity.longitude,
+            "title": activity.title,
+            "description": activity.description,
+            "flags": self._compute_flags(activity),
+            "created_at": activity.created_at,
+            "updated_at": activity.updated_at,
+            "deleted_at": activity.deleted_at,
+            "sync_version": activity.sync_version,
+        }
+        return ActivityDTO.model_validate(payload)
     
     def to_dto_list(self, activities: List[Activity]) -> List[ActivityDTO]:
         """Convert list of Activity models to ActivityDTOs"""

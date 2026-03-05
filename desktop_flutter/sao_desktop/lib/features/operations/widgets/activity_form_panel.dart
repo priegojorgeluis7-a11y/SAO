@@ -123,7 +123,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
             ? SaoColors.success.withOpacity(0.12)
             : isModified
                 ? SaoColors.warning.withOpacity(0.08)
-                : Colors.transparent,
+                : Theme.of(context).colorScheme.surface.withOpacity(0),
         border: Border.all(
           color: isModified ? SaoColors.warning : SaoColors.border,
         ),
@@ -208,7 +208,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                 SizedBox(width: SaoSpacing.sm),
                 Text(
                   'Detalles de Actividad',
-                  style: SaoTypography.sectionTitle.copyWith(fontSize: 16),
+                  style: SaoTypography.pageTitle,
                 ),
                 const Spacer(),
                 StatusBadge(status: widget.activity!.activity.status),
@@ -276,7 +276,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                       Expanded(
                         child: _buildReadOnlyField(
                           'PROYECTO',
-                          'TMQ',
+                          widget.activity!.activity.projectId,
                           Icons.folder_rounded,
                         ),
                       ),
@@ -388,7 +388,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                           Text(
                             'Lat: ${widget.activity!.activity.latitude!.toStringAsFixed(6)}, '
                             'Lng: ${widget.activity!.activity.longitude!.toStringAsFixed(6)}',
-                            style: SaoTypography.mono.copyWith(fontSize: 12),
+                            style: SaoTypography.mono,
                           ),
                         ],
                       ),

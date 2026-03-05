@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
 import '../../data/repositories/activity_repository.dart';
 import '../../ui/sao_ui.dart';
@@ -65,7 +66,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
         SnackBar(
           content: Row(
             children: [
-              Icon(Icons.check_circle_rounded, color: Colors.white),
+              Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary),
               SizedBox(width: SaoSpacing.md),
               Text('Actividad aprobada', style: TextStyle(fontWeight: FontWeight.w600)),
             ],
@@ -189,7 +190,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
 
   Widget _buildReasonChip(String reason) {
     return ActionChip(
-      label: Text(reason, style: SaoTypography.chipText.copyWith(fontSize: 11)),
+      label: Text(reason, style: SaoTypography.chipText),
       onPressed: () => _reviewCommentsController.text = reason,
       backgroundColor: SaoColors.gray100,
       shape: RoundedRectangleBorder(
@@ -217,7 +218,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
         SnackBar(
           content: Row(
             children: [
-              Icon(Icons.info_outline_rounded, color: Colors.white),
+              Icon(Icons.info_outline_rounded, color: SaoColors.onPrimary),
               SizedBox(width: SaoSpacing.md),
               Text('Notificación enviada al ingeniero'),
             ],
@@ -368,10 +369,10 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Theme.of(context).colorScheme.shadow.withOpacity(0.05),
             blurRadius: 8,
             offset: Offset(0, 2),
           ),
@@ -395,7 +396,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                       Icon(Icons.location_on_rounded, size: 14, color: SaoColors.gray600),
                       SizedBox(width: 6),
                       Text(
-                        'Proyecto: TMQ - Tramo 4',
+                        'Proyecto: ${ref.watch(activeProjectIdProvider)}',
                         style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
                       ),
                     ],
@@ -477,7 +478,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                 },
                 orElse: () => null,
               ),
-              projectName: 'TMQ',
+              projectName: ref.watch(activeProjectIdProvider),
               onFilterPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(content: Text('Filtros avanzados próximamente')),

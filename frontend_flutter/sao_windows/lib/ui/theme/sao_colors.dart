@@ -62,12 +62,33 @@ class SaoColors {
   static const error = Color(0xFFEF4444);
   static const warning = Color(0xFFF59E0B);
   static const info = Color(0xFF3B82F6);
+  static const infoBg = Color(0xFFEFF6FF);     // blue-50
+  static const infoBorder = Color(0xFFBFDBFE); // blue-200
+  static const infoIcon = Color(0xFF1D4ED8);   // blue-700
+  static const infoText = Color(0xFF1E3A8A);   // blue-900
+  static const infoLight = Color(0xFFDBEAFE);  // blue-100
+
+  // Error semantic backgrounds
+  static const errorBg = Color(0xFFFEF2F2);     // red-50
+  static const errorBorder = Color(0xFFFECACA); // red-200
+  static const errorText = Color(0xFF991B1B);   // red-800
+  static const errorLight = Color(0xFFFEE2E2);  // red-100
+
+  // Success / Warning semantic backgrounds
+  static const successBg = Color(0xFFF0FDF4);   // green-50
+  static const warningBg = Color(0xFFFEF3C7);   // amber-50
+
+  // Brand color (corporate identity)
+  static const brandPrimary = Color(0xFF691C32); // Rojo corporativo
 
   // ============================================================
   // SUPERFICIE (Backgrounds, Borders)
   // ============================================================
   static const surface = Colors.white;
   static const surfaceDim = gray50;
+  static const background = surfaceDim;
+  static const onSurface = gray900;
+  static const onSurfaceVariant = gray600;
   static const border = gray200;
   static const borderLight = border;
   static const borderStrong = gray300;

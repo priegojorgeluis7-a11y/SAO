@@ -11856,6 +11856,790 @@ class LocalEventsCompanion extends UpdateCompanion<LocalEvent> {
   }
 }
 
+class $AgendaAssignmentsTable extends AgendaAssignments
+    with TableInfo<$AgendaAssignmentsTable, AgendaAssignment> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $AgendaAssignmentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _resourceIdMeta = const VerificationMeta(
+    'resourceId',
+  );
+  @override
+  late final GeneratedColumn<String> resourceId = GeneratedColumn<String>(
+    'resource_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _activityIdMeta = const VerificationMeta(
+    'activityId',
+  );
+  @override
+  late final GeneratedColumn<String> activityId = GeneratedColumn<String>(
+    'activity_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 1,
+      maxTextLength: 200,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _frenteMeta = const VerificationMeta('frente');
+  @override
+  late final GeneratedColumn<String> frente = GeneratedColumn<String>(
+    'frente',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _municipioMeta = const VerificationMeta(
+    'municipio',
+  );
+  @override
+  late final GeneratedColumn<String> municipio = GeneratedColumn<String>(
+    'municipio',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _estadoMeta = const VerificationMeta('estado');
+  @override
+  late final GeneratedColumn<String> estado = GeneratedColumn<String>(
+    'estado',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _pkMeta = const VerificationMeta('pk');
+  @override
+  late final GeneratedColumn<int> pk = GeneratedColumn<int>(
+    'pk',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _startAtMeta = const VerificationMeta(
+    'startAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> startAt = GeneratedColumn<DateTime>(
+    'start_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _endAtMeta = const VerificationMeta('endAt');
+  @override
+  late final GeneratedColumn<DateTime> endAt = GeneratedColumn<DateTime>(
+    'end_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _riskMeta = const VerificationMeta('risk');
+  @override
+  late final GeneratedColumn<String> risk = GeneratedColumn<String>(
+    'risk',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('bajo'),
+  );
+  static const VerificationMeta _syncStatusMeta = const VerificationMeta(
+    'syncStatus',
+  );
+  @override
+  late final GeneratedColumn<String> syncStatus = GeneratedColumn<String>(
+    'sync_status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pending'),
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    projectId,
+    resourceId,
+    activityId,
+    title,
+    frente,
+    municipio,
+    estado,
+    pk,
+    startAt,
+    endAt,
+    risk,
+    syncStatus,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'agenda_assignments';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<AgendaAssignment> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('resource_id')) {
+      context.handle(
+        _resourceIdMeta,
+        resourceId.isAcceptableOrUnknown(data['resource_id']!, _resourceIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_resourceIdMeta);
+    }
+    if (data.containsKey('activity_id')) {
+      context.handle(
+        _activityIdMeta,
+        activityId.isAcceptableOrUnknown(data['activity_id']!, _activityIdMeta),
+      );
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_titleMeta);
+    }
+    if (data.containsKey('frente')) {
+      context.handle(
+        _frenteMeta,
+        frente.isAcceptableOrUnknown(data['frente']!, _frenteMeta),
+      );
+    }
+    if (data.containsKey('municipio')) {
+      context.handle(
+        _municipioMeta,
+        municipio.isAcceptableOrUnknown(data['municipio']!, _municipioMeta),
+      );
+    }
+    if (data.containsKey('estado')) {
+      context.handle(
+        _estadoMeta,
+        estado.isAcceptableOrUnknown(data['estado']!, _estadoMeta),
+      );
+    }
+    if (data.containsKey('pk')) {
+      context.handle(_pkMeta, pk.isAcceptableOrUnknown(data['pk']!, _pkMeta));
+    }
+    if (data.containsKey('start_at')) {
+      context.handle(
+        _startAtMeta,
+        startAt.isAcceptableOrUnknown(data['start_at']!, _startAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_startAtMeta);
+    }
+    if (data.containsKey('end_at')) {
+      context.handle(
+        _endAtMeta,
+        endAt.isAcceptableOrUnknown(data['end_at']!, _endAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_endAtMeta);
+    }
+    if (data.containsKey('risk')) {
+      context.handle(
+        _riskMeta,
+        risk.isAcceptableOrUnknown(data['risk']!, _riskMeta),
+      );
+    }
+    if (data.containsKey('sync_status')) {
+      context.handle(
+        _syncStatusMeta,
+        syncStatus.isAcceptableOrUnknown(data['sync_status']!, _syncStatusMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  AgendaAssignment map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return AgendaAssignment(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      resourceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}resource_id'],
+      )!,
+      activityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}activity_id'],
+      ),
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      )!,
+      frente: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}frente'],
+      )!,
+      municipio: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}municipio'],
+      )!,
+      estado: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}estado'],
+      )!,
+      pk: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}pk'],
+      ),
+      startAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}start_at'],
+      )!,
+      endAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}end_at'],
+      )!,
+      risk: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}risk'],
+      )!,
+      syncStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_status'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $AgendaAssignmentsTable createAlias(String alias) {
+    return $AgendaAssignmentsTable(attachedDatabase, alias);
+  }
+}
+
+class AgendaAssignment extends DataClass
+    implements Insertable<AgendaAssignment> {
+  final String id;
+  final String projectId;
+  final String resourceId;
+  final String? activityId;
+  final String title;
+  final String frente;
+  final String municipio;
+  final String estado;
+  final int? pk;
+  final DateTime startAt;
+  final DateTime endAt;
+  final String risk;
+  final String syncStatus;
+  final DateTime updatedAt;
+  const AgendaAssignment({
+    required this.id,
+    required this.projectId,
+    required this.resourceId,
+    this.activityId,
+    required this.title,
+    required this.frente,
+    required this.municipio,
+    required this.estado,
+    this.pk,
+    required this.startAt,
+    required this.endAt,
+    required this.risk,
+    required this.syncStatus,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['project_id'] = Variable<String>(projectId);
+    map['resource_id'] = Variable<String>(resourceId);
+    if (!nullToAbsent || activityId != null) {
+      map['activity_id'] = Variable<String>(activityId);
+    }
+    map['title'] = Variable<String>(title);
+    map['frente'] = Variable<String>(frente);
+    map['municipio'] = Variable<String>(municipio);
+    map['estado'] = Variable<String>(estado);
+    if (!nullToAbsent || pk != null) {
+      map['pk'] = Variable<int>(pk);
+    }
+    map['start_at'] = Variable<DateTime>(startAt);
+    map['end_at'] = Variable<DateTime>(endAt);
+    map['risk'] = Variable<String>(risk);
+    map['sync_status'] = Variable<String>(syncStatus);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  AgendaAssignmentsCompanion toCompanion(bool nullToAbsent) {
+    return AgendaAssignmentsCompanion(
+      id: Value(id),
+      projectId: Value(projectId),
+      resourceId: Value(resourceId),
+      activityId: activityId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(activityId),
+      title: Value(title),
+      frente: Value(frente),
+      municipio: Value(municipio),
+      estado: Value(estado),
+      pk: pk == null && nullToAbsent ? const Value.absent() : Value(pk),
+      startAt: Value(startAt),
+      endAt: Value(endAt),
+      risk: Value(risk),
+      syncStatus: Value(syncStatus),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory AgendaAssignment.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return AgendaAssignment(
+      id: serializer.fromJson<String>(json['id']),
+      projectId: serializer.fromJson<String>(json['projectId']),
+      resourceId: serializer.fromJson<String>(json['resourceId']),
+      activityId: serializer.fromJson<String?>(json['activityId']),
+      title: serializer.fromJson<String>(json['title']),
+      frente: serializer.fromJson<String>(json['frente']),
+      municipio: serializer.fromJson<String>(json['municipio']),
+      estado: serializer.fromJson<String>(json['estado']),
+      pk: serializer.fromJson<int?>(json['pk']),
+      startAt: serializer.fromJson<DateTime>(json['startAt']),
+      endAt: serializer.fromJson<DateTime>(json['endAt']),
+      risk: serializer.fromJson<String>(json['risk']),
+      syncStatus: serializer.fromJson<String>(json['syncStatus']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'projectId': serializer.toJson<String>(projectId),
+      'resourceId': serializer.toJson<String>(resourceId),
+      'activityId': serializer.toJson<String?>(activityId),
+      'title': serializer.toJson<String>(title),
+      'frente': serializer.toJson<String>(frente),
+      'municipio': serializer.toJson<String>(municipio),
+      'estado': serializer.toJson<String>(estado),
+      'pk': serializer.toJson<int?>(pk),
+      'startAt': serializer.toJson<DateTime>(startAt),
+      'endAt': serializer.toJson<DateTime>(endAt),
+      'risk': serializer.toJson<String>(risk),
+      'syncStatus': serializer.toJson<String>(syncStatus),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  AgendaAssignment copyWith({
+    String? id,
+    String? projectId,
+    String? resourceId,
+    Value<String?> activityId = const Value.absent(),
+    String? title,
+    String? frente,
+    String? municipio,
+    String? estado,
+    Value<int?> pk = const Value.absent(),
+    DateTime? startAt,
+    DateTime? endAt,
+    String? risk,
+    String? syncStatus,
+    DateTime? updatedAt,
+  }) => AgendaAssignment(
+    id: id ?? this.id,
+    projectId: projectId ?? this.projectId,
+    resourceId: resourceId ?? this.resourceId,
+    activityId: activityId.present ? activityId.value : this.activityId,
+    title: title ?? this.title,
+    frente: frente ?? this.frente,
+    municipio: municipio ?? this.municipio,
+    estado: estado ?? this.estado,
+    pk: pk.present ? pk.value : this.pk,
+    startAt: startAt ?? this.startAt,
+    endAt: endAt ?? this.endAt,
+    risk: risk ?? this.risk,
+    syncStatus: syncStatus ?? this.syncStatus,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  AgendaAssignment copyWithCompanion(AgendaAssignmentsCompanion data) {
+    return AgendaAssignment(
+      id: data.id.present ? data.id.value : this.id,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      resourceId: data.resourceId.present
+          ? data.resourceId.value
+          : this.resourceId,
+      activityId: data.activityId.present
+          ? data.activityId.value
+          : this.activityId,
+      title: data.title.present ? data.title.value : this.title,
+      frente: data.frente.present ? data.frente.value : this.frente,
+      municipio: data.municipio.present ? data.municipio.value : this.municipio,
+      estado: data.estado.present ? data.estado.value : this.estado,
+      pk: data.pk.present ? data.pk.value : this.pk,
+      startAt: data.startAt.present ? data.startAt.value : this.startAt,
+      endAt: data.endAt.present ? data.endAt.value : this.endAt,
+      risk: data.risk.present ? data.risk.value : this.risk,
+      syncStatus: data.syncStatus.present
+          ? data.syncStatus.value
+          : this.syncStatus,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgendaAssignment(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('resourceId: $resourceId, ')
+          ..write('activityId: $activityId, ')
+          ..write('title: $title, ')
+          ..write('frente: $frente, ')
+          ..write('municipio: $municipio, ')
+          ..write('estado: $estado, ')
+          ..write('pk: $pk, ')
+          ..write('startAt: $startAt, ')
+          ..write('endAt: $endAt, ')
+          ..write('risk: $risk, ')
+          ..write('syncStatus: $syncStatus, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    projectId,
+    resourceId,
+    activityId,
+    title,
+    frente,
+    municipio,
+    estado,
+    pk,
+    startAt,
+    endAt,
+    risk,
+    syncStatus,
+    updatedAt,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is AgendaAssignment &&
+          other.id == this.id &&
+          other.projectId == this.projectId &&
+          other.resourceId == this.resourceId &&
+          other.activityId == this.activityId &&
+          other.title == this.title &&
+          other.frente == this.frente &&
+          other.municipio == this.municipio &&
+          other.estado == this.estado &&
+          other.pk == this.pk &&
+          other.startAt == this.startAt &&
+          other.endAt == this.endAt &&
+          other.risk == this.risk &&
+          other.syncStatus == this.syncStatus &&
+          other.updatedAt == this.updatedAt);
+}
+
+class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
+  final Value<String> id;
+  final Value<String> projectId;
+  final Value<String> resourceId;
+  final Value<String?> activityId;
+  final Value<String> title;
+  final Value<String> frente;
+  final Value<String> municipio;
+  final Value<String> estado;
+  final Value<int?> pk;
+  final Value<DateTime> startAt;
+  final Value<DateTime> endAt;
+  final Value<String> risk;
+  final Value<String> syncStatus;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const AgendaAssignmentsCompanion({
+    this.id = const Value.absent(),
+    this.projectId = const Value.absent(),
+    this.resourceId = const Value.absent(),
+    this.activityId = const Value.absent(),
+    this.title = const Value.absent(),
+    this.frente = const Value.absent(),
+    this.municipio = const Value.absent(),
+    this.estado = const Value.absent(),
+    this.pk = const Value.absent(),
+    this.startAt = const Value.absent(),
+    this.endAt = const Value.absent(),
+    this.risk = const Value.absent(),
+    this.syncStatus = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  AgendaAssignmentsCompanion.insert({
+    required String id,
+    required String projectId,
+    required String resourceId,
+    this.activityId = const Value.absent(),
+    required String title,
+    this.frente = const Value.absent(),
+    this.municipio = const Value.absent(),
+    this.estado = const Value.absent(),
+    this.pk = const Value.absent(),
+    required DateTime startAt,
+    required DateTime endAt,
+    this.risk = const Value.absent(),
+    this.syncStatus = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       projectId = Value(projectId),
+       resourceId = Value(resourceId),
+       title = Value(title),
+       startAt = Value(startAt),
+       endAt = Value(endAt);
+  static Insertable<AgendaAssignment> custom({
+    Expression<String>? id,
+    Expression<String>? projectId,
+    Expression<String>? resourceId,
+    Expression<String>? activityId,
+    Expression<String>? title,
+    Expression<String>? frente,
+    Expression<String>? municipio,
+    Expression<String>? estado,
+    Expression<int>? pk,
+    Expression<DateTime>? startAt,
+    Expression<DateTime>? endAt,
+    Expression<String>? risk,
+    Expression<String>? syncStatus,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (projectId != null) 'project_id': projectId,
+      if (resourceId != null) 'resource_id': resourceId,
+      if (activityId != null) 'activity_id': activityId,
+      if (title != null) 'title': title,
+      if (frente != null) 'frente': frente,
+      if (municipio != null) 'municipio': municipio,
+      if (estado != null) 'estado': estado,
+      if (pk != null) 'pk': pk,
+      if (startAt != null) 'start_at': startAt,
+      if (endAt != null) 'end_at': endAt,
+      if (risk != null) 'risk': risk,
+      if (syncStatus != null) 'sync_status': syncStatus,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  AgendaAssignmentsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? projectId,
+    Value<String>? resourceId,
+    Value<String?>? activityId,
+    Value<String>? title,
+    Value<String>? frente,
+    Value<String>? municipio,
+    Value<String>? estado,
+    Value<int?>? pk,
+    Value<DateTime>? startAt,
+    Value<DateTime>? endAt,
+    Value<String>? risk,
+    Value<String>? syncStatus,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return AgendaAssignmentsCompanion(
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      resourceId: resourceId ?? this.resourceId,
+      activityId: activityId ?? this.activityId,
+      title: title ?? this.title,
+      frente: frente ?? this.frente,
+      municipio: municipio ?? this.municipio,
+      estado: estado ?? this.estado,
+      pk: pk ?? this.pk,
+      startAt: startAt ?? this.startAt,
+      endAt: endAt ?? this.endAt,
+      risk: risk ?? this.risk,
+      syncStatus: syncStatus ?? this.syncStatus,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (resourceId.present) {
+      map['resource_id'] = Variable<String>(resourceId.value);
+    }
+    if (activityId.present) {
+      map['activity_id'] = Variable<String>(activityId.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (frente.present) {
+      map['frente'] = Variable<String>(frente.value);
+    }
+    if (municipio.present) {
+      map['municipio'] = Variable<String>(municipio.value);
+    }
+    if (estado.present) {
+      map['estado'] = Variable<String>(estado.value);
+    }
+    if (pk.present) {
+      map['pk'] = Variable<int>(pk.value);
+    }
+    if (startAt.present) {
+      map['start_at'] = Variable<DateTime>(startAt.value);
+    }
+    if (endAt.present) {
+      map['end_at'] = Variable<DateTime>(endAt.value);
+    }
+    if (risk.present) {
+      map['risk'] = Variable<String>(risk.value);
+    }
+    if (syncStatus.present) {
+      map['sync_status'] = Variable<String>(syncStatus.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('AgendaAssignmentsCompanion(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('resourceId: $resourceId, ')
+          ..write('activityId: $activityId, ')
+          ..write('title: $title, ')
+          ..write('frente: $frente, ')
+          ..write('municipio: $municipio, ')
+          ..write('estado: $estado, ')
+          ..write('pk: $pk, ')
+          ..write('startAt: $startAt, ')
+          ..write('endAt: $endAt, ')
+          ..write('risk: $risk, ')
+          ..write('syncStatus: $syncStatus, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDb extends GeneratedDatabase {
   _$AppDb(QueryExecutor e) : super(e);
   $AppDbManager get managers => $AppDbManager(this);
@@ -11889,6 +12673,8 @@ abstract class _$AppDb extends GeneratedDatabase {
   late final $SyncQueueTable syncQueue = $SyncQueueTable(this);
   late final $SyncStateTable syncState = $SyncStateTable(this);
   late final $LocalEventsTable localEvents = $LocalEventsTable(this);
+  late final $AgendaAssignmentsTable agendaAssignments =
+      $AgendaAssignmentsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -11916,6 +12702,7 @@ abstract class _$AppDb extends GeneratedDatabase {
     syncQueue,
     syncState,
     localEvents,
+    agendaAssignments,
   ];
 }
 
@@ -20304,6 +21091,388 @@ typedef $$LocalEventsTableProcessedTableManager =
       LocalEvent,
       PrefetchHooks Function()
     >;
+typedef $$AgendaAssignmentsTableCreateCompanionBuilder =
+    AgendaAssignmentsCompanion Function({
+      required String id,
+      required String projectId,
+      required String resourceId,
+      Value<String?> activityId,
+      required String title,
+      Value<String> frente,
+      Value<String> municipio,
+      Value<String> estado,
+      Value<int?> pk,
+      required DateTime startAt,
+      required DateTime endAt,
+      Value<String> risk,
+      Value<String> syncStatus,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+typedef $$AgendaAssignmentsTableUpdateCompanionBuilder =
+    AgendaAssignmentsCompanion Function({
+      Value<String> id,
+      Value<String> projectId,
+      Value<String> resourceId,
+      Value<String?> activityId,
+      Value<String> title,
+      Value<String> frente,
+      Value<String> municipio,
+      Value<String> estado,
+      Value<int?> pk,
+      Value<DateTime> startAt,
+      Value<DateTime> endAt,
+      Value<String> risk,
+      Value<String> syncStatus,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$AgendaAssignmentsTableFilterComposer
+    extends Composer<_$AppDb, $AgendaAssignmentsTable> {
+  $$AgendaAssignmentsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get resourceId => $composableBuilder(
+    column: $table.resourceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get activityId => $composableBuilder(
+    column: $table.activityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get frente => $composableBuilder(
+    column: $table.frente,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get municipio => $composableBuilder(
+    column: $table.municipio,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get estado => $composableBuilder(
+    column: $table.estado,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pk => $composableBuilder(
+    column: $table.pk,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get startAt => $composableBuilder(
+    column: $table.startAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get endAt => $composableBuilder(
+    column: $table.endAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get risk => $composableBuilder(
+    column: $table.risk,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncStatus => $composableBuilder(
+    column: $table.syncStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$AgendaAssignmentsTableOrderingComposer
+    extends Composer<_$AppDb, $AgendaAssignmentsTable> {
+  $$AgendaAssignmentsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get resourceId => $composableBuilder(
+    column: $table.resourceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get activityId => $composableBuilder(
+    column: $table.activityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get frente => $composableBuilder(
+    column: $table.frente,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get municipio => $composableBuilder(
+    column: $table.municipio,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get estado => $composableBuilder(
+    column: $table.estado,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pk => $composableBuilder(
+    column: $table.pk,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get startAt => $composableBuilder(
+    column: $table.startAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get endAt => $composableBuilder(
+    column: $table.endAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get risk => $composableBuilder(
+    column: $table.risk,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get syncStatus => $composableBuilder(
+    column: $table.syncStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$AgendaAssignmentsTableAnnotationComposer
+    extends Composer<_$AppDb, $AgendaAssignmentsTable> {
+  $$AgendaAssignmentsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
+
+  GeneratedColumn<String> get resourceId => $composableBuilder(
+    column: $table.resourceId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get activityId => $composableBuilder(
+    column: $table.activityId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get frente =>
+      $composableBuilder(column: $table.frente, builder: (column) => column);
+
+  GeneratedColumn<String> get municipio =>
+      $composableBuilder(column: $table.municipio, builder: (column) => column);
+
+  GeneratedColumn<String> get estado =>
+      $composableBuilder(column: $table.estado, builder: (column) => column);
+
+  GeneratedColumn<int> get pk =>
+      $composableBuilder(column: $table.pk, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get startAt =>
+      $composableBuilder(column: $table.startAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get endAt =>
+      $composableBuilder(column: $table.endAt, builder: (column) => column);
+
+  GeneratedColumn<String> get risk =>
+      $composableBuilder(column: $table.risk, builder: (column) => column);
+
+  GeneratedColumn<String> get syncStatus => $composableBuilder(
+    column: $table.syncStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$AgendaAssignmentsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDb,
+          $AgendaAssignmentsTable,
+          AgendaAssignment,
+          $$AgendaAssignmentsTableFilterComposer,
+          $$AgendaAssignmentsTableOrderingComposer,
+          $$AgendaAssignmentsTableAnnotationComposer,
+          $$AgendaAssignmentsTableCreateCompanionBuilder,
+          $$AgendaAssignmentsTableUpdateCompanionBuilder,
+          (
+            AgendaAssignment,
+            BaseReferences<_$AppDb, $AgendaAssignmentsTable, AgendaAssignment>,
+          ),
+          AgendaAssignment,
+          PrefetchHooks Function()
+        > {
+  $$AgendaAssignmentsTableTableManager(
+    _$AppDb db,
+    $AgendaAssignmentsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$AgendaAssignmentsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$AgendaAssignmentsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$AgendaAssignmentsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> projectId = const Value.absent(),
+                Value<String> resourceId = const Value.absent(),
+                Value<String?> activityId = const Value.absent(),
+                Value<String> title = const Value.absent(),
+                Value<String> frente = const Value.absent(),
+                Value<String> municipio = const Value.absent(),
+                Value<String> estado = const Value.absent(),
+                Value<int?> pk = const Value.absent(),
+                Value<DateTime> startAt = const Value.absent(),
+                Value<DateTime> endAt = const Value.absent(),
+                Value<String> risk = const Value.absent(),
+                Value<String> syncStatus = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AgendaAssignmentsCompanion(
+                id: id,
+                projectId: projectId,
+                resourceId: resourceId,
+                activityId: activityId,
+                title: title,
+                frente: frente,
+                municipio: municipio,
+                estado: estado,
+                pk: pk,
+                startAt: startAt,
+                endAt: endAt,
+                risk: risk,
+                syncStatus: syncStatus,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String projectId,
+                required String resourceId,
+                Value<String?> activityId = const Value.absent(),
+                required String title,
+                Value<String> frente = const Value.absent(),
+                Value<String> municipio = const Value.absent(),
+                Value<String> estado = const Value.absent(),
+                Value<int?> pk = const Value.absent(),
+                required DateTime startAt,
+                required DateTime endAt,
+                Value<String> risk = const Value.absent(),
+                Value<String> syncStatus = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => AgendaAssignmentsCompanion.insert(
+                id: id,
+                projectId: projectId,
+                resourceId: resourceId,
+                activityId: activityId,
+                title: title,
+                frente: frente,
+                municipio: municipio,
+                estado: estado,
+                pk: pk,
+                startAt: startAt,
+                endAt: endAt,
+                risk: risk,
+                syncStatus: syncStatus,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$AgendaAssignmentsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDb,
+      $AgendaAssignmentsTable,
+      AgendaAssignment,
+      $$AgendaAssignmentsTableFilterComposer,
+      $$AgendaAssignmentsTableOrderingComposer,
+      $$AgendaAssignmentsTableAnnotationComposer,
+      $$AgendaAssignmentsTableCreateCompanionBuilder,
+      $$AgendaAssignmentsTableUpdateCompanionBuilder,
+      (
+        AgendaAssignment,
+        BaseReferences<_$AppDb, $AgendaAssignmentsTable, AgendaAssignment>,
+      ),
+      AgendaAssignment,
+      PrefetchHooks Function()
+    >;
 
 class $AppDbManager {
   final _$AppDb _db;
@@ -20352,4 +21521,6 @@ class $AppDbManager {
       $$SyncStateTableTableManager(_db, _db.syncState);
   $$LocalEventsTableTableManager get localEvents =>
       $$LocalEventsTableTableManager(_db, _db.localEvents);
+  $$AgendaAssignmentsTableTableManager get agendaAssignments =>
+      $$AgendaAssignmentsTableTableManager(_db, _db.agendaAssignments);
 }

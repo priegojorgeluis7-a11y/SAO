@@ -27,6 +27,9 @@ class ActivityQueuePanel extends StatefulWidget {
   final bool filterRejected;
   final bool filterGps;
   final bool filterChanges;
+  final String queueTab;
+  final ValueChanged<String>? onQueueTabChanged;
+  final ValueChanged<List<ActivityWithDetails>>? onVisibleActivitiesChanged;
 
   const ActivityQueuePanel({
     super.key,
@@ -38,6 +41,9 @@ class ActivityQueuePanel extends StatefulWidget {
     this.filterRejected = false,
     this.filterGps = false,
     this.filterChanges = false,
+    this.queueTab = 'PENDING',
+    this.onQueueTabChanged,
+    this.onVisibleActivitiesChanged,
   });
 
   @override
@@ -82,6 +88,28 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
       }).toList();
     }
 
+    filtered = filtered.where((activity) {
+      final status = _deriveStatus(activity);
+      final hasGpsConflict = activity.flags.gpsMismatch;
+      final hasCatalogChange = activity.flags.catalogChanged;
+      final hasChecklistIncomplete = activity.flags.checklistIncomplete;
+
+      switch (widget.queueTab) {
+        case 'ALL':
+          return true;
+        case 'PENDING':
+          return status == ActivityStatus.pendingReview;
+        case 'CHANGED':
+          return status == ActivityStatus.conflict || hasCatalogChange || hasChecklistIncomplete;
+        case 'GPS':
+          return hasGpsConflict;
+        case 'REJECTED':
+          return status == ActivityStatus.rejected;
+        default:
+          return true;
+      }
+    }).toList();
+
     // Filtro por estado
     if (widget.filterPending || widget.filterRejected || widget.filterGps || widget.filterChanges) {
       filtered = filtered.where((activity) {
@@ -99,14 +127,14 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
         
         // Filtro GPS Crítico (más de 800m de diferencia)
         if (widget.filterGps) {
-          // Implementar lógica GPS si es necesario
-          if (activity.activity.description?.contains('gps') ?? false) return true;
+          if (activity.flags.gpsMismatch) return true;
         }
         
         // Filtro Con Cambios
         if (widget.filterChanges) {
-          if (status == ActivityStatus.conflict || 
-              (activity.activity.description ?? '').contains('cambios')) {
+          if (status == ActivityStatus.conflict ||
+              activity.flags.catalogChanged ||
+              activity.flags.checklistIncomplete) {
             return true;
           }
         }
@@ -116,6 +144,38 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
     }
 
     return filtered;
+  }
+
+  Map<String, int> _buildTabCounters(List<ActivityWithDetails> activities) {
+    final counters = <String, int>{
+      'ALL': activities.length,
+      'PENDING': 0,
+      'CHANGED': 0,
+      'GPS': 0,
+      'REJECTED': 0,
+    };
+
+    for (final activity in activities) {
+      final status = _deriveStatus(activity);
+      final hasGpsConflict = activity.flags.gpsMismatch;
+      final hasCatalogChange = activity.flags.catalogChanged;
+      final hasChecklistIncomplete = activity.flags.checklistIncomplete;
+
+      if (status == ActivityStatus.pendingReview) {
+        counters['PENDING'] = (counters['PENDING'] ?? 0) + 1;
+      }
+      if (status == ActivityStatus.conflict || hasCatalogChange || hasChecklistIncomplete) {
+        counters['CHANGED'] = (counters['CHANGED'] ?? 0) + 1;
+      }
+      if (hasGpsConflict) {
+        counters['GPS'] = (counters['GPS'] ?? 0) + 1;
+      }
+      if (status == ActivityStatus.rejected) {
+        counters['REJECTED'] = (counters['REJECTED'] ?? 0) + 1;
+      }
+    }
+
+    return counters;
   }
 
   Color _getRiskColor(ActivityWithDetails activity) {
@@ -173,6 +233,10 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
     if (description.contains('cambios') || description.contains('discrepancia')) {
       return ActivityStatus.conflict;
     }
+
+    if (activity.flags.checklistIncomplete) {
+      return ActivityStatus.conflict;
+    }
     
     if (description.contains('aprobada') || description.contains('aprobado')) {
       return ActivityStatus.approved;
@@ -205,7 +269,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                 SizedBox(width: SaoSpacing.sm),
                 Text(
                   'Cola de Revisión',
-                  style: SaoTypography.sectionTitle.copyWith(fontSize: 16),
+                  style: SaoTypography.pageTitle,
                 ),
                 const Spacer(),
                 widget.activitiesAsync.when(
@@ -225,7 +289,6 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                         style: SaoTypography.caption.copyWith(
                           color: SaoColors.statusPendiente,
                           fontWeight: FontWeight.w600,
-                          fontSize: 11,
                         ),
                       ),
                     );
@@ -241,11 +304,53 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
             ),
           ),
 
+          widget.activitiesAsync.when(
+            data: (activities) {
+              final counters = _buildTabCounters(activities);
+              final tabs = const <(String key, String label)>[
+                ('PENDING', 'Pendientes'),
+                ('CHANGED', 'Con cambios'),
+                ('GPS', 'GPS crítico'),
+                ('REJECTED', 'Rechazadas'),
+                ('ALL', 'Todas'),
+              ];
+
+              return SizedBox(
+                height: 40,
+                child: ListView.separated(
+                  padding: EdgeInsets.symmetric(horizontal: SaoSpacing.lg),
+                  scrollDirection: Axis.horizontal,
+                  itemCount: tabs.length,
+                  separatorBuilder: (_, __) => SizedBox(width: SaoSpacing.xs),
+                  itemBuilder: (context, index) {
+                    final tab = tabs[index];
+                    final selected = widget.queueTab == tab.$1;
+                    final count = counters[tab.$1] ?? 0;
+                    return ChoiceChip(
+                      label: Text('${tab.$2} ($count)'),
+                      selected: selected,
+                      onSelected: (_) => widget.onQueueTabChanged?.call(tab.$1),
+                      selectedColor: SaoColors.primary.withOpacity(0.16),
+                      backgroundColor: SaoColors.gray100,
+                      labelStyle: SaoTypography.caption.copyWith(
+                        color: selected ? SaoColors.primary : SaoColors.gray700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    );
+                  },
+                ),
+              );
+            },
+            loading: () => SizedBox.shrink(),
+            error: (_, __) => SizedBox.shrink(),
+          ),
+
           // Lista de actividades agrupadas por frente
           Expanded(
             child: widget.activitiesAsync.when(
               data: (activities) {
                 final filtered = _filterActivities(activities);
+                widget.onVisibleActivitiesChanged?.call(filtered);
 
                 if (filtered.isEmpty) {
                   return _buildEmptyState();
@@ -552,7 +657,6 @@ class _FrontSection extends StatelessWidget {
                     '${activities.length} Pendiente${activities.length != 1 ? 's' : ''}',
                     style: SaoTypography.caption.copyWith(
                       color: SaoColors.gray600,
-                      fontSize: 11,
                     ),
                   ),
                 ),

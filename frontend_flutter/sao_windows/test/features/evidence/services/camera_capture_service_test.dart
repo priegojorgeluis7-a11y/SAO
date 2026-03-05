@@ -251,7 +251,7 @@ void main() {
       );
 
       expect(evidence.isCompressed, true);
-      expect(evidence.fileSizeDisplay, '1000.0 KB');
+      expect(evidence.fileSizeDisplay, '976.6 KB');
 
       // Step 4: Add description
       evidence = evidence.copyWith(description: 'Photo of site perimeter');

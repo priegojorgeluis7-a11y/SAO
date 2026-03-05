@@ -61,6 +61,14 @@ class CatalogService:
         """Obtiene una versión específica de catálogo por ID"""
         return self.db.query(CatalogVersion).filter(CatalogVersion.id == version_id).first()
 
+    def get_latest_published_digests(self, project_ids: list[str]) -> dict[str, CatalogVersion | None]:
+        """Return latest published catalog per project for lightweight version checks."""
+        unique_project_ids = [project_id for project_id in dict.fromkeys(project_ids) if project_id]
+        digests: dict[str, CatalogVersion | None] = {project_id: None for project_id in unique_project_ids}
+        for project_id in unique_project_ids:
+            digests[project_id] = self._get_latest_published_version(project_id)
+        return digests
+
     def _get_latest_published_version(self, project_id: str) -> Optional[CatalogVersion]:
         """Return latest published catalog version for a project, if any."""
         return (

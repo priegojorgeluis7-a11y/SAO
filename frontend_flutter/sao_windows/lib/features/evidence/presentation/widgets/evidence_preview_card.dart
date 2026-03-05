@@ -108,7 +108,10 @@ class EvidencePreviewCard extends StatelessWidget {
     );
   }
 
-  String _formatTime(DateTime dt) {
+  String _formatTime(DateTime? dt) {
+    if (dt == null) {
+      return '--:--';
+    }
     return '${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
   }
 }

@@ -304,11 +304,10 @@ class _TopBar extends StatelessWidget {
           const Gap(8),
           Text(
             'Validación de Operaciones',
-            style: TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: SaoColors.gray900,
-            ),
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: SaoColors.gray900,
+                ),
           ),
           const Spacer(),
           IconButton(
@@ -347,9 +346,9 @@ class _LeftInbox extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _buildHeader(),
+          _buildHeader(context),
           const Divider(height: 1, color: SaoColors.border),
-          _buildFilters(),
+          _buildFilters(context),
           const Divider(height: 1, color: SaoColors.border),
           Expanded(
             child: ListView.separated(
@@ -371,11 +370,10 @@ class _LeftInbox extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 item.activity,
-                                style: TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: SaoColors.gray900,
-                                  fontSize: 13,
-                                ),
+                                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                      fontWeight: FontWeight.w600,
+                                      color: SaoColors.gray900,
+                                    ),
                               ),
                             ),
                             if (item.isNew)
@@ -387,11 +385,10 @@ class _LeftInbox extends StatelessWidget {
                                 ),
                                 child: Text(
                                   'NUEVO',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
+                                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                                        fontWeight: FontWeight.bold,
+                                        color: SaoColors.onPrimary,
+                                      ),
                                 ),
                               ),
                           ],
@@ -399,7 +396,10 @@ class _LeftInbox extends StatelessWidget {
                         const Gap(4),
                         Text(
                           '${item.date} ${item.time}',
-                          style: TextStyle(fontSize: 11, color: SaoColors.gray600),
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodySmall
+                              ?.copyWith(color: SaoColors.gray600),
                         ),
                         const Gap(4),
                         // 📱 Indicador de riesgo homologado (círculo coloreado)
@@ -416,7 +416,7 @@ class _LeftInbox extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Row(
@@ -425,11 +425,10 @@ class _LeftInbox extends StatelessWidget {
           const Gap(6),
           Text(
             'Cola de Trabajo',
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              fontSize: 13,
-              color: SaoColors.gray900,
-            ),
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: SaoColors.gray900,
+                ),
           ),
           const Spacer(),
           Container(
@@ -440,11 +439,10 @@ class _LeftInbox extends StatelessWidget {
             ),
             child: Text(
               '${items.length}',
-              style: const TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
-              ),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    fontWeight: FontWeight.bold,
+                    color: SaoColors.onPrimary,
+                  ),
             ),
           ),
         ],
@@ -452,7 +450,7 @@ class _LeftInbox extends StatelessWidget {
     );
   }
 
-  Widget _buildFilters() {
+  Widget _buildFilters(BuildContext context) {
     final filters = [
       {'id': 'all', 'label': 'Todos', 'icon': Icons.list},
       {'id': 'new', 'label': 'Nuevos', 'icon': Icons.fiber_new},
@@ -485,16 +483,15 @@ class _LeftInbox extends StatelessWidget {
                   Icon(
                     f['icon'] as IconData,
                     size: 12,
-                    color: isActive ? Colors.white : SaoColors.gray700,
+                    color: isActive ? SaoColors.onPrimary : SaoColors.gray700,
                   ),
                   const Gap(4),
                   Text(
                     f['label'] as String,
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w500,
-                      color: isActive ? Colors.white : SaoColors.gray700,
-                    ),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          fontWeight: FontWeight.w500,
+                          color: isActive ? SaoColors.onPrimary : SaoColors.gray700,
+                        ),
                   ),
                 ],
               ),
@@ -530,11 +527,10 @@ class _RiskPill extends StatelessWidget {
         const Gap(6),
         Text(
           label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: color,
-          ),
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
         ),
       ],
     );
@@ -601,11 +597,10 @@ class _CenterForm extends StatelessWidget {
           children: [
             Text(
               'Verdad Técnica',
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: SaoColors.gray900,
-              ),
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: SaoColors.gray900,
+                  ),
             ),
             const Gap(16),
             _buildField(
@@ -645,8 +640,11 @@ class _CenterForm extends StatelessWidget {
                 label: 'Descripción',
                 icon: Icons.description,
                 suffix: editedDescription
-                    ? const Chip(
-                        label: Text('Editado', style: TextStyle(fontSize: 10)),
+                    ? Chip(
+                        label: Text(
+                          'Editado',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
                         padding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
                       )
@@ -661,8 +659,11 @@ class _CenterForm extends StatelessWidget {
                 label: 'Clasificación',
                 icon: Icons.category,
                 suffix: editedClassification
-                    ? const Chip(
-                        label: Text('Editado', style: TextStyle(fontSize: 10)),
+                    ? Chip(
+                        label: Text(
+                          'Editado',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
                         padding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
                       )
@@ -689,21 +690,19 @@ class _CenterForm extends StatelessWidget {
             const Gap(6),
             Text(
               label,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: SaoColors.gray600,
-              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: SaoColors.gray600,
+                  ),
             ),
           ],
         ),
         const Gap(4),
         Text(
           value,
-          style: TextStyle(
-            fontSize: 13,
-            color: SaoColors.gray900,
-          ),
+          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: SaoColors.gray900,
+              ),
         ),
       ],
     );
@@ -719,11 +718,10 @@ class _CenterForm extends StatelessWidget {
             const Gap(6),
             Text(
               'Nivel de Riesgo',
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: SaoColors.gray600,
-              ),
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w500,
+                    color: SaoColors.gray600,
+                  ),
             ),
           ],
         ),
@@ -756,11 +754,10 @@ class _RightEvidence extends StatelessWidget {
               const Gap(8),
               Text(
                 'Evidencia Visual',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: SaoColors.gray900,
-                ),
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: SaoColors.gray900,
+                    ),
               ),
               const Spacer(),
               TextButton.icon(
@@ -793,10 +790,9 @@ class _RightEvidence extends StatelessWidget {
                     const Gap(8),
                     Text(
                       'Foto de evidencia',
-                      style: TextStyle(
-                        color: SaoColors.gray600,
-                        fontSize: 13,
-                      ),
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: SaoColors.gray600,
+                          ),
                     ),
                   ],
                 ),
@@ -860,7 +856,7 @@ class _FooterActions extends StatelessWidget {
             label: const Text('Aprobar'),
             style: FilledButton.styleFrom(
               backgroundColor: SaoColors.actionPrimary,
-              foregroundColor: Colors.white,
+              foregroundColor: SaoColors.onPrimary,
             ),
           ),
         ],

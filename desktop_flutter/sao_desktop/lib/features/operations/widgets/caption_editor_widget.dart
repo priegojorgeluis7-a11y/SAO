@@ -64,7 +64,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
           SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary, size: 18),
                 SizedBox(width: SaoSpacing.sm),
                 Text('Pie de foto actualizado'),
               ],
@@ -101,7 +101,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: Theme.of(context).colorScheme.surface,
         borderRadius: BorderRadius.circular(SaoRadii.lg),
         border: Border.all(
           color: _isEditing ? SaoColors.primary : SaoColors.border,
@@ -126,13 +126,13 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
             children: [
               Text(
                 'Pie de Foto',
-                style: SaoTypography.bodyTextBold.copyWith(fontSize: 14),
+                style: SaoTypography.sectionTitle,
               ),
               if (!_isEditing)
                 Tooltip(
                   message: 'Editar pie de foto',
                   child: Material(
-                    color: Colors.transparent,
+                    color: Theme.of(context).colorScheme.surface.withOpacity(0),
                     child: InkWell(
                       onTap: () => setState(() => _isEditing = true),
                       borderRadius: BorderRadius.circular(4),
@@ -186,7 +186,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
                     filled: true,
                     fillColor: SaoColors.gray50,
                   ),
-                  style: SaoTypography.bodyText.copyWith(fontSize: 13),
+                  style: SaoTypography.bodyText,
                 ),
                 SizedBox(height: SaoSpacing.sm),
                 // Action buttons
@@ -216,7 +216,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2,
                                     valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white,
+                                      SaoColors.onPrimary,
                                     ),
                                   ),
                                 ),
@@ -249,7 +249,6 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
                   : Text(
                       _controller.text,
                       style: SaoTypography.bodyText.copyWith(
-                        fontSize: 13,
                         color: SaoColors.gray800,
                         height: 1.4,
                       ),
@@ -323,7 +322,7 @@ class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
             ),
             contentPadding: EdgeInsets.all(SaoSpacing.sm),
             filled: true,
-            fillColor: Colors.white,
+            fillColor: Theme.of(context).colorScheme.surface,
             suffixIcon: Padding(
               padding: EdgeInsets.all(SaoSpacing.xs),
               child: IconButton(
@@ -354,7 +353,6 @@ class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
             ? Text(
                 'Haz clic para agregar descripción',
                 style: SaoTypography.caption.copyWith(
-                  fontSize: 12,
                   color: SaoColors.gray500,
                   fontStyle: FontStyle.italic,
                 ),
@@ -365,7 +363,6 @@ class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
                     child: Text(
                       widget.caption,
                       style: SaoTypography.caption.copyWith(
-                        fontSize: 12,
                         color: SaoColors.gray700,
                       ),
                       maxLines: 2,

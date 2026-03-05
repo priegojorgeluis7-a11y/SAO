@@ -177,6 +177,64 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  Future<bool> hasOfflinePinConfigured() {
+    return _authService.hasOfflinePinConfigured();
+  }
+
+  Future<bool> setupOfflinePin(String pin) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await _authService.setupOfflinePin(pin);
+      state = state.copyWith(isLoading: false);
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
+  Future<bool> loginWithPin(String pin) async {
+    state = state.copyWith(isLoading: true, error: null);
+
+    try {
+      final isOffline = await _connectivityService.isOffline();
+      if (!isOffline) {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'El login con PIN es solo para modo offline',
+        );
+        return false;
+      }
+
+      final verified = await _authService.loginOfflineWithPin(pin);
+      if (!verified) {
+        state = state.copyWith(
+          isLoading: false,
+          error: 'PIN inválido o no configurado para este usuario',
+        );
+        return false;
+      }
+
+      final lastUser = await _authService.getLastUser();
+      state = AuthState(
+        isAuthenticated: true,
+        isLoading: false,
+        isOffline: true,
+        lastUserEmail: lastUser,
+      );
+      return true;
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString().replaceAll('Exception: ', ''),
+      );
+      return false;
+    }
+  }
+
   /// Login offline con biometría
   Future<bool> loginWithBiometrics() async {
     state = state.copyWith(isLoading: true, error: null);

@@ -1,6 +1,8 @@
 // lib/catalog/status_catalog.dart
 import 'package:flutter/material.dart';
 import '../ui/theme/sao_colors.dart';
+import '../data/repositories/catalog_bundle_models.dart';
+import 'roles_catalog.dart';
 
 /// Catálogo global de estados del flujo de operaciones (compartido Mobile + Desktop)
 /// Fuente única de verdad para estados de actividades/operaciones
@@ -12,7 +14,6 @@ class StatusType {
   final IconData icon;
   final int order; // Para ordenar en UI
   final bool isTerminal; // Estado final del flujo
-  final List<String> nextStates; // Estados válidos siguientes
 
   const StatusType({
     required this.id,
@@ -22,7 +23,6 @@ class StatusType {
     required this.icon,
     required this.order,
     this.isTerminal = false,
-    this.nextStates = const [],
   });
 
   @override
@@ -51,7 +51,6 @@ class StatusCatalog {
     backgroundColor: Color(0xFFE0E7FF),
     icon: Icons.fiber_new,
     order: 1,
-    nextStates: ['en_revision', 'rechazado'],
   );
 
   static const enRevision = StatusType(
@@ -61,7 +60,6 @@ class StatusCatalog {
     backgroundColor: Color(0xFFFEF3C7),
     icon: Icons.rate_review,
     order: 2,
-    nextStates: ['aprobado', 'rechazado', 'requiere_cambios'],
   );
 
   static const requiereCambios = StatusType(
@@ -71,7 +69,6 @@ class StatusCatalog {
     backgroundColor: Color(0xFFFEF3C7),
     icon: Icons.edit_note,
     order: 3,
-    nextStates: ['en_revision', 'rechazado'],
   );
 
   static const aprobado = StatusType(
@@ -81,7 +78,6 @@ class StatusCatalog {
     backgroundColor: Color(0xFFD1FAE5),
     icon: Icons.check_circle,
     order: 4,
-    nextStates: ['sincronizado'],
   );
 
   static const rechazado = StatusType(
@@ -92,7 +88,6 @@ class StatusCatalog {
     icon: Icons.cancel,
     order: 5,
     isTerminal: true,
-    nextStates: [],
   );
 
   static const sincronizado = StatusType(
@@ -103,7 +98,6 @@ class StatusCatalog {
     icon: Icons.cloud_done,
     order: 6,
     isTerminal: true,
-    nextStates: [],
   );
 
   static const offline = StatusType(
@@ -113,7 +107,6 @@ class StatusCatalog {
     backgroundColor: SaoColors.gray200,
     icon: Icons.cloud_off,
     order: 7,
-    nextStates: ['sincronizado', 'conflicto'],
   );
 
   static const conflicto = StatusType(
@@ -123,7 +116,6 @@ class StatusCatalog {
     backgroundColor: Color(0xFFFEE2E2),
     icon: Icons.error_outline,
     order: 8,
-    nextStates: ['en_revision'],
   );
 
   static const borrador = StatusType(
@@ -133,7 +125,6 @@ class StatusCatalog {
     backgroundColor: SaoColors.gray200,
     icon: Icons.edit_note,  // Ícono alternativo para borrador
     order: 0,
-    nextStates: ['nuevo', 'en_revision'],
   );
 
   // ============================================================
@@ -214,19 +205,199 @@ class StatusCatalog {
     return list;
   }
 
-  /// Validar transición entre estados
-  static bool canTransitionTo(String fromId, String toId) {
-    final from = findById(fromId);
-    if (from == null) return false;
-    return from.nextStates.contains(toId);
+  /// Siguientes estados válidos según catálogo efectivo (rules.workflow).
+  static List<String> nextStatesFor({
+    required String status,
+    required String role,
+    String? activityType,
+    required CatalogBundle catalog,
+  }) {
+    final workflowNode = _workflowNodeFor(catalog, activityType: activityType);
+    if (workflowNode == null) return const [];
+
+    final transitions = _transitionsFrom(workflowNode);
+    final from = status.trim().toLowerCase();
+    if (transitions.isEmpty) {
+      return _statesNextFrom(workflowNode, from);
+    }
+
+    final result = <String>[];
+
+    for (final transition in transitions) {
+      final transitionFrom = (transition['from'] ?? '')
+          .toString()
+          .trim()
+          .toLowerCase();
+      if (transitionFrom != from) continue;
+      if (!_roleAllowed(transition, role)) continue;
+      if (!_permissionsAllowed(transition, role)) continue;
+
+      for (final toState in _toStatesFromTransition(transition)) {
+        if (!result.contains(toState)) {
+          result.add(toState);
+        }
+      }
+    }
+
+    return result;
+  }
+
+  static List<String> _statesNextFrom(
+    Map<String, dynamic> workflowNode,
+    String from,
+  ) {
+    final states = workflowNode['states'];
+    if (states is! List) return const [];
+
+    for (final state in states.whereType<Map>()) {
+      final stateMap = state.cast<String, dynamic>();
+      final stateId = (stateMap['id'] ?? '').toString().trim().toLowerCase();
+      if (stateId != from) continue;
+
+      final next = stateMap['next'];
+      if (next is! List) return const [];
+      return next
+          .map((e) => e.toString().trim().toLowerCase())
+          .where((e) => e.isNotEmpty)
+          .toList(growable: false);
+    }
+
+    return const [];
+  }
+
+  static Map<String, dynamic>? _workflowNodeFor(
+    CatalogBundle catalog, {
+    String? activityType,
+  }) {
+    final workflow = catalog.effective.rules.workflowJson;
+    if (workflow.isEmpty) return null;
+
+    final typeCode = activityType?.trim();
+    if (typeCode != null && typeCode.isNotEmpty) {
+      final byType = _typedWorkflow(workflow, typeCode);
+      if (byType != null) return byType;
+    }
+
+    final global = workflow['global'] ?? workflow['default'];
+    if (global is Map) {
+      return global.cast<String, dynamic>();
+    }
+    return workflow;
+  }
+
+  static Map<String, dynamic>? _typedWorkflow(
+    Map<String, dynamic> workflow,
+    String activityType,
+  ) {
+    const keys = <String>[
+      'by_activity_type',
+      'byActivityType',
+      'by_type',
+      'byType',
+      'types',
+    ];
+
+    for (final key in keys) {
+      final raw = workflow[key];
+      if (raw is! Map) continue;
+      final typed = raw.cast<String, dynamic>();
+
+      final direct = typed[activityType];
+      if (direct is Map) return direct.cast<String, dynamic>();
+
+      final normalizedType = activityType.toLowerCase();
+      for (final entry in typed.entries) {
+        if (entry.key.toLowerCase() == normalizedType && entry.value is Map) {
+          return (entry.value as Map).cast<String, dynamic>();
+        }
+      }
+    }
+
+    return null;
+  }
+
+  static List<Map<String, dynamic>> _transitionsFrom(Map<String, dynamic> workflowNode) {
+    final transitions = workflowNode['transitions'];
+    if (transitions is! List) return const <Map<String, dynamic>>[];
+
+    return transitions
+        .whereType<Map>()
+        .map((m) => m.cast<String, dynamic>())
+        .toList(growable: false);
+  }
+
+  static List<String> _toStatesFromTransition(Map<String, dynamic> transition) {
+    final to = transition['to'];
+    if (to is List) {
+      return to
+          .map((e) => e.toString().trim().toLowerCase())
+          .where((e) => e.isNotEmpty)
+          .toList(growable: false);
+    }
+
+    final single = to?.toString().trim().toLowerCase() ?? '';
+    if (single.isEmpty) return const [];
+    return <String>[single];
+  }
+
+  static bool _roleAllowed(Map<String, dynamic> transition, String role) {
+    final rawRoles = transition['roles'];
+    if (rawRoles is! List || rawRoles.isEmpty) return true;
+
+    final normalizedRole = role.trim().toLowerCase();
+    final allowed = rawRoles
+        .map((e) => e.toString().trim().toLowerCase())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+
+    return allowed.contains(normalizedRole);
+  }
+
+  static bool _permissionsAllowed(Map<String, dynamic> transition, String role) {
+    final rawPermissions = transition['required_permissions'];
+    if (rawPermissions is! List || rawPermissions.isEmpty) return true;
+
+    final required = rawPermissions
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+    if (required.isEmpty) return true;
+
+    return required.every((permission) => RolesCatalog.hasPermission(role, permission));
+  }
+
+  /// Validar transición entre estados (catalog-driven)
+  static bool canTransitionTo({
+    required String fromId,
+    required String toId,
+    required String role,
+    String? activityType,
+    required CatalogBundle catalog,
+  }) {
+    return nextStatesFor(
+      status: fromId,
+      role: role,
+      activityType: activityType,
+      catalog: catalog,
+    ).contains(toId.trim().toLowerCase());
   }
 
   /// Etiquetas legibles de los siguientes estados válidos para UX (tooltips/ayudas)
-  static List<String> nextStateLabels(String fromId) {
-    final from = findById(fromId);
-    if (from == null || from.nextStates.isEmpty) return const [];
+  static List<String> nextStateLabels({
+    required String fromId,
+    required String role,
+    String? activityType,
+    required CatalogBundle catalog,
+  }) {
+    final nextStates = nextStatesFor(
+      status: fromId,
+      role: role,
+      activityType: activityType,
+      catalog: catalog,
+    );
+    if (nextStates.isEmpty) return const [];
 
-    return from.nextStates
+    return nextStates
         .map((id) => findById(id)?.label ?? id)
         .toList(growable: false);
   }

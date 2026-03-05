@@ -2,10 +2,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../features/auth/application/auth_providers.dart';
-import '../../features/events/ui/report_event_sheet.dart';
+import '../../core/connectivity/offline_mode_controller.dart';
+import '../../core/sync/sync_orchestrator.dart';
+import '../../data/local/app_db.dart';
+import '../../data/local/dao/activity_dao.dart';
 import '../../ui/theme/sao_colors.dart';
 import 'models/today_activity.dart';
 
@@ -29,13 +32,11 @@ class HomePage extends ConsumerStatefulWidget {
 }
 
 class _HomePageState extends ConsumerState<HomePage> {
-  static const List<TodayActivity> _seedData = [];
-
   // ====== Estado de datos (MUTABLE) ======
-  late final List<TodayActivity> _items;
+  List<TodayActivity> _items = [];
+  bool _loadingActivities = true;
 
   // ====== UI State ======
-  bool _isOffline = true;
   int _urgentCount = 0;
   String _query = '';
   final TextEditingController _searchCtrl = TextEditingController();
@@ -50,17 +51,99 @@ class _HomePageState extends ConsumerState<HomePage> {
   @override
   void initState() {
     super.initState();
-    _items = List<TodayActivity>.from(_seedData);
-    _urgentCount = _items.where((a) => a.status == ActivityStatus.vencida).length;
-    
-    // Inicializar mapa de estados
-    for (final item in _items) {
-      _activityStates[item.id] = item;
-    }
+    // ignore: unawaited_futures
+    ref.read(offlineModeProvider.notifier).load();
+    // ignore: unawaited_futures
+    _loadHomeActivities();
 
     // ✅ Si tu CatalogRepository necesita cargar JSON / drift, hazlo aquí.
     // ignore: unawaited_futures
     _safeInitCatalogs();
+  }
+
+  Future<void> _loadHomeActivities() async {
+    setState(() {
+      _loadingActivities = true;
+    });
+
+    try {
+      final dao = ActivityDao(GetIt.I<AppDb>());
+      final rows = await dao.listHomeActivitiesByProject(widget.selectedProject);
+      final items = rows.map(_toTodayActivity).toList();
+
+      if (!mounted) return;
+      setState(() {
+        _items = items;
+        _urgentCount = _items.where((a) => a.status == ActivityStatus.vencida).length;
+        _activityStates
+          ..clear()
+          ..addEntries(_items.map((item) => MapEntry(item.id, item)));
+        _loadingActivities = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingActivities = false;
+      });
+    }
+  }
+
+  TodayActivity _toTodayActivity(HomeActivityRecord row) {
+    final activity = row.activity;
+    final executionState = _executionStateFromRow(activity);
+
+    return TodayActivity(
+      id: activity.id,
+      title: activity.title.trim().isNotEmpty
+          ? activity.title
+          : (row.activityTypeName ?? 'Actividad'),
+      frente: (row.segmentName?.trim().isNotEmpty ?? false)
+          ? row.segmentName!.trim()
+          : (row.frontName?.trim().isNotEmpty ?? false)
+              ? row.frontName!.trim()
+              : 'Sin frente',
+      municipio: 'Municipio',
+      estado: 'Estado',
+      pk: activity.pk,
+      status: _statusFromRow(activity, executionState),
+      executionState: executionState,
+      horaInicio: activity.startedAt,
+      horaFin: activity.finishedAt,
+      isUnplanned: row.isUnplanned,
+    );
+  }
+
+  ExecutionState _executionStateFromRow(Activity activity) {
+    if (activity.status == 'REVISION_PENDIENTE') {
+      return ExecutionState.revisionPendiente;
+    }
+    if (activity.startedAt != null && activity.finishedAt == null) {
+      return ExecutionState.enCurso;
+    }
+    if (activity.finishedAt != null ||
+        activity.status == 'DRAFT' ||
+        activity.status == 'READY_TO_SYNC' ||
+        activity.status == 'SYNCED') {
+      return ExecutionState.terminada;
+    }
+    return ExecutionState.pendiente;
+  }
+
+  ActivityStatus _statusFromRow(Activity activity, ExecutionState executionState) {
+    if (executionState == ExecutionState.revisionPendiente) {
+      return ActivityStatus.vencida;
+    }
+    final created = activity.createdAt;
+    final today = DateTime.now();
+    final createdDay = DateTime(created.year, created.month, created.day);
+    final todayDay = DateTime(today.year, today.month, today.day);
+    if (createdDay.isBefore(todayDay)) {
+      return ActivityStatus.vencida;
+    }
+    if (createdDay.isAtSameMomentAs(todayDay)) {
+      return ActivityStatus.hoy;
+    }
+    return ActivityStatus.programada;
   }
 
   Future<void> _safeInitCatalogs() async {
@@ -153,7 +236,11 @@ class _HomePageState extends ConsumerState<HomePage> {
       extra: currentActivity,
     );
     // result puede ser el ID de la actividad guardada o null si canceló
-    return result != null; // true si guardó, false/null si canceló
+    final saved = result != null;
+    if (saved) {
+      await _loadHomeActivities();
+    }
+    return saved; // true si guardó, false/null si canceló
   }
 
   // ====== NUEVO FLUJO: swipe derecha con 3 estados ======
@@ -179,7 +266,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _iniciarActividad(TodayActivity a) {
     final now = DateTime.now();
-    final gps = _mockGps();
+    final gps = a.gpsLocation;
     
     final updated = a.copyWith(
       executionState: ExecutionState.enCurso,
@@ -379,8 +466,6 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   // ====== Utils ======
-  String _mockGps() => '20.523,-100.812';
-
   String _fmtTime(DateTime dt) =>
       "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
 
@@ -391,8 +476,125 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
   }
 
+  Future<void> _handleCloudAction({
+    required bool isOffline,
+    required bool isSyncing,
+  }) async {
+    if (isSyncing) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Sincronización en progreso...')),
+      );
+      return;
+    }
+
+    if (isOffline) {
+      await ref.read(offlineModeProvider.notifier).setOffline(false);
+    }
+
+    await ref.read(syncOrchestratorProvider.notifier).syncAll(
+          projectId: widget.selectedProject,
+        );
+  }
+
+  void _showSyncStatusSheet(SyncOrchestratorState state) {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        final statusLabel = switch (state.status) {
+          SyncOrchestratorStatus.success => 'Éxito',
+          SyncOrchestratorStatus.error => 'Error',
+          SyncOrchestratorStatus.syncing => 'Sincronizando',
+          SyncOrchestratorStatus.idle => 'Idle',
+        };
+        final timestamp = state.updatedAt == null
+            ? 'N/A'
+            : '${state.updatedAt!.year.toString().padLeft(4, '0')}-'
+                '${state.updatedAt!.month.toString().padLeft(2, '0')}-'
+                '${state.updatedAt!.day.toString().padLeft(2, '0')} '
+                '${state.updatedAt!.hour.toString().padLeft(2, '0')}:'
+                '${state.updatedAt!.minute.toString().padLeft(2, '0')}';
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Estado de sincronización',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 12),
+                Text('Último estado: $statusLabel'),
+                const SizedBox(height: 6),
+                Text('Timestamp: $timestamp'),
+                const SizedBox(height: 6),
+                const Text('Pendientes: N/A'),
+                if (state.errorMessage != null && state.errorMessage!.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    state.errorMessage!,
+                    style: const TextStyle(color: SaoColors.error),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isOffline = ref.watch(offlineModeProvider);
+    final syncState = ref.watch(syncOrchestratorProvider);
+    final isSyncing = syncState.status == SyncOrchestratorStatus.syncing;
+    final hasSyncError = syncState.status == SyncOrchestratorStatus.error;
+
+    ref.listen<SyncOrchestratorState>(syncOrchestratorProvider, (previous, next) {
+      if (!mounted) return;
+      final wasSyncing = previous?.status == SyncOrchestratorStatus.syncing;
+      if (wasSyncing && next.status == SyncOrchestratorStatus.success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sincronización completada')),
+        );
+      }
+      if (wasSyncing && next.status == SyncOrchestratorStatus.error) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('Error al sincronizar'),
+            action: SnackBarAction(
+              label: 'Detalles',
+              onPressed: () => _showSyncStatusSheet(next),
+            ),
+          ),
+        );
+      }
+    });
+
+    final cloudIcon = isSyncing
+        ? Icons.cloud_upload_rounded
+        : (hasSyncError || isOffline)
+            ? Icons.cloud_off_rounded
+            : Icons.cloud_done_rounded;
+    final cloudTooltip = isSyncing
+        ? 'Sincronizando…'
+        : hasSyncError
+            ? 'Error de sync'
+            : isOffline
+                ? 'Offline'
+                : 'Online';
+    final cloudColor = isSyncing
+        ? SaoColors.info
+        : hasSyncError
+            ? SaoColors.error
+            : isOffline
+                ? SaoColors.gray400
+                : SaoColors.success;
     final isTutorialGuest = GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
 
     // ====== Filtrado por búsqueda ======
@@ -426,26 +628,18 @@ class _HomePageState extends ConsumerState<HomePage> {
         children: [
           FloatingActionButton.small(
             heroTag: 'fab_report_event',
-            tooltip: 'Reportar evento',
+            tooltip: 'Actividad no planeada',
             backgroundColor: SaoColors.riskHigh,
             foregroundColor: Colors.white,
-            onPressed: () {
-              final user = ref.read(currentUserProvider);
-              showReportEventSheet(
-                context,
-                projectId: widget.selectedProject,
-                reportedByUserId: user?.id ?? 'unknown',
+            onPressed: () async {
+              final result = await context.push(
+                '/wizard/register?project=${widget.selectedProject}&mode=unplanned',
               );
+              if (result != null) {
+                await _loadHomeActivities();
+              }
             },
             child: const Icon(Icons.warning_rounded),
-          ),
-          const SizedBox(height: 10),
-          FloatingActionButton(
-            heroTag: 'fab_add_activity',
-            tooltip: 'Agregar actividad',
-            onPressed: () => context.push(
-                '/wizard/register?project=${widget.selectedProject}'),
-            child: const Icon(Icons.add_rounded),
           ),
         ],
       ),
@@ -496,11 +690,14 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                 ),
                 IconButton(
-                  tooltip: _isOffline ? 'Offline' : 'Online',
-                  onPressed: () => setState(() => _isOffline = !_isOffline),
+                  tooltip: cloudTooltip,
+                  onPressed: () async => _handleCloudAction(
+                    isOffline: isOffline,
+                    isSyncing: isSyncing,
+                  ),
                   icon: Icon(
-                    _isOffline ? Icons.cloud_off_rounded : Icons.cloud_done_rounded,
-                    color: _isOffline ? SaoColors.gray400 : SaoColors.success,
+                    cloudIcon,
+                    color: cloudColor,
                   ),
                 ),
                 Stack(
@@ -606,20 +803,20 @@ class _HomePageState extends ConsumerState<HomePage> {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF6FF),
+                    color: SaoColors.infoBg,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFFBFDBFE)),
+                    border: Border.all(color: SaoColors.infoBorder),
                   ),
                   child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.school_outlined, size: 18, color: Color(0xFF1D4ED8)),
+                          Icon(Icons.school_outlined, size: 18, color: SaoColors.infoIcon),
                           SizedBox(width: 6),
                           Text(
                             'Modo tutorial · Vista Inicio',
-                            style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF1E3A8A)),
+                            style: TextStyle(fontWeight: FontWeight.w700, color: SaoColors.infoText),
                           ),
                         ],
                       ),
@@ -635,7 +832,12 @@ class _HomePageState extends ConsumerState<HomePage> {
             ),
 
           // Lista / Empty State
-          if (grouped.isEmpty)
+          if (_loadingActivities)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (grouped.isEmpty)
             SliverFillRemaining(
               hasScrollBody: false,
               child: _EmptyState(
@@ -1044,6 +1246,31 @@ class _ActivityTile extends StatelessWidget {
                                 ),
                               ),
                             ),
+                            if (a.isUnplanned)
+                              Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: SaoColors.warning.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: SaoColors.warning),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.warning_rounded, size: 12, color: SaoColors.warning),
+                                    SizedBox(width: 2),
+                                    Text(
+                                      'No planeada',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        color: SaoColors.warning,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             if (needsAttention)
                               Container(
                                 margin: const EdgeInsets.only(right: 6),

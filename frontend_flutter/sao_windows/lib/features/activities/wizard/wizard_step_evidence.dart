@@ -2,6 +2,8 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
 import 'wizard_controller.dart';
 
 class WizardStepEvidence extends StatefulWidget {
@@ -155,11 +157,14 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
               children: [
                 Expanded(
                   child: RichText(
-                    text: const TextSpan(
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF111827)),
+                    text: TextSpan(
+                      style: SaoTypography.frontTitle.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: SaoColors.primary,
+                      ),
                       children: [
-                        TextSpan(text: 'Evidencia '),
-                        TextSpan(text: '*', style: TextStyle(color: Color(0xFFEF4444))),
+                        const TextSpan(text: 'Evidencia '),
+                        TextSpan(text: '*', style: SaoTypography.frontTitle.copyWith(color: SaoColors.error)),
                       ],
                     ),
                   ),
@@ -168,21 +173,20 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
+                      color: SaoColors.alertBg,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.orange.shade200),
+                      border: Border.all(color: SaoColors.alertBorder),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.cloud_off_rounded, size: 14, color: Colors.orange.shade700),
+                        Icon(Icons.cloud_off_rounded, size: 14, color: SaoColors.alertText),
                         const SizedBox(width: 4),
                         Text(
                           'Sin conexión',
-                          style: TextStyle(
-                            fontSize: 11,
+                          style: SaoTypography.caption.copyWith(
                             fontWeight: FontWeight.w600,
-                            color: Colors.orange.shade700,
+                            color: SaoColors.alertText,
                           ),
                         ),
                       ],
@@ -193,7 +197,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
             const SizedBox(height: 10),
             const Text(
               'Mínimo 1 foto con descripción obligatoria.',
-              style: TextStyle(color: Color(0xFF64748B)),
+              style: SaoTypography.caption,
             ),
             const SizedBox(height: 16),
 
@@ -211,7 +215,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                       Text('Tomar foto'),
                       Text(
                         'Cámara trasera',
-                        style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                        style: SaoTypography.monoSmall,
                       ),
                     ],
                   ),
@@ -226,7 +230,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                       Text('Galería'),
                       Text(
                         'Seleccionar existente',
-                        style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                        style: SaoTypography.monoSmall,
                       ),
                     ],
                   ),
@@ -245,7 +249,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                       Text('PDF'),
                       Text(
                         'Documentos',
-                        style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                        style: SaoTypography.monoSmall,
                       ),
                     ],
                   ),
@@ -259,13 +263,13 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF9FAFB),
+                  color: SaoColors.gray50,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE5E7EB)),
+                  border: Border.all(color: SaoColors.border),
                 ),
                 child: const Text(
                   'Sin fotos aún. Agrega al menos una con su descripción.',
-                  style: TextStyle(color: Color(0xFF64748B)),
+                  style: SaoTypography.caption,
                   textAlign: TextAlign.center,
                 ),
               ),
@@ -279,10 +283,10 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: SaoColors.surface,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: hasError ? const Color(0xFFEF4444) : const Color(0xFFE5E7EB),
+                    color: hasError ? SaoColors.error : SaoColors.border,
                     width: hasError ? 2 : 1,
                   ),
                 ),
@@ -300,8 +304,8 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                           return Container(
                             width: 80,
                             height: 80,
-                            color: const Color(0xFFF3F4F6),
-                            child: const Icon(Icons.broken_image, color: Color(0xFF9CA3AF)),
+                            color: SaoColors.gray100,
+                            child: const Icon(Icons.broken_image, color: SaoColors.gray400),
                           );
                         },
                       ),
@@ -313,10 +317,9 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                         children: [
                           Text(
                             'Foto ${i + 1}',
-                            style: const TextStyle(
-                              fontSize: 12,
+                            style: SaoTypography.caption.copyWith(
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF6B7280),
+                              color: SaoColors.gray500,
                             ),
                           ),
                           const SizedBox(height: 4),
@@ -326,27 +329,27 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                             maxLines: 3,
                             decoration: InputDecoration(
                               hintText: 'Descripción de la evidencia...',
-                              hintStyle: const TextStyle(color: Color(0xFF9CA3AF)),
+                              hintStyle: const TextStyle(color: SaoColors.gray400),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
-                                borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+                                borderSide: const BorderSide(color: SaoColors.border),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide(
-                                  color: hasError ? const Color(0xFFEF4444) : const Color(0xFFE5E7EB),
+                                  color: hasError ? SaoColors.error : SaoColors.border,
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(8),
                                 borderSide: BorderSide(
-                                  color: hasError ? const Color(0xFFEF4444) : const Color(0xFF3B82F6),
+                                  color: hasError ? SaoColors.error : SaoColors.info,
                                   width: 2,
                                 ),
                               ),
                               errorText: hasError ? 'Descripción obligatoria' : null,
-                              errorStyle: const TextStyle(fontSize: 11),
+                              errorStyle: SaoTypography.caption,
                             ),
                             onChanged: (value) {
                               widget.controller.updateDescripcion(i, value);
@@ -358,7 +361,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                     const SizedBox(width: 8),
                     IconButton(
                       onPressed: () => widget.controller.removePhotoAt(i),
-                      icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
+                      icon: const Icon(Icons.delete_outline, color: SaoColors.error),
                       tooltip: 'Eliminar',
                     ),
                   ],
@@ -377,8 +380,8 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
             child: Container(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
               decoration: const BoxDecoration(
-                color: Colors.white,
-                border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+                color: SaoColors.surface,
+                border: Border(top: BorderSide(color: SaoColors.border)),
               ),
               child: Row(
                 children: [

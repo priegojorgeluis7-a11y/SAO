@@ -138,7 +138,6 @@ class GpsValidationBanner extends StatelessWidget {
                     Text(
                       _title,
                       style: SaoTypography.bodyTextBold.copyWith(
-                        fontSize: 14,
                         color: _bannerColor,
                       ),
                     ),
@@ -146,7 +145,6 @@ class GpsValidationBanner extends StatelessWidget {
                     Text(
                       _subtitle,
                       style: SaoTypography.caption.copyWith(
-                        fontSize: 13,
                         color: _bannerColor.withOpacity(0.8),
                       ),
                     ),
@@ -162,7 +160,7 @@ class GpsValidationBanner extends StatelessWidget {
                     Tooltip(
                       message: 'Ver en mapa',
                       child: Material(
-                        color: Colors.transparent,
+                        color: Theme.of(context).colorScheme.surface.withOpacity(0),
                         child: InkWell(
                           onTap: onViewMap,
                           borderRadius: BorderRadius.circular(6),
@@ -182,7 +180,7 @@ class GpsValidationBanner extends StatelessWidget {
                     Tooltip(
                       message: 'Editar GPS',
                       child: Material(
-                        color: Colors.transparent,
+                        color: Theme.of(context).colorScheme.surface.withOpacity(0),
                         child: InkWell(
                           onTap: onEditGps,
                           borderRadius: BorderRadius.circular(6),
@@ -209,7 +207,7 @@ class GpsValidationBanner extends StatelessWidget {
           Container(
             padding: EdgeInsets.all(SaoSpacing.sm),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.5),
+              color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
               borderRadius: BorderRadius.circular(SaoRadii.sm),
             ),
             child: Row(
@@ -299,7 +297,7 @@ class GpsValidationBanner extends StatelessWidget {
                       ),
                       contentPadding: EdgeInsets.all(SaoSpacing.sm),
                       filled: true,
-                      fillColor: Colors.white,
+                      fillColor: Theme.of(context).colorScheme.surface,
                     ),
                     style: SaoTypography.bodyText,
                   ),
@@ -331,7 +329,6 @@ class _DetailItem extends StatelessWidget {
         Text(
           label,
           style: SaoTypography.caption.copyWith(
-            fontSize: 12,
             color: SaoColors.gray600,
           ),
         ),
@@ -339,7 +336,6 @@ class _DetailItem extends StatelessWidget {
         Text(
           value,
           style: SaoTypography.mono.copyWith(
-            fontSize: 13,
             fontWeight: FontWeight.w600,
           ),
           maxLines: 1,

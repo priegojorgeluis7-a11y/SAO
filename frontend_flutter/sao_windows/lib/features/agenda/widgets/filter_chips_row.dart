@@ -1,17 +1,20 @@
 // lib/features/agenda/widgets/filter_chips_row.dart
 
 import 'package:flutter/material.dart';
+import '../../../ui/theme/sao_colors.dart';
 import '../models/resource.dart';
 
 class FilterChipsRow extends StatelessWidget {
   final List<Resource> resources;
   final String selectedFilterId;
+  final bool loading;
   final ValueChanged<String> onFilterChange;
 
   const FilterChipsRow({
     super.key,
     required this.resources,
     required this.selectedFilterId,
+    this.loading = false,
     required this.onFilterChange,
   });
 
@@ -25,7 +28,7 @@ class FilterChipsRow extends StatelessWidget {
     ];
 
     return Container(
-      color: Colors.white,
+      color: SaoColors.surface,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -37,34 +40,39 @@ class FilterChipsRow extends StatelessWidget {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w700,
-                color: Color(0xFF6B7280),
+                color: SaoColors.statusBorrador,
               ),
             ),
           ),
           SizedBox(
             height: 38,
-            child: ListView.separated(
+            child: loading
+                ? const Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: chips.length,
               separatorBuilder: (_, _) => const SizedBox(width: 8),
               itemBuilder: (_, i) {
                 final c = chips[i];
                 final selected = selectedFilterId == c.$1;
-                
+
                 return ChoiceChip(
                   selected: selected,
                   onSelected: (_) => onFilterChange(c.$1),
-                  backgroundColor: const Color(0xFFF3F4F6),
-                  selectedColor: const Color(0xFF1F2937),
+                  backgroundColor: SaoColors.gray100,
+                  selectedColor: SaoColors.gray800,
                   side: BorderSide(
-                    color: selected
-                        ? const Color(0xFF1F2937)
-                        : const Color(0xFFE5E7EB),
+                    color: selected ? SaoColors.gray800 : SaoColors.gray200,
                   ),
                   labelStyle: TextStyle(
-                    color: selected
-                        ? const Color(0xFFFFFFFF)
-                        : const Color(0xFF374151),
+                    color: selected ? Colors.white : SaoColors.primaryLight,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                     fontSize: 13,
                   ),
@@ -74,9 +82,7 @@ class FilterChipsRow extends StatelessWidget {
                       Icon(
                         c.$3,
                         size: 16,
-                        color: selected
-                            ? const Color(0xFFFFFFFF)
-                            : const Color(0xFF6B7280),
+                        color: selected ? Colors.white : SaoColors.statusBorrador,
                       ),
                       const SizedBox(width: 6),
                       Text(c.$2),

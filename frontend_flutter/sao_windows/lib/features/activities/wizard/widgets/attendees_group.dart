@@ -1,6 +1,7 @@
 // lib/features/activities/wizard/widgets/attendees_group.dart
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_typography.dart';
 import '../../../catalog/catalog_repository.dart';
 
 class AttendeesGroup extends StatelessWidget {
@@ -26,7 +27,7 @@ class AttendeesGroup extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border),
       ),
@@ -36,7 +37,7 @@ class AttendeesGroup extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(title, style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF111827))),
+              Text(title, style: AppTypography.bodyTextBold),
               if (onAddNew != null)
                 IconButton(
                   icon: const Icon(Icons.add_circle_outline, size: 20),
@@ -50,9 +51,9 @@ class AttendeesGroup extends StatelessWidget {
           ),
           if (items.isEmpty) ...[
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'Sin asistentes registrados',
-              style: TextStyle(color: Color(0xFF64748B)),
+              style: AppTypography.hint,
             ),
             const SizedBox(height: 4),
             if (onAddNew != null)
@@ -68,11 +69,11 @@ class AttendeesGroup extends StatelessWidget {
           ] else ...[
             const SizedBox(height: 8),
             if (selectedCount == 0)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.only(bottom: 8),
                 child: Text(
                   'Ninguno seleccionado',
-                  style: TextStyle(color: Color(0xFF64748B), fontStyle: FontStyle.italic),
+                  style: AppTypography.hint.copyWith(fontStyle: FontStyle.italic),
                 ),
               )
             else
@@ -80,7 +81,7 @@ class AttendeesGroup extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   '$selectedCount seleccionado${selectedCount > 1 ? 's' : ''}',
-                  style: const TextStyle(color: Color(0xFF1E40AF), fontWeight: FontWeight.w600),
+                  style: AppTypography.caption.copyWith(color: AppColors.info, fontWeight: FontWeight.w600),
                 ),
               ),
             ...items.map<Widget>((attendee) {
@@ -93,7 +94,7 @@ class AttendeesGroup extends StatelessWidget {
                 title: Text(
                   attendee.name,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Color(0xFF111827)),
+                  style: AppTypography.bodyTextBold,
                 ),
                 onChanged: (_) => onToggle(attendee.id),
               );

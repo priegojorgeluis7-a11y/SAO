@@ -392,3 +392,24 @@ class LocalEvents extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+// ---------- Agenda Assignments ----------
+class AgendaAssignments extends Table {
+  TextColumn get id => text()();
+  TextColumn get projectId => text()();
+  TextColumn get resourceId => text()();
+  TextColumn get activityId => text().nullable()();
+  TextColumn get title => text().withLength(min: 1, max: 200)();
+  TextColumn get frente => text().withDefault(const Constant(''))();
+  TextColumn get municipio => text().withDefault(const Constant(''))();
+  TextColumn get estado => text().withDefault(const Constant(''))();
+  IntColumn get pk => integer().nullable()();
+  DateTimeColumn get startAt => dateTime()();
+  DateTimeColumn get endAt => dateTime()();
+  TextColumn get risk => text().withDefault(const Constant('bajo'))();
+  TextColumn get syncStatus => text().withDefault(const Constant('pending'))();
+  DateTimeColumn get updatedAt => dateTime().withDefault(currentDateAndTime)();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

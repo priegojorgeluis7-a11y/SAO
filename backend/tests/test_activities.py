@@ -1,9 +1,11 @@
 """Tests for activities CRUD endpoints"""
 import pytest
 from datetime import datetime, timezone
+import json
 from uuid import uuid4
 
-from app.models.catalog import CatalogStatus, CatalogVersion
+from app.models.audit_log import AuditLog
+from app.models.catalog import CATActivityType, CatalogStatus, CatalogVersion
 from app.models.front import Front
 from app.models.project import Project, ProjectStatus
 
@@ -53,6 +55,16 @@ def test_catalog(db, test_user):
         published_by_id=test_user.id,
     )
     db.add(catalog)
+    db.flush()
+    db.add(
+        CATActivityType(
+            id=uuid4(),
+            version_id=catalog.id,
+            code="INSP_CIVIL",
+            name="Inspeccion civil",
+            is_active=True,
+        )
+    )
     db.commit()
     db.refresh(catalog)
     return catalog
@@ -98,6 +110,10 @@ def test_create_activity(client, auth_headers, sample_activity_data):
     assert data["deleted_at"] is None
     assert "server_id" in data
     assert data["server_id"] is not None
+    assert "flags" in data
+    assert isinstance(data["flags"], dict)
+    assert "gps_mismatch" in data["flags"]
+    assert "catalog_changed" in data["flags"]
 
 
 def test_create_activity_idempotent(client, auth_headers, sample_activity_data):
@@ -353,10 +369,28 @@ def test_activity_requires_auth(client, sample_activity_data):
     # Update without auth
     response = client.put(f"/api/v1/activities/{uuid4()}", json={"title": "test"})
     assert response.status_code == 401
-    
+
     # Delete without auth
     response = client.delete(f"/api/v1/activities/{uuid4()}")
     assert response.status_code == 401
+
+
+def test_create_activity_rejects_unknown_activity_type_for_catalog(
+    client,
+    auth_headers,
+    sample_activity_data,
+):
+    sample_activity_data["activity_type_code"] = "NOT_IN_CATALOG"
+
+    response = client.post(
+        "/api/v1/activities",
+        json=sample_activity_data,
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["code"] == "ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION"
 
 
 def test_create_activity_validates_pk_range(client, auth_headers, sample_activity_data):
@@ -373,3 +407,123 @@ def test_create_activity_validates_pk_range(client, auth_headers, sample_activit
     
     # Should fail validation
     assert response.status_code == 422
+
+
+def test_activity_timeline_returns_audit_events_desc(client, auth_headers, sample_activity_data, db, test_user):
+    create_response = client.post(
+        "/api/v1/activities",
+        json=sample_activity_data,
+        headers=auth_headers,
+    )
+    assert create_response.status_code == 201
+    activity_uuid = create_response.json()["uuid"]
+
+    older = AuditLog(
+        actor_id=test_user.id,
+        actor_email=test_user.email,
+        action="REVIEW_REJECT",
+        entity="activity",
+        entity_id=activity_uuid,
+        details_json=json.dumps({"reason": "missing_info"}),
+    )
+    newer = AuditLog(
+        actor_id=test_user.id,
+        actor_email=test_user.email,
+        action="REVIEW_APPROVE",
+        entity="activity",
+        entity_id=activity_uuid,
+        details_json=json.dumps({"ok": True}),
+    )
+    db.add(older)
+    db.flush()
+    db.add(newer)
+    db.commit()
+
+    response = client.get(f"/api/v1/activities/{activity_uuid}/timeline", headers=auth_headers)
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload, list)
+    assert len(payload) >= 2
+    assert payload[0]["action"] == "REVIEW_APPROVE"
+    assert payload[1]["action"] == "REVIEW_REJECT"
+    assert payload[0]["actor"] == test_user.email
+
+
+def test_activity_timeline_not_found(client, auth_headers):
+    fake_uuid = str(uuid4())
+    response = client.get(f"/api/v1/activities/{fake_uuid}/timeline", headers=auth_headers)
+    assert response.status_code == 404
+
+
+def test_patch_flags_sets_gps_mismatch(client, auth_headers, sample_activity_data):
+    """PATCH /flags sets gps_mismatch and increments sync_version."""
+    create = client.post("/api/v1/activities", json=sample_activity_data, headers=auth_headers)
+    assert create.status_code == 201
+    uuid = create.json()["uuid"]
+    initial_sync = create.json()["sync_version"]
+
+    response = client.patch(
+        f"/api/v1/activities/{uuid}/flags",
+        json={"gps_mismatch": True},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["flags"]["gps_mismatch"] is True
+    assert data["flags"]["catalog_changed"] is False
+    assert data["sync_version"] == initial_sync + 1
+
+
+def test_patch_flags_sets_catalog_changed(client, auth_headers, sample_activity_data):
+    """PATCH /flags sets catalog_changed independently."""
+    create = client.post("/api/v1/activities", json=sample_activity_data, headers=auth_headers)
+    uuid = create.json()["uuid"]
+
+    response = client.patch(
+        f"/api/v1/activities/{uuid}/flags",
+        json={"catalog_changed": True},
+        headers=auth_headers,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["flags"]["catalog_changed"] is True
+    assert data["flags"]["gps_mismatch"] is False
+
+
+def test_patch_flags_partial_update_leaves_other_unchanged(client, auth_headers, sample_activity_data):
+    """PATCH /flags with only one field does not reset the other."""
+    create = client.post("/api/v1/activities", json=sample_activity_data, headers=auth_headers)
+    uuid = create.json()["uuid"]
+
+    # Set both flags
+    client.patch(f"/api/v1/activities/{uuid}/flags",
+                 json={"gps_mismatch": True, "catalog_changed": True},
+                 headers=auth_headers)
+
+    # Patch only gps_mismatch → catalog_changed should stay True
+    response = client.patch(f"/api/v1/activities/{uuid}/flags",
+                            json={"gps_mismatch": False},
+                            headers=auth_headers)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["flags"]["gps_mismatch"] is False
+    assert data["flags"]["catalog_changed"] is True
+
+
+def test_patch_flags_not_found(client, auth_headers):
+    """PATCH /flags on non-existent uuid returns 404."""
+    response = client.patch(
+        f"/api/v1/activities/{uuid4()}/flags",
+        json={"gps_mismatch": True},
+        headers=auth_headers,
+    )
+    assert response.status_code == 404
+
+
+def test_patch_flags_requires_auth(client, sample_activity_data):
+    """PATCH /flags without token returns 401."""
+    response = client.patch(
+        f"/api/v1/activities/{uuid4()}/flags",
+        json={"gps_mismatch": True},
+    )
+    assert response.status_code == 401

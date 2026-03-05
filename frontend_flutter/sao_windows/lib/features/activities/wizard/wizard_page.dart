@@ -1,8 +1,11 @@
 // lib/features/activities/wizard/wizard_page.dart
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
 
 import '../../../data/local/app_db.dart';
+import '../../../ui/theme/sao_colors.dart';
+import '../../auth/application/auth_providers.dart';
 import '../../home/models/today_activity.dart';
 import '../../catalog/catalog_repository.dart';
 import '../../evidence/pending_evidence_store.dart';
@@ -13,12 +16,12 @@ import 'wizard_step_fields.dart';
 import 'wizard_step_evidence.dart';
 import 'wizard_step_confirm.dart';
 
-class ActivityWizardPage extends StatefulWidget {
+class ActivityWizardPage extends ConsumerStatefulWidget {
   final TodayActivity activity;
   final String projectCode;
-
   final CatalogRepository catalogRepo;
   final PendingEvidenceStore pendingStore;
+  final bool isUnplanned;
 
   const ActivityWizardPage({
     super.key,
@@ -26,13 +29,14 @@ class ActivityWizardPage extends StatefulWidget {
     required this.projectCode,
     required this.catalogRepo,
     required this.pendingStore,
+    this.isUnplanned = false,
   });
 
   @override
-  State<ActivityWizardPage> createState() => _ActivityWizardPageState();
+  ConsumerState<ActivityWizardPage> createState() => _ActivityWizardPageState();
 }
 
-class _ActivityWizardPageState extends State<ActivityWizardPage> {
+class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage> {
   final PageController _pager = PageController();
   late final WizardController c;
   int step = 0;
@@ -42,8 +46,8 @@ class _ActivityWizardPageState extends State<ActivityWizardPage> {
     super.initState();
 
     final database = GetIt.I<AppDb>();
-    // TODO: Obtener usuario actual del sistema de autenticación
-    const currentUserId = 'user-local'; // Placeholder hasta tener auth
+    final currentUserId =
+        ref.read(currentUserProvider)?.id ?? 'user-local';
 
     c = WizardController(
       activity: widget.activity,
@@ -52,6 +56,7 @@ class _ActivityWizardPageState extends State<ActivityWizardPage> {
       pendingStore: widget.pendingStore,
       database: database,
       currentUserId: currentUserId,
+      isUnplanned: widget.isUnplanned,
     );
 
     // ignore: unawaited_futures
@@ -97,11 +102,15 @@ class _ActivityWizardPageState extends State<ActivityWizardPage> {
       animation: c,
       builder: (context, _) {
         return Scaffold(
-          backgroundColor: const Color(0xFFF8FAFC),
+          backgroundColor: SaoColors.gray50,
           appBar: AppBar(
-            backgroundColor: Colors.white,
-            surfaceTintColor: Colors.white,
-            title: Text('Registrar actividad (${step + 1}/4)'),
+            backgroundColor: SaoColors.surface,
+            surfaceTintColor: SaoColors.surface,
+            title: Text(
+              widget.isUnplanned
+                  ? 'Actividad no planeada (${step + 1}/4)'
+                  : 'Registrar actividad (${step + 1}/4)',
+            ),
             leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: back),
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(3),
@@ -112,8 +121,8 @@ class _ActivityWizardPageState extends State<ActivityWizardPage> {
                 builder: (context, value, child) {
                   return LinearProgressIndicator(
                     value: value,
-                    backgroundColor: const Color(0xFFE5E7EB),
-                    valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF1E40AF)),
+                    backgroundColor: SaoColors.gray200,
+                    valueColor: const AlwaysStoppedAnimation<Color>(SaoColors.actionPrimary),
                     minHeight: 3,
                   );
                 },

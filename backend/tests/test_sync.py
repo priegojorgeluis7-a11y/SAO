@@ -3,10 +3,15 @@ import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 
+pytestmark = pytest.mark.integration
+
 from app.models.project import Project, ProjectStatus
 from app.models.front import Front
-from app.models.catalog import CatalogVersion, CatalogStatus
+from app.models.catalog import CATActivityType, CatalogVersion, CatalogStatus
+from app.core.config import settings
+from app.core.security import get_password_hash
 from app.models.role import Role
+from app.models.user import User, UserStatus
 from app.models.user_role_scope import UserRoleScope
 
 
@@ -49,6 +54,50 @@ def _build_activity_payload(
 def _push_request(project_id: str, activity_payload: dict) -> dict:
     """Build sync push request body for a single activity item."""
     return {"project_id": project_id, "activities": [activity_payload]}
+
+
+def _create_user_with_role_scope(
+    client,
+    db,
+    *,
+    email: str,
+    role_name: str,
+    project_id: str,
+    password: str = "testpass123",
+):
+    role = db.query(Role).filter(Role.name == role_name).first()
+    if role is None:
+        role = Role(name=role_name, description=f"{role_name} role")
+        db.add(role)
+        db.flush()
+
+    user = User(
+        id=uuid4(),
+        email=email,
+        password_hash=get_password_hash(password),
+        full_name=f"{role_name.title()} User",
+        status=UserStatus.ACTIVE,
+    )
+    db.add(user)
+    db.flush()
+
+    db.add(
+        UserRoleScope(
+            id=uuid4(),
+            user_id=user.id,
+            role_id=role.id,
+            project_id=project_id,
+        )
+    )
+    db.commit()
+
+    login_response = client.post(
+        "/api/v1/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+    return user, {"Authorization": f"Bearer {token}"}
 
 
 @pytest.fixture
@@ -125,6 +174,16 @@ def test_catalog_tmq(db, test_user, test_project_tmq):
         published_by_id=test_user.id,
     )
     db.add(catalog)
+    db.flush()
+    db.add(
+        CATActivityType(
+            id=uuid4(),
+            version_id=catalog.id,
+            code="INSP_CIVIL",
+            name="Inspeccion civil",
+            is_active=True,
+        )
+    )
     db.commit()
     db.refresh(catalog)
     return catalog
@@ -159,14 +218,162 @@ def test_sync_pull_basic(client, auth_headers, test_project_tmq, test_front_tmq,
     assert response.status_code == 200
     data = response.json()
     assert "current_version" in data
+    assert "has_more" in data
+    assert "next_since_version" in data
+    assert "next_after_uuid" in data
     assert "activities" in data
     assert len(data["activities"]) == 3
     assert data["current_version"] == 1  # All activities start at sync_version 1
+    assert data["has_more"] is False
     
     # Verify activities are in ascending sync_version order
     for activity in data["activities"]:
         assert activity["sync_version"] == 1
         assert activity["deleted_at"] is None
+
+
+def test_sync_push_rate_limit_returns_429(
+    client,
+    auth_headers,
+    test_project_tmq,
+    test_front_tmq,
+    test_catalog_tmq,
+    test_user,
+    test_user_scope_tmq,
+    monkeypatch,
+):
+    monkeypatch.setattr(settings, "RATE_LIMIT_SYNC_PUSH_PER_MINUTE", 2, raising=False)
+    monkeypatch.setattr(settings, "RATE_LIMIT_WINDOW_SECONDS", 60, raising=False)
+
+    payload = _build_activity_payload(
+        project_id=test_project_tmq.id,
+        front_id=str(test_front_tmq.id),
+        created_by_user_id=str(test_user.id),
+        catalog_version_id=str(test_catalog_tmq.id),
+        pk_start=41000,
+        pk_end=41500,
+        title="Rate limit sync push",
+    )
+    body = _push_request(test_project_tmq.id, payload)
+
+    first = client.post("/api/v1/sync/push", json=body, headers=auth_headers)
+    second = client.post("/api/v1/sync/push", json=body, headers=auth_headers)
+    third = client.post("/api/v1/sync/push", json=body, headers=auth_headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429
+
+
+def test_e2e_operativo_push_supervisor_approve_operativo_pull(
+    client,
+    db,
+    test_project_tmq,
+    test_front_tmq,
+    test_catalog_tmq,
+):
+    operativo, operativo_headers = _create_user_with_role_scope(
+        client,
+        db,
+        email=f"operativo-{uuid4().hex[:8]}@example.com",
+        role_name="OPERATIVO",
+        project_id=test_project_tmq.id,
+    )
+    _, supervisor_headers = _create_user_with_role_scope(
+        client,
+        db,
+        email=f"supervisor-{uuid4().hex[:8]}@example.com",
+        role_name="SUPERVISOR",
+        project_id=test_project_tmq.id,
+    )
+
+    activity_uuid = str(uuid4())
+    activity_payload = _build_activity_payload(
+        activity_uuid=activity_uuid,
+        project_id=test_project_tmq.id,
+        front_id=str(test_front_tmq.id),
+        created_by_user_id=str(operativo.id),
+        catalog_version_id=str(test_catalog_tmq.id),
+        pk_start=11500,
+        pk_end=11900,
+        execution_state="REVISION_PENDIENTE",
+        title="E2E activity from operativo",
+    )
+
+    push_response = client.post(
+        "/api/v1/sync/push",
+        json=_push_request(test_project_tmq.id, activity_payload),
+        headers=operativo_headers,
+    )
+    assert push_response.status_code == 200
+    push_results = push_response.json()["results"]
+    assert len(push_results) == 1
+    assert push_results[0]["status"] in {"CREATED", "UPDATED", "UNCHANGED"}
+
+    baseline_pull = client.post(
+        "/api/v1/sync/pull",
+        json={"project_id": test_project_tmq.id, "since_version": 0, "limit": 500},
+        headers=operativo_headers,
+    )
+    assert baseline_pull.status_code == 200
+    baseline_data = baseline_pull.json()
+    baseline_current_version = baseline_data["current_version"]
+    baseline_item = next(
+        (item for item in baseline_data["activities"] if item["uuid"] == activity_uuid),
+        None,
+    )
+    assert baseline_item is not None
+
+    queue_response = client.get(
+        f"/api/v1/review/queue?project_id={test_project_tmq.id}",
+        headers=supervisor_headers,
+    )
+    assert queue_response.status_code == 200
+    queue_item = next(
+        (item for item in queue_response.json()["items"] if item["id"] == activity_uuid),
+        None,
+    )
+    assert queue_item is not None
+
+    decision_response = client.post(
+        f"/api/v1/review/activity/{activity_uuid}/decision",
+        json={"decision": "APPROVE", "field_resolutions": []},
+        headers=supervisor_headers,
+    )
+    assert decision_response.status_code == 200
+    assert decision_response.json()["ok"] is True
+    assert decision_response.json()["status"] == "APROBADO"
+
+    delta_pull = client.post(
+        "/api/v1/sync/pull",
+        json={
+            "project_id": test_project_tmq.id,
+            "since_version": baseline_current_version,
+            "limit": 500,
+        },
+        headers=operativo_headers,
+    )
+    assert delta_pull.status_code == 200
+    delta_data = delta_pull.json()
+    approved_item = next(
+        (item for item in delta_data["activities"] if item["uuid"] == activity_uuid),
+        None,
+    )
+
+    if approved_item is None:
+        full_pull_after_approve = client.post(
+            "/api/v1/sync/pull",
+            json={"project_id": test_project_tmq.id, "since_version": 0, "limit": 500},
+            headers=operativo_headers,
+        )
+        assert full_pull_after_approve.status_code == 200
+        approved_item = next(
+            (item for item in full_pull_after_approve.json()["activities"] if item["uuid"] == activity_uuid),
+            None,
+        )
+
+    assert approved_item is not None
+    assert approved_item["execution_state"] == "COMPLETADA"
 
 
 def test_sync_pull_with_updates_and_deletes(client, auth_headers, test_project_tmq, test_front_tmq, test_catalog_tmq, test_user, test_user_scope_tmq):
@@ -255,6 +462,7 @@ def test_sync_pull_empty_result(client, auth_headers, test_project_tmq, test_use
     data = response.json()
     assert len(data["activities"]) == 0
     assert data["current_version"] == 100  # Should return since_version when no results
+    assert data["has_more"] is False
 
 
 def test_sync_pull_limit(client, auth_headers, test_project_tmq, test_front_tmq, test_catalog_tmq, test_user, test_user_scope_tmq):
@@ -284,6 +492,62 @@ def test_sync_pull_limit(client, auth_headers, test_project_tmq, test_front_tmq,
     assert response.status_code == 200
     data = response.json()
     assert len(data["activities"]) == 3  # Respects limit
+    assert data["has_more"] is True
+    assert data["next_since_version"] == 1
+    assert data["next_after_uuid"] is not None
+
+
+def test_sync_pull_limit_paginated_with_cursor(client, auth_headers, test_project_tmq, test_front_tmq, test_catalog_tmq, test_user, test_user_scope_tmq):
+    """Test pull pagination with since_version + after_uuid cursor to avoid missing rows."""
+    created_uuids = []
+    for i in range(5):
+        activity_data = _build_activity_payload(
+            project_id=test_project_tmq.id,
+            front_id=str(test_front_tmq.id),
+            created_by_user_id=str(test_user.id),
+            catalog_version_id=str(test_catalog_tmq.id),
+            pk_start=31000 + (i * 1000),
+            pk_end=31500 + (i * 1000),
+            title=f"Paginated Activity {i}",
+        )
+        response = client.post("/api/v1/activities", json=activity_data, headers=auth_headers)
+        assert response.status_code == 201
+        created_uuids.append(response.json()["uuid"])
+
+    first_page = client.post(
+        "/api/v1/sync/pull",
+        json={
+            "project_id": test_project_tmq.id,
+            "since_version": 0,
+            "limit": 3,
+        },
+        headers=auth_headers,
+    )
+    assert first_page.status_code == 200
+    first_payload = first_page.json()
+    assert len(first_payload["activities"]) == 3
+    assert first_payload["has_more"] is True
+
+    second_page = client.post(
+        "/api/v1/sync/pull",
+        json={
+            "project_id": test_project_tmq.id,
+            "since_version": first_payload["next_since_version"],
+            "after_uuid": first_payload["next_after_uuid"],
+            "limit": 3,
+        },
+        headers=auth_headers,
+    )
+    assert second_page.status_code == 200
+    second_payload = second_page.json()
+    assert len(second_payload["activities"]) == 2
+    assert second_payload["has_more"] is False
+
+    pulled_uuids = {
+        *(activity["uuid"] for activity in first_payload["activities"]),
+        *(activity["uuid"] for activity in second_payload["activities"]),
+    }
+    assert pulled_uuids == set(created_uuids)
 
 
 def test_sync_pull_requires_auth(client, test_project_tmq):
@@ -532,6 +796,117 @@ def test_sync_push_conflict_deleted_activity(client, auth_headers, test_project_
     assert result["sync_version"] == sync_version_after_delete  # Unchanged
 
 
+def test_sync_push_conflict_when_incoming_stale(client, auth_headers, test_project_tmq, test_front_tmq, test_catalog_tmq, test_user, test_user_scope_tmq):
+    """If incoming sync_version is stale and payload changes, push must return CONFLICT."""
+    payload = _build_activity_payload(
+        project_id=test_project_tmq.id,
+        front_id=str(test_front_tmq.id),
+        created_by_user_id=str(test_user.id),
+        catalog_version_id=str(test_catalog_tmq.id),
+        pk_start=81000,
+        pk_end=81500,
+        title="Stale Version Activity",
+    )
+    create_resp = client.post("/api/v1/activities", json=payload, headers=auth_headers)
+    assert create_resp.status_code == 201
+
+    activity_uuid = create_resp.json()["uuid"]
+
+    # Server update to move sync_version from 1 -> 2
+    update_resp = client.put(
+        f"/api/v1/activities/{activity_uuid}",
+        json={"title": "Server Updated"},
+        headers=auth_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["sync_version"] == 2
+
+    stale_push = {
+        "project_id": test_project_tmq.id,
+        "activities": [
+            {
+                "uuid": activity_uuid,
+                "server_id": update_resp.json()["server_id"],
+                "project_id": test_project_tmq.id,
+                "front_id": str(test_front_tmq.id),
+                "pk_start": 81000,
+                "pk_end": 81500,
+                "execution_state": "EN_CURSO",
+                "assigned_to_user_id": None,
+                "created_by_user_id": str(test_user.id),
+                "catalog_version_id": str(test_catalog_tmq.id),
+                "activity_type_code": "INSP_CIVIL",
+                "title": "Client Stale Update",
+                "description": None,
+                "latitude": None,
+                "longitude": None,
+                "deleted_at": None,
+                "sync_version": 1,
+            }
+        ],
+    }
+    push_resp = client.post("/api/v1/sync/push", json=stale_push, headers=auth_headers)
+    assert push_resp.status_code == 200
+    result = push_resp.json()["results"][0]
+    assert result["status"] == "CONFLICT"
+    assert result["sync_version"] == 2
+
+
+def test_sync_push_force_override_applies_stale_update(client, auth_headers, test_project_tmq, test_front_tmq, test_catalog_tmq, test_user, test_user_scope_tmq):
+    """With force_override=true, stale updates should be applied as UPDATED."""
+    payload = _build_activity_payload(
+        project_id=test_project_tmq.id,
+        front_id=str(test_front_tmq.id),
+        created_by_user_id=str(test_user.id),
+        catalog_version_id=str(test_catalog_tmq.id),
+        pk_start=82000,
+        pk_end=82500,
+        title="Force Override Activity",
+    )
+    create_resp = client.post("/api/v1/activities", json=payload, headers=auth_headers)
+    assert create_resp.status_code == 201
+    activity_uuid = create_resp.json()["uuid"]
+
+    update_resp = client.put(
+        f"/api/v1/activities/{activity_uuid}",
+        json={"title": "Server Side Change"},
+        headers=auth_headers,
+    )
+    assert update_resp.status_code == 200
+    assert update_resp.json()["sync_version"] == 2
+
+    force_push = {
+        "project_id": test_project_tmq.id,
+        "force_override": True,
+        "activities": [
+            {
+                "uuid": activity_uuid,
+                "server_id": update_resp.json()["server_id"],
+                "project_id": test_project_tmq.id,
+                "front_id": str(test_front_tmq.id),
+                "pk_start": 82000,
+                "pk_end": 82500,
+                "execution_state": "COMPLETADA",
+                "assigned_to_user_id": None,
+                "created_by_user_id": str(test_user.id),
+                "catalog_version_id": str(test_catalog_tmq.id),
+                "activity_type_code": "INSP_CIVIL",
+                "title": "Client Override Value",
+                "description": None,
+                "latitude": None,
+                "longitude": None,
+                "deleted_at": None,
+                "sync_version": 1,
+            }
+        ],
+    }
+    push_resp = client.post("/api/v1/sync/push", json=force_push, headers=auth_headers)
+    assert push_resp.status_code == 200
+    result = push_resp.json()["results"][0]
+    assert result["status"] == "UPDATED"
+    assert result["sync_version"] == 3
+
+
 def test_sync_push_requires_auth(client, test_project_tmq, test_front_tmq, test_catalog_tmq, test_user):
     """Test that sync push requires authentication"""
     push_request = {
@@ -561,6 +936,76 @@ def test_sync_push_requires_auth(client, test_project_tmq, test_front_tmq, test_
     response = client.post("/api/v1/sync/push", json=push_request)
     
     assert response.status_code == 401  # Unauthorized
+
+
+def test_sync_push_invalid_when_catalog_version_does_not_match_project(
+    client,
+    auth_headers,
+    db,
+    test_project_tmq,
+    test_front_tmq,
+    test_catalog_tmq,
+    test_user,
+    test_user_scope_tmq,
+):
+    tap_project = Project(
+        id="TAP",
+        name="Test Project TAP",
+        status=ProjectStatus.ACTIVE,
+        start_date=datetime.now().date(),
+    )
+    db.add(tap_project)
+    db.commit()
+
+    body = _push_request(
+        test_project_tmq.id,
+        _build_activity_payload(
+            project_id=test_project_tmq.id,
+            front_id=str(test_front_tmq.id),
+            created_by_user_id=str(test_user.id),
+            catalog_version_id=str(test_catalog_tmq.id),
+            pk_start=91000,
+            pk_end=91500,
+            title="Invalid catalog project binding",
+        ),
+    )
+    body["activities"][0]["project_id"] = "TAP"
+
+    response = client.post("/api/v1/sync/push", json=body, headers=auth_headers)
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "INVALID"
+    assert result["error_code"] == "PROJECT_ID_MISMATCH"
+
+
+def test_sync_push_invalid_when_activity_type_not_in_catalog(
+    client,
+    auth_headers,
+    test_project_tmq,
+    test_front_tmq,
+    test_catalog_tmq,
+    test_user,
+    test_user_scope_tmq,
+):
+    body = _push_request(
+        test_project_tmq.id,
+        _build_activity_payload(
+            project_id=test_project_tmq.id,
+            front_id=str(test_front_tmq.id),
+            created_by_user_id=str(test_user.id),
+            catalog_version_id=str(test_catalog_tmq.id),
+            pk_start=92000,
+            pk_end=92500,
+            title="Invalid activity type",
+        ),
+    )
+    body["activities"][0]["activity_type_code"] = "NOT_IN_CATALOG"
+
+    response = client.post("/api/v1/sync/push", json=body, headers=auth_headers)
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "INVALID"
+    assert result["error_code"] == "ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION"
 
 
 def test_sync_pull_project_access_denied(client, auth_headers, test_project_tmq):

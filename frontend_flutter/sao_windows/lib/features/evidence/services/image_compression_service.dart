@@ -14,8 +14,19 @@ class CompressionStats {
 
   String get originalSizeFormatted => ImageCompressionService.formatFileSize(originalSizeBytes);
   String get compressedSizeFormatted => ImageCompressionService.formatFileSize(compressedSizeBytes);
-  double get compressionRatio => 1.0 - (compressedSizeBytes / originalSizeBytes);
-  double get percentReduction => compressionRatio * 100;
+  double get compressionRatio {
+    if (originalSizeBytes <= 0) {
+      return 0.0;
+    }
+    return (originalSizeBytes - compressedSizeBytes) / originalSizeBytes;
+  }
+
+  double get percentReduction {
+    if (originalSizeBytes <= 0) {
+      return 0.0;
+    }
+    return ((originalSizeBytes - compressedSizeBytes) * 100) / originalSizeBytes;
+  }
 
   CompressionStats({
     required this.originalSizeBytes,

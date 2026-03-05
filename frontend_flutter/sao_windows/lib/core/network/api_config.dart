@@ -1,6 +1,9 @@
 /// API networking configuration
 /// Defines base URLs, timeouts, and other HTTP settings
 class ApiConfig {
+  static const String defaultBaseUrl =
+      'https://sao-api-fjzra25vya-uc.a.run.app/api/v1';
+
   // Singleton instance
   static final ApiConfig _instance = ApiConfig._internal();
   factory ApiConfig() => _instance;
@@ -16,7 +19,7 @@ class ApiConfig {
   /// - Production: 'https://sao-api-fjzra25vya-uc.a.run.app/api/v1'
   String get baseUrl {
     // TODO: Use flavor-based configuration for prod/dev/staging
-    return _baseUrl ?? 'https://sao-api-fjzra25vya-uc.a.run.app/api/v1';
+    return _baseUrl ?? defaultBaseUrl;
   }
 
   String? _baseUrl;
@@ -24,6 +27,11 @@ class ApiConfig {
   /// Override base URL (useful for testing or environment switching)
   void setBaseUrl(String url) {
     _baseUrl = url;
+  }
+
+  /// Clears runtime override and restores the default URL.
+  void resetBaseUrl() {
+    _baseUrl = null;
   }
 
   /// Connection timeout duration

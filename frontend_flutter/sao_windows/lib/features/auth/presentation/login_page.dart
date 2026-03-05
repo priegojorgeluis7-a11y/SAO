@@ -15,6 +15,109 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _passwordController = TextEditingController(text: 'admin123');
   bool _obscurePassword = true;
 
+  Future<void> _showCreatePinDialog() async {
+    final pinController = TextEditingController();
+    final confirmController = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Configurar PIN offline'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('Define un PIN de 4 a 6 dígitos para iniciar sesión sin conexión.'),
+              const SizedBox(height: 12),
+              TextField(
+                controller: pinController,
+                keyboardType: TextInputType.number,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'PIN'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: confirmController,
+                keyboardType: TextInputType.number,
+                obscureText: true,
+                decoration: const InputDecoration(labelText: 'Confirmar PIN'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Omitir'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final pin = pinController.text.trim();
+                final confirm = confirmController.text.trim();
+                if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('El PIN debe tener 4 a 6 dígitos numéricos')),
+                  );
+                  return;
+                }
+                if (pin != confirm) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('El PIN y su confirmación no coinciden')),
+                  );
+                  return;
+                }
+
+                final ok = await ref.read(authProvider.notifier).setupOfflinePin(pin);
+                if (ok && context.mounted) {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('PIN offline configurado correctamente')),
+                  );
+                }
+              },
+              child: const Text('Guardar PIN'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  Future<void> _handlePinLogin() async {
+    final pinController = TextEditingController();
+    await showDialog<void>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Entrar con PIN'),
+          content: TextField(
+            controller: pinController,
+            keyboardType: TextInputType.number,
+            obscureText: true,
+            decoration: const InputDecoration(labelText: 'PIN offline'),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () async {
+                final ok = await ref.read(authProvider.notifier).loginWithPin(
+                      pinController.text.trim(),
+                    );
+                if (ok && context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+              child: const Text('Ingresar'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   void dispose() {
     _emailController.dispose();
@@ -31,7 +134,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         );
 
     if (success && mounted) {
-      // La navegación se maneja automáticamente por el router
+      final hasPin = await ref.read(authProvider.notifier).hasOfflinePinConfigured();
+      if (!hasPin && mounted) {
+        await _showCreatePinDialog();
+      }
     }
   }
 
@@ -199,6 +305,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                                   ),
                                 ),
                         ),
+                        if (authState.isOffline) ...[
+                          const SizedBox(height: 12),
+                          OutlinedButton.icon(
+                            onPressed: authState.isLoading ? null : _handlePinLogin,
+                            icon: const Icon(Icons.pin),
+                            label: const Text('Entrar con PIN (offline)'),
+                          ),
+                        ],
                         const SizedBox(height: 16),
 
                         // Info de credenciales (solo desarrollo)

@@ -1,6 +1,7 @@
 // lib/features/activities/wizard/widgets/risk_selector.dart
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../core/theme/app_typography.dart';
 import '../wizard_controller.dart';
 
 class RiskSelector extends StatelessWidget {
@@ -66,8 +67,7 @@ class RiskSelector extends StatelessWidget {
             child: Text(
               label,
               textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: 12,
+              style: AppTypography.caption.copyWith(
                 fontWeight: FontWeight.w900,
                 color: selected ? color : AppColors.gray700,
               ),

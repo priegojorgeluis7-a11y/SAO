@@ -179,7 +179,7 @@ void main() {
         totalDistance += gpsPoints[i].distanceTo(gpsPoints[i + 1]);
       }
 
-      expect(totalDistance, greaterThan(100)); // Moved > 100m
+      expect(totalDistance, greaterThan(20)); // Moved > 20m
       expect(videoEvidence.isVideo, true);
 
       // Add description

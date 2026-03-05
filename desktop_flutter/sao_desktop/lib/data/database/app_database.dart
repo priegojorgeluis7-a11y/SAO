@@ -93,60 +93,6 @@ class AppDatabase extends _$AppDatabase {
       ));
     }
 
-    final subcategoriesByCode = <String, List<String>>{
-      'CAM': [
-        'Verificación de DDV',
-        'Marcaje de afectaciones',
-        'Revisión de accesos / BDT',
-        'Seguimiento técnico',
-      ],
-      'REU': [
-        'Técnica / Interinstitucional',
-        'Ejidal / Comisariado',
-        'Municipal / Estatal / Protección Civil',
-        'Seguimiento / Evaluación',
-        'Informativa',
-        'Mesa Técnica',
-      ],
-      'ASP': [
-        '1ª Asamblea Protocolizada (1AP)',
-        '1ª Asamblea Protocolizada Permanente',
-        '2ª Asamblea Protocolizada (2AP)',
-        '2ª Asamblea Protocolizada Permanente',
-        'Asamblea Informativa',
-      ],
-      'CIN': [
-        'Etapa Informativa',
-        'Etapa de Construcción de Acuerdos',
-        'Etapa de Actos y Acuerdos',
-      ],
-      'SOC': [
-        'Presentación Comunitaria',
-        'Difusión de Información',
-        'Atención a Inquietudes',
-      ],
-      'AIN': [
-        'Técnico',
-        'Social',
-        'Documental',
-      ],
-    };
-
-    final purposeBySubcategory = <String, String>{
-      'Verificación de DDV': 'Verificación de afectaciones',
-      'Marcaje de afectaciones': 'Marcaje o actualización de DDV / trazo',
-      'Revisión de accesos / BDT': 'Análisis de accesos y pasos alternos',
-      'Técnica / Interinstitucional': 'Coordinación institucional',
-      'Ejidal / Comisariado': 'Atención a inconformidades o conflictos',
-      'Informativa': 'Presentación general del proyecto',
-      '1ª Asamblea Protocolizada (1AP)': 'Entrega de documentación / Convocatorias',
-      '2ª Asamblea Protocolizada (2AP)': 'Obtención de anuencia o firma de COP',
-      'Etapa Informativa': 'Presentación general del proyecto',
-      'Etapa de Construcción de Acuerdos': 'Atención a inconformidades o conflictos',
-      'Presentación Comunitaria': 'Presentación general del proyecto',
-      'Atención a Inquietudes': 'Atención a inconformidades o conflictos',
-      'Documental': 'Seguimiento administrativo / documental',
-    };
 
     // Fronts
     final fronts = ['Frente A', 'Frente B', 'Frente C', 'Frente D'];
@@ -190,52 +136,6 @@ class AppDatabase extends _$AppDatabase {
       ));
     }
 
-    // Activities (mocks basados en catálogo real)
-    final now = DateTime.now();
-    for (var i = 0; i < 10; i++) {
-      final actId = 'act-${now.millisecondsSinceEpoch}-$i';
-      final actType = actTypes[i % actTypes.length];
-      final activityCode = actType.$3;
-      final activityName = actType.$2;
-      final subcategories = subcategoriesByCode[activityCode] ?? const <String>[];
-      final subcategory = subcategories.isEmpty
-          ? ''
-          : subcategories[i % subcategories.length];
-      final purpose = purposeBySubcategory[subcategory] ?? 'Seguimiento administrativo / documental';
-      final title = subcategory.isEmpty
-          ? '$activityCode $activityName'
-          : '$activityCode $activityName – $subcategory';
-
-      await into(activities).insert(ActivitiesCompanion.insert(
-        id: actId,
-        projectId: 'proj-tmq-001',
-        activityTypeId: actType.$1,
-        assignedTo: 'usr-ing-001',
-        frontId: Value('front-00${(i % 4) + 1}'),
-        municipalityId: Value('muni-00${(i % 4) + 1}'),
-        title: title,
-        description: Value(purpose),
-        status: 'PENDING_REVIEW',
-        executedAt: Value(now.subtract(Duration(days: i))),
-        createdAt: now.subtract(Duration(days: i)),
-        latitude: Value(19.4326 + (i * 0.1)),
-        longitude: Value(-99.1332 + (i * 0.1)),
-      ));
-
-      // 2-4 evidencias por actividad
-      final numEvidences = 2 + (i % 3);
-      for (var j = 0; j < numEvidences; j++) {
-        await into(evidences).insert(EvidencesCompanion.insert(
-          id: 'evid-$actId-$j',
-          activityId: actId,
-          filePath: 'assets/sample_images/photo_${i}_$j.jpg',
-          fileType: 'IMAGE',
-          caption: Value('Evidencia fotográfica ${j + 1}'),
-          capturedAt: now.subtract(Duration(days: i, hours: j)),
-          latitude: Value(19.4326 + (i * 0.1)),
-          longitude: Value(-99.1332 + (i * 0.1)),
-        ));
-      }
-    }
+    // No se precargan actividades/evidencias para evitar datos de demostración.
   }
 }

@@ -1,20 +1,34 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/auth/token_storage.dart';
+import '../../../core/auth/pin_storage.dart';
+import '../../../core/storage/kv_store.dart';
 import '../data/auth_repository.dart';
 import '../application/auth_controller.dart';
+import 'signup_controller.dart';
 import '../data/models/user.dart';
 
+/// Provider for PinStorage
+final pinStorageProvider = Provider<PinStorage>((ref) {
+  final secureStorage = GetIt.I<FlutterSecureStorage>();
+  return PinStorage(secureStorage);
+});
+
 /// Provider for AuthRepository
-/// Uses ApiClient and TokenStorage from GetIt
+/// Uses ApiClient, TokenStorage and PinStorage from GetIt/providers
 final authRepositoryProvider = Provider<AuthRepository>((ref) {
   final apiClient = GetIt.I<ApiClient>();
   final tokenStorage = GetIt.I<TokenStorage>();
+  final kvStore = GetIt.I<KvStore>();
+  final pinStorage = ref.watch(pinStorageProvider);
 
   return AuthRepository(
     apiClient: apiClient,
     tokenStorage: tokenStorage,
+    kvStore: kvStore,
+    pinStorage: pinStorage,
   );
 });
 
@@ -23,7 +37,20 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
 final authControllerProvider =
     StateNotifierProvider<AuthController, AuthState>((ref) {
   final repository = ref.watch(authRepositoryProvider);
-  return AuthController(repository);
+  final pinStorage = ref.watch(pinStorageProvider);
+  return AuthController(repository, pinStorage: pinStorage);
+});
+
+final authStateProvider = Provider<AsyncValue<AuthState>>((ref) {
+  final authState = ref.watch(authControllerProvider);
+  if (authState.isLoading) {
+    return const AsyncValue<AuthState>.loading();
+  }
+  return AsyncValue<AuthState>.data(authState);
+});
+
+final sessionProvider = Provider<AuthState>((ref) {
+  return ref.watch(authControllerProvider);
 });
 
 /// Convenience provider - check if user is authenticated
@@ -48,4 +75,10 @@ final authLoadingProvider = Provider<bool>((ref) {
 final authErrorProvider = Provider<String?>((ref) {
   final authState = ref.watch(authControllerProvider);
   return authState.error;
+});
+
+final signupControllerProvider =
+    StateNotifierProvider<SignupController, SignupState>((ref) {
+  final repository = ref.watch(authRepositoryProvider);
+  return SignupController(repository);
 });

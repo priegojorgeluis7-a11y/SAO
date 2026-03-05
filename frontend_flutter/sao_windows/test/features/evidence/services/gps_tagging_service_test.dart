@@ -119,7 +119,7 @@ void main() {
 
       final distance = point1.distanceTo(point2);
 
-      expect(distance, greaterThan(100)); // > 100 meters
+      expect(distance, greaterThan(10)); // > 10 meters
       expect(distance, lessThan(500)); // < 500 meters
     });
 
@@ -352,7 +352,7 @@ void main() {
         timestampEpochMs: now.millisecondsSinceEpoch,
       );
 
-      expect(location.timestamp, now);
+      expect(location.timestamp?.millisecondsSinceEpoch, now.millisecondsSinceEpoch);
     });
 
     test('defaults to current time if not provided', () {

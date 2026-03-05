@@ -210,6 +210,46 @@ def test_list_events_since_version(client, auth_headers, test_project_tmq, test_
     assert resp_none.json()["total"] == 0
 
 
+def test_list_events_since_version_with_pagination(client, auth_headers, test_project_tmq, test_user, test_user_scope_tmq):
+    """Events list paginates correctly while preserving since_version window."""
+    created_uuids: list[str] = []
+    for i in range(5):
+        payload = _event_payload(
+            project_id=test_project_tmq.id,
+            reported_by_user_id=str(test_user.id),
+            title=f"Event {i}",
+        )
+        resp = client.post("/api/v1/events", json=payload, headers=auth_headers)
+        assert resp.status_code == 201
+        created_uuids.append(resp.json()["uuid"])
+
+    page1 = client.get(
+        f"/api/v1/events?project_id={test_project_tmq.id}&since_version=0&page=1&page_size=3",
+        headers=auth_headers,
+    )
+    assert page1.status_code == 200
+    p1 = page1.json()
+    assert p1["total"] == 5
+    assert len(p1["items"]) == 3
+    assert p1["has_next"] is True
+
+    page2 = client.get(
+        f"/api/v1/events?project_id={test_project_tmq.id}&since_version=0&page=2&page_size=3",
+        headers=auth_headers,
+    )
+    assert page2.status_code == 200
+    p2 = page2.json()
+    assert p2["total"] == 5
+    assert len(p2["items"]) == 2
+    assert p2["has_next"] is False
+
+    pulled = {
+        *(item["uuid"] for item in p1["items"]),
+        *(item["uuid"] for item in p2["items"]),
+    }
+    assert pulled == set(created_uuids)
+
+
 # ─────────────────────────────────────────────────────────────────
 # Tests — Get
 # ─────────────────────────────────────────────────────────────────

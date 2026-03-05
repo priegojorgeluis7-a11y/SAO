@@ -199,7 +199,7 @@ class ValidationPageSimple extends ConsumerWidget {
                             children: [
                               Text('ACT-001-2024', style: SaoTypography.caption),
                               const SizedBox(height: SaoSpacing.xs),
-                              Text('Actividad de ejemplo', style: SaoTypography.cardTitle.copyWith(fontSize: 16)),
+                              Text('Actividad de ejemplo', style: SaoTypography.cardTitle),
                             ],
                           ),
                         ),

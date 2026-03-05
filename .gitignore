@@ -30,3 +30,7 @@ venv/
 **/*.log
 *.tmp
 *.temp
+
+# Local artifacts
+/test.db
+/tools/cloud-sql-proxy.exe

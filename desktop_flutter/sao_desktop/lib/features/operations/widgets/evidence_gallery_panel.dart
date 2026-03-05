@@ -51,9 +51,9 @@ class EvidenceGalleryPanel extends StatelessWidget {
 
     final evidence = activity!.evidences[selectedIndex];
     
-    // Calculate GPS validation status (mock)
+    // Calculate GPS validation status
     final gpsStatus = _calculateGpsStatus(activity!);
-    final distance = _calculateDistance(activity!, 150.0); // Mock: 150m
+    final distance = _calculateDistance(activity!, 150.0);
 
     return Container(
       decoration: BoxDecoration(
@@ -178,8 +178,8 @@ class EvidenceGalleryPanel extends StatelessWidget {
 
   /// Calcula el estado de validación GPS vs PK
   GpsValidationStatus _calculateGpsStatus(ActivityWithDetails activity) {
-    // Mock: Simular diferentes estados según la distancia
-    // En producción, calcular distancia real usando coordenadas
+    // Simular diferentes estados según la distancia
+    // Pendiente: calcular distancia real usando coordenadas
     final distance = _calculateDistance(activity, 0);
     
     if (distance < 50) {
@@ -193,8 +193,7 @@ class EvidenceGalleryPanel extends StatelessWidget {
     }
   }
 
-  /// Calcula distancia aproximada entre PIN y GPS (mock)
-  double _calculateDistance(ActivityWithDetails activity, double mockDistance) {
+  /// Calcula distancia aproximada entre PIN y GPS
+  double _calculateDistance(ActivityWithDetails activity, double fallbackDistance) {
     // TODO: Implementar cálculo real usando Haversine formula
-    // Por ahora retornar valor mock para demostración
-    return mockDistance;
+    return fallbackDistance;

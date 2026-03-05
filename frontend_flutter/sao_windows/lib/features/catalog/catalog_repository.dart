@@ -2,12 +2,30 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:get_it/get_it.dart';
 import 'package:path_provider/path_provider.dart';
+
+import '../../core/network/api_client.dart';
+import 'models/catalog_bundle_models.dart';
+
+class ProjectFrontOption {
+  final String id;
+  final String code;
+  final String name;
+
+  const ProjectFrontOption({
+    required this.id,
+    required this.code,
+    required this.name,
+  });
+}
 
 /// Catálogos DATA-DRIVEN.
 /// Carga desde JSON base (assets/catalogos.json) + items personalizados (archivo local).
 class CatalogRepository {
   CatalogRepository();
+
+  String _projectId = 'TMQ';
 
   bool _ready = false;
   bool get isReady => _ready;
@@ -21,24 +39,264 @@ class CatalogRepository {
   // Items candidatos pendientes de aprobación del administrador
   List<CandidateItem> _pendingCandidates = [];
 
-  /// Carga desde assets si existe (assets/catalogos.json).
+  /// Carga catálogo efectivo desde bundle (API) con fallback local.
   /// También carga items personalizados desde archivo local.
-  Future<void> init() async {
-    if (_ready) return;
+  Future<void> init({String projectId = 'TMQ'}) async {
+    final normalized = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
+    if (_ready && _projectId == normalized) return;
 
-    try {
-      final raw = await rootBundle.loadString('assets/catalogos.json');
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      _data = CatalogData.fromJson(map);
-    } catch (_) {
-      // No local asset — data stays empty until catalog is synced from API
-    }
+    _projectId = normalized;
+
+    await loadProjectBundle(_projectId);
 
     // Cargar items personalizados
     await _loadCustomData();
     await _loadPendingCandidates();
 
     _ready = true;
+  }
+
+  Future<void> loadProjectBundle(String projectId) async {
+    _projectId = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
+
+    final cachedBundle = await _readCachedBundle(_projectId);
+    if (cachedBundle != null) {
+      _data = CatalogData.fromJson(cachedBundle);
+      _ready = true;
+
+      final localHash = _extractBundleHash(cachedBundle);
+      final updateAvailable = await _checkUpdatesWithFallback(
+        projectId: _projectId,
+        localHash: localHash,
+      );
+
+      if (updateAvailable == false) {
+        return;
+      }
+
+      if (updateAvailable == null) {
+        // Sin red o endpoint no disponible: conservar cache local.
+        return;
+      }
+    }
+
+    // 1. Try /catalog/bundle — canonical schema for wizard/admin.
+    try {
+      final apiClient = GetIt.instance<ApiClient>();
+      final response = await apiClient.get<dynamic>(
+        '/catalog/bundle',
+        queryParameters: {'project_id': _projectId},
+      );
+      final map = Map<String, dynamic>.from(response.data as Map);
+      await _saveCachedBundle(_projectId, map);
+      _data = CatalogData.fromJson(map);
+      _ready = true;
+      return;
+    } catch (_) {}
+
+    // 2. Try /api/v1/catalog/bundle for environments without API path prefixing.
+    try {
+      final apiClient = GetIt.instance<ApiClient>();
+      final response = await apiClient.get<dynamic>(
+        '/api/v1/catalog/bundle',
+        queryParameters: {'project_id': _projectId},
+      );
+      final map = Map<String, dynamic>.from(response.data as Map);
+      await _saveCachedBundle(_projectId, map);
+      _data = CatalogData.fromJson(map);
+      _ready = true;
+      return;
+    } catch (_) {}
+
+    // 3. Try /catalog/effective — fallback legacy endpoint.
+    try {
+      final apiClient = GetIt.instance<ApiClient>();
+      final response = await apiClient.get<dynamic>(
+        '/catalog/effective',
+        queryParameters: {'project_id': _projectId},
+      );
+      final map = Map<String, dynamic>.from(response.data as Map);
+      await _saveCachedBundle(_projectId, map);
+      _data = CatalogData.fromJson(map);
+      _ready = true;
+      return;
+    } catch (_) {}
+
+    // 4. Keep cached bundle if available and network fetch failed.
+    if (cachedBundle != null) {
+      _data = CatalogData.fromJson(cachedBundle);
+      _ready = true;
+      return;
+    }
+
+    // 5. Fallback to bundled asset JSON (offline / first launch).
+    try {
+      final raw = await rootBundle.loadString('assets/base_seed_catalog.bundle.json');
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      _data = CatalogData.fromJson(map);
+    } catch (_) {
+      _data = CatalogData.fromJson({});
+    }
+
+    _ready = true;
+  }
+
+  Future<Map<String, dynamic>?> _readCachedBundle(String projectId) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/catalog_bundle_${projectId.toUpperCase()}.json');
+      if (!await file.exists()) return null;
+      final raw = await file.readAsString();
+      return jsonDecode(raw) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _saveCachedBundle(String projectId, Map<String, dynamic> bundle) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/catalog_bundle_${projectId.toUpperCase()}.json');
+      await file.writeAsString(jsonEncode(bundle));
+    } catch (_) {
+      // Silently fail
+    }
+  }
+
+  Future<bool?> _checkUpdatesWithFallback({
+    required String projectId,
+    String? localHash,
+  }) async {
+    final query = <String, dynamic>{'project_id': projectId};
+    if (localHash != null && localHash.isNotEmpty) {
+      query['current_hash'] = localHash;
+    }
+
+    try {
+      final apiClient = GetIt.instance<ApiClient>();
+      final response = await apiClient.get<dynamic>(
+        '/catalog/check-updates',
+        queryParameters: query,
+      );
+      final map = Map<String, dynamic>.from(response.data as Map);
+      return map['update_available'] == true;
+    } catch (_) {}
+
+    try {
+      final apiClient = GetIt.instance<ApiClient>();
+      final response = await apiClient.get<dynamic>(
+        '/api/v1/catalog/check-updates',
+        queryParameters: query,
+      );
+      final map = Map<String, dynamic>.from(response.data as Map);
+      return map['update_available'] == true;
+    } catch (_) {}
+
+    return null;
+  }
+
+  Future<List<ProjectFrontOption>> fetchFrontsForProject(String projectId) async {
+    final normalized = projectId.trim().toUpperCase();
+    if (normalized.isEmpty) return const [];
+
+    final apiClient = GetIt.instance<ApiClient>();
+    final endpoints = ['/fronts', '/api/v1/fronts'];
+
+    for (final endpoint in endpoints) {
+      try {
+        final response = await apiClient.get<dynamic>(
+          endpoint,
+          queryParameters: {'project_id': normalized},
+        );
+        final rows = (response.data as List<dynamic>)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+        return rows
+            .map(
+              (row) => ProjectFrontOption(
+                id: (row['id'] ?? '').toString(),
+                code: (row['code'] ?? '').toString(),
+                name: (row['name'] ?? '').toString(),
+              ),
+            )
+            .where((row) => row.id.trim().isNotEmpty && row.name.trim().isNotEmpty)
+            .toList();
+      } catch (_) {}
+    }
+
+    return const [];
+  }
+
+  Future<List<String>> fetchStatesForProject(String projectId) async {
+    final normalized = projectId.trim().toUpperCase();
+    if (normalized.isEmpty) return const [];
+
+    final apiClient = GetIt.instance<ApiClient>();
+    final endpoints = ['/locations/states', '/api/v1/locations/states'];
+
+    for (final endpoint in endpoints) {
+      try {
+        final response = await apiClient.get<dynamic>(
+          endpoint,
+          queryParameters: {'project_id': normalized},
+        );
+        final rows = (response.data as List<dynamic>)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+        return rows
+            .map((row) => (row['estado'] ?? '').toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
+      } catch (_) {}
+    }
+
+    return const [];
+  }
+
+  Future<List<String>> fetchMunicipiosForProject(String projectId, String estado) async {
+    final normalizedProject = projectId.trim().toUpperCase();
+    final normalizedState = estado.trim();
+    if (normalizedProject.isEmpty || normalizedState.isEmpty) return const [];
+
+    final apiClient = GetIt.instance<ApiClient>();
+    final endpoints = ['/locations', '/api/v1/locations'];
+
+    for (final endpoint in endpoints) {
+      try {
+        final response = await apiClient.get<dynamic>(
+          endpoint,
+          queryParameters: {
+            'project_id': normalizedProject,
+            'estado': normalizedState,
+          },
+        );
+        final rows = (response.data as List<dynamic>)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+        return rows
+            .map((row) => (row['municipio'] ?? '').toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+      } catch (_) {}
+    }
+
+    return const [];
+  }
+
+  String? _extractBundleHash(Map<String, dynamic> bundle) {
+    final direct = bundle['hash']?.toString().trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+
+    final meta = (bundle['meta'] as Map?)?.cast<String, dynamic>();
+    if (meta == null) return null;
+
+    final candidate =
+        meta['hash'] ?? meta['catalog_hash'] ?? meta['bundle_hash'] ?? meta['checksum'];
+    final normalized = candidate?.toString().trim();
+    if (normalized == null || normalized.isEmpty) return null;
+    return normalized;
   }
 
   /// Carga items personalizados desde archivo local
@@ -146,6 +404,28 @@ class CatalogRepository {
     return merged.values.toList();
   }
 
+  List<CatItem> purposesForCascade({
+    required String activityId,
+    String? subcategoryId,
+  }) {
+    final normalizedActivityId = activityId.trim();
+    final normalizedSubcategoryId = subcategoryId?.trim();
+    if (normalizedActivityId.isEmpty) return const [];
+
+    final bySpecificSubcategory = (normalizedSubcategoryId == null || normalizedSubcategoryId.isEmpty)
+        ? const <CatItem>[]
+        : purposesFor(normalizedSubcategoryId, activityId: normalizedActivityId);
+
+    final globals = _lookupMapList(_data.propositosBySubcat, '$normalizedActivityId|');
+    final customGlobals = _lookupMapList(_customData.customPurposes, '$normalizedActivityId|');
+
+    final merged = <String, CatItem>{
+      for (final item in [...bySpecificSubcategory, ...globals, ...customGlobals]) item.id: item,
+    };
+
+    return merged.values.toList();
+  }
+
   List<CatItem> temasSugeridosFor(String activityId) {
     final normalizedActivityId = activityId.trim();
     final ids = _lookupMapList(
@@ -155,6 +435,28 @@ class CatalogRepository {
     final allTopics = temas;
     final map = {for (final t in allTopics) t.id: t};
     return [for (final id in ids) if (map[id] != null) map[id]!];
+  }
+
+  String topicPolicyFor(String activityId) {
+    final normalizedActivityId = activityId.trim();
+    final rules = _data.rules;
+    final topicPolicy = (rules['topic_policy'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+    final byActivity = (topicPolicy['by_activity'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+    final mode = byActivity[normalizedActivityId] ?? topicPolicy['default'] ?? 'any';
+    return mode.toString().trim().isEmpty ? 'any' : mode.toString();
+  }
+
+  bool shouldAllowAllTopics(String activityId) {
+    return topicPolicyFor(activityId) != 'suggested_only';
+  }
+
+  List<CatItem> topicsForActivity(String activityId) {
+    final normalizedActivityId = activityId.trim();
+    if (normalizedActivityId.isEmpty) return const [];
+    if (!shouldAllowAllTopics(normalizedActivityId)) {
+      return temasSugeridosFor(normalizedActivityId);
+    }
+    return temas;
   }
 
   List<TValue> _lookupMapList<TValue>(Map<String, List<TValue>> source, String key) {
@@ -342,6 +644,7 @@ class CatalogData {
   final List<CatItem> resultados;
 
   final List<String> matrizRiesgo;
+  final Map<String, dynamic> rules;
 
   CatalogData({
     required this.version,
@@ -354,22 +657,55 @@ class CatalogData {
     required this.asistentesLocales,
     required this.resultados,
     required this.matrizRiesgo,
+    required this.rules,
   });
 
   factory CatalogData.fromJson(Map<String, dynamic> json) {
-    List<CatItem> parseItems(List<dynamic> arr, {IconData fallback = Icons.list_alt_rounded}) {
+    if ((json['schema'] ?? '').toString() == 'sao.catalog.bundle.v1' || json['effective'] is Map<String, dynamic>) {
+      return CatalogData.fromBundleJson(json);
+    }
+
+    bool parseRequiresGeo(Map<String, dynamic> row) {
+      final value = row['requires_geo'] ?? row['requires_gps'];
+      if (value is bool) return value;
+      final normalized = value?.toString().toLowerCase().trim();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+
+    List<String> parseWorkflowChecklist(Map<String, dynamic> row) {
+      final raw = row['workflow_checklist'];
+      if (raw is List) {
+        return raw
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
+      }
+      return const <String>[];
+    }
+
+    List<CatItem> parseItems(
+      List<dynamic> arr, {
+      IconData fallback = Icons.list_alt_rounded,
+      bool includeRequiresGeo = false,
+    }) {
       return arr.map((e) {
         final m = e as Map<String, dynamic>;
         return CatItem(
           id: (m['id'] ?? m['activity_id'] ?? m['subcategory_id'] ?? m['topic_id'] ?? '').toString(),
           label: (m['name_effective'] ?? m['name'] ?? m['nombre'] ?? m['label'] ?? '').toString(),
           icon: fallback,
+          requiresGeo: includeRequiresGeo ? parseRequiresGeo(m) : false,
+          workflowChecklist: includeRequiresGeo ? parseWorkflowChecklist(m) : const <String>[],
         );
       }).toList();
     }
 
     // Activities
-    final actividades = parseItems((json['activities'] ?? <dynamic>[]) as List<dynamic>, fallback: Icons.category_rounded);
+    final actividades = parseItems(
+      (json['activities'] ?? <dynamic>[]) as List<dynamic>,
+      fallback: Icons.category_rounded,
+      includeRequiresGeo: true,
+    );
 
     // Subcategorias (por actividad)
     final Map<String, List<CatItem>> subcatsByAct = {};
@@ -512,6 +848,164 @@ class CatalogData {
       resultados: resultados,
       matrizRiesgo: (json['matrizRiesgo'] as List?)?.map((e) => e.toString()).toList() ??
           const ['Bajo', 'Medio', 'Alto', 'Prioritario'],
+      rules: const <String, dynamic>{},
+    );
+  }
+
+  factory CatalogData.fromBundleJson(Map<String, dynamic> json) {
+    final bundle = CatalogBundle.fromJson(json);
+    final entities = bundle.effective.entities;
+
+    bool parseRequiresGeo(Map<String, dynamic> row) {
+      final value = row['requires_geo'] ?? row['requires_gps'];
+      if (value is bool) return value;
+      final normalized = value?.toString().toLowerCase().trim();
+      return normalized == 'true' || normalized == '1' || normalized == 'yes';
+    }
+
+    List<String> parseWorkflowChecklist(Map<String, dynamic> row) {
+      final raw = row['workflow_checklist'];
+      if (raw is List) {
+        return raw
+            .map((item) => item.toString().trim())
+            .where((item) => item.isNotEmpty)
+            .toList();
+      }
+      return const <String>[];
+    }
+
+    List<CatItem> toCatItems(
+      List<Map<String, dynamic>> rows, {
+      required IconData fallback,
+      bool includeRequiresGeo = false,
+    }) {
+      return rows
+          .where((row) => (row['active'] as bool?) ?? true)
+          .map((row) {
+            final name = (row['name_effective'] ?? row['name'] ?? row['label'] ?? '').toString();
+            final id = (row['id'] ?? '').toString();
+            return CatItem(
+              id: id,
+              label: name,
+              icon: fallback,
+              requiresGeo: includeRequiresGeo ? parseRequiresGeo(row) : false,
+              workflowChecklist: includeRequiresGeo ? parseWorkflowChecklist(row) : const <String>[],
+            );
+          })
+          .where((item) => item.id.isNotEmpty && item.label.isNotEmpty)
+          .toList();
+    }
+
+    final actividades = toCatItems(
+      entities.activities,
+      fallback: Icons.category_rounded,
+      includeRequiresGeo: true,
+    );
+
+    final subcatsByAct = <String, List<CatItem>>{};
+    for (final row in entities.subcategories.where((row) => (row['active'] as bool?) ?? true)) {
+      final activityId = (row['activity_id'] ?? '').toString();
+      final subcatId = (row['id'] ?? '').toString();
+      final name = (row['name_effective'] ?? row['name'] ?? row['label'] ?? '').toString();
+      if (activityId.isEmpty || subcatId.isEmpty || name.isEmpty) continue;
+
+      final item = CatItem(
+        id: subcatId,
+        label: name,
+        icon: Icons.subdirectory_arrow_right_rounded,
+      );
+      subcatsByAct.putIfAbsent(activityId, () => []);
+      if (!subcatsByAct[activityId]!.any((x) => x.id == item.id)) {
+        subcatsByAct[activityId]!.add(item);
+      }
+    }
+
+    final purposesBySub = <String, List<CatItem>>{};
+    for (final row in entities.purposes.where((row) => (row['active'] as bool?) ?? true)) {
+      final purposeId = (row['id'] ?? '').toString();
+      final activityId = (row['activity_id'] ?? '').toString();
+      final subcategoryRaw = row.containsKey('subcategory_id') ? row['subcategory_id'] : null;
+      final subcategoryId = subcategoryRaw?.toString();
+      final name = (row['name_effective'] ?? row['name'] ?? row['label'] ?? '').toString();
+      if (purposeId.isEmpty || name.isEmpty) continue;
+
+      final purposeItem = CatItem(
+        id: purposeId,
+        label: name,
+        icon: Icons.flag_rounded,
+      );
+
+      if (subcategoryId != null && subcategoryId.isNotEmpty) {
+        purposesBySub.putIfAbsent(subcategoryId, () => []);
+        if (!purposesBySub[subcategoryId]!.any((x) => x.id == purposeItem.id)) {
+          purposesBySub[subcategoryId]!.add(purposeItem);
+        }
+      }
+
+      if (activityId.isNotEmpty) {
+        final composite = '$activityId|${subcategoryId ?? ''}';
+        purposesBySub.putIfAbsent(composite, () => []);
+        if (!purposesBySub[composite]!.any((x) => x.id == purposeItem.id)) {
+          purposesBySub[composite]!.add(purposeItem);
+        }
+
+        if (subcategoryId == null || subcategoryId.isEmpty) {
+          final activityOnly = '$activityId|';
+          purposesBySub.putIfAbsent(activityOnly, () => []);
+          if (!purposesBySub[activityOnly]!.any((x) => x.id == purposeItem.id)) {
+            purposesBySub[activityOnly]!.add(purposeItem);
+          }
+        }
+      }
+    }
+
+    final temas = toCatItems(
+      entities.topics,
+      fallback: Icons.local_offer_rounded,
+    );
+
+    final sugeridos = <String, List<String>>{};
+    for (final row in bundle.effective.relations.activityToTopicsSuggested
+        .where((row) => (row['active'] as bool?) ?? true)) {
+      final activityId = (row['activity_id'] ?? '').toString();
+      final topicId = (row['topic_id'] ?? '').toString();
+      if (activityId.isEmpty || topicId.isEmpty) continue;
+      sugeridos.putIfAbsent(activityId, () => []);
+      if (!sugeridos[activityId]!.contains(topicId)) {
+        sugeridos[activityId]!.add(topicId);
+      }
+    }
+
+    final resultados = toCatItems(
+      entities.results,
+      fallback: Icons.check_circle_rounded,
+    );
+
+    final assistants = entities.assistants.where((row) => (row['active'] as bool?) ?? true).toList();
+    final assistantsInstRows = assistants.where((row) {
+      final type = (row['type'] ?? '').toString().toLowerCase();
+      return type.contains('dependencia') || type.contains('instit');
+    }).toList();
+    final assistantsLocalRows = assistants.where((row) {
+      final type = (row['type'] ?? '').toString().toLowerCase();
+      return !(type.contains('dependencia') || type.contains('instit'));
+    }).toList();
+
+    final asistentesInst = toCatItems(assistantsInstRows, fallback: Icons.apartment_rounded);
+    final asistentesLoc = toCatItems(assistantsLocalRows, fallback: Icons.groups_rounded);
+
+    return CatalogData(
+      version: (bundle.meta['bundle_id'] ?? bundle.meta['project_id'] ?? 'bundle').toString(),
+      actividades: actividades,
+      subcategoriasByActividad: subcatsByAct,
+      propositosBySubcat: purposesBySub,
+      temas: temas,
+      temasSugeridosIdsByActividad: sugeridos,
+      asistentesInstitucionales: asistentesInst,
+      asistentesLocales: asistentesLoc,
+      resultados: resultados,
+      matrizRiesgo: const ['Bajo', 'Medio', 'Alto', 'Prioritario'],
+      rules: bundle.effective.rules,
     );
   }
 }
@@ -625,9 +1119,32 @@ class CatItem {
   final String label;
   /// Ícono asociado
   final IconData icon;
+  /// Requiere captura GPS (lat/lon) para guardar
+  final bool requiresGeo;
+  /// Checklist de workflow de la actividad (ej: photo_min_1, gps_point)
+  final List<String> workflowChecklist;
   
   /// Constructor del item de catálogo
-  const CatItem({required this.id, required this.label, required this.icon});
+  const CatItem({
+    required this.id,
+    required this.label,
+    required this.icon,
+    this.requiresGeo = false,
+    this.workflowChecklist = const <String>[],
+  });
+
+  int get minimumEvidencePhotos {
+    final matcher = RegExp(r'^photo_min_(\d+)$');
+    var required = 0;
+    for (final token in workflowChecklist) {
+      final match = matcher.firstMatch(token.trim().toLowerCase());
+      if (match == null) continue;
+      final value = int.tryParse(match.group(1) ?? '');
+      if (value == null) continue;
+      if (value > required) required = value;
+    }
+    return required;
+  }
   
   /// Alias para label (compatibilidad)
   String get name => label;

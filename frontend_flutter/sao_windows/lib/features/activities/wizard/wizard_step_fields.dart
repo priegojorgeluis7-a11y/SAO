@@ -37,26 +37,65 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
   final GlobalKey _purposeKey = GlobalKey();
   final GlobalKey _topicOtherKey = GlobalKey();
   final GlobalKey _resultKey = GlobalKey();
+  final GlobalKey _agreementsKey = GlobalKey();
 
   // Estados de error
   final Map<String, bool> _fieldErrors = {};
+  final Map<int, TextEditingController> _agreementControllers = {};
+  late final TextEditingController _notesController;
 
   @override
   void initState() {
     super.initState();
     // Listen to controller changes
     widget.controller.addListener(_onControllerChanged);
+    _notesController = TextEditingController(text: widget.controller.reportNotes);
+    _syncAgreementControllers();
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    for (final controller in _agreementControllers.values) {
+      controller.dispose();
+    }
+    _agreementControllers.clear();
+    _notesController.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
+    _syncAgreementControllers();
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  void _syncAgreementControllers() {
+    if (_notesController.text != widget.controller.reportNotes) {
+      _notesController.text = widget.controller.reportNotes;
+      _notesController.selection = TextSelection.collapsed(offset: _notesController.text.length);
+    }
+
+    final agreements = widget.controller.reportAgreements;
+
+    final toRemove = _agreementControllers.keys
+        .where((index) => index >= agreements.length)
+        .toList();
+    for (final index in toRemove) {
+      _agreementControllers[index]?.dispose();
+      _agreementControllers.remove(index);
+    }
+
+    for (int index = 0; index < agreements.length; index++) {
+      final currentValue = agreements[index];
+      final existing = _agreementControllers[index];
+      if (existing == null) {
+        _agreementControllers[index] = TextEditingController(text: currentValue);
+      } else if (existing.text != currentValue) {
+        existing.text = currentValue;
+        existing.selection = TextSelection.collapsed(offset: existing.text.length);
+      }
     }
   }
 
@@ -101,6 +140,9 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
             break;
           case 'result':
             targetKey = _resultKey;
+            break;
+          case 'report_agreements':
+            targetKey = _agreementsKey;
             break;
         }
         
@@ -158,12 +200,11 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
                 children: [
                   _sectionTitle('Nivel de riesgo detectado'),
                   if (_fieldErrors['risk'] == true)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.only(top: 4),
                       child: Text(
                         '⚠️ Dato obligatorio',
-                        style: TextStyle(
-                          fontSize: 12,
+                        style: SaoTypography.caption.copyWith(
                           color: SaoColors.error,
                           fontWeight: FontWeight.w600,
                         ),
@@ -262,7 +303,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
               )
             else if (c.selectedSubcategory != null)
               const HintCard(
-                message: 'Propósito: automático / no aplica para esta subcategoría.',
+                message: 'Propósito: automático / no aplica para esta subcategoría (o aplica global a la actividad).',
                 icon: Icons.info_outline,
               ),
 
@@ -366,6 +407,101 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
               message: 'Tip: puedes cerrar sin evidencia. La actividad quedará como "terminada sin evidencia enviada".',
               icon: Icons.lightbulb_outline,
             ),
+
+            const SizedBox(height: 18),
+
+            _sectionTitle('Minuta / Reporte'),
+            const SizedBox(height: 10),
+
+            TextField(
+              // TODO(priegojorgeluis7): Integrar dictado por voz cuando se defina
+              // el patrón compartido de captura de audio en SAO.
+              minLines: 5,
+              maxLines: 8,
+              keyboardType: TextInputType.multiline,
+              textCapitalization: TextCapitalization.sentences,
+              decoration: InputDecoration(
+                labelText: 'Desarrollo / Notas',
+                hintText: 'Describe lo ocurrido, contexto, decisiones, solicitudes…',
+                alignLabelWithHint: true,
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  onPressed: null,
+                  tooltip: 'Dictado por voz próximamente',
+                  icon: const Icon(Icons.mic_none_rounded),
+                ),
+              ),
+              controller: _notesController,
+              onChanged: c.setReportNotes,
+            ),
+
+            const SizedBox(height: 10),
+
+            Container(
+              key: _agreementsKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Acuerdos / Pendientes',
+                    style: SaoTypography.sectionTitle.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: SaoColors.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  ...List.generate(c.reportAgreements.length, (index) {
+                    final controller = _agreementControllers[index] ?? TextEditingController();
+                    final showError = _fieldErrors['report_agreements'] == true &&
+                        c.reportAgreements[index].trim().isEmpty;
+
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: TextField(
+                              controller: controller,
+                              minLines: 1,
+                              maxLines: 3,
+                              textCapitalization: TextCapitalization.sentences,
+                              decoration: InputDecoration(
+                                labelText: 'Acuerdo ${index + 1}',
+                                hintText: 'Escribe un acuerdo o pendiente',
+                                border: const OutlineInputBorder(),
+                                errorText: showError ? 'Completa o elimina este acuerdo' : null,
+                              ),
+                              onChanged: (value) {
+                                c.updateReportAgreement(index, value);
+                                _clearError('report_agreements');
+                              },
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            tooltip: 'Eliminar acuerdo',
+                            onPressed: () {
+                              c.removeReportAgreementAt(index);
+                              _clearError('report_agreements');
+                            },
+                            icon: const Icon(Icons.delete_outline_rounded),
+                          ),
+                        ],
+                      ),
+                    );
+                  }),
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      c.addReportAgreement();
+                      _clearError('report_agreements');
+                    },
+                    icon: const Icon(Icons.add_rounded),
+                    label: const Text('Agregar acuerdo'),
+                  ),
+                ],
+              ),
+            ),
           ],
         ),
 
@@ -436,9 +572,9 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
                 maxLength: 100,
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Se enviará para aprobación por el administrador',
-                style: TextStyle(fontSize: 12, color: SaoColors.gray500),
+                style: SaoTypography.caption.copyWith(color: SaoColors.gray500),
               ),
             ],
           ),
@@ -513,9 +649,9 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
                 maxLength: 100,
               ),
               const SizedBox(height: 8),
-              const Text(
+              Text(
                 'Se enviará para aprobación por el administrador',
-                style: TextStyle(fontSize: 12, color: SaoColors.gray500),
+                style: SaoTypography.caption.copyWith(color: SaoColors.gray500),
               ),
             ],
           ),

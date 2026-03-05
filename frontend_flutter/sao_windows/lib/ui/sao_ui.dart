@@ -23,7 +23,7 @@
 /// SaoPanel(title: 'Sección', child: ...)
 /// 
 /// // Catálogos (fuentes únicas de verdad)
-/// ActivityCatalog.caminamiento
+/// // Actividades: CatalogRepository.activities (bundle-driven)
 /// StatusCatalog.aprobado
 /// RiskCatalog.prioritario  // ← Homologado mobile ↔ desktop
 /// RolesCatalog.coordinador
@@ -86,7 +86,6 @@ export 'helpers/sao_platform.dart';
 // ============================================================
 // CATÁLOGOS GLOBALES: Fuentes únicas de verdad
 // ============================================================
-export '../catalog/activity_catalog.dart';
 export '../catalog/status_catalog.dart';
 export '../catalog/risk_catalog.dart';
 export '../catalog/roles_catalog.dart';

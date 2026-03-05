@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from pathlib import PurePosixPath
+from pathlib import Path, PurePosixPath
 import re
 from typing import Tuple
 from uuid import UUID
@@ -15,12 +15,31 @@ from app.models.user import User
 
 
 class EvidenceService:
-    """Handle evidence upload lifecycle and signed URL operations."""
+    """Handle evidence upload lifecycle and signed URL operations.
+
+    Supports two storage backends:
+    - "gcs"   (default): Google Cloud Storage with signed URLs.
+    - "local" (dev):     Saves files to LOCAL_UPLOADS_DIR; serves via /uploads/*.
+    """
+
+    ALLOWED_MIME_TYPES = {
+        "image/jpeg",
+        "image/png",
+        "application/pdf",
+    }
+    MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024
 
     def __init__(self, db: Session):
         self.db = db
         self.bucket_name = settings.GCS_BUCKET
-        self.storage_client = storage.Client()
+        if not self._is_local:
+            self.storage_client = storage.Client()
+        else:
+            self.storage_client = None
+
+    @property
+    def _is_local(self) -> bool:
+        return settings.EVIDENCE_STORAGE_BACKEND == "local"
 
     @staticmethod
     def _utc_now() -> datetime:
@@ -62,10 +81,14 @@ class EvidenceService:
         object_name: str,
         mime_type: str,
         expiry_minutes: int,
+        evidence_id: str | None = None,
     ) -> Tuple[str, datetime]:
-        """Create a temporary signed URL for uploading an object to GCS."""
-        blob = self.storage_client.bucket(bucket).blob(object_name)
+        """Create an upload URL. Returns a local PUT endpoint URL in local mode."""
         expires_at = self._utc_now() + timedelta(minutes=expiry_minutes)
+        if self._is_local:
+            url = f"{settings.LOCAL_BASE_URL}/api/v1/evidences/local-upload/{evidence_id}"
+            return url, expires_at
+        blob = self.storage_client.bucket(bucket).blob(object_name)
         signed_url = blob.generate_signed_url(
             version="v4",
             expiration=timedelta(minutes=expiry_minutes),
@@ -80,9 +103,12 @@ class EvidenceService:
         object_name: str,
         expiry_minutes: int,
     ) -> Tuple[str, datetime]:
-        """Create a temporary signed URL for downloading an object from GCS."""
-        blob = self.storage_client.bucket(bucket).blob(object_name)
+        """Create a download URL. Returns a local static URL in local mode."""
         expires_at = self._utc_now() + timedelta(minutes=expiry_minutes)
+        if self._is_local:
+            url = f"{settings.LOCAL_BASE_URL}/uploads/{object_name}"
+            return url, expires_at
+        blob = self.storage_client.bucket(bucket).blob(object_name)
         signed_url = blob.generate_signed_url(
             version="v4",
             expiration=timedelta(minutes=expiry_minutes),
@@ -91,9 +117,23 @@ class EvidenceService:
         return signed_url, expires_at
 
     def object_exists(self, bucket: str, object_name: str) -> bool:
-        """Check whether object exists in GCS bucket."""
+        """Check whether object exists (GCS bucket or local disk)."""
+        if self._is_local:
+            return (Path(settings.LOCAL_UPLOADS_DIR) / object_name).exists()
         blob = self.storage_client.bucket(bucket).blob(object_name)
         return blob.exists(client=self.storage_client)
+
+    def save_local_upload(self, evidence_id: str, content: bytes) -> None:
+        """Persist an uploaded file to LOCAL_UPLOADS_DIR (local mode only)."""
+        evidence = self._get_evidence_or_404(evidence_id)
+        if not evidence.pending_object_path:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Evidence upload not initialized",
+            )
+        dest = Path(settings.LOCAL_UPLOADS_DIR) / evidence.pending_object_path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content)
 
     def get_activity_or_404(self, activity_id: UUID | str) -> Activity:
         """Get activity by UUID or raise 404 when missing."""
@@ -115,11 +155,27 @@ class EvidenceService:
         current_user: User,
     ) -> tuple[Evidence, str, datetime]:
         """Initialize evidence upload, persist pending object path, and return signed PUT URL."""
+        normalized_mime = (mime_type or "").strip().lower()
+        if normalized_mime not in self.ALLOWED_MIME_TYPES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=(
+                    "Invalid mime_type. Allowed values: "
+                    "image/jpeg, image/png, application/pdf"
+                ),
+            )
+
+        if size_bytes > self.MAX_UPLOAD_SIZE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail="File too large. Maximum allowed size is 20MB",
+            )
+
         self.get_activity_or_404(activity_id)
 
         evidence = Evidence(
             activity_id=self._parse_uuid(activity_id),
-            mime_type=mime_type,
+            mime_type=normalized_mime,
             size_bytes=size_bytes,
             original_file_name=file_name,
             created_by=current_user.id,
@@ -133,8 +189,9 @@ class EvidenceService:
         signed_url, expires_at = self.generate_signed_upload_url(
             bucket=self.bucket_name,
             object_name=object_path,
-            mime_type=mime_type,
+            mime_type=normalized_mime,
             expiry_minutes=settings.SIGNED_URL_EXPIRE_MINUTES,
+            evidence_id=str(evidence.id),
         )
 
         self.db.commit()
@@ -158,10 +215,12 @@ class EvidenceService:
             )
 
         if not self.object_exists(self.bucket_name, evidence.pending_object_path):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Uploaded object not found in storage",
+            detail = (
+                "Uploaded object not found in local storage"
+                if self._is_local
+                else "Uploaded object not found in storage"
             )
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)
 
         evidence.object_path = evidence.pending_object_path
         evidence.pending_object_path = None

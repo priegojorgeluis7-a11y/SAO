@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
 import 'wizard_controller.dart';
 
 class WizardStepContext extends StatefulWidget {
@@ -19,9 +20,13 @@ class WizardStepContext extends StatefulWidget {
 
 class _WizardStepContextState extends State<WizardStepContext> {
   final GlobalKey _riskKey = GlobalKey();
+  final GlobalKey _locationKey = GlobalKey();
   bool _showRiskError = false;
   late final TextEditingController _referenciaController;
   late final TextEditingController _coloniaController;
+  late final TextEditingController _estadoController;
+  late final TextEditingController _municipioController;
+  late final TextEditingController _riskController;
 
   @override
   void initState() {
@@ -29,6 +34,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
     widget.controller.addListener(_onControllerChanged);
     _referenciaController = TextEditingController(text: widget.controller.colonia);
     _coloniaController = TextEditingController(text: widget.controller.colonia);
+    _estadoController = TextEditingController(text: widget.controller.estadoId ?? '');
+    _municipioController = TextEditingController(text: widget.controller.municipioId ?? '');
+    _riskController = TextEditingController(text: _riskLabel(widget.controller.risk));
   }
 
   @override
@@ -36,11 +44,93 @@ class _WizardStepContextState extends State<WizardStepContext> {
     widget.controller.removeListener(_onControllerChanged);
     _referenciaController.dispose();
     _coloniaController.dispose();
+    _estadoController.dispose();
+    _municipioController.dispose();
+    _riskController.dispose();
     super.dispose();
   }
 
   void _onControllerChanged() {
+    if (_referenciaController.text != widget.controller.colonia) {
+      _referenciaController.value = TextEditingValue(
+        text: widget.controller.colonia,
+        selection: TextSelection.collapsed(offset: widget.controller.colonia.length),
+      );
+    }
+    if (_coloniaController.text != widget.controller.colonia) {
+      _coloniaController.value = TextEditingValue(
+        text: widget.controller.colonia,
+        selection: TextSelection.collapsed(offset: widget.controller.colonia.length),
+      );
+    }
+    final estado = widget.controller.estadoId ?? '';
+    if (_estadoController.text != estado) {
+      _estadoController.value = TextEditingValue(
+        text: estado,
+        selection: TextSelection.collapsed(offset: estado.length),
+      );
+    }
+    final municipio = widget.controller.municipioId ?? '';
+    if (_municipioController.text != municipio) {
+      _municipioController.value = TextEditingValue(
+        text: municipio,
+        selection: TextSelection.collapsed(offset: municipio.length),
+      );
+    }
+    final risk = _riskLabel(widget.controller.risk);
+    if (_riskController.text != risk) {
+      _riskController.value = TextEditingValue(
+        text: risk,
+        selection: TextSelection.collapsed(offset: risk.length),
+      );
+    }
     if (mounted) setState(() {});
+  }
+
+  RiskLevel? _riskFromText(String value) {
+    final normalized = value.toLowerCase();
+    if (normalized.contains('prior') || normalized.contains('crit')) return RiskLevel.prioritario;
+    if (normalized.contains('alto') || normalized.contains('high')) return RiskLevel.alto;
+    if (normalized.contains('medio') || normalized.contains('med')) return RiskLevel.medio;
+    if (normalized.contains('bajo') || normalized.contains('low')) return RiskLevel.bajo;
+    return null;
+  }
+
+  String _riskLabel(RiskLevel? level) {
+    switch (level) {
+      case RiskLevel.bajo:
+        return 'Bajo';
+      case RiskLevel.medio:
+        return 'Medio';
+      case RiskLevel.alto:
+        return 'Alto';
+      case RiskLevel.prioritario:
+        return 'Prioritario';
+      case null:
+        return '';
+    }
+  }
+
+  Future<void> _openEditContextSheet() async {
+    if (!widget.controller.isUnplanned) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _EditContextBottomSheet(
+        controller: widget.controller,
+        onEditLocation: () {
+          Navigator.of(context).pop();
+          if (_locationKey.currentContext != null) {
+            Scrollable.ensureVisible(
+              _locationKey.currentContext!,
+              duration: const Duration(milliseconds: 350),
+              curve: Curves.easeInOut,
+            );
+          }
+        },
+      ),
+    );
   }
 
   void _handleNext() {
@@ -97,19 +187,54 @@ class _WizardStepContextState extends State<WizardStepContext> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
-        _card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                a.title,
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: SaoColors.gray900),
-              ),
-              const SizedBox(height: 8),
-              Text('Proyecto: ${c.projectCode}', style: const TextStyle(color: SaoColors.gray700)),
-              Text('Frente: ${a.frente}', style: const TextStyle(color: SaoColors.gray700)),
-              Text('Ubicación: ${a.municipio}, ${a.estado}', style: const TextStyle(color: SaoColors.gray700)),
-            ],
+        // ── Banner actividad no planeada ──────────────────
+        if (c.isUnplanned) ...[
+          _UnplannedBanner(controller: c),
+          const SizedBox(height: 16),
+        ],
+
+        InkWell(
+          onTap: c.isUnplanned ? _openEditContextSheet : null,
+          borderRadius: BorderRadius.circular(14),
+          child: _card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        a.title,
+                        style: SaoTypography.frontTitle.copyWith(
+                          fontWeight: FontWeight.w900,
+                          color: SaoColors.gray900,
+                        ),
+                      ),
+                    ),
+                    if (c.isUnplanned)
+                      const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.edit_rounded, size: 16, color: SaoColors.info),
+                          SizedBox(width: 4),
+                          Text(
+                            'Editar',
+                            style: TextStyle(
+                              color: SaoColors.info,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Text('Proyecto: ${c.contextProjectLabel}', style: const TextStyle(color: SaoColors.gray700)),
+                Text('Frente: ${c.contextFrontLabel}', style: const TextStyle(color: SaoColors.gray700)),
+                Text('Ubicación: ${c.contextLocationLabel}', style: const TextStyle(color: SaoColors.gray700)),
+              ],
+            ),
           ),
         ),
         
@@ -124,7 +249,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
             children: [
               const Text(
                 'Cadenamiento (PK)',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: SaoColors.gray900),
+                style: SaoTypography.cardTitle,
               ),
               const SizedBox(height: 12),
               
@@ -185,12 +310,11 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   onChanged: c.setPkFin,
                 ),
                 if (c.pkInicio != null && c.pkFin != null && c.pkFin! < c.pkInicio!)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.only(top: 8),
                     child: Text(
                       '⚠️ El PK final debe ser mayor al inicial',
-                      style: TextStyle(
-                        fontSize: 12,
+                      style: SaoTypography.caption.copyWith(
                         color: SaoColors.error,
                         fontWeight: FontWeight.w600,
                       ),
@@ -224,21 +348,18 @@ class _WizardStepContextState extends State<WizardStepContext> {
               children: [
                 AnimatedDefaultTextStyle(
                   duration: const Duration(milliseconds: 200),
-                  style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w900,
-                  color: _showRiskError ? SaoColors.error : SaoColors.primary,
+                  style: SaoTypography.cardTitle.copyWith(
+                    color: _showRiskError ? SaoColors.error : SaoColors.primary,
+                  ),
+                  child: const Text('Nivel de Riesgo Detectado'),
                 ),
-                child: const Text('Nivel de Riesgo Detectado'),
-              ),
               
               if (_showRiskError)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.only(top: 4),
                   child: Text(
                     '⚠️ Dato obligatorio',
-                    style: TextStyle(
-                      fontSize: 12,
+                    style: SaoTypography.caption.copyWith(
                       color: SaoColors.error,
                       fontWeight: FontWeight.w600,
                     ),
@@ -246,70 +367,63 @@ class _WizardStepContextState extends State<WizardStepContext> {
                 ),
               
               const SizedBox(height: 12),
-              
-              // Botones de riesgo en grilla 2x2
-              Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _riskChip(
-                          label: 'Bajo',
-                          level: RiskLevel.bajo,
-                          color: SaoColors.riskLow,
-                          selected: c.risk == RiskLevel.bajo,
-                          onTap: () {
-                            c.setRisk(RiskLevel.bajo);
-                            setState(() => _showRiskError = false);
+              Builder(
+                builder: (_) {
+                  final riskOptions = c.catalogRepo.matrizRiesgo
+                      .map((item) => item.trim())
+                      .where((item) => item.isNotEmpty)
+                      .toList();
+
+                  final parsedOptions = riskOptions
+                      .map((item) => (label: item, level: _riskFromText(item)))
+                      .where((entry) => entry.level != null)
+                      .toList();
+
+                  if (parsedOptions.isEmpty) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        TextField(
+                          controller: _riskController,
+                          decoration: const InputDecoration(
+                            labelText: 'Riesgo (texto libre)',
+                            hintText: 'Captura el nivel de riesgo',
+                            border: OutlineInputBorder(),
+                          ),
+                          onChanged: (value) {
+                            final parsed = _riskFromText(value);
+                            if (parsed != null) {
+                              c.setRisk(parsed);
+                              setState(() => _showRiskError = false);
+                            }
                           },
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _riskChip(
-                          label: 'Medio',
-                          level: RiskLevel.medio,
-                          color: SaoColors.riskMedium,
-                          selected: c.risk == RiskLevel.medio,
-                          onTap: () {
-                            c.setRisk(RiskLevel.medio);
-                            setState(() => _showRiskError = false);
-                          },
+                        const SizedBox(height: 6),
+                        const Text(
+                          'TODO: conectar matriz de riesgo desde catálogo real versionado/effective.',
+                          style: SaoTypography.caption,
                         ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _riskChip(
-                          label: 'Alto',
-                          level: RiskLevel.alto,
-                          color: SaoColors.riskHigh,
-                          selected: c.risk == RiskLevel.alto,
-                          onTap: () {
-                            c.setRisk(RiskLevel.alto);
-                            setState(() => _showRiskError = false);
-                          },
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: _riskChip(
-                          label: 'Prioritario',
-                          level: RiskLevel.prioritario,
-                          color: SaoColors.riskPriority,
-                          selected: c.risk == RiskLevel.prioritario,
-                          onTap: () {
-                            c.setRisk(RiskLevel.prioritario);
-                            setState(() => _showRiskError = false);
-                          },
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    );
+                  }
+
+                  return Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: parsedOptions.map((entry) {
+                      final level = entry.level!;
+                      final selected = c.risk == level;
+                      return ChoiceChip(
+                        label: Text(entry.label),
+                        selected: selected,
+                        onSelected: (_) {
+                          c.setRisk(level);
+                          setState(() => _showRiskError = false);
+                        },
+                      );
+                    }).toList(),
+                  );
+                },
               ),
               
               // Banner de Protocolo Social animado
@@ -356,7 +470,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
             children: [
               const Text(
                 'Horario de la actividad',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: SaoColors.primary),
+                style: SaoTypography.cardTitle,
               ),
               const SizedBox(height: 12),
               Row(
@@ -365,7 +479,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Hora inicio', style: TextStyle(fontSize: 12, color: SaoColors.gray500)),
+                        const Text('Hora inicio', style: SaoTypography.caption),
                         const SizedBox(height: 4),
                         OutlinedButton.icon(
                           onPressed: () async {
@@ -400,7 +514,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Hora fin', style: TextStyle(fontSize: 12, color: SaoColors.gray500)),
+                        const Text('Hora fin', style: SaoTypography.caption),
                         const SizedBox(height: 4),
                         OutlinedButton.icon(
                           onPressed: () async {
@@ -435,41 +549,67 @@ class _WizardStepContextState extends State<WizardStepContext> {
         // =============================
         // UBICACIÓN
         // =============================
-        _card(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Ubicación específica',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: SaoColors.primary),
-              ),
+        Container(
+          key: _locationKey,
+          child: _card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Ubicación específica',
+                  style: SaoTypography.cardTitle,
+                ),
               const SizedBox(height: 12),
               
               // Estado
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Estado', style: TextStyle(fontSize: 12, color: SaoColors.gray500)),
+                  const Text('Estado', style: SaoTypography.caption),
                   const SizedBox(height: 4),
-                  DropdownButtonFormField<String>(
-                    initialValue: c.estadoId,
-                    hint: const Text('Selecciona un estado', style: TextStyle(color: SaoColors.gray400)),
-                    decoration: const InputDecoration(
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: SaoColors.info, width: 2),
+                  if (c.availableStates.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      value: c.estadoId,
+                      decoration: const InputDecoration(
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: SaoColors.info, width: 2),
+                        ),
                       ),
+                      hint: const Text('Selecciona estado'),
+                      items: c.availableStates
+                          .map(
+                            (estado) => DropdownMenuItem<String>(
+                              value: estado,
+                              child: Text(estado),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) async {
+                        await c.setEstadoAndLoadMunicipios(value);
+                        if (mounted) {
+                          setState(() {
+                            _estadoController.text = c.estadoId ?? '';
+                            _municipioController.text = c.municipioId ?? '';
+                          });
+                        }
+                      },
+                    )
+                  else
+                    TextField(
+                      controller: _estadoController,
+                      decoration: const InputDecoration(
+                        hintText: 'Captura el estado',
+                        hintStyle: TextStyle(color: SaoColors.gray400),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: SaoColors.info, width: 2),
+                        ),
+                      ),
+                      onChanged: c.setEstado,
                     ),
-                    items: const [
-                      DropdownMenuItem(value: 'est_1', child: Text('Chihuahua')),
-                      DropdownMenuItem(value: 'est_2', child: Text('Durango')),
-                      DropdownMenuItem(value: 'est_3', child: Text('Sinaloa')),
-                      DropdownMenuItem(value: 'est_4', child: Text('Guanajuato')),
-                      // TODO: Cargar desde catálogo
-                    ],
-                    onChanged: c.setEstado,
-                  ),
                 ],
               ),
               
@@ -479,29 +619,43 @@ class _WizardStepContextState extends State<WizardStepContext> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Municipio', style: TextStyle(fontSize: 12, color: SaoColors.gray500)),
+                  const Text('Municipio', style: SaoTypography.caption),
                   const SizedBox(height: 4),
-                  DropdownButtonFormField<String>(
-                    initialValue: c.municipioId,
-                    hint: const Text('Selecciona un municipio', style: TextStyle(color: SaoColors.gray400)),
-                    decoration: const InputDecoration(
-                      contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      border: OutlineInputBorder(),
-                      focusedBorder: OutlineInputBorder(
-                        borderSide: BorderSide(color: SaoColors.info, width: 2),
+                  if (c.availableMunicipios.isNotEmpty)
+                    DropdownButtonFormField<String>(
+                      value: c.municipioId,
+                      decoration: const InputDecoration(
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: SaoColors.info, width: 2),
+                        ),
                       ),
+                      hint: const Text('Selecciona municipio'),
+                      items: c.availableMunicipios
+                          .map(
+                            (municipio) => DropdownMenuItem<String>(
+                              value: municipio,
+                              child: Text(municipio),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: c.setMunicipio,
+                    )
+                  else
+                    TextField(
+                      controller: _municipioController,
+                      decoration: const InputDecoration(
+                        hintText: 'Captura el municipio',
+                        hintStyle: TextStyle(color: SaoColors.gray400),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(),
+                        focusedBorder: OutlineInputBorder(
+                          borderSide: BorderSide(color: SaoColors.info, width: 2),
+                        ),
+                      ),
+                      onChanged: c.setMunicipio,
                     ),
-                    items: c.estadoId != null ? const [
-                      DropdownMenuItem(value: 'mun_1', child: Text('Apaseo el Grande')),
-                      DropdownMenuItem(value: 'mun_2', child: Text('Celaya')),
-                      DropdownMenuItem(value: 'mun_3', child: Text('Cortazar')),
-                      DropdownMenuItem(value: 'mun_4', child: Text('Chihuahua')),
-                      DropdownMenuItem(value: 'mun_5', child: Text('Juárez')),
-                      DropdownMenuItem(value: 'mun_6', child: Text('Cuauhtémoc')),
-                      // TODO: Filtrar por estado seleccionado
-                    ] : [],
-                    onChanged: c.estadoId != null ? c.setMunicipio : null,
-                  ),
                 ],
               ),
               
@@ -511,7 +665,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Colonia', style: TextStyle(fontSize: 12, color: SaoColors.gray500)),
+                  const Text('Colonia', style: SaoTypography.caption),
                   const SizedBox(height: 4),
                   TextField(
                     controller: _coloniaController,
@@ -528,7 +682,8 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   ),
                 ],
               ),
-            ],
+              ],
+            ),
           ),
         ),
 
@@ -644,7 +799,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? SaoColors.info.withOpacity(0.1) : Colors.white,
+          color: selected ? SaoColors.info.withOpacity(0.1) : SaoColors.surface,
           border: Border.all(
             color: selected ? SaoColors.info : SaoColors.gray300,
             width: selected ? 2 : 1,
@@ -661,9 +816,8 @@ class _WizardStepContextState extends State<WizardStepContext> {
             const SizedBox(height: 4),
             Text(
               label,
-              style: TextStyle(
+              style: SaoTypography.caption.copyWith(
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                fontSize: 12,
                 color: selected ? SaoColors.info : SaoColors.gray700,
               ),
             ),
@@ -755,8 +909,7 @@ class _PKInputState extends State<_PKInput> {
       children: [
         Text(
           widget.label,
-          style: const TextStyle(
-            fontSize: 12,
+          style: SaoTypography.caption.copyWith(
             fontWeight: FontWeight.w600,
             color: SaoColors.gray500,
           ),
@@ -781,11 +934,7 @@ class _PKInputState extends State<_PKInput> {
               padding: EdgeInsets.symmetric(horizontal: 8),
               child: Text(
                 '+',
-                style: TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                  color: SaoColors.gray500,
-                ),
+                style: SaoTypography.metricValue,
               ),
             ),
             Expanded(
@@ -810,8 +959,7 @@ class _PKInputState extends State<_PKInput> {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               'PK completo: ${_formatPkDisplay(widget.value!)}',
-              style: const TextStyle(
-                fontSize: 12,
+              style: SaoTypography.caption.copyWith(
                 fontWeight: FontWeight.w600,
                 color: SaoColors.info,
               ),
@@ -828,3 +976,310 @@ class _PKInputState extends State<_PKInput> {
   }
 }
 
+// ────────────────────────────────────────────────────────────
+// Banner + campos exclusivos de actividad no planeada
+// ────────────────────────────────────────────────────────────
+
+class _UnplannedBanner extends StatefulWidget {
+  final WizardController controller;
+  const _UnplannedBanner({required this.controller});
+
+  @override
+  State<_UnplannedBanner> createState() => _UnplannedBannerState();
+}
+
+class _EditContextBottomSheet extends StatefulWidget {
+  final WizardController controller;
+  final VoidCallback onEditLocation;
+
+  const _EditContextBottomSheet({
+    required this.controller,
+    required this.onEditLocation,
+  });
+
+  @override
+  State<_EditContextBottomSheet> createState() => _EditContextBottomSheetState();
+}
+
+class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
+  late final TextEditingController _frontNameController;
+
+  @override
+  void initState() {
+    super.initState();
+    _frontNameController = TextEditingController(text: widget.controller.selectedFrontName);
+  }
+
+  @override
+  void dispose() {
+    _frontNameController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _handleProjectChanged(ProjectRef project) async {
+    widget.controller.setProject(project);
+    await widget.controller.loadFrontOptionsForProject(project.id);
+    await widget.controller.loadLocationOptionsForProject(project.id);
+    if (mounted) {
+      setState(() {
+        _frontNameController.text = widget.controller.selectedFrontName;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller;
+    final projects = c.availableProjects;
+    final fronts = c.availableFronts;
+
+    final currentProject = projects.cast<ProjectRef?>().firstWhere(
+          (p) => p!.id == c.selectedProjectId,
+          orElse: () => null,
+        );
+    final currentFront = fronts.cast<FrontRef?>().firstWhere(
+          (f) => f!.id == c.selectedFrontId,
+          orElse: () => null,
+        );
+
+    return SafeArea(
+      child: Padding(
+        padding: EdgeInsets.only(
+          left: 16,
+          right: 16,
+          top: 8,
+          bottom: 16 + MediaQuery.of(context).viewInsets.bottom,
+        ),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Editar contexto',
+                style: SaoTypography.frontTitle,
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Proyecto',
+                style: SaoTypography.bodyTextSmall,
+              ),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<ProjectRef>(
+                value: currentProject,
+                decoration: const InputDecoration(
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                ),
+                items: projects
+                    .map(
+                      (p) => DropdownMenuItem<ProjectRef>(
+                        value: p,
+                        child: Text('${p.code} — ${p.name}'),
+                      ),
+                    )
+                    .toList(),
+                onChanged: (value) {
+                  if (value == null) return;
+                  _handleProjectChanged(value);
+                },
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Frente',
+                style: SaoTypography.bodyTextSmall,
+              ),
+              const SizedBox(height: 6),
+              if (fronts.isNotEmpty)
+                DropdownButtonFormField<FrontRef>(
+                  value: currentFront,
+                  decoration: const InputDecoration(
+                    border: OutlineInputBorder(),
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                  items: fronts
+                      .map(
+                        (f) => DropdownMenuItem<FrontRef>(
+                          value: f,
+                          child: Text(f.name),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    c.setFront(value);
+                    setState(() {
+                      _frontNameController.text = value.name;
+                    });
+                  },
+                )
+              else ...[
+                TextField(
+                  controller: _frontNameController,
+                  decoration: const InputDecoration(
+                    hintText: 'Captura el nombre del frente',
+                    border: OutlineInputBorder(),
+                  ),
+                  onChanged: c.setFrontName,
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'TODO: conectar selector de frentes desde catálogo materializado.',
+                  style: SaoTypography.caption,
+                ),
+              ],
+              const SizedBox(height: 14),
+              const Text(
+                'Ubicación',
+                style: SaoTypography.bodyTextSmall,
+              ),
+              const SizedBox(height: 6),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: SaoColors.gray50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: SaoColors.gray200),
+                ),
+                child: Text(
+                  '${c.contextLocationLabel} · Colonia: ${c.colonia.isEmpty ? "-" : c.colonia}',
+                  style: SaoTypography.bodyText,
+                ),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: widget.onEditLocation,
+                icon: const Icon(Icons.place_outlined),
+                label: const Text('Editar ubicación'),
+              ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () {
+                    if (fronts.isEmpty) {
+                      c.setFrontName(_frontNameController.text.trim());
+                    }
+                    Navigator.of(context).pop();
+                  },
+                  child: const Text('Guardar cambios'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UnplannedBannerState extends State<_UnplannedBanner> {
+  late final TextEditingController _reasonCtrl;
+  late final TextEditingController _refCtrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _reasonCtrl = TextEditingController(
+        text: widget.controller.unplannedReason ?? '');
+    _refCtrl = TextEditingController(
+        text: widget.controller.unplannedReference);
+  }
+
+  @override
+  void dispose() {
+    _reasonCtrl.dispose();
+    _refCtrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = widget.controller;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Banner informativo ──
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: SaoColors.alertBg,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: SaoColors.alertBorder),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.warning_amber_rounded,
+                  color: SaoColors.warning, size: 20),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Actividad No Planeada — quedará en revisión pendiente hasta ser aprobada.',
+                  style: SaoTypography.bodyTextSmall,
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        // ── Motivo (obligatorio) ──
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: SaoColors.surface,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: SaoColors.gray200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Motivo *',
+                style: SaoTypography.sectionTitle,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: _reasonCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Describe el motivo',
+                  hintText: 'Ej. Ajuste operativo por bloqueo de acceso',
+                  contentPadding:
+                      EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  border: OutlineInputBorder(),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide: BorderSide(color: SaoColors.warning, width: 2),
+                  ),
+                ),
+                onChanged: c.setUnplannedReason,
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'TODO: conectar motivos de actividad no planeada desde catálogo real.',
+                style: SaoTypography.caption,
+              ),
+
+              const SizedBox(height: 12),
+
+              // Referencia / folio (opcional)
+              TextField(
+                controller: _refCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Referencia / Folio (opcional)',
+                  hintText: 'Ej. OT-2026-042',
+                  border: OutlineInputBorder(),
+                  focusedBorder: OutlineInputBorder(
+                    borderSide:
+                        BorderSide(color: SaoColors.info, width: 2),
+                  ),
+                ),
+                onChanged: c.setUnplannedReference,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}

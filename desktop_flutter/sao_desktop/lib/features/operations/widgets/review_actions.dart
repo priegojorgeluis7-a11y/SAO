@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
 import '../../../core/theme/app_spacing.dart';
 
 class ReviewActions extends StatelessWidget {
@@ -49,14 +50,15 @@ class ReviewActions extends StatelessWidget {
                   children: [
                     Text(
                       'APROBAR',
-                      style: TextStyle(
-                        fontSize: 16,
+                      style: SaoTypography.sectionTitle.copyWith(
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     Text(
                       'Enter',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal),
+                      style: SaoTypography.caption.copyWith(
+                        fontWeight: FontWeight.normal,
+                      ),
                     ),
                   ],
                 ),
@@ -88,7 +90,9 @@ class ReviewActions extends StatelessWidget {
                     ),
                     Text(
                       'R',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.normal),
+                      style: SaoTypography.caption.copyWith(
+                        fontWeight: FontWeight.normal,
+                      ),
                     ),
                   ],
                 ),
@@ -114,7 +118,7 @@ class ReviewActions extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text('SALTAR', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text('Esc', style: TextStyle(fontSize: 11)),
+                  Text('Esc', style: SaoTypography.caption),
                 ],
               ),
             ),

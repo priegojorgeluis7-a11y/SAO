@@ -15,6 +15,9 @@ import 'catalog_substitution_modal.dart';
 /// 3. Validación Técnica (checklist + GPS)
 class ActivityDetailsPanelPro extends StatefulWidget {
   final ActivityWithDetails? activity;
+  final List<ActivityTimelineEntry> timelineEntries;
+  final bool timelineLoading;
+  final String? timelineError;
   final Function(String field, String value)? onFieldChanged;
   final Function(String field)? onAcceptChange;
   final Function(String field)? onRevertChange;
@@ -22,6 +25,9 @@ class ActivityDetailsPanelPro extends StatefulWidget {
   const ActivityDetailsPanelPro({
     super.key,
     required this.activity,
+    this.timelineEntries = const [],
+    this.timelineLoading = false,
+    this.timelineError,
     this.onFieldChanged,
     this.onAcceptChange,
     this.onRevertChange,
@@ -395,8 +401,8 @@ class _ActivityDetailsPanelProState extends State<ActivityDetailsPanelPro>
           Row(
             children: [
               Expanded(
-                child: _buildReadOnlyField('Proyecto', 'TMQ - Tramo 4',
-                    Icons.folder_rounded),
+                child: _buildReadOnlyField(
+                    'Proyecto', activity.activity.projectId, Icons.folder_rounded),
               ),
               SizedBox(width: SaoSpacing.lg),
               Expanded(
@@ -466,46 +472,86 @@ class _ActivityDetailsPanelProState extends State<ActivityDetailsPanelPro>
   // TAB 2: HISTORIAL (Timeline)
   // ============================================================
   Widget _buildHistorialTab(ActivityWithDetails activity) {
+    if (widget.timelineLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    if (widget.timelineError != null) {
+      return Center(
+        child: Text(
+          widget.timelineError!,
+          style: SaoTypography.bodyText.copyWith(color: SaoColors.error),
+        ),
+      );
+    }
+
+    if (widget.timelineEntries.isEmpty) {
+      return Center(
+        child: Text(
+          'Sin historial disponible',
+          style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       padding: EdgeInsets.all(SaoSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildTimelineItem(
-            icon: Icons.create_rounded,
-            color: SaoColors.gray500,
-            title: 'Creado',
-            subtitle: 'Por: Juan Ingeniero',
-            timestamp: '15/03/2024 09:30',
-          ),
-          _buildTimelineConnector(),
-          _buildTimelineItem(
-            icon: Icons.edit_rounded,
-            color: SaoColors.warning,
-            title: 'Editado en campo',
-            subtitle: 'Descripción modificada',
-            timestamp: '15/03/2024 14:20',
-          ),
-          _buildTimelineConnector(),
-          _buildTimelineItem(
-            icon: Icons.person_rounded,
-            color: SaoColors.info,
-            title: 'En revisión',
-            subtitle: 'Por: Coordinador María',
-            timestamp: 'hace 2 horas',
-          ),
-          _buildTimelineConnector(),
-          _buildTimelineItem(
-            icon: Icons.warning_rounded,
-            color: SaoColors.warning,
-            title: 'Validación requerida',
-            subtitle:
-                'GPS a 400m del PK - Se requiere justificación',
-            timestamp: 'hace 1 hora',
-          ),
+          for (int i = 0; i < widget.timelineEntries.length; i++) ...[
+            _buildTimelineEvent(widget.timelineEntries[i]),
+            if (i < widget.timelineEntries.length - 1) _buildTimelineConnector(),
+          ],
         ],
       ),
     );
+  }
+
+  Widget _buildTimelineEvent(ActivityTimelineEntry entry) {
+    final icon = _timelineIcon(entry.action);
+    final color = _timelineColor(entry.action);
+    final title = _timelineTitle(entry.action);
+    final subtitle = entry.actor == null || entry.actor!.trim().isEmpty
+        ? 'Sin actor'
+        : 'Por: ${entry.actor}';
+    final timestamp = DateFormat('dd/MM/yyyy HH:mm').format(entry.at.toLocal());
+
+    return _buildTimelineItem(
+      icon: icon,
+      color: color,
+      title: title,
+      subtitle: subtitle,
+      timestamp: timestamp,
+    );
+  }
+
+  IconData _timelineIcon(String action) {
+    final key = action.toUpperCase();
+    if (key.contains('APPROVE')) return Icons.check_circle_rounded;
+    if (key.contains('REJECT')) return Icons.cancel_rounded;
+    if (key.contains('CREATE')) return Icons.create_rounded;
+    if (key.contains('UPDATE') || key.contains('PATCH')) return Icons.edit_rounded;
+    return Icons.history_rounded;
+  }
+
+  Color _timelineColor(String action) {
+    final key = action.toUpperCase();
+    if (key.contains('APPROVE')) return SaoColors.success;
+    if (key.contains('REJECT')) return SaoColors.error;
+    if (key.contains('CREATE')) return SaoColors.info;
+    if (key.contains('UPDATE') || key.contains('PATCH')) return SaoColors.warning;
+    return SaoColors.gray500;
+  }
+
+  String _timelineTitle(String action) {
+    final key = action.trim();
+    if (key.isEmpty) return 'Evento';
+    return key
+        .toLowerCase()
+        .split('_')
+        .map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
   }
 
   // ============================================================
@@ -735,8 +781,7 @@ class _ActivityDetailsPanelProState extends State<ActivityDetailsPanelPro>
               SizedBox(height: SaoSpacing.xs),
               Text(
                 timestamp,
-                style: SaoTypography.caption
-                    .copyWith(color: SaoColors.gray500, fontSize: 11),
+                style: SaoTypography.chipText.copyWith(color: SaoColors.gray500),
               ),
             ],
           ),

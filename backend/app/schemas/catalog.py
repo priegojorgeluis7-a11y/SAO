@@ -40,6 +40,14 @@ class CatalogVersionResponse(CatalogVersionBase):
     model_config = ORM_CONFIG
 
 
+class CatalogVersionDigest(BaseModel):
+    """Lightweight latest-published digest for one project."""
+    version_id: UUID | None = None
+    version_number: str | None = None
+    hash: str | None = None
+    published_at: datetime | None = None
+
+
 # =================== Activity Types ===================
 
 class CATActivityTypeBase(BaseModel):

@@ -1,22 +1,19 @@
-import 'dart:async';
-
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../network/exceptions.dart';
 import 'catalog_providers.dart';
 import 'catalog_sync_status.dart';
 
-class CatalogSyncController extends AutoDisposeAsyncNotifier<CatalogSyncStatus> {
+class CatalogSyncController extends AutoDisposeNotifier<CatalogSyncStatus> {
   bool _isSyncing = false;
 
   @override
-  FutureOr<CatalogSyncStatus> build() => const CatalogSyncIdle();
+  CatalogSyncStatus build() => const CatalogSyncIdle();
 
   Future<void> sync(String projectId) async {
     if (_isSyncing) return;
     _isSyncing = true;
-
-    state = const AsyncLoading();
+    state = const CatalogSyncing();
 
     try {
       final svc = ref.read(catalogSyncServiceProvider);
@@ -24,18 +21,18 @@ class CatalogSyncController extends AutoDisposeAsyncNotifier<CatalogSyncStatus> 
 
       final kv = ref.read(kvStoreProvider);
       final versionId = await kv.getString('catalog_version:$projectId') ?? 'unknown';
-      state = AsyncData(CatalogReady(versionId));
+      state = CatalogReady(versionId);
     } catch (e) {
       // Auth errors (expired session, missing token) must surface as a special
       // state so CatalogBootstrapScreen can call logout() and send the user to
       // the login page cleanly, instead of showing a generic catalog error.
       if (_isAuthError(e)) {
-        state = const AsyncData(CatalogSyncError(
+        state = const CatalogSyncError(
           'Tu sesión ha expirado.\nVuelve a iniciar sesión.',
           canRetry: false,
           canUseLocal: false,
           isAuthError: true,
-        ));
+        );
         return;
       }
 
@@ -45,21 +42,17 @@ class CatalogSyncController extends AutoDisposeAsyncNotifier<CatalogSyncStatus> 
       final canFallbackToLocal = _canUseLocalFallback(e);
 
       if (existing != null) {
-        state = AsyncData(
-          CatalogSyncError(
-            '$msg\nUsando catálogo local: $existing',
-            canUseLocal: true,
-          ),
+        state = CatalogSyncError(
+          '$msg\nUsando catálogo local: $existing',
+          canUseLocal: true,
         );
       } else {
-        state = AsyncData(
-          CatalogSyncError(
-            canFallbackToLocal
-                ? '$msg\nPuedes continuar con el catálogo local incluido en la app.'
-                : '$msg\nNo hay catálogo local.',
-            canRetry: true,
-            canUseLocal: canFallbackToLocal,
-          ),
+        state = CatalogSyncError(
+          canFallbackToLocal
+              ? '$msg\nPuedes continuar con el catálogo local incluido en la app.'
+              : '$msg\nNo hay catálogo local.',
+          canRetry: true,
+          canUseLocal: canFallbackToLocal,
         );
       }
     } finally {
@@ -136,7 +129,7 @@ class CatalogSyncController extends AutoDisposeAsyncNotifier<CatalogSyncStatus> 
   }
 }
 
-final catalogSyncControllerProvider = AutoDisposeAsyncNotifierProvider<
+final catalogSyncControllerProvider = AutoDisposeNotifierProvider<
     CatalogSyncController, CatalogSyncStatus>(
   CatalogSyncController.new,
 );

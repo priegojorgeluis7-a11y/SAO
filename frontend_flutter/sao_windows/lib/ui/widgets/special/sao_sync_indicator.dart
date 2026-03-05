@@ -56,8 +56,8 @@ class SaoSyncIndicator extends StatelessWidget {
                 child: Text(
                   '$pendingCount',
                   style: SaoTypography.caption.copyWith(
-                    color: Colors.white,
-                    fontSize: 10,
+                    color: SaoColors.onPrimary,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),

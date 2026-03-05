@@ -153,13 +153,13 @@ class _TextFieldRendererState extends State<TextFieldRenderer> {
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(
-                color: widget.fieldState.hasError ? Colors.red : SaoColors.borderLight,
+                color: widget.fieldState.hasError ? SaoColors.error : SaoColors.borderLight,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(
-                color: widget.fieldState.hasError ? Colors.red : SaoColors.primary,
+                color: widget.fieldState.hasError ? SaoColors.error : SaoColors.primary,
                 width: 2,
               ),
             ),
@@ -171,7 +171,7 @@ class _TextFieldRendererState extends State<TextFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -184,7 +184,7 @@ class _TextFieldRendererState extends State<TextFieldRenderer> {
         Text(widget.fieldState.fieldLabel, style: SaoTypography.labelMedium),
         if (widget.fieldState.required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('*', style: SaoTypography.bodySmall.copyWith(color: SaoColors.error, fontWeight: FontWeight.bold)),
         ],
       ],
     );
@@ -243,13 +243,13 @@ class _NumberFieldRendererState extends State<NumberFieldRenderer> {
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(
-                color: widget.fieldState.hasError ? Colors.red : SaoColors.borderLight,
+                color: widget.fieldState.hasError ? SaoColors.error : SaoColors.borderLight,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(
-                color: widget.fieldState.hasError ? Colors.red : SaoColors.primary,
+                color: widget.fieldState.hasError ? SaoColors.error : SaoColors.primary,
                 width: 2,
               ),
             ),
@@ -261,7 +261,7 @@ class _NumberFieldRendererState extends State<NumberFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -274,7 +274,7 @@ class _NumberFieldRendererState extends State<NumberFieldRenderer> {
         Text(widget.fieldState.fieldLabel, style: SaoTypography.labelMedium),
         if (widget.fieldState.required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('*', style: SaoTypography.bodySmall.copyWith(color: SaoColors.error, fontWeight: FontWeight.bold)),
         ],
       ],
     );
@@ -349,13 +349,13 @@ class _DateFieldRendererState extends State<DateFieldRenderer> {
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(
-                    color: widget.fieldState.hasError ? Colors.red : SaoColors.borderLight,
+                    color: widget.fieldState.hasError ? SaoColors.error : SaoColors.borderLight,
                   ),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
                   borderSide: BorderSide(
-                    color: widget.fieldState.hasError ? Colors.red : SaoColors.primary,
+                    color: widget.fieldState.hasError ? SaoColors.error : SaoColors.primary,
                     width: 2,
                   ),
                 ),
@@ -369,7 +369,7 @@ class _DateFieldRendererState extends State<DateFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -382,7 +382,7 @@ class _DateFieldRendererState extends State<DateFieldRenderer> {
         Text(widget.fieldState.fieldLabel, style: SaoTypography.labelMedium),
         if (widget.fieldState.required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('*', style: SaoTypography.bodySmall.copyWith(color: SaoColors.error, fontWeight: FontWeight.bold)),
         ],
       ],
     );
@@ -429,7 +429,7 @@ class _SelectFieldRendererState extends State<SelectFieldRenderer> {
         DecoratedBox(
           decoration: BoxDecoration(
             border: Border.all(
-              color: widget.fieldState.hasError ? Colors.red : SaoColors.borderLight,
+              color: widget.fieldState.hasError ? SaoColors.error : SaoColors.borderLight,
             ),
             borderRadius: BorderRadius.circular(8),
           ),
@@ -457,7 +457,7 @@ class _SelectFieldRendererState extends State<SelectFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -470,7 +470,7 @@ class _SelectFieldRendererState extends State<SelectFieldRenderer> {
         Text(widget.fieldState.fieldLabel, style: SaoTypography.labelMedium),
         if (widget.fieldState.required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('*', style: SaoTypography.bodySmall.copyWith(color: SaoColors.error, fontWeight: FontWeight.bold)),
         ],
       ],
     );
@@ -555,7 +555,7 @@ class _MultiSelectFieldRendererState extends State<MultiSelectFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -568,7 +568,7 @@ class _MultiSelectFieldRendererState extends State<MultiSelectFieldRenderer> {
         Text(widget.fieldState.fieldLabel, style: SaoTypography.labelMedium),
         if (widget.fieldState.required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('*', style: SaoTypography.bodySmall.copyWith(color: SaoColors.error, fontWeight: FontWeight.bold)),
         ],
       ],
     );
@@ -616,7 +616,7 @@ class _CheckboxFieldRendererState extends State<CheckboxFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -675,13 +675,13 @@ class _TextAreaFieldRendererState extends State<TextAreaFieldRenderer> {
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(
-                color: widget.fieldState.hasError ? Colors.red : SaoColors.borderLight,
+                color: widget.fieldState.hasError ? SaoColors.error : SaoColors.borderLight,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
               borderSide: BorderSide(
-                color: widget.fieldState.hasError ? Colors.red : SaoColors.primary,
+                color: widget.fieldState.hasError ? SaoColors.error : SaoColors.primary,
                 width: 2,
               ),
             ),
@@ -693,7 +693,7 @@ class _TextAreaFieldRendererState extends State<TextAreaFieldRenderer> {
           const SizedBox(height: 6),
           Text(
             widget.fieldState.error!,
-            style: SaoTypography.bodySmall.copyWith(color: Colors.red),
+            style: SaoTypography.bodySmall.copyWith(color: SaoColors.error),
           ),
         ],
       ],
@@ -706,7 +706,7 @@ class _TextAreaFieldRendererState extends State<TextAreaFieldRenderer> {
         Text(widget.fieldState.fieldLabel, style: SaoTypography.labelMedium),
         if (widget.fieldState.required) ...[
           const SizedBox(width: 4),
-          const Text('*', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+          Text('*', style: SaoTypography.bodySmall.copyWith(color: SaoColors.error, fontWeight: FontWeight.bold)),
         ],
       ],
     );

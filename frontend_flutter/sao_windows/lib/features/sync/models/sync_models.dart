@@ -2,6 +2,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import '../../../ui/theme/sao_colors.dart';
 
 enum SyncHealthStatus {
   allSynced, // 🟢 Todo sincronizado
@@ -39,6 +40,8 @@ enum UploadItemType {
 
 class UploadQueueItem {
   final String id;
+  final String entityId;
+  final String entity;
   final UploadItemType type;
   final String title;
   final String subtitle;
@@ -50,6 +53,8 @@ class UploadQueueItem {
 
   const UploadQueueItem({
     required this.id,
+    required this.entityId,
+    required this.entity,
     required this.type,
     required this.title,
     required this.subtitle,
@@ -59,6 +64,10 @@ class UploadQueueItem {
     this.retryCount = 0,
     required this.createdAt,
   });
+
+  bool get isConflict =>
+      status == UploadItemStatus.error &&
+      (errorMessage?.toUpperCase().contains('CONFLICT') ?? false);
 
   IconData get icon {
     switch (type) {
@@ -74,11 +83,11 @@ class UploadQueueItem {
   Color get color {
     switch (type) {
       case UploadItemType.activity:
-        return const Color(0xFF3B82F6);
+        return SaoColors.info;
       case UploadItemType.event:
-        return const Color(0xFFF59E0B);
+        return SaoColors.warning;
       case UploadItemType.evidence:
-        return const Color(0xFF10B981);
+        return SaoColors.success;
     }
   }
 }
@@ -155,6 +164,6 @@ class SyncConfig {
   });
 
   double get usagePercentage => usedSpaceMb / (usedSpaceMb + availableSpaceMb);
-  
+
   String get usageText => '$usedSpaceMb MB / ${usedSpaceMb + availableSpaceMb} MB';
 }

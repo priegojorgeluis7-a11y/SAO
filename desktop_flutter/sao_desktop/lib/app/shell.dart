@@ -1,75 +1,106 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../features/dashboard/dashboard_page.dart';
-import '../features/operations/validation_page_new_design.dart'; // 🎯 NUEVO DISEÑO UX con tarjetas inteligentes
+import '../features/operations/validation_page_new_design.dart';
 import '../features/planning/planning_page.dart';
 import '../features/catalogs/catalogs_page.dart';
 import '../features/users/users_page.dart';
+import '../features/events/events_page.dart';
 import '../features/reports/reports_page.dart';
-import '../features/ui_catalog/ui_catalog_page.dart'; // 🎨 UI Catalog
+import '../features/ui_catalog/ui_catalog_page.dart';
+import '../features/auth/app_session_controller.dart';
 import '../core/theme/app_colors.dart';
 
-class AppShell extends StatefulWidget {
+class AppShell extends ConsumerStatefulWidget {
   const AppShell({super.key});
 
   @override
-  State<AppShell> createState() => _AppShellState();
+  ConsumerState<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
-  int _selectedIndex = 1; // Empezar en Operaciones/Validación
+class _AppShellState extends ConsumerState<AppShell> {
+  int _selectedIndex = 1; // Start on Operations
+  int _refreshToken = 0;
 
-  final List<_NavItem> _navItems = [
-    _NavItem(
-      icon: Icons.dashboard_rounded,
-      label: 'Dashboard',
-      page: const DashboardPage(),
-    ),
-    _NavItem(
-      icon: Icons.railway_alert,  // 🎯 Ícono más apropiado para operaciones ferroviarias
-      label: 'Operaciones',
-      page: const ValidationPageNewDesign(), // 🎯 NUEVO DISEÑO UX con tarjetas inteligentes
-    ),
-    _NavItem(
-      icon: Icons.calendar_month_rounded,
-      label: 'Planeación',
-      page: const PlanningPage(),
-    ),
-    _NavItem(
-      icon: Icons.category_rounded,
-      label: 'Catálogos',
-      page: const CatalogsPage(),
-    ),
-    _NavItem(
-      icon: Icons.people_rounded,
-      label: 'Usuarios',
-      page: const UsersPage(),
-    ),
-    _NavItem(
-      icon: Icons.description_rounded,
-      label: 'Reportes',
-      page: const ReportsPage(),
-    ),
-    _NavItem(
-      icon: Icons.palette_rounded,
-      label: 'Catálogo de Diseño',
-      page: const UiCatalogPage(),
-    ),
-  ];
+  List<_NavItem> get _navItems {
+    final items = [
+      _NavItem(
+        icon: Icons.dashboard_rounded,
+        label: 'Dashboard',
+        page: const DashboardPage(),
+      ),
+      _NavItem(
+        icon: Icons.railway_alert,
+        label: 'Operaciones',
+        page: const ValidationPageNewDesign(),
+      ),
+      _NavItem(
+        icon: Icons.calendar_month_rounded,
+        label: 'Planeación',
+        page: const PlanningPage(),
+      ),
+      _NavItem(
+        icon: Icons.category_rounded,
+        label: 'Catálogos',
+        page: const CatalogsPage(),
+      ),
+      _NavItem(
+        icon: Icons.people_rounded,
+        label: 'Usuarios',
+        page: const UsersPage(),
+      ),
+      _NavItem(
+        icon: Icons.campaign_rounded,
+        label: 'Eventos',
+        page: const EventsPage(),
+      ),
+      _NavItem(
+        icon: Icons.description_rounded,
+        label: 'Reportes',
+        page: const ReportsPage(),
+      ),
+      // Design system storybook — only in debug builds
+      if (kDebugMode)
+        _NavItem(
+          icon: Icons.palette_rounded,
+          label: 'UI Catalog',
+          page: const UiCatalogPage(),
+        ),
+    ];
+    return items;
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Row(
-        children: [
+    final user = ref.watch(currentAppUserProvider);
+    final navItems = _navItems;
+
+    // Clamp index in case UiCatalog was removed in release builds
+    final safeIndex = _selectedIndex.clamp(0, navItems.length - 1);
+
+    return CallbackShortcuts(
+      bindings: {
+        SingleActivator(LogicalKeyboardKey.f5): () {
+          if (!mounted) return;
+          setState(() => _refreshToken++);
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: Scaffold(
+          body: Row(
+            children: [
           // Navigation Rail
           NavigationRail(
-            selectedIndex: _selectedIndex,
+            selectedIndex: safeIndex,
             onDestinationSelected: (index) {
               setState(() => _selectedIndex = index);
             },
             labelType: NavigationRailLabelType.all,
-            destinations: _navItems.map((item) {
+            destinations: navItems.map((item) {
               return NavigationRailDestination(
                 icon: Icon(item.icon),
                 label: Text(item.label),
@@ -97,9 +128,9 @@ class _AppShellState extends State<AppShell> {
               ),
             ),
           ),
-          
+
           const VerticalDivider(thickness: 1, width: 1),
-          
+
           // Main Content
           Expanded(
             child: Column(
@@ -117,7 +148,7 @@ class _AppShellState extends State<AppShell> {
                   child: Row(
                     children: [
                       Text(
-                        _navItems[_selectedIndex].label,
+                        navItems[safeIndex].label,
                         style: const TextStyle(
                           fontSize: 24,
                           fontWeight: FontWeight.bold,
@@ -125,57 +156,90 @@ class _AppShellState extends State<AppShell> {
                       ),
                       const Spacer(),
                       IconButton(
-                        icon: const Icon(Icons.sync_rounded),
+                        icon: const Icon(Icons.refresh_rounded),
+                        tooltip: 'Actualizar vista',
                         onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Sincronización iniciada'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
+                          setState(() => _refreshToken++);
                         },
-                        tooltip: 'Sincronizar',
                       ),
-                      const SizedBox(width: 8),
+                      // User info
                       const CircleAvatar(
                         backgroundColor: AppColors.primary,
                         child: Icon(Icons.person, color: AppColors.onPrimary),
                       ),
                       const SizedBox(width: 12),
-                      const Column(
+                      Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'Usuario Admin',
-                            style: TextStyle(
+                            user?.fullName.isNotEmpty == true
+                                ? user!.fullName
+                                : (user?.email ?? 'Usuario'),
+                            style: const TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                           Text(
-                            'Coordinador',
-                            style: TextStyle(
+                            user?.role.isNotEmpty == true ? user!.role : 'SAO',
+                            style: const TextStyle(
                               fontSize: 12,
                               color: AppColors.gray500,
                             ),
                           ),
                         ],
                       ),
+                      const SizedBox(width: 8),
+                      // Logout button
+                      IconButton(
+                        icon: const Icon(Icons.logout_rounded),
+                        tooltip: 'Cerrar sesión',
+                        onPressed: () => _confirmLogout(context),
+                      ),
                     ],
                   ),
                 ),
-                
+
                 // Page Content
                 Expanded(
-                  child: _navItems[_selectedIndex].page,
+                  child: KeyedSubtree(
+                    key: ValueKey('page-$safeIndex-$_refreshToken'),
+                    child: navItems[safeIndex].page,
+                  ),
                 ),
               ],
             ),
           ),
-        ],
+            ],
+          ),
+        ),
       ),
     );
+  }
+
+  void _confirmLogout(BuildContext context) {
+    showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    ).then((confirmed) {
+      if (confirmed == true && mounted) {
+        ref.read(appSessionControllerProvider.notifier).logout();
+      }
+    });
   }
 }
 

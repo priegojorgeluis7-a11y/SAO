@@ -85,6 +85,21 @@ class SyncRepository {
     await (_db.delete(_db.syncQueue)..where((s) => s.id.equals(itemId))).go();
   }
 
+  Future<SyncQueueData?> getQueueItem(String itemId) {
+    return (_db.select(_db.syncQueue)..where((s) => s.id.equals(itemId)))
+        .getSingleOrNull();
+  }
+
+  Future<void> markDone(String itemId) async {
+    await (_db.update(_db.syncQueue)..where((s) => s.id.equals(itemId))).write(
+          SyncQueueCompanion(
+            status: const Value('DONE'),
+            lastError: const Value(null),
+            lastAttemptAt: Value(DateTime.now()),
+          ),
+        );
+  }
+
   // =================== Manual Sync ===================
 
   /// Forzar sincronización inmediata
@@ -183,6 +198,8 @@ class SyncRepository {
 
     return UploadQueueItem(
       id: row.id,
+      entityId: row.entityId,
+      entity: row.entity,
       type: type,
       title: title,
       subtitle: subtitle,

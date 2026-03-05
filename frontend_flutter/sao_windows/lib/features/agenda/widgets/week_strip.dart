@@ -1,6 +1,8 @@
 // lib/features/agenda/widgets/week_strip.dart
 
 import 'package:flutter/material.dart';
+import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
 
 class WeekStrip extends StatelessWidget {
   final DateTime selectedDay;
@@ -26,7 +28,7 @@ class WeekStrip extends StatelessWidget {
     final days = List.generate(7, (i) => startOfWeek.add(Duration(days: i)));
 
     return Container(
-      color: Colors.white,
+      color: SaoColors.surface,
       child: Column(
         children: [
           Padding(
@@ -42,11 +44,7 @@ class WeekStrip extends StatelessWidget {
                   child: Center(
                     child: Text(
                       _getWeekLabel(days.first, days.last),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 14,
-                        color: Color(0xFF6B7280),
-                      ),
+                      style: SaoTypography.bodyTextBold.copyWith(color: SaoColors.gray500),
                     ),
                   ),
                 ),
@@ -87,12 +85,12 @@ class WeekStrip extends StatelessWidget {
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
                       color: isSelected
-                          ? const Color(0xFF1E40AF)
-                          : const Color(0xFFF9FAFB),
+                          ? SaoColors.actionPrimary
+                          : SaoColors.surfaceDim,
                       border: Border.all(
                         color: isSelected
-                            ? const Color(0xFF1E40AF)
-                            : const Color(0xFFE5E7EB),
+                            ? SaoColors.actionPrimary
+                            : SaoColors.border,
                         width: isSelected ? 2 : 1,
                       ),
                     ),
@@ -103,21 +101,19 @@ class WeekStrip extends StatelessWidget {
                           label,
                           style: TextStyle(
                             fontWeight: FontWeight.w600,
-                            fontSize: 12,
                             color: isSelected
-                                ? Colors.white
-                                : const Color(0xFF6B7280),
+                                ? SaoColors.onActionPrimary
+                                : SaoColors.gray500,
                           ),
                         ),
                         const SizedBox(height: 4),
                         Text(
                           '${d.day}',
                           style: TextStyle(
-                            fontSize: 20,
                             fontWeight: FontWeight.w900,
                             color: isSelected
-                                ? Colors.white
-                                : const Color(0xFF111827),
+                                ? SaoColors.onActionPrimary
+                                : SaoColors.primary,
                           ),
                         ),
                         if (isToday && !isSelected)
@@ -126,7 +122,7 @@ class WeekStrip extends StatelessWidget {
                             width: 4,
                             height: 4,
                             decoration: const BoxDecoration(
-                              color: Color(0xFF1E40AF),
+                              color: SaoColors.actionPrimary,
                               shape: BoxShape.circle,
                             ),
                           ),

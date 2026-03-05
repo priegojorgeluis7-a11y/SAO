@@ -1,0 +1,112 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+
+concurrency:
+  group: backend-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest
+        run: pytest tests -q
+
+  deploy:
+    name: Deploy to Cloud Run
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      SERVICE_NAME: sao-api
+      REGION: us-central1
+
+    permissions:
+      contents: read
+      id-token: write   # Needed for Workload Identity Federation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Build and push image
+        run: |
+          IMAGE="us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/sao/sao-api:${{ github.sha }}"
+          gcloud builds submit backend/ \
+            --tag "$IMAGE" \
+            --project "${{ secrets.GCP_PROJECT_ID }}"
+          echo "IMAGE=$IMAGE" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy "$SERVICE_NAME" \
+            --image "$IMAGE" \
+            --region "$REGION" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --platform managed \
+            --quiet
+
+      - name: Smoke test production
+        run: |
+          SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
+            --region "$REGION" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --format='value(status.url)')"
+          if [ -z "$SERVICE_URL" ]; then
+            echo "Unable to resolve Cloud Run service URL"
+            exit 1
+          fi
+          HEALTH_URL="$SERVICE_URL/health"
+          ID_TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+          for i in $(seq 1 6); do
+            STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+              -H "Authorization: Bearer $ID_TOKEN" \
+              "$HEALTH_URL")
+            if [ "$STATUS" = "200" ]; then
+              echo "Health check passed (attempt $i)"
+              exit 0
+            fi
+            echo "Attempt $i: status $STATUS — waiting 10s…"
+            sleep 10
+          done
+          echo "Smoke test failed after 60s"
+          exit 1

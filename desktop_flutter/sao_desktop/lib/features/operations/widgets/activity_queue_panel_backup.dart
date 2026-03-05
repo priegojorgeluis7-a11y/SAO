@@ -135,7 +135,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                 SizedBox(width: SaoSpacing.sm),
                 Text(
                   'Cola de Revisión',
-                  style: SaoTypography.h3.copyWith(fontSize: 16),
+                  style: SaoTypography.h3,
                 ),
                 const Spacer(),
                 widget.activitiesAsync.when(
@@ -325,7 +325,6 @@ class _FrontSection extends StatelessWidget {
                     '${activities.length} Pendiente${activities.length != 1 ? 's' : ''}',
                     style: SaoTypography.caption.copyWith(
                       color: SaoColors.gray600,
-                      fontSize: 11,
                     ),
                   ),
                 ),
@@ -371,7 +370,6 @@ class _FrontSection extends StatelessWidget {
                         child: Text(
                           df.format(activity.activity.executedAt!),
                           style: SaoTypography.caption.copyWith(
-                            fontSize: 10,
                             color: SaoColors.gray600,
                           ),
                         ),

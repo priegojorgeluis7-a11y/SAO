@@ -64,6 +64,17 @@ class ApiClient {
 
   Dio get dio => _dio;
 
+  /// Updates base URL at runtime for both authenticated and no-auth clients.
+  /// This allows switching backend environments without recreating the app.
+  void updateBaseUrl(String baseUrl) {
+    final normalized = baseUrl.trim();
+    if (normalized.isEmpty) return;
+    _config.setBaseUrl(normalized);
+    _dio.options.baseUrl = normalized;
+    _noAuthDio.options.baseUrl = normalized;
+    appLogger.i('🌐 ApiClient base URL updated to: $normalized');
+  }
+
   // ─────────────────────────────────────────────
   // Interceptor de autenticación
   // ─────────────────────────────────────────────
@@ -255,6 +266,7 @@ class ApiClient {
 
   bool _shouldSkipAuth(String path) {
     return path.contains('/auth/login') ||
+      path.contains('/auth/signup') ||
         path.contains('/auth/refresh') ||
         path.contains('/auth/register');
   }

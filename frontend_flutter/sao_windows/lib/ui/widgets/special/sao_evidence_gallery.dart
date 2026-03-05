@@ -1,6 +1,7 @@
 // lib/ui/widgets/special/sao_evidence_gallery.dart
 import 'package:flutter/material.dart';
 import '../../theme/sao_colors.dart';
+import '../../theme/sao_typography.dart';
 import '../../theme/sao_spacing.dart';
 import '../../theme/sao_radii.dart';
 
@@ -81,9 +82,8 @@ class _EvidenceThumbnail extends StatelessWidget {
               ),
               child: Text(
                 _formatPK(image.pk),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 10,
+                style: SaoTypography.caption.copyWith(
+                  color: SaoColors.onActionPrimary,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -97,7 +97,7 @@ class _EvidenceThumbnail extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
+                  color: SaoColors.surface.withValues(alpha: 0.9),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(

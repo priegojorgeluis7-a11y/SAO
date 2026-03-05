@@ -15,49 +15,29 @@ import '../../features/activities/wizard/register_wizard_page.dart';
 import '../../features/catalog/catalog_repository.dart';
 import '../../features/evidence/pending_evidence_store.dart';
 import '../../features/auth/ui/login_page.dart';
+import '../../features/auth/ui/signup_page.dart';
+import '../../features/auth/ui/pin_unlock_page.dart';
+import '../../features/auth/ui/pin_setup_page.dart';
 import '../../features/auth/application/auth_providers.dart';
 import '../../features/sync/sync_center_page.dart';
+import '../../features/events/ui/events_list_page.dart';
+import '../../features/projects/projects_page.dart';
 import '../../features/tutorial/tutorial_mode_page.dart';
 import '../../ui/bootstrap/catalog_bootstrap_screen.dart';
+import 'auth_redirect_resolver.dart';
 
 /// Provider for GoRouter with authentication redirect
 final goRouterProvider = Provider<GoRouter>((ref) {
-  final authState = ref.watch(authControllerProvider);
+  final authStateAsync = ref.watch(authStateProvider);
 
   return GoRouter(
     initialLocation: '/',
     refreshListenable: GoRouterRefreshStream(ref.watch(authControllerProvider.notifier).stream),
     redirect: (context, state) {
-      final isAuthenticated = authState.isAuthenticated;
-      final isLoading = authState.isLoading;
-      final isLoginRoute = state.uri.path == '/login';
-      final isTutorialRoute = state.uri.path == '/tutorial';
-      final isTutorialGuest = state.uri.queryParameters['tutorial'] == '1';
-      final isTutorialGuestShellRoute = isTutorialGuest &&
-          (state.uri.path == '/' ||
-              state.uri.path == '/sync' ||
-              state.uri.path == '/agenda' ||
-              state.uri.path == '/settings');
-
-      // If still loading, don't redirect yet
-      if (isLoading) {
-        return null;
-      }
-
-      // If not authenticated and not on login route, redirect to login
-      if (!isAuthenticated &&
-          !isLoginRoute &&
-          !isTutorialRoute &&
-          !isTutorialGuestShellRoute) {
-        return '/login';
-      }
-
-      // If authenticated and on login route, redirect to home
-      if (isAuthenticated && isLoginRoute) {
-        return '/';
-      }
-
-      return null;
+      return resolveAuthRedirect(
+        authStateAsync: authStateAsync,
+        uri: state.uri,
+      );
     },
     routes: [
       // Login route (outside Shell)
@@ -65,6 +45,30 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/login',
         name: 'login',
         builder: (context, state) => const LoginPage(),
+      ),
+      GoRoute(
+        path: '/auth/login',
+        name: 'auth-login',
+        builder: (context, state) => const LoginPage(),
+      ),
+      GoRoute(
+        path: '/auth/signup',
+        name: 'auth-signup',
+        builder: (context, state) => const SignupPage(),
+      ),
+      GoRoute(
+        path: '/auth/pin-unlock',
+        name: 'pin-unlock',
+        builder: (context, state) => const PinUnlockPage(),
+      ),
+      GoRoute(
+        path: '/auth/pin-setup',
+        name: 'pin-setup',
+        builder: (context, state) => const PinSetupPage(),
+      ),
+      GoRoute(
+        path: '/home',
+        redirect: (context, state) => '/',
       ),
       ShellRoute(
         builder: (context, state, child) {
@@ -83,7 +87,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                 return NoTransitionPage(
                   child: HomePage(
                     selectedProject: projectCode,
-                    onTapProject: () {},
+                    onTapProject: () async {
+                      final selected = await context.push<String>(
+                        '/projects?selected=${Uri.encodeQueryComponent(projectCode)}&tutorial=1',
+                      );
+                      if (!context.mounted || selected == null || selected.trim().isEmpty) {
+                        return;
+                      }
+                      final normalized = selected.trim().toUpperCase();
+                      if (normalized == projectCode.toUpperCase()) {
+                        return;
+                      }
+                      context.go('/?project=${Uri.encodeQueryComponent(normalized)}&tutorial=1');
+                    },
                   ),
                 );
               }
@@ -93,7 +109,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                   projectId: projectCode,
                   childWhenReady: HomePage(
                     selectedProject: projectCode,
-                    onTapProject: () {}, // No project switching functionality
+                    onTapProject: () async {
+                      final selected = await context.push<String>(
+                        '/projects?selected=${Uri.encodeQueryComponent(projectCode)}',
+                      );
+                      if (!context.mounted || selected == null || selected.trim().isEmpty) {
+                        return;
+                      }
+                      final normalized = selected.trim().toUpperCase();
+                      if (normalized == projectCode.toUpperCase()) {
+                        return;
+                      }
+                      context.go('/?project=${Uri.encodeQueryComponent(normalized)}');
+                    },
                   ),
                 ),
               );
@@ -103,11 +131,12 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/projects',
             name: 'projects',
             pageBuilder: (context, state) {
-              // Redirect to home if someone accesses this obsolete route
-              WidgetsBinding.instance.addPostFrameCallback((_) {
-                context.go('/');
-              });
-              return const NoTransitionPage(child: SizedBox.shrink());
+              final selected = state.uri.queryParameters['selected'] ??
+                  state.uri.queryParameters['project'] ??
+                  'TMQ';
+              return NoTransitionPage(
+                child: ProjectsPage(selectedCode: selected),
+              );
             },
           ),
           GoRoute(
@@ -125,6 +154,16 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) {
               return const NoTransitionPage(
                 child: SyncCenterPage(),
+              );
+            },
+          ),
+          GoRoute(
+            path: '/events',
+            name: 'events',
+            pageBuilder: (context, state) {
+              final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+              return NoTransitionPage(
+                child: EventsListPage(projectId: projectCode),
               );
             },
           ),
@@ -150,10 +189,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 
           final activity = TodayActivity(
             id: activityId,
-            title: 'Actividad',
-            frente: 'Frente A',
-            municipio: 'Municipio',
-            estado: 'Estado',
+            title: '',
+            frente: '',
+            municipio: '',
+            estado: '',
             status: ActivityStatus.hoy,
           );
 
@@ -176,10 +215,10 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           final activity = state.extra as TodayActivity? ??
               TodayActivity(
                 id: activityId,
-                title: 'Actividad',
-                frente: 'Frente A',
-                municipio: 'Municipio',
-                estado: 'Estado',
+                title: '',
+                frente: '',
+                municipio: '',
+                estado: '',
                 status: ActivityStatus.hoy,
               );
 
@@ -196,17 +235,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'register-wizard',
         builder: (context, state) {
           final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+          final isUnplanned = state.uri.queryParameters['mode'] == 'unplanned';
 
           final catalogRepo = GetIt.I<CatalogRepository>();
           final pendingStore = GetIt.I<PendingEvidenceStore>();
 
           final newActivity = TodayActivity(
             id: 'new-${DateTime.now().millisecondsSinceEpoch}',
-            title: 'Nueva actividad',
-            frente: 'Frente A',
-            municipio: 'Municipio',
-            estado: 'Estado',
+            title: '',
+            frente: '',
+            municipio: '',
+            estado: '',
             status: ActivityStatus.hoy,
+            isUnplanned: isUnplanned,
           );
 
           return RegisterWizardPage(
@@ -214,6 +255,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             projectCode: projectCode,
             catalogRepo: catalogRepo,
             pendingStore: pendingStore,
+            isUnplanned: isUnplanned,
           );
         },
       ),
@@ -259,6 +301,20 @@ class ShellWithBottomNav extends StatefulWidget {
 }
 
 class _ShellWithBottomNavState extends State<ShellWithBottomNav> {
+  String _buildNavQuery(BuildContext context) {
+    final uri = GoRouterState.of(context).uri;
+    final project = (uri.queryParameters['project'] ?? 'TMQ').trim();
+    final tutorial = uri.queryParameters['tutorial'] == '1';
+
+    final query = <String, String>{
+      'project': project.isEmpty ? 'TMQ' : project,
+    };
+    if (tutorial) {
+      query['tutorial'] = '1';
+    }
+    return Uri(queryParameters: query).query;
+  }
+
   bool _isTutorialGuest(BuildContext context) {
     final uri = GoRouterState.of(context).uri;
     return uri.queryParameters['tutorial'] == '1';
@@ -268,24 +324,29 @@ class _ShellWithBottomNavState extends State<ShellWithBottomNav> {
     final location = GoRouterState.of(context).uri.path;
     if (location.startsWith('/sync')) return 1;
     if (location.startsWith('/agenda')) return 2;
-    if (location.startsWith('/settings')) return 3;
+    if (location.startsWith('/events')) return 3;
+    if (location.startsWith('/settings')) return 4;
     return 0;
   }
 
   void _onItemTapped(int index, BuildContext context) {
-    final tutorialQuery = _isTutorialGuest(context) ? '?tutorial=1' : '';
+    final query = _buildNavQuery(context);
+    final suffix = query.isEmpty ? '' : '?$query';
     switch (index) {
       case 0:
-        context.go('/$tutorialQuery');
+        context.go('/$suffix');
         break;
       case 1:
-        context.go('/sync$tutorialQuery');
+        context.go('/sync$suffix');
         break;
       case 2:
-        context.go('/agenda$tutorialQuery');
+        context.go('/agenda$suffix');
         break;
       case 3:
-        context.go('/settings$tutorialQuery');
+        context.go('/events$suffix');
+        break;
+      case 4:
+        context.go('/settings$suffix');
         break;
     }
   }
@@ -316,6 +377,11 @@ class _ShellWithBottomNavState extends State<ShellWithBottomNav> {
             label: 'Agenda',
             icon: Icon(Icons.calendar_today_outlined),
             activeIcon: Icon(Icons.calendar_today),
+          ),
+          BottomNavigationBarItem(
+            label: 'Eventos',
+            icon: Icon(Icons.campaign_outlined),
+            activeIcon: Icon(Icons.campaign),
           ),
           BottomNavigationBarItem(
             label: 'Ajustes',

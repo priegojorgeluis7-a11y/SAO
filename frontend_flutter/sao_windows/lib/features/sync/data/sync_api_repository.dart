@@ -25,17 +25,19 @@ class SyncApiRepository {
   Future<SyncPullResponse> pullActivities({
     required String projectId,
     int sinceVersion = 0,
+    String? afterUuid,
     int limit = 500,
     int? untilVersion,
   }) async {
     try {
       appLogger.i(
-        '🔽 Sync Pull: project=$projectId, since=$sinceVersion, limit=$limit, until=$untilVersion',
+        '🔽 Sync Pull: project=$projectId, since=$sinceVersion, after=$afterUuid, limit=$limit, until=$untilVersion',
       );
 
       final request = SyncPullRequest(
         projectId: projectId,
         sinceVersion: sinceVersion,
+        afterUuid: afterUuid,
         limit: limit,
         untilVersion: untilVersion,
       );
@@ -51,7 +53,7 @@ class SyncApiRepository {
 
       appLogger.i(
         '✅ Sync Pull Success: currentVersion=${pullResponse.currentVersion}, '
-        'activities=${pullResponse.activities.length}',
+        'activities=${pullResponse.activities.length}, hasMore=${pullResponse.hasMore}',
       );
 
       // Log activity details
@@ -94,14 +96,16 @@ class SyncApiRepository {
   Future<SyncPushResponse> pushActivities({
     required String projectId,
     required List<ActivityDTO> activities,
+    bool forceOverride = false,
   }) async {
     try {
       appLogger.i(
-        '🔼 Sync Push: project=$projectId, activities=${activities.length}',
+        '🔼 Sync Push: project=$projectId, activities=${activities.length}, forceOverride=$forceOverride',
       );
 
       final request = SyncPushRequest(
         projectId: projectId,
+        forceOverride: forceOverride,
         activities: activities,
       );
 

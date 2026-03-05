@@ -1,7 +1,8 @@
 import 'dart:io';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
-import '../domain/entities/report_context.dart';
+import 'package:path/path.dart' as p;
+import '../../domain/entities/report_context.dart';
 
 /// Servicio de exportación de reportes PDF
 class ReportExportService {
@@ -56,7 +57,8 @@ class ReportExportService {
       for (final evidence in context.evidences) {
         final sourceFile = File(evidence.filePath);
         if (await sourceFile.exists()) {
-          final fileName = sourceFile.path.split('/').last;
+          // basename handles both Windows (\) and POSIX (/) separators.
+          final fileName = p.basename(sourceFile.path);
           await sourceFile.copy('${evidencesDir.path}/$fileName');
         }
       }
@@ -73,7 +75,7 @@ class ReportExportService {
         'evidencias': context.evidences
             .map((e) => {
               'id': e.id,
-              'archivo': e.filePath.split('/').last,
+              'archivo': p.basename(e.filePath),
               'tipo': e.fileType,
               'caption': e.caption,
             })

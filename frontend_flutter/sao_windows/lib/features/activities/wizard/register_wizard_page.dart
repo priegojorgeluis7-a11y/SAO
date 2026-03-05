@@ -9,9 +9,9 @@ import 'wizard_page.dart';
 class RegisterWizardPage extends StatelessWidget {
   final TodayActivity activity;
   final String projectCode;
-
   final CatalogRepository catalogRepo;
   final PendingEvidenceStore pendingStore;
+  final bool isUnplanned;
 
   const RegisterWizardPage({
     super.key,
@@ -19,6 +19,7 @@ class RegisterWizardPage extends StatelessWidget {
     required this.projectCode,
     required this.catalogRepo,
     required this.pendingStore,
+    this.isUnplanned = false,
   });
 
   @override
@@ -28,6 +29,7 @@ class RegisterWizardPage extends StatelessWidget {
       projectCode: projectCode,
       catalogRepo: catalogRepo,
       pendingStore: pendingStore,
+      isUnplanned: isUnplanned,
     );
   }
 }

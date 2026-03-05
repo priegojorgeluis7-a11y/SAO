@@ -370,7 +370,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
     final cardsByStatus = StatusCatalog.orderedByFlow.asMap().entries.map((entry) {
       final status = entry.value;
       final index = entry.key;
-      final data = _realCatalogMocks[index % _realCatalogMocks.length];
+      final data = _catalogSamples[index % _catalogSamples.length];
       final risk = RiskCatalog.findById(data.riskId) ?? RiskCatalog.medio;
       final needsAttention =
           status.id == StatusCatalog.requiereCambios.id ||
@@ -412,7 +412,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
         Text('Tarjetas por Estado', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.xs),
         Text(
-          'Se muestra 1 mock por cada estado de StatusCatalog',
+          'Se muestra 1 ejemplo por cada estado de StatusCatalog',
           style: SaoTypography.caption,
         ),
         const SizedBox(height: SaoSpacing.lg),
@@ -423,7 +423,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
         const SizedBox(height: SaoSpacing.lg),
 
         ...['bajo', 'medio', 'alto', 'prioritario'].map((riskId) {
-          final data = _realCatalogMocks.firstWhere((m) => m.riskId == riskId);
+          final data = _catalogSamples.firstWhere((m) => m.riskId == riskId);
           final risk = RiskCatalog.findById(riskId) ?? RiskCatalog.medio;
           final activityTitle = '${data.activityCode} ${data.activityName}';
 
@@ -611,7 +611,7 @@ class CatalogSection {
   CatalogSection({required this.title, required this.builder});
 }
 
-class _RailwayCatalogMock {
+class _RailwayCatalogSample {
   final String activityCode;
   final String activityName;
   final String subcategoryCode;
@@ -620,7 +620,7 @@ class _RailwayCatalogMock {
   final String attendeeName;
   final String riskId;
 
-  const _RailwayCatalogMock({
+  const _RailwayCatalogSample({
     required this.activityCode,
     required this.activityName,
     required this.subcategoryCode,
@@ -631,8 +631,8 @@ class _RailwayCatalogMock {
   });
 }
 
-const List<_RailwayCatalogMock> _realCatalogMocks = [
-  _RailwayCatalogMock(
+const List<_RailwayCatalogSample> _catalogSamples = [
+  _RailwayCatalogSample(
     activityCode: 'CAM',
     activityName: 'Caminamiento',
     subcategoryCode: 'CAM_DDV',
@@ -641,7 +641,7 @@ const List<_RailwayCatalogMock> _realCatalogMocks = [
     attendeeName: 'Comisariado Ejidal',
     riskId: 'bajo',
   ),
-  _RailwayCatalogMock(
+  _RailwayCatalogSample(
     activityCode: 'REU',
     activityName: 'Reunión',
     subcategoryCode: 'REU_EJI',
@@ -650,7 +650,7 @@ const List<_RailwayCatalogMock> _realCatalogMocks = [
     attendeeName: 'Gobierno Municipal',
     riskId: 'medio',
   ),
-  _RailwayCatalogMock(
+  _RailwayCatalogSample(
     activityCode: 'ASP',
     activityName: 'Asamblea Protocolizada',
     subcategoryCode: 'ASP_1AP',
@@ -659,7 +659,7 @@ const List<_RailwayCatalogMock> _realCatalogMocks = [
     attendeeName: 'ARTF',
     riskId: 'alto',
   ),
-  _RailwayCatalogMock(
+  _RailwayCatalogSample(
     activityCode: 'CIN',
     activityName: 'Consulta Indígena',
     subcategoryCode: 'CIN_CON',

@@ -74,6 +74,9 @@ class WizardStepConfirm extends StatelessWidget {
         ? '${controller.evidencias.length} foto${controller.evidencias.length > 1 ? 's' : ''}'
         : 'Sin evidencia';
 
+    final reportNotes = controller.getReportNotes();
+    final reportAgreements = controller.getReportAgreements();
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       child: Column(
@@ -99,10 +102,31 @@ class WizardStepConfirm extends StatelessWidget {
             ),
           ),
 
+          // Actividad no planeada (editable - paso 0)
+          if (controller.isUnplanned) ...[
+            const SizedBox(height: 12),
+            _editableCard(
+              context: context,
+              title: 'No planeada',
+              onEdit: () => onJumpToStep(0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _infoRow('Motivo', controller.unplannedReasonLabel),
+                  if (controller.unplannedReference.trim().isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    _infoRow('Referencia', controller.unplannedReference.trim()),
+                  ],
+                ],
+              ),
+            ),
+          ],
+
           const SizedBox(height: 12),
 
           // Contexto (editable - paso 0)
           _editableCard(
+            context: context,
             title: 'Contexto',
             onEdit: () => onJumpToStep(0),
             child: Row(
@@ -125,6 +149,7 @@ class WizardStepConfirm extends StatelessWidget {
 
           // Clasificación (editable - paso 1)
           _editableCard(
+            context: context,
             title: 'Clasificación',
             onEdit: () => onJumpToStep(1),
             child: Column(
@@ -147,6 +172,7 @@ class WizardStepConfirm extends StatelessWidget {
 
           // Evidencia (editable - paso 2)
           _editableCard(
+            context: context,
             title: 'Evidencia',
             onEdit: () => onJumpToStep(2),
             child: Row(
@@ -161,6 +187,40 @@ class WizardStepConfirm extends StatelessWidget {
               ],
             ),
           ),
+
+          if (reportNotes.isNotEmpty || reportAgreements.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _editableCard(
+              context: context,
+              title: 'Minuta / Reporte',
+              onEdit: () => onJumpToStep(1),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (reportNotes.isNotEmpty) ...[
+                    _infoRow('Desarrollo / Notas', reportNotes),
+                  ],
+                  if (reportAgreements.isNotEmpty) ...[
+                    if (reportNotes.isNotEmpty) const SizedBox(height: 8),
+                    Text(
+                      'Acuerdos / Pendientes:',
+                      style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
+                    ),
+                    const SizedBox(height: 4),
+                    ...reportAgreements.map(
+                      (agreement) => Padding(
+                        padding: const EdgeInsets.only(bottom: 2),
+                        child: Text(
+                          '• $agreement',
+                          style: SaoTypography.bodyText.copyWith(color: SaoColors.primary),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
 
           const Spacer(),
 
@@ -179,7 +239,9 @@ class WizardStepConfirm extends StatelessWidget {
                   onPressed: controller.canSave
                       ? () => _handleSave(context, hasEvidence)
                       : null,
-                  child: const Text('Guardar'),
+                  child: Text(
+                    controller.isUnplanned ? 'Enviar a revisión' : 'Guardar',
+                  ),
                 ),
               ),
             ],
@@ -195,12 +257,12 @@ class WizardStepConfirm extends StatelessWidget {
       children: [
         Text(
           '$label: ',
-          style: const TextStyle(color: SaoColors.gray500, fontSize: 14),
+          style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
         ),
         Expanded(
           child: Text(
             value,
-            style: const TextStyle(color: SaoColors.primary, fontSize: 14),
+            style: SaoTypography.bodyText.copyWith(color: SaoColors.primary),
           ),
         ),
       ],
@@ -214,8 +276,12 @@ class WizardStepConfirm extends StatelessWidget {
         color: SaoColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: SaoColors.border),
-        boxShadow: const [
-          BoxShadow(blurRadius: 10, offset: Offset(0, 4), color: Color(0x0A000000)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+            color: SaoColors.gray900.withOpacity(0.04),
+          ),
         ],
       ),
       child: child,
@@ -223,6 +289,7 @@ class WizardStepConfirm extends StatelessWidget {
   }
 
   Widget _editableCard({
+    required BuildContext context,
     required String title,
     required VoidCallback onEdit,
     required Widget child,
@@ -232,12 +299,16 @@ class WizardStepConfirm extends StatelessWidget {
         color: SaoColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: SaoColors.border),
-        boxShadow: const [
-          BoxShadow(blurRadius: 10, offset: Offset(0, 4), color: Color(0x0A000000)),
+        boxShadow: [
+          BoxShadow(
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+            color: SaoColors.gray900.withOpacity(0.04),
+          ),
         ],
       ),
       child: Material(
-        color: Colors.transparent,
+        color: Theme.of(context).colorScheme.surface.withOpacity(0),
         child: InkWell(
           onTap: onEdit,
           borderRadius: BorderRadius.circular(14),
@@ -251,9 +322,8 @@ class WizardStepConfirm extends StatelessWidget {
                     Expanded(
                       child: Text(
                         title,
-                        style: const TextStyle(
+                        style: SaoTypography.cardTitle.copyWith(
                           fontWeight: FontWeight.w900,
-                          fontSize: 16,
                           color: SaoColors.primary,
                         ),
                       ),
@@ -335,12 +405,7 @@ class WizardStepConfirm extends StatelessWidget {
     );
 
     try {
-      // Guardar en DB (necesitamos projectId y activityTypeId reales)
-      // Por ahora usamos valores de ejemplo - en producción vendrían del contexto
-      final activityId = await controller.saveToDatabase(
-        projectId: 'project-uuid-example', // TODO: obtener del contexto
-        activityTypeId: 'activity-type-uuid', // TODO: mapear desde catálogo
-      );
+      final activityId = await controller.saveToDatabase();
 
       if (!context.mounted) return;
 
@@ -348,7 +413,11 @@ class WizardStepConfirm extends StatelessWidget {
       Navigator.of(context).pop();
 
       // Mostrar éxito
-      final closeText = hasEvidence ? 'Terminada (con evidencia)' : 'Terminada (sin evidencia)';
+      final closeText = controller.isUnplanned
+          ? 'Enviada a revisión pendiente'
+          : hasEvidence
+              ? 'Terminada (con evidencia)'
+              : 'Terminada (sin evidencia)';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('✅ Actividad guardada — $closeText'),

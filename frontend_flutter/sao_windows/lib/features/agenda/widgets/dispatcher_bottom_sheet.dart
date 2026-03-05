@@ -2,6 +2,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
+import '../../../core/di/service_locator.dart';
+import '../../../data/local/app_db.dart';
+import '../../../data/local/dao/activity_dao.dart';
+import '../../catalog/catalog_repository.dart';
+import '../data/agenda_assignment_factory.dart';
+import '../data/effective_catalog_version_resolver.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
 
@@ -9,6 +17,7 @@ class DispatcherBottomSheet extends StatefulWidget {
   final List<Resource> resources;
   final List<AgendaItem> existingItems;
   final DateTime selectedDay;
+  final String? projectId;
   final ValueChanged<AgendaItem> onCreate;
 
   const DispatcherBottomSheet({
@@ -16,6 +25,7 @@ class DispatcherBottomSheet extends StatefulWidget {
     required this.resources,
     required this.existingItems,
     required this.selectedDay,
+    this.projectId,
     required this.onCreate,
   });
 
@@ -24,22 +34,113 @@ class DispatcherBottomSheet extends StatefulWidget {
 }
 
 class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
+  final ActivityDao _activityDao = ActivityDao(getIt<AppDb>());
+  final CatalogRepository _catalogRepo = CatalogRepository();
+  final AgendaAssignmentFactory _assignmentFactory = AgendaAssignmentFactory();
+  final EffectiveCatalogVersionResolver _versionResolver =
+      const EffectiveCatalogVersionResolver();
+
   int _currentStep = 0;
   String? _selectedResourceId;
-  String _title = '';
+  CatItem? _selectedActivity;
+  RiskLevel? _selectedRisk;
   String _pk = '';
   DateTime? _startTime;
   DateTime? _endTime;
-  RiskLevel _riskLevel = RiskLevel.bajo;
 
-  final _titleController = TextEditingController();
+  List<CatItem> _activities = const [];
+  List<String> _riskOptions = const [];
+  bool _loadingActivities = true;
+  String? _activitiesError;
+
+  List<FrontOption> _frontOptions = const [];
+  FrontOption? _selectedFront;
+  bool _loadingFronts = true;
+  String? _frontsError;
+  String _frontFreeText = '';
+
   final _pkController = TextEditingController();
+  final _frontController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWizardCatalogOptions();
+    _loadProjectFronts();
+  }
 
   @override
   void dispose() {
-    _titleController.dispose();
     _pkController.dispose();
+    _frontController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadWizardCatalogOptions() async {
+    setState(() {
+      _loadingActivities = true;
+      _activitiesError = null;
+    });
+
+    try {
+      await _catalogRepo.init();
+      final activities = _catalogRepo.activities;
+      final risks = _catalogRepo.matrizRiesgo
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty)
+          .toList();
+
+      if (!mounted) return;
+      setState(() {
+        _activities = activities;
+        _riskOptions = risks;
+        _loadingActivities = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingActivities = false;
+        _activitiesError =
+            'No se pudieron cargar actividades/riesgo desde catálogo del wizard.';
+      });
+    }
+  }
+
+  Future<void> _loadProjectFronts() async {
+    final projectId = widget.projectId?.trim();
+    if (projectId == null || projectId.isEmpty) {
+      setState(() {
+        _loadingFronts = false;
+        _frontsError = 'No hay proyecto seleccionado para cargar frentes.';
+      });
+      return;
+    }
+
+    setState(() {
+      _loadingFronts = true;
+      _frontsError = null;
+    });
+
+    try {
+      final rows = await _activityDao.listActiveSegmentsByProject(projectId);
+      final fronts = rows
+          .map((segment) => FrontOption(id: segment.id, name: segment.segmentName))
+          .toList()
+        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+      if (!mounted) return;
+      setState(() {
+        _frontOptions = fronts;
+        _selectedFront = fronts.isNotEmpty ? fronts.first : null;
+        _loadingFronts = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _frontsError = 'No se pudieron cargar los frentes del proyecto.';
+        _loadingFronts = false;
+      });
+    }
   }
 
   @override
@@ -51,7 +152,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       builder: (_, scrollController) {
         return Container(
           decoration: const BoxDecoration(
-            color: Colors.white,
+            color: SaoColors.surface,
             borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
           ),
           child: Column(
@@ -82,7 +183,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: const Color(0xFFD1D5DB),
+              color: SaoColors.gray300,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -91,11 +192,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             children: [
               const Text(
                 'Despachador',
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
-                  color: Color(0xFF111827),
-                ),
+                style: SaoTypography.pageTitle,
               ),
               const Spacer(),
               _StepIndicator(current: _currentStep, total: 3),
@@ -125,13 +222,24 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       children: [
         const Text(
           '¿A quién asignar?',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-          ),
+          style: SaoTypography.cardTitle,
         ),
         const SizedBox(height: 16),
+        if (widget.resources.where((r) => r.isActive).isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.25)),
+            ),
+            child: const Text(
+              'No hay recursos operativos disponibles para asignación.',
+              style: TextStyle(color: SaoColors.error, fontWeight: FontWeight.w600),
+            ),
+          )
+        else
         Wrap(
           spacing: 12,
           runSpacing: 12,
@@ -152,16 +260,16 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                           shape: BoxShape.circle,
                           border: Border.all(
                             color: hasConflict != null
-                                ? const Color(0xFFEF4444)
+                                ? SaoColors.error
                                 : selected
-                                    ? const Color(0xFF1E40AF)
-                                    : const Color(0xFFE5E7EB),
+                                    ? SaoColors.actionPrimary
+                                    : SaoColors.border,
                             width: selected ? 3 : 2,
                           ),
                         ),
                         child: CircleAvatar(
                           radius: 32,
-                          backgroundColor: const Color(0xFF3B82F6),
+                          backgroundColor: SaoColors.info,
                           backgroundImage: r.avatarUrl != null
                               ? NetworkImage(r.avatarUrl!)
                               : null,
@@ -169,9 +277,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                               ? Text(
                                   r.initials,
                                   style: const TextStyle(
-                                    fontSize: 18,
                                     fontWeight: FontWeight.w900,
-                                    color: Colors.white,
+                                    color: SaoColors.onPrimary,
                                   ),
                                 )
                               : null,
@@ -186,11 +293,10 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontSize: 12,
                             fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                             color: selected
-                                ? const Color(0xFF1E40AF)
-                                : const Color(0xFF374151),
+                                ? SaoColors.actionPrimary
+                                : SaoColors.primaryLight,
                           ),
                         ),
                       ),
@@ -210,21 +316,144 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       children: [
         const Text(
           '¿Qué y dónde?',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-          ),
+          style: SaoTypography.cardTitle,
         ),
         const SizedBox(height: 16),
-        TextField(
-          controller: _titleController,
-          onChanged: (v) => setState(() => _title = v),
-          decoration: const InputDecoration(
-            labelText: 'Actividad',
-            border: OutlineInputBorder(),
+        if (_loadingActivities)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          )
+        else if (_activitiesError != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.25)),
+            ),
+            child: Text(
+              _activitiesError!,
+              style: const TextStyle(
+                color: SaoColors.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else if (_activities.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.alertBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.alertBorder),
+            ),
+            child: const Text(
+              'No hay actividades habilitadas en el catálogo efectivo.',
+              style: TextStyle(
+                color: SaoColors.alertText,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else
+          DropdownButtonFormField<CatItem>(
+            initialValue: _selectedActivity,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Actividad',
+              border: OutlineInputBorder(),
+            ),
+            items: _activities
+                .map(
+                  (activity) => DropdownMenuItem<CatItem>(
+                    value: activity,
+                    child: Text(
+                      activity.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedActivity = value;
+              });
+            },
           ),
-        ),
+        const SizedBox(height: 12),
+        if (_loadingFronts)
+          const LinearProgressIndicator(minHeight: 2)
+        else if (_frontsError != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.25)),
+            ),
+            child: Text(
+              _frontsError!,
+              style: const TextStyle(
+                color: SaoColors.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else if (_frontOptions.isNotEmpty)
+          DropdownButtonFormField<FrontOption>(
+            initialValue: _selectedFront,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Frente',
+              border: OutlineInputBorder(),
+            ),
+            items: _frontOptions
+                .map(
+                  (front) => DropdownMenuItem<FrontOption>(
+                    value: front,
+                    child: Text(
+                      front.name,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedFront = value;
+              });
+            },
+          )
+        else
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: _frontController,
+                onChanged: (value) {
+                  setState(() {
+                    _frontFreeText = value;
+                  });
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Frente',
+                  hintText: 'Captura el frente',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                'TODO: conectar selector de frentes desde catálogo real cuando el backend lo exponga.',
+                style: SaoTypography.caption,
+              ),
+            ],
+          ),
         const SizedBox(height: 12),
         TextField(
           controller: _pkController,
@@ -237,58 +466,43 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
           ),
         ),
         const SizedBox(height: 16),
-        const Text(
-          'Nivel de riesgo',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF374151),
+        if (_riskOptions.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.alertBg,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.alertBorder),
+            ),
+            child: const Text(
+              'No hay niveles de riesgo en catálogo del wizard.',
+              style: TextStyle(
+                color: SaoColors.alertText,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _riskOptions.map((label) {
+              final parsed = _riskFromCatalogText(label);
+              final selected = parsed != null && _selectedRisk == parsed;
+              return ChoiceChip(
+                label: Text(label),
+                selected: selected,
+                onSelected: parsed == null
+                    ? null
+                    : (_) {
+                        setState(() {
+                          _selectedRisk = parsed;
+                        });
+                      },
+              );
+            }).toList(),
           ),
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _RiskChip(
-                label: 'Bajo',
-                color: const Color(0xFF10B981),
-                selected: _riskLevel == RiskLevel.bajo,
-                onTap: () => setState(() => _riskLevel = RiskLevel.bajo),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _RiskChip(
-                label: 'Medio',
-                color: const Color(0xFFFBBF24),
-                selected: _riskLevel == RiskLevel.medio,
-                onTap: () => setState(() => _riskLevel = RiskLevel.medio),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Row(
-          children: [
-            Expanded(
-              child: _RiskChip(
-                label: 'Alto',
-                color: const Color(0xFFF97316),
-                selected: _riskLevel == RiskLevel.alto,
-                onTap: () => setState(() => _riskLevel = RiskLevel.alto),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: _RiskChip(
-                label: 'Prioritario',
-                color: const Color(0xFFEF4444),
-                selected: _riskLevel == RiskLevel.prioritario,
-                onTap: () => setState(() => _riskLevel = RiskLevel.prioritario),
-              ),
-            ),
-          ],
-        ),
       ],
     );
   }
@@ -301,11 +515,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       children: [
         const Text(
           '¿Cuándo?',
-          style: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w900,
-            color: Color(0xFF111827),
-          ),
+          style: SaoTypography.cardTitle,
         ),
         const SizedBox(height: 16),
         _TimePickerButton(
@@ -322,11 +532,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         const SizedBox(height: 16),
         const Text(
           'Duración sugerida',
-          style: TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
-            color: Color(0xFF374151),
-          ),
+          style: SaoTypography.bodyTextBold,
         ),
         const SizedBox(height: 8),
         Row(
@@ -343,9 +549,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFFEF2F2),
+              color: SaoColors.error.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFFCA5A5)),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.35)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -354,18 +560,14 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                   children: [
                     const Icon(
                       Icons.warning_rounded,
-                      color: Color(0xFFEF4444),
+                      color: SaoColors.error,
                       size: 20,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         conflict,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF991B1B),
-                        ),
+                        style: SaoTypography.bodyTextBold.copyWith(color: SaoColors.error),
                       ),
                     ),
                   ],
@@ -376,8 +578,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                   icon: const Icon(Icons.search_rounded, size: 16),
                   label: const Text('Buscar hueco libre'),
                   style: TextButton.styleFrom(
-                    foregroundColor: const Color(0xFF1E40AF),
-                    backgroundColor: Colors.white,
+                    foregroundColor: SaoColors.actionPrimary,
+                    backgroundColor: SaoColors.surface,
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
                       vertical: 8,
@@ -398,8 +600,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
       decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(top: BorderSide(color: Color(0xFFE5E7EB))),
+        color: SaoColors.surface,
+        border: Border(top: BorderSide(color: SaoColors.border)),
       ),
       child: Row(
         children: [
@@ -416,9 +618,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             child: ElevatedButton(
               onPressed: canProceed ? _handleNext : null,
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF691C32),
-                disabledBackgroundColor: const Color(0xFFE5E7EB),
-                foregroundColor: Colors.white,
+                backgroundColor: SaoColors.actionPrimary,
+                disabledBackgroundColor: SaoColors.border,
+                foregroundColor: SaoColors.onPrimary,
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
               child: Text(
@@ -437,7 +639,13 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       case 0:
         return _selectedResourceId != null;
       case 1:
-        return _title.isNotEmpty && _pk.isNotEmpty;
+        final hasFront = _frontOptions.isEmpty
+            ? _frontFreeText.trim().isNotEmpty
+            : _selectedFront != null;
+        return _selectedActivity != null &&
+          _selectedRisk != null &&
+          _pk.isNotEmpty &&
+          hasFront;
       case 2:
         return _startTime != null && _endTime != null;
       default:
@@ -445,11 +653,11 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     }
   }
 
-  void _handleNext() {
+  Future<void> _handleNext() async {
     if (_currentStep < 2) {
       setState(() => _currentStep++);
     } else {
-      _createItem();
+      await _createItem();
     }
   }
 
@@ -552,30 +760,57 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     }
   }
 
-  void _createItem() {
+  Future<void> _createItem() async {
     if (_selectedResourceId == null ||
+        _selectedActivity == null ||
         _startTime == null ||
         _endTime == null) {
       return;
     }
 
-    final item = AgendaItem(
+    final effectiveVersionId = await _versionResolver.resolve(
+      projectId: widget.projectId,
+      fallbackVersionId: null,
+    );
+
+    final selectedActivity = _selectedActivity;
+    if (selectedActivity == null) return;
+    final projectCode = widget.projectId?.trim() ?? '';
+    final frontName = (_selectedFront?.name ?? _frontFreeText).trim();
+
+    final item = _assignmentFactory.build(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       resourceId: _selectedResourceId!,
-      title: _title,
-      projectCode: 'P-001',
-      frente: 'Frente 1',
-      municipio: 'Municipio',
-      estado: 'Estado',
-      pk: _pk.isNotEmpty ? int.tryParse(_pk) : null,
+      activity: EffectiveActivityInput(
+        id: selectedActivity.id,
+        name: selectedActivity.name,
+        colorHex: null,
+        severity: null,
+      ),
+      projectCode: projectCode,
+      frente: frontName,
       start: _startTime!,
       end: _endTime!,
-      risk: _riskLevel,
-      syncStatus: SyncStatus.pending,
+      pk: _pk.isNotEmpty ? int.tryParse(_pk) : null,
+      risk: _selectedRisk!,
+      effectiveVersionId: effectiveVersionId,
+      municipio: null,
+      estado: null,
     );
 
     widget.onCreate(item);
+    if (!mounted) return;
     Navigator.pop(context);
+  }
+
+  RiskLevel? _riskFromCatalogText(String label) {
+    final normalized = label.trim().toLowerCase();
+    if (normalized.isEmpty) return null;
+    if (normalized.contains('prior')) return RiskLevel.prioritario;
+    if (normalized.contains('alto') || normalized.contains('high')) return RiskLevel.alto;
+    if (normalized.contains('medio') || normalized.contains('med')) return RiskLevel.medio;
+    if (normalized.contains('bajo') || normalized.contains('low')) return RiskLevel.bajo;
+    return null;
   }
 }
 
@@ -598,8 +833,8 @@ class _StepIndicator extends StatelessWidget {
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: i <= current
-                ? const Color(0xFF1E40AF)
-                : const Color(0xFFD1D5DB),
+                ? SaoColors.actionPrimary
+                : SaoColors.gray300,
           ),
         ),
       ),
@@ -626,32 +861,25 @@ class _TimePickerButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFFD1D5DB)),
+          border: Border.all(color: SaoColors.gray300),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Row(
           children: [
-            const Icon(Icons.schedule_rounded, color: Color(0xFF6B7280)),
+            const Icon(Icons.schedule_rounded, color: SaoColors.gray500),
             const SizedBox(width: 12),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: Color(0xFF6B7280),
-                  ),
+                  style: SaoTypography.caption,
                 ),
                 Text(
                   time != null
                       ? '${time!.hour.toString().padLeft(2, '0')}:${time!.minute.toString().padLeft(2, '0')}'
                       : '--:--',
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF111827),
-                  ),
+                  style: SaoTypography.bodyTextBold.copyWith(color: SaoColors.primary),
                 ),
               ],
             ),
@@ -682,56 +910,12 @@ class _DurationChip extends StatelessWidget {
   }
 }
 
-class _RiskChip extends StatelessWidget {
-  final String label;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
+class FrontOption {
+  final String id;
+  final String name;
 
-  const _RiskChip({
-    required this.label,
-    required this.color,
-    required this.selected,
-    required this.onTap,
+  const FrontOption({
+    required this.id,
+    required this.name,
   });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12),
-        decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.1) : Colors.white,
-          border: Border.all(
-            color: selected ? color : const Color(0xFFD1D5DB),
-            width: selected ? 2 : 1,
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 12,
-              height: 12,
-              decoration: BoxDecoration(
-                color: color,
-                shape: BoxShape.circle,
-              ),
-            ),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                color: selected ? color : const Color(0xFF374151),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }

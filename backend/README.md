@@ -30,7 +30,13 @@ Editar `.env` con tu configuración de base de datos:
 ```env
 DATABASE_URL=postgresql://user:password@localhost:5432/sao_db
 JWT_SECRET=your-secret-key
+SIGNUP_INVITE_CODE=your-invite-code
+# ADMIN_INVITE_CODE=optional-admin-invite-code
 ```
+
+Variables de signup:
+- `SIGNUP_INVITE_CODE`: requerida para crear cuentas no ADMIN vía `/api/v1/auth/signup`.
+- `ADMIN_INVITE_CODE`: opcional. Si no está definida, el signup de `ADMIN` se rechaza con `403`.
 
 ### 4. Setup Database
 
@@ -58,6 +64,9 @@ alembic upgrade head
 python -m app.seeds.run_seeds
 ```
 
+Opcional: para evitar descarga remota del catálogo nacional de estados/municipios,
+define `MX_LOCATIONS_DATA_FILE` apuntando a un JSON local (mismo formato del origen público).
+
 **Cloud Run Job example:**
 ```bash
 gcloud run jobs create sao-migrations \
@@ -74,6 +83,43 @@ gcloud run jobs execute sao-migrations --region REGION
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+### 6.1 Local-only mode (SQLite, no Cloud SQL)
+
+Para trabajar 100% local (sin tocar servidores reales):
+
+```powershell
+cd backend
+./scripts/start_local_sqlite.ps1
+```
+
+Esto crea/usa `local_dev.db`, corre seeds base y levanta la API en `127.0.0.1:8000`.
+Nota: el seed de catálogo efectivo se omite en este modo con `SAO_SKIP_EFFECTIVE_CATALOG_SEED=1`.
+
+### 6.2 Migrate to real Cloud SQL (one command)
+
+Cuando termines desarrollo local y quieras aplicar migraciones/seeds en Cloud SQL:
+
+```powershell
+cd backend
+./scripts/migrate_to_cloudsql.ps1
+```
+
+Este script:
+- lee `DATABASE_URL`, `JWT_SECRET`, `GCS_BUCKET` desde Secret Manager,
+- levanta `cloud-sql-proxy` temporal,
+- ejecuta migraciones + seeds,
+- y cierra el proxy al finalizar.
+
+Opciones útiles:
+
+```powershell
+# Solo migraciones (sin seeds)
+./scripts/migrate_to_cloudsql.ps1 -RunSeeds $false
+
+# Omitir seed efectivo (si aplica en un entorno específico)
+./scripts/migrate_to_cloudsql.ps1 -SkipEffectiveCatalogSeed $true
 ```
 
 ## 📚 API Documentation

@@ -60,6 +60,56 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     await ref.read(syncStateProvider.notifier).sync();
   }
 
+  Future<void> _resolveConflictUseLocal(UploadQueueItem item) async {
+    await ref.read(syncStateProvider.notifier).resolveConflictUseLocal(item.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Se reenviará la versión local con override.'),
+        backgroundColor: SaoColors.warning,
+      ),
+    );
+  }
+
+  Future<void> _resolveConflictUseServer(UploadQueueItem item) async {
+    await ref.read(syncStateProvider.notifier).resolveConflictUseServer(item.id);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Se aplicó la versión del servidor.'),
+        backgroundColor: SaoColors.info,
+      ),
+    );
+  }
+
+  Future<void> _showConflictDialog(UploadQueueItem item) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Conflicto de sincronización'),
+        content: const Text(
+          'Esta actividad cambió en servidor. Puedes usar tu versión local o tomar la versión del servidor.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resolveConflictUseServer(item);
+            },
+            child: const Text('Usar servidor'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(ctx).pop();
+              _resolveConflictUseLocal(item);
+            },
+            child: const Text('Usar mi versión'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _toggleWifiOnly(bool value) {
     setState(() {
       _config = SyncConfig(
@@ -128,7 +178,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
         GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: SaoColors.gray50,
       appBar: AppBar(
         backgroundColor: Colors.white,
         surfaceTintColor: Colors.white,
@@ -153,9 +203,9 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
+                  color: SaoColors.infoBg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                  border: Border.all(color: SaoColors.infoBorder),
                 ),
                 child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -163,13 +213,13 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                     Row(
                       children: [
                         Icon(Icons.school_outlined,
-                            size: 18, color: Color(0xFF1D4ED8)),
+                            size: 18, color: SaoColors.infoIcon),
                         SizedBox(width: 6),
                         Text(
                           'Modo tutorial · Vista Sincronización',
                           style: TextStyle(
                               fontWeight: FontWeight.w700,
-                              color: Color(0xFF1E3A8A)),
+                              color: SaoColors.infoText),
                         ),
                       ],
                     ),
@@ -313,7 +363,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
               '(${uploadQueue.length})',
               style: const TextStyle(
                 fontSize: 14,
-                color: Color(0xFF6B7280),
+                color: SaoColors.statusBorrador,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -324,7 +374,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
           'Mi trabajo pendiente de subir',
           style: TextStyle(
             fontSize: 13,
-            color: Color(0xFF9CA3AF),
+            color: SaoColors.gray400,
           ),
         ),
         const SizedBox(height: 12),
@@ -336,14 +386,14 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
               color: Colors.white,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: const Color(0xFFE5E7EB),
+                color: SaoColors.gray200,
               ),
             ),
             child: const Row(
               children: [
                 Icon(
                   Icons.check_circle_outline_rounded,
-                  color: Color(0xFF10B981),
+                  color: SaoColors.success,
                   size: 28,
                 ),
                 SizedBox(width: 12),
@@ -352,7 +402,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                     'No hay elementos pendientes',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Color(0xFF6B7280),
+                      color: SaoColors.statusBorrador,
                     ),
                   ),
                 ),
@@ -375,7 +425,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFFE5E7EB),
+          color: SaoColors.gray200,
         ),
       ),
       child: Row(
@@ -412,7 +462,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                   item.subtitle,
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF9CA3AF),
+                    color: SaoColors.gray400,
                   ),
                 ),
 
@@ -424,7 +474,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: item.progress,
-                        backgroundColor: const Color(0xFFE5E7EB),
+                        backgroundColor: SaoColors.gray200,
                         valueColor: AlwaysStoppedAnimation(item.color),
                         minHeight: 6,
                       ),
@@ -439,7 +489,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                       item.errorMessage!,
                       style: const TextStyle(
                         fontSize: 11,
-                        color: Color(0xFFEF4444),
+                        color: SaoColors.error,
                       ),
                     ),
                   ),
@@ -452,19 +502,19 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEF3C7),
+                color: SaoColors.warningBg,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: const Row(
                 children: [
-                  Icon(Icons.hourglass_empty_rounded, size: 14, color: Color(0xFFF59E0B)),
+                  Icon(Icons.hourglass_empty_rounded, size: 14, color: SaoColors.warning),
                   SizedBox(width: 4),
                   Text(
                     'Esperando',
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
-                      color: Color(0xFFF59E0B),
+                      color: SaoColors.warning,
                     ),
                   ),
                 ],
@@ -474,7 +524,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFFDBEAFE),
+                color: SaoColors.infoLight,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Row(
@@ -501,10 +551,15 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
             )
           else if (item.status == UploadItemStatus.error)
             IconButton(
-              icon: const Icon(Icons.refresh_rounded, size: 20),
-              color: const Color(0xFFEF4444),
-              onPressed: () => _retryItem(item),
-              tooltip: 'Reintentar',
+              icon: Icon(
+                item.isConflict ? Icons.merge_type_rounded : Icons.refresh_rounded,
+                size: 20,
+              ),
+              color: SaoColors.error,
+              onPressed: () => item.isConflict
+                  ? _showConflictDialog(item)
+                  : _retryItem(item),
+              tooltip: item.isConflict ? 'Resolver conflicto' : 'Reintentar',
             ),
         ],
       ),
@@ -534,7 +589,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
           'Datos disponibles offline',
           style: TextStyle(
             fontSize: 13,
-            color: Color(0xFF9CA3AF),
+            color: SaoColors.gray400,
           ),
         ),
         const SizedBox(height: 12),
@@ -546,7 +601,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: const Color(0xFFE5E7EB),
+              color: SaoColors.gray200,
             ),
           ),
           child: Column(
@@ -570,11 +625,11 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                 borderRadius: BorderRadius.circular(4),
                 child: LinearProgressIndicator(
                   value: _config.usagePercentage,
-                  backgroundColor: const Color(0xFFE5E7EB),
+                  backgroundColor: SaoColors.gray200,
                   valueColor: AlwaysStoppedAnimation(
                     _config.usagePercentage > 0.8
-                        ? const Color(0xFFEF4444)
-                        : const Color(0xFF3B82F6),
+                        ? SaoColors.error
+                        : SaoColors.info,
                   ),
                   minHeight: 8,
                 ),
@@ -600,7 +655,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: const Color(0xFFE5E7EB),
+          color: SaoColors.gray200,
         ),
       ),
       child: Row(
@@ -609,13 +664,13 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: const Color(0xFF3B82F6).withOpacity(0.1),
+              color: SaoColors.info.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(
               resource.icon,
               size: 22,
-              color: const Color(0xFF3B82F6),
+              color: SaoColors.info,
             ),
           ),
           const SizedBox(width: 14),
@@ -637,7 +692,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                   '${resource.sizeMb} MB',
                   style: const TextStyle(
                     fontSize: 12,
-                    color: Color(0xFF9CA3AF),
+                    color: SaoColors.gray400,
                   ),
                 ),
                 if (resource.lastUpdatedAt != null && resource.status == DownloadResourceStatus.upToDate)
@@ -647,7 +702,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                       'Actualizado ${_formatRelativeTime(resource.lastUpdatedAt!)}',
                       style: const TextStyle(
                         fontSize: 11,
-                        color: Color(0xFF10B981),
+                        color: SaoColors.success,
                       ),
                     ),
                   ),
@@ -660,8 +715,8 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                       borderRadius: BorderRadius.circular(4),
                       child: LinearProgressIndicator(
                         value: resource.progress,
-                        backgroundColor: const Color(0xFFE5E7EB),
-                        valueColor: const AlwaysStoppedAnimation(Color(0xFF3B82F6)),
+                        backgroundColor: SaoColors.gray200,
+                        valueColor: const AlwaysStoppedAnimation(SaoColors.info),
                         minHeight: 6,
                       ),
                     ),
@@ -680,22 +735,22 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
   Widget _buildDownloadStatusBadge(DownloadResourceStatus status) {
     final (color, icon, text) = switch (status) {
       DownloadResourceStatus.upToDate => (
-          const Color(0xFF10B981),
+          SaoColors.success,
           Icons.check_circle_rounded,
           'Al día',
         ),
       DownloadResourceStatus.downloading => (
-          const Color(0xFF3B82F6),
+          SaoColors.info,
           Icons.downloading_rounded,
           'Descargando',
         ),
       DownloadResourceStatus.pending => (
-          const Color(0xFFF59E0B),
+          SaoColors.warning,
           Icons.pending_rounded,
           'Pendiente',
         ),
       DownloadResourceStatus.error => (
-          const Color(0xFFEF4444),
+          SaoColors.error,
           Icons.error_rounded,
           'Error',
         ),
@@ -758,7 +813,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: const Color(0xFFE5E7EB),
+              color: SaoColors.gray200,
             ),
           ),
           child: Column(
@@ -775,7 +830,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                   'Sincronizar solo con WiFi',
                   style: TextStyle(fontSize: 12),
                 ),
-                activeThumbColor: const Color(0xFF10B981),
+                activeThumbColor: SaoColors.success,
               ),
             ],
           ),
@@ -792,15 +847,15 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              side: const BorderSide(color: Color(0xFFEF4444), width: 1.5),
+              side: const BorderSide(color: SaoColors.error, width: 1.5),
             ),
-            icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444)),
+            icon: const Icon(Icons.delete_outline_rounded, color: SaoColors.error),
             label: const Text(
               'Liberar espacio en dispositivo',
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFFEF4444),
+                color: SaoColors.error,
               ),
             ),
           ),
@@ -815,20 +870,20 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     switch (syncHealth.status) {
       case SyncHealthStatus.allSynced:
         return (
-          const Color(0xFFF0FDF4),
-          const Color(0xFF10B981),
+          SaoColors.successBg,
+          SaoColors.success,
           Icons.cloud_done_rounded,
         );
       case SyncHealthStatus.syncing:
         return (
-          const Color(0xFFDBEAFE),
-          const Color(0xFF3B82F6),
+          SaoColors.infoLight,
+          SaoColors.info,
           Icons.cloud_sync_rounded,
         );
       case SyncHealthStatus.error:
         return (
-          const Color(0xFFFEE2E2),
-          const Color(0xFFEF4444),
+          SaoColors.errorLight,
+          SaoColors.error,
           Icons.cloud_off_rounded,
         );
     }

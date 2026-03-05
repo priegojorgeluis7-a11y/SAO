@@ -1,17 +1,28 @@
 """Activities API endpoints"""
 
+import json
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.api.deps import get_current_user
+from app.models.activity import Activity
+from app.models.audit_log import AuditLog
 from app.models.user import User
 from app.services.activity_service import ActivityService
+from app.services.activity_catalog_validator import (
+    ActivityCatalogValidationError,
+    validate_activity_catalog_binding,
+)
 from app.schemas.activity import (
     ActivityCreate,
-    ActivityUpdate,
     ActivityDTO,
+    ActivityFlagsUpdate,
     ActivityListResponse,
+    ActivityTimelineItem,
+    ActivityUpdate,
 )
 
 router = APIRouter(prefix="/activities", tags=["activities"])
@@ -30,6 +41,19 @@ async def create_activity(
     Otherwise creates new activity (201)
     """
     service = ActivityService(db)
+
+    try:
+        validate_activity_catalog_binding(
+            db,
+            project_id=activity_data.project_id,
+            catalog_version_id=activity_data.catalog_version_id,
+            activity_type_code=activity_data.activity_type_code,
+        )
+    except ActivityCatalogValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": exc.code, "message": exc.message},
+        )
     
     # Check if activity already exists
     existing = service.get_activity_by_uuid(activity_data.uuid)
@@ -130,3 +154,75 @@ async def delete_activity(
     service = ActivityService(db)
     activity = service.soft_delete_activity(uuid)
     return service.to_dto(activity)
+
+
+@router.patch("/{uuid}/flags", response_model=ActivityDTO)
+async def patch_activity_flags(
+    uuid: str,
+    flags: ActivityFlagsUpdate,
+    db: Session = Depends(get_db),
+    _authenticated_user: User = Depends(get_current_user),
+):
+    """Patch structured review flags (gps_mismatch, catalog_changed) on an activity.
+    Only supplied fields are updated; omitted fields remain unchanged.
+    Increments sync_version so mobile pull detects the change.
+    """
+    service = ActivityService(db)
+    activity = service.patch_flags(
+        uuid=uuid,
+        gps_mismatch=flags.gps_mismatch,
+        catalog_changed=flags.catalog_changed,
+    )
+    return service.to_dto(activity)
+
+
+@router.get("/{uuid}/timeline", response_model=list[ActivityTimelineItem])
+async def get_activity_timeline(
+    uuid: str,
+    db: Session = Depends(get_db),
+    _authenticated_user: User = Depends(get_current_user),
+):
+    """Return last audit events for a single activity (max 50, newest first)."""
+    try:
+        activity_uuid = UUID(uuid)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid activity uuid: {uuid}",
+        )
+
+    activity = db.query(Activity).filter(Activity.uuid == activity_uuid).first()
+    if activity is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Activity with uuid {uuid} not found",
+        )
+
+    logs = (
+        db.query(AuditLog)
+        .filter(AuditLog.entity == "activity", AuditLog.entity_id == str(activity.uuid))
+        .order_by(AuditLog.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    timeline: list[ActivityTimelineItem] = []
+    for log in logs:
+        details: dict | None = None
+        if log.details_json:
+            try:
+                parsed = json.loads(log.details_json)
+                details = parsed if isinstance(parsed, dict) else {"value": parsed}
+            except Exception:
+                details = {"raw": log.details_json}
+
+        timeline.append(
+            ActivityTimelineItem(
+                at=log.created_at,
+                actor=log.actor_email,
+                action=log.action,
+                details=details,
+            )
+        )
+
+    return timeline

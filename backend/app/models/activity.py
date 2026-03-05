@@ -1,7 +1,7 @@
 """Activity model - Official v1 Contract"""
 import enum
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, DateTime, Text, ForeignKey, CheckConstraint, Index
+from sqlalchemy import Boolean, Column, String, Integer, DateTime, Text, ForeignKey, CheckConstraint, Index
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.models.base import BaseModel
@@ -83,6 +83,12 @@ class Activity(BaseModel):
     # Title and description
     title = Column(String(200), nullable=True)
     description = Column(Text, nullable=True)
+
+    # ============================================================
+    # STRUCTURED FLAGS (review quality signals)
+    # ============================================================
+    gps_mismatch = Column(Boolean, nullable=False, default=False)
+    catalog_changed = Column(Boolean, nullable=False, default=False)
     
     # ============================================================
     # RELATIONSHIPS

@@ -7,7 +7,10 @@ class AppConfig {
   /// - Android (dispositivo): 'http://192.168.1.100:8000/api/v1' (IP de tu PC en la red)
   /// - Android (emulador): 'http://10.0.2.2:8000/api/v1' (apunta al localhost de la PC)
   /// - iOS (simulador): 'http://localhost:8000/api/v1'
-  static const String baseApiUrl = 'https://sao-api-fjzra25vya-uc.a.run.app/api/v1';
+  static const String baseApiUrl = String.fromEnvironment(
+    'SAO_API_BASE',
+    defaultValue: 'http://localhost:8000/api/v1',
+  );
   
   /// Timeout para conexiones HTTP
   static const Duration connectionTimeout = Duration(seconds: 10);

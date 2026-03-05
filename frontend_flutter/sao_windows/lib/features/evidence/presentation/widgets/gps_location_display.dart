@@ -135,7 +135,10 @@ class GpsLocationDisplay extends StatelessWidget {
     return Colors.red;
   }
 
-  String _formatTimestamp(DateTime dt) {
+  String _formatTimestamp(DateTime? dt) {
+    if (dt == null) {
+      return 'N/A';
+    }
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} '
         '${dt.hour}:${dt.minute.toString().padLeft(2, '0')}:${dt.second.toString().padLeft(2, '0')}';
   }

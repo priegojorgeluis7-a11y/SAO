@@ -1,16 +1,17 @@
 class AppDataMode {
   AppDataMode._();
 
-  /// Global switch de datos.
-  /// true  -> usa mocks operativos
-  /// false -> intenta backend y, si falla, usa DB local
-  static const bool useMocks = true;
-
-  /// Base URL del backend (opcional).
-  /// Ejemplo: http://127.0.0.1:8000
-  static const String backendBaseUrl = '';
+  /// Base URL del backend.
+  /// Debe establecerse via --dart-define=SAO_BACKEND_URL=https://...
+    /// Si no se establece, usa fallback al backend productivo.
+  static const String backendBaseUrl =
+            String.fromEnvironment(
+                'SAO_BACKEND_URL',
+                defaultValue: 'https://sao-api-fjzra25vya-uc.a.run.app',
+            );
 
   /// JWT bearer token para llamadas online del desktop.
-  /// Dejar vacío para modo local/mock.
-  static const String backendBearerToken = '';
+  /// En producción se usa el token dinámico de TokenStore (login).
+  static const String backendBearerToken =
+      String.fromEnvironment('SAO_BACKEND_TOKEN', defaultValue: '');
 }

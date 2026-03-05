@@ -2,16 +2,118 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../auth/data/auth_provider.dart';
+import '../auth/application/auth_providers.dart';
 import '../sync/data/sync_api_repository.dart';
 import '../catalog/data/catalog_api_repository.dart';
 import '../catalog/data/catalog_local_repository.dart';
 import '../catalog/application/catalog_sync_service.dart';
+import '../../core/di/service_locator.dart';
+import '../../core/network/api_client.dart';
+import '../../core/network/api_config.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../core/utils/logger.dart';
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
+
+  static const _apiBaseUrlKey = 'api_base_url_override';
+
+  Future<void> _configureBackendUrl(BuildContext context) async {
+    final prefs = getIt<SharedPreferences>();
+    final apiConfig = getIt<ApiConfig>();
+    final apiClient = getIt<ApiClient>();
+    final stored = prefs.getString(_apiBaseUrlKey)?.trim();
+    final current = (stored != null && stored.isNotEmpty)
+        ? stored
+        : apiConfig.baseUrl;
+
+    final controller = TextEditingController(text: current);
+    final formKey = GlobalKey<FormState>();
+
+    final submittedUrl = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          title: const Text('Configurar backend API'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Base URL',
+                hintText: 'https://host/api/v1',
+              ),
+              validator: (value) {
+                final candidate = (value ?? '').trim();
+                if (candidate.isEmpty) {
+                  return 'Ingresa una URL';
+                }
+                final uri = Uri.tryParse(candidate);
+                if (uri == null || !uri.hasScheme || !uri.hasAuthority) {
+                  return 'URL inválida';
+                }
+                if (uri.scheme != 'http' && uri.scheme != 'https') {
+                  return 'La URL debe usar http o https';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop('__RESET__'),
+              child: const Text('Usar predeterminada'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState?.validate() != true) return;
+                Navigator.of(dialogContext).pop(controller.text.trim());
+              },
+              child: const Text('Guardar'),
+            ),
+          ],
+        );
+      },
+    );
+
+    controller.dispose();
+
+    if (submittedUrl == null) return;
+
+    if (submittedUrl == '__RESET__') {
+      await prefs.remove(_apiBaseUrlKey);
+      apiConfig.resetBaseUrl();
+      final defaultUrl = ApiConfig.defaultBaseUrl;
+      apiClient.updateBaseUrl(defaultUrl);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Backend restablecido a: $defaultUrl'),
+            backgroundColor: SaoColors.info,
+          ),
+        );
+      }
+      return;
+    }
+
+    await prefs.setString(_apiBaseUrlKey, submittedUrl);
+    apiClient.updateBaseUrl(submittedUrl);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Backend actualizado a: $submittedUrl'),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    }
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -32,20 +134,20 @@ class SettingsPage extends ConsumerWidget {
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
+                color: SaoColors.infoBg,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFBFDBFE)),
+                border: Border.all(color: SaoColors.infoBorder),
               ),
               child: const Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.school_outlined, size: 18, color: Color(0xFF1D4ED8)),
+                      Icon(Icons.school_outlined, size: 18, color: SaoColors.infoIcon),
                       SizedBox(width: 6),
                       Text(
                         'Modo tutorial · Vista Ajustes',
-                        style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF1E3A8A)),
+                        style: TextStyle(fontWeight: FontWeight.w700, color: SaoColors.infoText),
                       ),
                     ],
                   ),
@@ -209,6 +311,13 @@ class SettingsPage extends ConsumerWidget {
           const Divider(),
 
           // Sección de aplicación
+          ListTile(
+            leading: const Icon(Icons.dns_outlined),
+            title: const Text('Backend API'),
+            subtitle: const Text('Cambiar endpoint (entorno)'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _configureBackendUrl(context),
+          ),
           ListTile(
             leading: const Icon(Icons.sync_outlined),
             title: const Text('Sincronización'),
@@ -475,9 +584,14 @@ class SettingsPage extends ConsumerWidget {
               );
 
               if (confirm == true && context.mounted) {
-                await ref.read(authProvider.notifier).logout();
+                await ref.read(authControllerProvider.notifier).logout();
+                ref.invalidate(authStateProvider);
+                ref.invalidate(sessionProvider);
+                ref.invalidate(currentUserProvider);
+                ref.invalidate(isAuthenticatedProvider);
+                ref.invalidate(authControllerProvider);
                 if (context.mounted) {
-                  context.go('/login');
+                  context.go('/auth/login');
                 }
               }
             },

@@ -2,6 +2,22 @@
 import '../../../core/network/api_client.dart';
 import '../models/event_dto.dart';
 
+class EventListPage {
+  final List<EventDTO> items;
+  final int total;
+  final int page;
+  final int pageSize;
+  final bool hasNext;
+
+  const EventListPage({
+    required this.items,
+    required this.total,
+    required this.page,
+    required this.pageSize,
+    required this.hasNext,
+  });
+}
+
 /// Repository for remote event operations.
 /// Maps to backend /api/v1/events endpoints.
 class EventsApiRepository {
@@ -26,16 +42,34 @@ class EventsApiRepository {
     return EventDTO.fromJson(response.data!);
   }
 
+  /// PUT /api/v1/events/{uuid}
+  Future<EventDTO> updateEvent(EventDTO event) async {
+    final response = await _apiClient.put<Map<String, dynamic>>(
+      '/events/${event.uuid}',
+      data: event.toJson(),
+    );
+    return EventDTO.fromJson(response.data!);
+  }
+
+  /// DELETE /api/v1/events/{uuid}
+  Future<void> deleteEvent(String uuid) async {
+    await _apiClient.delete<void>('/events/$uuid');
+  }
+
   /// GET /api/v1/events?project_id=...&since_version=...
-  Future<List<EventDTO>> listEvents({
+  Future<EventListPage> listEvents({
     required String projectId,
     int? sinceVersion,
     String? severity,
-    int limit = 200,
+    bool includeDeleted = true,
+    int page = 1,
+    int pageSize = 200,
   }) async {
     final query = <String, dynamic>{
       'project_id': projectId,
-      'limit': limit,
+      'page': page,
+      'page_size': pageSize,
+      'include_deleted': includeDeleted,
       'since_version': sinceVersion,
       'severity': severity,
     }..removeWhere((_, v) => v == null);
@@ -43,9 +77,17 @@ class EventsApiRepository {
       '/events',
       queryParameters: query,
     );
-    final items = response.data!['items'] as List<dynamic>;
-    return items
+    final data = response.data!;
+    final items = (data['items'] as List<dynamic>)
         .map((e) => EventDTO.fromJson(e as Map<String, dynamic>))
         .toList();
+
+    return EventListPage(
+      items: items,
+      total: (data['total'] as num?)?.toInt() ?? items.length,
+      page: (data['page'] as num?)?.toInt() ?? page,
+      pageSize: (data['page_size'] as num?)?.toInt() ?? pageSize,
+      hasNext: (data['has_next'] as bool?) ?? false,
+    );
   }
 }

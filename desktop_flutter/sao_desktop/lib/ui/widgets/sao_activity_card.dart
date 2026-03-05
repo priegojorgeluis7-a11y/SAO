@@ -194,7 +194,7 @@ class SaoActivityCard extends StatelessWidget {
                 ),
                 child: compact
                     ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Container(
                             width: 6,

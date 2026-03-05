@@ -5,6 +5,7 @@ from uuid import uuid4
 from unittest.mock import patch, MagicMock
 
 from app.models.catalog import CatalogStatus, CatalogVersion
+from app.core.config import settings
 from app.models.front import Front
 from app.models.project import Project, ProjectStatus
 from app.models.role import Role
@@ -308,3 +309,76 @@ def test_upload_init_unauthorized(client, auth_headers, db):
     
     # Should fail with 404 (activity not found) or 403 (no access)
     assert response.status_code in [404, 403]
+
+
+@patch("app.services.evidence_service.storage.Client")
+def test_upload_init_rejects_invalid_mime_type(mock_storage_client, client, auth_headers, test_activity, test_user_scope_tmq):
+    """upload-init should reject mime types outside JPEG/PNG/PDF."""
+    mock_storage_client.return_value = MagicMock()
+
+    request_data = {
+        "activityId": str(test_activity.uuid),
+        "mimeType": "image/gif",
+        "sizeBytes": 1024,
+        "fileName": "anim.gif",
+    }
+
+    response = client.post(
+        "/api/v1/evidences/upload-init",
+        json=request_data,
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+    assert "Invalid mime_type" in response.json()["detail"]
+
+
+@patch("app.services.evidence_service.storage.Client")
+def test_upload_init_rejects_file_larger_than_20mb(mock_storage_client, client, auth_headers, test_activity, test_user_scope_tmq):
+    """upload-init should reject payloads over 20MB."""
+    mock_storage_client.return_value = MagicMock()
+
+    request_data = {
+        "activityId": str(test_activity.uuid),
+        "mimeType": "image/jpeg",
+        "sizeBytes": 20 * 1024 * 1024 + 1,
+        "fileName": "large.jpg",
+    }
+
+    response = client.post(
+        "/api/v1/evidences/upload-init",
+        json=request_data,
+        headers=auth_headers,
+    )
+
+    assert response.status_code == 422
+    assert "20MB" in response.json()["detail"]
+
+
+@patch("app.services.evidence_service.storage.Client")
+def test_upload_init_rate_limit_returns_429(mock_storage_client, client, auth_headers, test_activity, test_user_scope_tmq, monkeypatch):
+    monkeypatch.setattr(settings, "RATE_LIMIT_EVIDENCE_UPLOAD_INIT_PER_MINUTE", 2, raising=False)
+    monkeypatch.setattr(settings, "RATE_LIMIT_WINDOW_SECONDS", 60, raising=False)
+
+    mock_blob = MagicMock()
+    mock_blob.generate_signed_url.return_value = "https://signed-url.example.com/upload"
+    mock_bucket = MagicMock()
+    mock_bucket.blob.return_value = mock_blob
+    mock_client = MagicMock()
+    mock_client.bucket.return_value = mock_bucket
+    mock_storage_client.return_value = mock_client
+
+    request_data = {
+        "activityId": str(test_activity.uuid),
+        "mimeType": "image/jpeg",
+        "sizeBytes": 2048,
+        "fileName": "photo.jpg",
+    }
+
+    first = client.post("/api/v1/evidences/upload-init", json=request_data, headers=auth_headers)
+    second = client.post("/api/v1/evidences/upload-init", json=request_data, headers=auth_headers)
+    third = client.post("/api/v1/evidences/upload-init", json=request_data, headers=auth_headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 429

@@ -1,6 +1,7 @@
 // lib/features/agenda/widgets/agenda_mini_card.dart
 
 import 'package:flutter/material.dart';
+import '../../../ui/theme/sao_colors.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
 
@@ -18,7 +19,7 @@ class AgendaMiniCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final riskColor = _getRiskColor(item.risk);
+    final borderColor = _getBorderColor();
 
     return Material(
       borderRadius: BorderRadius.circular(12),
@@ -30,9 +31,9 @@ class AgendaMiniCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(12),
             border: Border(
-              left: BorderSide(color: riskColor, width: 6),
+              left: BorderSide(color: borderColor, width: 6),
             ),
-            color: Colors.white,
+            color: SaoColors.surface,
           ),
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           child: Row(
@@ -47,7 +48,7 @@ class AgendaMiniCard extends StatelessWidget {
                       style: const TextStyle(
                         fontWeight: FontWeight.w900,
                         fontSize: 12,
-                        color: Color(0xFF111827),
+                        color: SaoColors.primary,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -58,7 +59,7 @@ class AgendaMiniCard extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: Color(0xFF1F2937),
+                        color: SaoColors.gray800,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -68,7 +69,7 @@ class AgendaMiniCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 12,
-                        color: Color(0xFF6B7280),
+                        color: SaoColors.statusBorrador,
                       ),
                     ),
                   ],
@@ -79,7 +80,7 @@ class AgendaMiniCard extends StatelessWidget {
                 children: [
                   CircleAvatar(
                     radius: 16,
-                    backgroundColor: const Color(0xFF3B82F6),
+                    backgroundColor: SaoColors.info,
                     backgroundImage: resource.avatarUrl != null
                         ? NetworkImage(resource.avatarUrl!)
                         : null,
@@ -114,14 +115,34 @@ class AgendaMiniCard extends StatelessWidget {
   Color _getRiskColor(RiskLevel level) {
     switch (level) {
       case RiskLevel.bajo:
-        return const Color(0xFF10B981);
+        return SaoColors.success;
       case RiskLevel.medio:
-        return const Color(0xFFFBBF24);
+        return SaoColors.warning;
       case RiskLevel.alto:
-        return const Color(0xFFF97316);
+        return SaoColors.riskHigh;
       case RiskLevel.prioritario:
-        return const Color(0xFFEF4444);
+        return SaoColors.riskPriority;
     }
+  }
+
+  Color _getBorderColor() {
+    final parsed = _parseHexColor(item.colorSnapshot);
+    return parsed ?? _getRiskColor(item.risk);
+  }
+
+  Color? _parseHexColor(String? hexColor) {
+    if (hexColor == null || hexColor.trim().isEmpty) return null;
+
+    var normalized = hexColor.trim().replaceFirst('#', '');
+    if (normalized.length == 6) {
+      normalized = 'FF$normalized';
+    }
+    if (normalized.length != 8) return null;
+
+    final value = int.tryParse(normalized, radix: 16);
+    if (value == null) return null;
+
+    return Color(value);
   }
 }
 
@@ -139,13 +160,13 @@ class _SyncIcon extends StatelessWidget {
   (IconData, Color) _getIconAndColor() {
     switch (status) {
       case SyncStatus.pending:
-        return (Icons.cloud_queue_rounded, const Color(0xFF9CA3AF));
+        return (Icons.cloud_queue_rounded, SaoColors.gray400);
       case SyncStatus.uploading:
-        return (Icons.cloud_upload_rounded, const Color(0xFFFBBF24));
+        return (Icons.cloud_upload_rounded, SaoColors.warning);
       case SyncStatus.synced:
-        return (Icons.cloud_done_rounded, const Color(0xFF10B981));
+        return (Icons.cloud_done_rounded, SaoColors.success);
       case SyncStatus.error:
-        return (Icons.cloud_off_rounded, const Color(0xFFEF4444));
+        return (Icons.cloud_off_rounded, SaoColors.error);
     }
   }
 }

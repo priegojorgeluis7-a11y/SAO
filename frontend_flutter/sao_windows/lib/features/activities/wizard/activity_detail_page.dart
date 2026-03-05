@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../home/models/today_activity.dart';
+import '../../../ui/theme/sao_colors.dart';
+import '../../../ui/theme/sao_typography.dart';
 
 class ActivityDetailPage extends StatefulWidget {
   final TodayActivity activity;
@@ -43,7 +45,7 @@ class ActivityDetailPage extends StatefulWidget {
 }
 
 class _ActivityDetailPageState extends State<ActivityDetailPage> {
-  // ====== Estado local mock de evidencias (mientras conectas image_picker/Drift) ======
+  // ====== Estado local de evidencias ======
   int photos = 0;
   int pdfs = 0;
   int audios = 0;
@@ -65,11 +67,11 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   Color _baseStatusColor(ActivityStatus s) {
     switch (s) {
       case ActivityStatus.vencida:
-        return const Color(0xFFD64545);
+        return SaoColors.error;
       case ActivityStatus.hoy:
-        return const Color(0xFFB26A00);
+        return SaoColors.warning;
       case ActivityStatus.programada:
-        return const Color(0xFF5B6472);
+        return SaoColors.gray600;
     }
   }
 
@@ -87,11 +89,11 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   Color _baseStatusBg(ActivityStatus s) {
     switch (s) {
       case ActivityStatus.vencida:
-        return const Color(0xFFFFF1F1);
+        return SaoColors.statusRechazadoBg;
       case ActivityStatus.hoy:
-        return const Color(0xFFFFF7E6);
+        return SaoColors.alertBg;
       case ActivityStatus.programada:
-        return const Color(0xFFF8FAFC);
+        return SaoColors.gray50;
     }
   }
 
@@ -99,19 +101,19 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   Color _effectiveColor() {
     if ((widget.blockReason ?? '').isNotEmpty) {
       // cancelada = rojo; otros = naranja
-      return widget.blockReason == 'Cancelada' ? const Color(0xFFD64545) : const Color(0xFFF97316);
+      return widget.blockReason == 'Cancelada' ? SaoColors.error : SaoColors.riskHigh;
     }
-    if (widget.endAt != null) return const Color(0xFF16A34A); // terminada
-    if (widget.inProgress) return const Color(0xFF2563EB); // en progreso
+    if (widget.endAt != null) return SaoColors.success; // terminada
+    if (widget.inProgress) return SaoColors.statusEnCampo; // en progreso
     return _baseStatusColor(widget.activity.status);
   }
 
   Color _effectiveBg() {
     if ((widget.blockReason ?? '').isNotEmpty) {
-      return widget.blockReason == 'Cancelada' ? const Color(0xFFFFF1F1) : const Color(0xFFFFF7ED);
+      return widget.blockReason == 'Cancelada' ? SaoColors.statusRechazadoBg : SaoColors.riskHighBg;
     }
-    if (widget.endAt != null) return const Color(0xFFF0FDF4);
-    if (widget.inProgress) return const Color(0xFFEFF6FF);
+    if (widget.endAt != null) return SaoColors.statusAprobadoBg;
+    if (widget.inProgress) return SaoColors.statusEnCampoBg;
     return _baseStatusBg(widget.activity.status);
   }
 
@@ -147,10 +149,10 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
     final bool canReport = widget.onReportIncident != null && widget.endAt == null; // se puede reportar mientras no esté terminada
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: SaoColors.gray50,
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        surfaceTintColor: Colors.white,
+        backgroundColor: SaoColors.surface,
+        surfaceTintColor: SaoColors.surface,
         titleSpacing: 0,
         title: const Text('Detalle'),
       ),
@@ -163,7 +165,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
             decoration: BoxDecoration(
               color: bg,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFFEAEAEA)),
+              border: Border.all(color: SaoColors.border),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -175,27 +177,22 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                     Expanded(
                       child: Text(
                         a.title,
-                        style: const TextStyle(
-                          fontSize: 18,
+                        style: SaoTypography.frontTitle.copyWith(
                           fontWeight: FontWeight.w900,
-                          color: Color(0xFF111827),
+                          color: SaoColors.primary,
                         ),
                       ),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: SaoColors.surface,
                         borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: const Color(0xFFEAEAEA)),
+                        border: Border.all(color: SaoColors.border),
                       ),
                       child: Text(
                         'PK ${_formatPk(a.pk)}',
-                        style: const TextStyle(
-                          fontFamily: 'monospace',
-                          fontWeight: FontWeight.w900,
-                          color: Color(0xFF111827),
-                        ),
+                        style: SaoTypography.pkLabel,
                       ),
                     ),
                   ],
@@ -219,12 +216,12 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                 // Location
                 Row(
                   children: [
-                    const Icon(Icons.place_outlined, size: 18, color: Color(0xFF475569)),
+                    const Icon(Icons.place_outlined, size: 18, color: SaoColors.gray600),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         '${a.municipio}, ${a.estado}',
-                        style: const TextStyle(fontSize: 13, color: Color(0xFF334155)),
+                        style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
                       ),
                     ),
                   ],
@@ -247,8 +244,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                     Expanded(
                       child: Text(
                         _effectiveStatusText(),
-                        style: TextStyle(
-                          fontSize: 13,
+                        style: SaoTypography.bodyTextSmall.copyWith(
                           fontWeight: FontWeight.w800,
                           color: c,
                         ),
@@ -263,9 +259,9 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: SaoColors.surface,
                       borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: const Color(0xFFEAEAEA)),
+                      border: Border.all(color: SaoColors.border),
                     ),
                     child: Row(
                       children: [
@@ -344,7 +340,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
 
           const SizedBox(height: 18),
 
-          // ===== Evidencias (mock local) =====
+          // ===== Evidencias =====
           _sectionTitle('Evidencias'),
           const SizedBox(height: 8),
           _kvRow('Fotos', '$photos'),
@@ -380,7 +376,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
 
           const SizedBox(height: 18),
 
-          // ===== Historial (mock) =====
+          // ===== Historial =====
           _sectionTitle('Historial'),
           const SizedBox(height: 8),
           _timelineTile(
@@ -429,24 +425,27 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   // =========================
   static Widget _sectionTitle(String t) => Text(
         t,
-        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF111827)),
+      style: SaoTypography.sectionTitle,
       );
 
   static Widget _chip(String t, {required IconData icon}) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: SaoColors.surface,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: const Color(0xFFEAEAEA)),
+          border: Border.all(color: SaoColors.border),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: const Color(0xFF475569)),
+            Icon(icon, size: 16, color: SaoColors.gray600),
             const SizedBox(width: 6),
             Text(
               t,
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+              style: SaoTypography.caption.copyWith(
+                fontWeight: FontWeight.w800,
+                color: SaoColors.gray900,
+              ),
             ),
           ],
         ),
@@ -454,20 +453,23 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
 
   static Widget _kvRow(String k, String v) => Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: Color(0xFFF0F0F0))),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: SaoColors.border)),
         ),
         child: Row(
           children: [
             Expanded(
               child: Text(
                 k,
-                style: const TextStyle(fontSize: 13, color: Color(0xFF5B6472)),
+                style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray600),
               ),
             ),
             Text(
               v,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Color(0xFF111827)),
+              style: SaoTypography.bodyTextSmall.copyWith(
+                fontWeight: FontWeight.w900,
+                color: SaoColors.primary,
+              ),
             ),
           ],
         ),
@@ -476,9 +478,21 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   static Widget _kvMini(String k, String v) => Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(k, style: const TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w700)),
+          Text(
+            k,
+            style: SaoTypography.caption.copyWith(
+              color: SaoColors.gray500,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
           const SizedBox(height: 2),
-          Text(v, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF111827))),
+          Text(
+            v,
+            style: SaoTypography.bodyTextBold.copyWith(
+              fontWeight: FontWeight.w900,
+              color: SaoColors.primary,
+            ),
+          ),
         ],
       );
 
@@ -511,9 +525,9 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
         margin: const EdgeInsets.only(bottom: 10),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFFFAFAFA),
+          color: SaoColors.gray50,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFEAEAEA)),
+          border: Border.all(color: SaoColors.border),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -522,9 +536,9 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
               width: 36,
               height: 36,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: SaoColors.surface,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFEAEAEA)),
+                border: Border.all(color: SaoColors.border),
               ),
               child: Icon(icon, size: 18),
             ),
@@ -535,12 +549,15 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                 children: [
                   Text(
                     title,
-                    style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13, color: Color(0xFF111827)),
+                    style: SaoTypography.bodyTextSmall.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: SaoColors.primary,
+                    ),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     subtitle,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF5B6472)),
+                    style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
                   ),
                 ],
               ),

@@ -8,6 +8,7 @@ class ActivityWithDetails {
   final Front? front;
   final Municipality? municipality;
   final List<Evidence> evidences;
+  final ActivityFlags flags;
 
   ActivityWithDetails({
     required this.activity,
@@ -16,6 +17,7 @@ class ActivityWithDetails {
     this.front,
     this.municipality,
     required this.evidences,
+    this.flags = const ActivityFlags(),
   });
 
   String get statusLabel {
@@ -36,4 +38,30 @@ class ActivityWithDetails {
         return 'default';
     }
   }
+}
+
+class ActivityFlags {
+  final bool gpsMismatch;
+  final bool catalogChanged;
+  final bool checklistIncomplete;
+
+  const ActivityFlags({
+    this.gpsMismatch = false,
+    this.catalogChanged = false,
+    this.checklistIncomplete = false,
+  });
+}
+
+class ActivityTimelineEntry {
+  final DateTime at;
+  final String? actor;
+  final String action;
+  final Map<String, dynamic>? details;
+
+  const ActivityTimelineEntry({
+    required this.at,
+    required this.actor,
+    required this.action,
+    required this.details,
+  });
 }

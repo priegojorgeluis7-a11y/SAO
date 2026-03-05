@@ -8,15 +8,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:sao_windows/app.dart';
 import 'package:sao_windows/core/di/service_locator.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   // Initialize dependencies before running tests
   setUpAll(() async {
-    WidgetsFlutterBinding.ensureInitialized();
-    await setupServiceLocator();
+    SharedPreferences.setMockInitialValues({});
+    await setupServiceLocator(prewarmCatalog: false);
   });
 
   testWidgets('App smoke test', (WidgetTester tester) async {

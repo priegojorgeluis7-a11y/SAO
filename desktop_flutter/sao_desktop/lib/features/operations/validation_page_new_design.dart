@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
 import '../../data/repositories/activity_repository.dart';
 import '../../ui/sao_ui.dart';
@@ -18,13 +19,19 @@ class ValidationPageNewDesign extends ConsumerStatefulWidget {
 
 class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesign> {
   ActivityWithDetails? _selectedActivity;
+  List<ActivityWithDetails> _visibleActivities = const [];
   int _selectedEvidenceIndex = 0;
   String _searchQuery = '';
+  String _queueTab = 'PENDING';
   bool _filterPending = false;
   bool _filterRejected = false;
   bool _filterGps = false;
   bool _filterChanges = false;
+  String? _selectedRejectReasonCode;
   late TextEditingController _reviewCommentsController;
+  List<ActivityTimelineEntry> _timelineEntries = const [];
+  bool _timelineLoading = false;
+  String? _timelineError;
 
   @override
   void initState() {
@@ -65,10 +72,10 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
             Container(
               padding: EdgeInsets.all(24),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.05),
+                    color: Theme.of(context).colorScheme.shadow.withOpacity(0.05),
                     blurRadius: 8,
                     offset: Offset(0, 2),
                   ),
@@ -117,7 +124,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                       },
                       orElse: () => null,
                     ),
-                    projectName: 'TMQ',
+                    projectName: ref.watch(activeProjectIdProvider),
                     onFilterPressed: () {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -184,15 +191,23 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                         activitiesAsync: activitiesAsync,
                         selectedActivity: _selectedActivity,
                         searchQuery: _searchQuery,
+                        queueTab: _queueTab,
                         filterPending: _filterPending,
                         filterRejected: _filterRejected,
                         filterGps: _filterGps,
                         filterChanges: _filterChanges,
+                        onQueueTabChanged: (tab) {
+                          setState(() => _queueTab = tab);
+                        },
+                        onVisibleActivitiesChanged: (activities) {
+                          _visibleActivities = activities;
+                        },
                         onSelectActivity: (activity) {
                           setState(() {
                             _selectedActivity = activity;
                             _selectedEvidenceIndex = 0;
                           });
+                          _loadTimelineForActivity(activity.activity.id);
                         },
                       ),
                     ),
@@ -220,6 +235,9 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                       ),
                       child: ActivityDetailsPanelPro(
                         activity: _selectedActivity,
+                        timelineEntries: _timelineEntries,
+                        timelineLoading: _timelineLoading,
+                        timelineError: _timelineError,
                         onFieldChanged: (field, value) {
                           print('Campo $field cambiado a: $value');
                           ScaffoldMessenger.of(context).showSnackBar(
@@ -276,14 +294,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                           setState(() => _selectedEvidenceIndex = index);
                         },
                         onCaptionChanged: (evidenceId, caption) {
-                          print('Caption actualizado: $caption');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Pie de foto guardado'),
-                              duration: Duration(seconds: 1),
-                              backgroundColor: SaoColors.success,
-                            ),
-                          );
+                          _saveEvidenceCaption(evidenceId, caption);
                         },
                       ),
                     ),
@@ -299,7 +310,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
             Container(
               padding: EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: Theme.of(context).colorScheme.surface,
                 border: Border(
                   top: BorderSide(color: SaoColors.border),
                 ),
@@ -326,7 +337,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: SaoColors.error,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SaoColors.onPrimary,
                       disabledBackgroundColor: SaoColors.gray300,
                     ),
                   ),
@@ -344,7 +355,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: SaoColors.success,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SaoColors.onPrimary,
                       disabledBackgroundColor: SaoColors.gray300,
                     ),
                   ),
@@ -357,6 +368,33 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     );
   }
 
+  Future<void> _loadTimelineForActivity(String activityId) async {
+    setState(() {
+      _timelineLoading = true;
+      _timelineError = null;
+      _timelineEntries = const [];
+    });
+
+    final repo = ref.read(activityRepositoryProvider);
+    try {
+      final timeline = await repo.getActivityTimeline(activityId);
+      if (!mounted || _selectedActivity?.activity.id != activityId) return;
+      setState(() {
+        _timelineEntries = timeline;
+      });
+    } catch (_) {
+      if (!mounted || _selectedActivity?.activity.id != activityId) return;
+      setState(() {
+        _timelineError = 'No se pudo cargar el historial';
+      });
+    } finally {
+      if (!mounted || _selectedActivity?.activity.id != activityId) return;
+      setState(() {
+        _timelineLoading = false;
+      });
+    }
+  }
+
   Widget _buildShortcutPill(String label) {
     return Container(
       padding: EdgeInsets.symmetric(
@@ -364,16 +402,15 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
         vertical: 2,
       ),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
+        color: SaoColors.onPrimary.withOpacity(0.2),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
-        border: Border.all(color: Colors.white.withOpacity(0.6)),
+        border: Border.all(color: SaoColors.onPrimary.withOpacity(0.6)),
       ),
       child: Text(
         label,
         style: SaoTypography.caption.copyWith(
-          color: Colors.white,
+          color: SaoColors.onPrimary,
           fontWeight: FontWeight.w600,
-          fontSize: 10,
         ),
       ),
     );
@@ -405,17 +442,18 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
   /// Aprueba la actividad seleccionada y carga la siguiente
   Future<void> _approveActivity() async {
     if (_selectedActivity == null) return;
+    final previousActivityId = _selectedActivity!.activity.id;
 
     final repo = ref.read(activityRepositoryProvider);
     try {
-      await repo.approveActivity(_selectedActivity!.activity.id, 'usr-admin-001');
+      await repo.approveActivity(previousActivityId, 'usr-admin-001');
       
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
               children: [
-                Icon(Icons.check_circle_rounded, color: Colors.white),
+                Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary),
                 SizedBox(width: SaoSpacing.md),
                 Expanded(
                   child: Text(
@@ -433,7 +471,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
         );
         
         // Cargar siguiente actividad
-        _loadNextActivity();
+        _loadNextActivity(previousActivityId);
       }
     } catch (e) {
       if (mounted) {
@@ -449,6 +487,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
 
   /// Muestra diálogo para rechazar la actividad
   void _showRejectDialog() {
+    final repo = ref.read(activityRepositoryProvider);
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -511,15 +550,43 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                 style: SaoTypography.caption.copyWith(fontWeight: FontWeight.w600),
               ),
               SizedBox(height: SaoSpacing.md),
-              Wrap(
-                spacing: SaoSpacing.sm,
-                runSpacing: SaoSpacing.sm,
-                children: [
-                  _buildReasonChip('La foto está borrosa'),
-                  _buildReasonChip('No se observa el elemento'),
-                  _buildReasonChip('GPS incorrecto'),
-                  _buildReasonChip('Falta información'),
-                ],
+              FutureBuilder<List<RejectionPlaybookItem>>(
+                future: repo.getRejectPlaybook(projectId: _selectedActivity?.activity.projectId),
+                builder: (context, snapshot) {
+                  final items = (snapshot.data != null && snapshot.data!.isNotEmpty)
+                      ? snapshot.data!
+                      : const <RejectionPlaybookItem>[
+                          RejectionPlaybookItem(
+                            reasonCode: 'PHOTO_BLUR',
+                            label: 'Foto borrosa',
+                            severity: 'MED',
+                            requiresComment: false,
+                          ),
+                          RejectionPlaybookItem(
+                            reasonCode: 'GPS_MISMATCH',
+                            label: 'GPS no coincide',
+                            severity: 'HIGH',
+                            requiresComment: true,
+                          ),
+                          RejectionPlaybookItem(
+                            reasonCode: 'MISSING_INFO',
+                            label: 'Falta información',
+                            severity: 'MED',
+                            requiresComment: true,
+                          ),
+                        ];
+
+                  return Wrap(
+                    spacing: SaoSpacing.sm,
+                    runSpacing: SaoSpacing.sm,
+                    children: items.map((item) {
+                      return _buildReasonChip(
+                        item.label,
+                        reasonCode: item.reasonCode,
+                      );
+                    }).toList(),
+                  );
+                },
               ),
               SizedBox(height: SaoSpacing.xxl),
               Row(
@@ -556,10 +623,13 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
   }
 
   /// Chip con motivo común de rechazo
-  Widget _buildReasonChip(String reason) {
+  Widget _buildReasonChip(String reason, {required String reasonCode}) {
     return ActionChip(
-      label: Text(reason, style: SaoTypography.caption.copyWith(fontSize: 11)),
-      onPressed: () => _reviewCommentsController.text = reason,
+      label: Text(reason, style: SaoTypography.chipText),
+      onPressed: () {
+        _selectedRejectReasonCode = reasonCode;
+        _reviewCommentsController.text = reason;
+      },
       backgroundColor: SaoColors.gray100,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -571,6 +641,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
   /// Rechaza la actividad con comentarios
   Future<void> _rejectActivity() async {
     if (_selectedActivity == null) return;
+    final previousActivityId = _selectedActivity!.activity.id;
 
     final comments = _reviewCommentsController.text.trim();
     if (comments.isEmpty) return;
@@ -578,9 +649,10 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     final repo = ref.read(activityRepositoryProvider);
     try {
       await repo.rejectActivity(
-        _selectedActivity!.activity.id,
+        previousActivityId,
         'usr-admin-001',
         comments,
+        _selectedRejectReasonCode,
       );
 
       if (mounted) {
@@ -588,7 +660,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
           SnackBar(
             content: Row(
               children: [
-                Icon(Icons.cancel_rounded, color: Colors.white),
+                Icon(Icons.cancel_rounded, color: SaoColors.onPrimary),
                 SizedBox(width: SaoSpacing.md),
                 Expanded(
                   child: Text(
@@ -606,10 +678,11 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
         );
 
         // Cargar siguiente actividad
-        _loadNextActivity();
+        _loadNextActivity(previousActivityId);
         
         // Limpiar controles
         _reviewCommentsController.clear();
+        _selectedRejectReasonCode = null;
       }
     } catch (e) {
       if (mounted) {
@@ -623,12 +696,46 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     }
   }
 
+  Future<void> _saveEvidenceCaption(String evidenceId, String caption) async {
+    final repo = ref.read(activityRepositoryProvider);
+    try {
+      await repo.updateEvidenceCaption(evidenceId, caption);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Pie de foto guardado'),
+          duration: Duration(seconds: 1),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo guardar el pie de foto: $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
   /// Carga la siguiente actividad en la cola
-  void _loadNextActivity() {
-    // Simplemente limpiar la selección actual
-    // El stream provider actualizará automáticamente cuando se refresquen los datos
+  void _loadNextActivity(String processedActivityId) {
+    final queue = _visibleActivities;
+    final currentIndex = queue.indexWhere((item) => item.activity.id == processedActivityId);
+
+    ActivityWithDetails? next;
+    if (queue.length > 1 && currentIndex >= 0) {
+      final forwardIndex = currentIndex + 1;
+      if (forwardIndex < queue.length) {
+        next = queue[forwardIndex];
+      } else {
+        next = queue[currentIndex - 1];
+      }
+    }
+
     setState(() {
-      _selectedActivity = null;
+      _selectedActivity = next;
       _selectedEvidenceIndex = 0;
     });
   }
@@ -640,7 +747,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       SnackBar(
         content: Row(
           children: [
-            Icon(Icons.edit_rounded, color: Colors.white),
+            Icon(Icons.edit_rounded, color: SaoColors.onPrimary),
             SizedBox(width: SaoSpacing.md),
             Text('Revisando: ${activity.activity.title}'),
           ],

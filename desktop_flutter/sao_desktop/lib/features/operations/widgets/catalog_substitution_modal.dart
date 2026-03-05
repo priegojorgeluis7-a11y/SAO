@@ -232,7 +232,7 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                     label: Text('Elegir: "${_selectedValue.length > 30 ? _selectedValue.substring(0, 30) + "..." : _selectedValue}"'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: SaoColors.primary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SaoColors.onPrimary,
                     ),
                   ),
                 ],
@@ -298,7 +298,6 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                                 child: Text(
                                   'Recomendado',
                                   style: SaoTypography.caption.copyWith(
-                                    fontSize: 9,
                                     color: SaoColors.success,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -312,7 +311,6 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                             Text(
                               item.code,
                               style: SaoTypography.mono.copyWith(
-                                fontSize: 10,
                                 color: SaoColors.gray600,
                               ),
                             ),
@@ -330,7 +328,6 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                               child: Text(
                                 item.category,
                                 style: SaoTypography.caption.copyWith(
-                                  fontSize: 9,
                                   color: SaoColors.info,
                                 ),
                               ),
@@ -357,7 +354,6 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
               Text(
                 item.description,
                 style: SaoTypography.bodyText.copyWith(
-                  fontSize: 12,
                   color: SaoColors.gray600,
                 ),
                 maxLines: 2,
@@ -382,7 +378,6 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                             child: Text(
                               std,
                               style: SaoTypography.caption.copyWith(
-                                fontSize: 9,
                                 color: SaoColors.gray700,
                               ),
                             ),

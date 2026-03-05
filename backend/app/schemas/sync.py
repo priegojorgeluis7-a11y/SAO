@@ -13,6 +13,10 @@ class SyncPullRequest(BaseModel):
     """Request schema for sync pull operation"""
     project_id: str = Field(..., description="Project ID to sync activities for")
     since_version: int = Field(0, ge=0, description="Last sync_version client has; server returns activities with sync_version > this")
+    after_uuid: UUID | None = Field(
+        None,
+        description="Optional tie-breaker for pagination when multiple rows share since_version",
+    )
     until_version: int | None = Field(None, ge=0, description="Optional upper bound for sync_version; if provided, returns activities with sync_version <= this")
     limit: int = Field(500, ge=1, le=1000, description="Maximum number of activities to return")
 
@@ -20,6 +24,15 @@ class SyncPullRequest(BaseModel):
 class SyncPullResponse(BaseModel):
     """Response schema for sync pull operation"""
     current_version: int = Field(..., description="Maximum sync_version in returned activities; client should use this for next pull")
+    has_more: bool = Field(False, description="Whether there are more activities available for the same snapshot window")
+    next_since_version: int | None = Field(
+        None,
+        description="Cursor value to use for next pull page when has_more is true",
+    )
+    next_after_uuid: UUID | None = Field(
+        None,
+        description="Tie-breaker UUID cursor to use with next_since_version",
+    )
     activities: list[ActivityDTO] = Field(default_factory=list, description="List of activities updated since since_version")
 
 
@@ -63,15 +76,21 @@ class SyncPushActivityItem(BaseModel):
 class SyncPushRequest(BaseModel):
     """Request schema for sync push operation"""
     project_id: str = Field(..., description="Project ID for activities being pushed")
+    force_override: bool = Field(
+        False,
+        description="If true, server applies incoming changes even when stale/conflicting",
+    )
     activities: list[SyncPushActivityItem] = Field(..., description="List of activities to push")
 
 
 class SyncPushResultItem(BaseModel):
     """Result for a single pushed activity"""
     uuid: UUID = Field(..., description="UUID of the activity")
-    status: Literal["CREATED", "UPDATED", "UNCHANGED", "CONFLICT"] = Field(..., description="Result status")
-    server_id: int = Field(..., description="Server-assigned ID")
+    status: Literal["CREATED", "UPDATED", "UNCHANGED", "CONFLICT", "INVALID"] = Field(..., description="Result status")
+    server_id: int | None = Field(None, description="Server-assigned ID when available")
     sync_version: int = Field(..., description="Current sync_version after operation")
+    error_code: str | None = Field(None, description="Machine-readable validation error code")
+    message: str | None = Field(None, description="Validation/conflict message")
 
 
 class SyncPushResponse(BaseModel):

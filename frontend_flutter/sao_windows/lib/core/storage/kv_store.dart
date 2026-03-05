@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 abstract class KvStore {
   Future<String?> getString(String key);
   Future<void> setString(String key, String value);
+  Future<void> remove(String key);
 }
 
 class SharedPrefsKvStore implements KvStore {
@@ -18,5 +19,10 @@ class SharedPrefsKvStore implements KvStore {
   @override
   Future<void> setString(String key, String value) async {
     await _prefs.setString(key, value);
+  }
+
+  @override
+  Future<void> remove(String key) async {
+    await _prefs.remove(key);
   }
 }

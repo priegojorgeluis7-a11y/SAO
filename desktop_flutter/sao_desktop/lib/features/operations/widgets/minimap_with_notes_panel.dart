@@ -108,7 +108,7 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                 SizedBox(width: SaoSpacing.sm),
                 Text(
                   'Notas Internas',
-                  style: SaoTypography.sectionTitle.copyWith(fontSize: 14, color: SaoColors.primary),
+                  style: SaoTypography.sectionTitle.copyWith(color: SaoColors.primary),
                 ),
               ],
             ),
@@ -166,7 +166,7 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                                 fillColor: SaoColors.gray50,
                               ),
                               maxLines: 2,
-                              style: SaoTypography.bodyText.copyWith(fontSize: 12),
+                              style: SaoTypography.bodyText,
                             ),
                           ),
                           SizedBox(width: SaoSpacing.sm),
@@ -251,7 +251,6 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                                             .format(note.timestamp),
                                         style: SaoTypography.caption.copyWith(
                                           color: SaoColors.gray400,
-                                          fontSize: 10,
                                         ),
                                       ),
                                     ],
@@ -260,7 +259,7 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                                   Text(
                                     note.text,
                                     style: SaoTypography.bodyText
-                                        .copyWith(fontSize: 12, color: SaoColors.gray700),
+                                        .copyWith(color: SaoColors.gray700),
                                   ),
                                 ],
                               ),

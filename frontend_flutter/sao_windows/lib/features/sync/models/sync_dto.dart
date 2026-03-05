@@ -8,12 +8,14 @@ library;
 class SyncPullRequest {
   final String projectId;
   final int sinceVersion;
+  final String? afterUuid;
   final int? untilVersion;
   final int limit;
 
   const SyncPullRequest({
     required this.projectId,
     this.sinceVersion = 0,
+    this.afterUuid,
     this.untilVersion,
     this.limit = 500,
   });
@@ -22,6 +24,7 @@ class SyncPullRequest {
     return {
       'project_id': projectId,
       'since_version': sinceVersion,
+      if (afterUuid != null) 'after_uuid': afterUuid,
       if (untilVersion != null) 'until_version': untilVersion,
       'limit': limit,
     };
@@ -31,16 +34,25 @@ class SyncPullRequest {
 /// Response schema for sync pull operation
 class SyncPullResponse {
   final int currentVersion;
+  final bool hasMore;
+  final int? nextSinceVersion;
+  final String? nextAfterUuid;
   final List<ActivityDTO> activities;
 
   const SyncPullResponse({
     required this.currentVersion,
+    required this.hasMore,
+    required this.nextSinceVersion,
+    required this.nextAfterUuid,
     required this.activities,
   });
 
   factory SyncPullResponse.fromJson(Map<String, dynamic> json) {
     return SyncPullResponse(
       currentVersion: json['current_version'] as int,
+      hasMore: (json['has_more'] as bool?) ?? false,
+      nextSinceVersion: json['next_since_version'] as int?,
+      nextAfterUuid: json['next_after_uuid'] as String?,
       activities: (json['activities'] as List<dynamic>)
           .map((a) => ActivityDTO.fromJson(a as Map<String, dynamic>))
           .toList(),
@@ -151,15 +163,18 @@ class ActivityDTO {
 /// [project_id] must match all activities in the batch.
 class SyncPushRequest {
   final String projectId;
+  final bool forceOverride;
   final List<ActivityDTO> activities;
 
   const SyncPushRequest({
     required this.projectId,
+    this.forceOverride = false,
     required this.activities,
   });
 
   Map<String, dynamic> toJson() => {
         'project_id': projectId,
+        'force_override': forceOverride,
         'activities': activities.map((a) => a.toJson()).toList(),
       };
 }

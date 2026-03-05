@@ -18,6 +18,11 @@ class AgendaItem {
   final String id;
   final String resourceId;
   final String title;
+  final String? activityId;
+  final String? activityNameSnapshot;
+  final String? colorSnapshot;
+  final String? severitySnapshot;
+  final String? effectiveVersionId;
   final String projectCode;  // TAP, TMQ, SNL
   final String frente;
   final String municipio;
@@ -34,6 +39,11 @@ class AgendaItem {
     required this.id,
     required this.resourceId,
     required this.title,
+    this.activityId,
+    this.activityNameSnapshot,
+    this.colorSnapshot,
+    this.severitySnapshot,
+    this.effectiveVersionId,
     required this.projectCode,
     required this.frente,
     required this.municipio,
@@ -50,6 +60,11 @@ class AgendaItem {
   AgendaItem copyWith({
     String? resourceId,
     String? title,
+    String? activityId,
+    String? activityNameSnapshot,
+    String? colorSnapshot,
+    String? severitySnapshot,
+    String? effectiveVersionId,
     String? projectCode,
     String? frente,
     String? municipio,
@@ -66,6 +81,11 @@ class AgendaItem {
       id: id,
       resourceId: resourceId ?? this.resourceId,
       title: title ?? this.title,
+      activityId: activityId ?? this.activityId,
+      activityNameSnapshot: activityNameSnapshot ?? this.activityNameSnapshot,
+      colorSnapshot: colorSnapshot ?? this.colorSnapshot,
+      severitySnapshot: severitySnapshot ?? this.severitySnapshot,
+      effectiveVersionId: effectiveVersionId ?? this.effectiveVersionId,
       projectCode: projectCode ?? this.projectCode,
       frente: frente ?? this.frente,
       municipio: municipio ?? this.municipio,
@@ -86,7 +106,14 @@ class AgendaItem {
       final m = pk! % 1000;
       return 'PK $km+${m.toString().padLeft(3, '0')}';
     }
-    return '$municipio, $estado';
+    final city = municipio.trim();
+    final state = estado.trim();
+    if (city.isNotEmpty && state.isNotEmpty) {
+      return '$city, $state';
+    }
+    if (city.isNotEmpty) return city;
+    if (state.isNotEmpty) return state;
+    return 'Sin ubicación';
   }
 
   Duration get duration => end.difference(start);
