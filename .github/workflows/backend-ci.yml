@@ -87,7 +87,25 @@ jobs:
             --format='value(id)')"
 
           echo "Build ID: $BUILD_ID"
-          gcloud builds wait "$BUILD_ID" --project "$PROJECT_ID"
+
+          for i in $(seq 1 180); do
+            STATUS="$(gcloud builds describe "$BUILD_ID" --project "$PROJECT_ID" --format='value(status)')"
+            echo "Build status: $STATUS"
+            if [ "$STATUS" = "SUCCESS" ]; then
+              break
+            fi
+            if [ "$STATUS" = "FAILURE" ] || [ "$STATUS" = "CANCELLED" ] || [ "$STATUS" = "TIMEOUT" ]; then
+              echo "Build ended with status: $STATUS"
+              exit 1
+            fi
+            sleep 5
+          done
+
+          STATUS="$(gcloud builds describe "$BUILD_ID" --project "$PROJECT_ID" --format='value(status)')"
+          if [ "$STATUS" != "SUCCESS" ]; then
+            echo "Build did not complete in time. Final status: $STATUS"
+            exit 1
+          fi
 
           echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
 
