@@ -80,6 +80,18 @@ Conclusión Fase 1 al corte:
 - Bloqueo de acceso a Actions: RESUELTO.
 - Bloqueo actual: TECNICO (workflows en `failure`), pendiente corregir errores de pipeline para marcar Fase 1 como cerrada.
 
+Actualización posterior (2026-03-05, commit `b4bc8f14d8b65362184d94016233ce448973e92a`):
+- Flutter CI run: `https://github.com/priegojorgeluis7-a11y/SAO/actions/runs/22737110957` -> `success`.
+- Backend CI run: `https://github.com/priegojorgeluis7-a11y/SAO/actions/runs/22737110964` -> `failure`.
+  - Job `test`: `success`.
+  - Job `Deploy to Cloud Run`: `failure`.
+  - Causa exacta en step `Authenticate to Google Cloud`:
+    `google-github-actions/auth failed with: the GitHub Action workflow must specify exactly one of workload_identity_provider or credentials_json`.
+
+Estado actual Fase 1:
+- Validación de tests CI: OK (backend + flutter).
+- Bloqueo remanente: configuración de secrets/variables para autenticación GCP en deploy (`GCP_WORKLOAD_IDENTITY_PROVIDER` y/o `credentials_json`).
+
 ---
 
 ## 6) Actualizacion documental obligatoria

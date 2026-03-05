@@ -46,6 +46,10 @@
 	- `Backend CI` run `22736601995`: `failure` (job `test` fallido; `Deploy to Cloud Run` skipped)
 	- `Flutter CI` run `22736601947`: `failure` (job `analyze-and-test` fallido)
 	- Estado Fase 1 CI/CD: sigue EN CURSO por bloqueo técnico de pipeline (ya no por falta de acceso/evidencia).
+- ✅ Re-run CI posterior sobre commit `b4bc8f14d8b65362184d94016233ce448973e92a`:
+	- `Flutter CI` run `22737110957`: `success`.
+	- `Backend CI` run `22737110964`: job `test` `success`, `Deploy to Cloud Run` `failure`.
+	- Bloqueo actual acotado a configuración de autenticación GCP en Actions (`GCP_WORKLOAD_IDENTITY_PROVIDER` / `credentials_json`).
 
 > Esta métrica refleja **estado de ejecución de pruebas hoy**, no porcentaje de cierre funcional del producto.
 

@@ -13,7 +13,7 @@
 | Fase | Estado | Inicio | Cierre | Observaciones |
 |---|---|---|---|---|
 | Fase 0 - Freeze y baseline | COMPLETADA | 2026-03-05 | 2026-03-05 | Baseline tecnico confirmado con evidencia de pruebas y E2E staging. |
-| Fase 1 - CI/CD end-to-end | EN CURSO (BLOQUEO TECNICO EN PIPELINE) | 2026-03-05 | - | Evidencia remota en `main` ya capturada: Backend CI (`22736601995`) y Flutter CI (`22736601947`) sobre `b7f49a1`; ambos en `failure`, por lo que falta estabilizar workflows para cierre. |
+| Fase 1 - CI/CD end-to-end | EN CURSO (BLOQUEO DE SECRETOS GCP EN DEPLOY) | 2026-03-05 | - | Nuevo run sobre `b4bc8f1`: Flutter CI (`22737110957`) `success`; Backend CI (`22737110964`) con job `test` `success` y fallo en deploy por auth GCP (`workload_identity_provider`/`credentials_json` no inyectado). |
 | Fase 2 - Cobertura desktop no-auth | EN CURSO | 2026-03-05 | - | Cobertura ampliada en `catalog` y `reports` (+20 tests acumulados), bug de exportacion cross-platform corregido, suite desktop en verde. |
 | Fase 3 - Estabilizacion mobile suite | COMPLETADA | 2026-03-05 | 2026-03-05 | `flutter test` global mobile en verde (`All tests passed`, 223 tests). |
 | Fase 4 - Consolidacion documental | PENDIENTE | - | - | Se ejecuta al cerrar Fases 1-3. |
