@@ -88,9 +88,17 @@ Actualización posterior (2026-03-05, commit `b4bc8f14d8b65362184d94016233ce4489
   - Causa exacta en step `Authenticate to Google Cloud`:
     `google-github-actions/auth failed with: the GitHub Action workflow must specify exactly one of workload_identity_provider or credentials_json`.
 
-Estado actual Fase 1:
+Estado actual Fase 1 (2026-03-09):
 - Validación de tests CI: OK (backend + flutter).
-- Bloqueo remanente: configuración de secrets/variables para autenticación GCP en deploy (`GCP_WORKLOAD_IDENTITY_PROVIDER` y/o `credentials_json`).
+- Workflow actualizado para soportar dos métodos de auth:
+  - Opción A (recomendada): Workload Identity Federation — secrets `GCP_WORKLOAD_IDENTITY_PROVIDER` + `GCP_SERVICE_ACCOUNT` + `GCP_PROJECT_ID`
+  - Opción B: Service Account Key JSON — secret `GCP_SA_KEY`
+- Bloqueo remanente: configurar en GitHub -> Settings -> Secrets -> Actions UNO de los dos métodos de auth del repositorio.
+  - Para desbloqueo inmediato (Opción A):
+    - `GCP_WORKLOAD_IDENTITY_PROVIDER` = URI del pool WIF en GCP.
+    - `GCP_SERVICE_ACCOUNT` = `sao-ci@sao-prod-488416.iam.gserviceaccount.com`.
+    - `GCP_PROJECT_ID` = `sao-prod-488416`.
+- Workflow falla con mensaje diagnóstico claro si ningún secret está configurado.
 
 ---
 

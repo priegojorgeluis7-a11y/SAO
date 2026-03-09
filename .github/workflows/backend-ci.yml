@@ -53,30 +53,30 @@ jobs:
 
     permissions:
       contents: read
-      id-token: write   # Needed for Workload Identity Federation
+      id-token: write   # Required for Workload Identity Federation
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Set up Cloud SDK
+      - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Build and push image
+      - name: Build and push image via Cloud Build
         shell: bash
         run: |
           set -euo pipefail
 
-          PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
-          echo "Using project: $PROJECT_ID"
-          gcloud config set project "$PROJECT_ID"
-
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
           IMAGE="us-central1-docker.pkg.dev/${PROJECT_ID}/sao/sao-api:${{ github.sha }}"
 
           BUILD_ID="$(gcloud builds submit backend/ \
@@ -113,24 +113,22 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
 
           gcloud run deploy "$SERVICE_NAME" \
             --image "$IMAGE" \
             --region "$REGION" \
-            --project "$PROJECT_ID" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
             --platform managed \
             --quiet
 
-      - name: Smoke test production
+      - name: Smoke test
         shell: bash
         run: |
           set -euo pipefail
-          PROJECT_ID="$(echo '${{ secrets.GCP_PROJECT_ID }}' | tr -d '[:space:]')"
 
           SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
             --region "$REGION" \
-            --project "$PROJECT_ID" \
+            --project "${{ secrets.GCP_PROJECT_ID }}" \
             --format='value(status.url)')"
 
           if [ -z "$SERVICE_URL" ]; then
@@ -149,7 +147,7 @@ jobs:
               echo "Health check passed (attempt $i)"
               exit 0
             fi
-            echo "Attempt $i: status $STATUS — waiting 10s…"
+            echo "Attempt $i: status $STATUS — waiting 10s..."
             sleep 10
           done
 
