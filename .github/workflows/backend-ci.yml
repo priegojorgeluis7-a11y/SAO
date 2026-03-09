@@ -137,7 +137,9 @@ jobs:
           fi
 
           HEALTH_URL="$SERVICE_URL/health"
-          ID_TOKEN="$(gcloud auth print-identity-token --audiences="$SERVICE_URL")"
+          ID_TOKEN="$(gcloud auth print-identity-token \
+            --impersonate-service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
+            --audiences="$SERVICE_URL")"
 
           for i in $(seq 1 6); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
