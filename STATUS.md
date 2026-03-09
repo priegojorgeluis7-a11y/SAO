@@ -1,6 +1,6 @@
 # SAO — Estado del Proyecto
-**Fecha:** 2026-03-05
-**Versión:** 0.2.2
+**Fecha:** 2026-03-09 (actualizado sesión noche)
+**Versión:** 0.2.3
 **Deployment:** ✅ Cloud Run en producción (`sao-api` / `sao-prod-488416`)
 **Auditoría:** Completada 2026-03-04 (ver `docs/AUDIT_REPORT.md`)
 **Plan 100% local:** Iniciado 2026-03-04 (ver `docs/PLAN_100_LOCAL.md`)
@@ -15,11 +15,21 @@
 
 ---
 
+## Actualización Rápida (2026-03-09)
+
+- ✅ Home: badge global de pendientes por completar en AppBar (`assignment_late`) con contador y acceso directo a Sync Center.
+- ✅ Sync Center: bandeja de pendientes con filtros por `proyecto` y `estado`.
+- ✅ Navegación contextual: Home ahora abre Sync Center con pre-filtro por proyecto usando query params (`pending_project`; soporte también para `pending_status`).
+- ✅ Sync Center: pre-carga de filtros desde ruta en `didChangeDependencies` con control idempotente para evitar re-aplicaciones innecesarias.
+- ✅ Validación técnica: diagnóstico sin errores en archivos tocados (`home_page.dart` y `sync_center_page.dart`).
+
+---
+
 ## Estado General
 
 | Componente | Estado | Avance | Bloqueadores |
 |------------|--------|--------|-------------|
-| Backend FastAPI | 🟡 En producción + local | **97%** | 1 deuda técnica menor |
+| Backend FastAPI | ✅ En producción + local | **99%** | FCM push catalog (baja prioridad) |
 | App Móvil Flutter | ✅ Operativa | **100%** | — |
 | Desktop Admin Flutter | 🟡 Funcional (pendiente endurecimiento final) | **95%** | Cobertura unitaria parcial fuera de auth |
 | Load Testing / QA | 🟡 E2E local + staging real ejecutado | **98%** | Falta automatizar corrida en pipeline |
@@ -38,18 +48,20 @@
 	- `Push status`: `CREATED`
 	- `Final execution_state`: `COMPLETADA`
 	- Robustecimiento aplicado al script para staging real: resolución de `catalog_version_id` UUID y fallback `APPROVE_EXCEPTION` cuando aplica regla `CHECKLIST_INCOMPLETE`
+- ✅ Re-ejecución E2E real con usuarios de asignaciones (`operativo.asignaciones@sao.mx` / `admin.asignaciones@sao.mx`):
+	- `Activity UUID`: `8124c360-283e-48f1-949c-782ff21f32cd`
+	- `Push status`: `CREATED`
+	- `Final execution_state`: `COMPLETADA`
+	- `baseline current_version`: `2` · `catalog_version_id`: `13194331-c6ce-4b81-8c42-c66d98e9df17`
 - ✅ Corrida completa de `flutter test` móvil en verde en ejecución de cierre posterior (exit code 0)
 - ✅ Revalidación actual de `flutter test` móvil en verde: `All tests passed` (223 tests)
 - ✅ Desktop Fase 2 (avance): nuevos tests en `catalog`/`reports` + fix de exportación cross-platform; `flutter test` desktop en verde (`All tests passed`, 82 tests)
 - ✅ Cobertura desktop actualizada por módulo (`flutter test --coverage`): `catalog` 10.57% (267/2526), `review` 74.42% (32/43), `reports` 36.52% (237/649)
-- ⚠️ Evidencia remota GitHub Actions capturada en `main` para commit `b7f49a1d43ef140630e014a0cffefb4b1eb1069e`:
-	- `Backend CI` run `22736601995`: `failure` (job `test` fallido; `Deploy to Cloud Run` skipped)
-	- `Flutter CI` run `22736601947`: `failure` (job `analyze-and-test` fallido)
-	- Estado Fase 1 CI/CD: sigue EN CURSO por bloqueo técnico de pipeline (ya no por falta de acceso/evidencia).
-- ✅ Re-run CI posterior sobre commit `b4bc8f14d8b65362184d94016233ce448973e92a`:
-	- `Flutter CI` run `22737110957`: `success`.
-	- `Backend CI` run `22737110964`: job `test` `success`, `Deploy to Cloud Run` `failure`.
-	- Bloqueo actual acotado a configuración de autenticación GCP en Actions (`GCP_WORKLOAD_IDENTITY_PROVIDER` / `credentials_json`).
+- ✅ **CI/CD COMPLETO EN VERDE (2026-03-09)** — run `22880086051` (re-run del commit `0fc645d`):
+	- `Backend CI` job `test`: `success`
+	- `Backend CI` job `Deploy to Cloud Run`: `success` (incluye build + deploy + smoke test `/health`)
+	- Revisión activa: `sao-api-00039-lx5` · URL: `https://sao-api-fjzra25vya-uc.a.run.app`
+	- Bloqueadores resueltos en sesión: Artifact Registry repo, migración `reject_reasons`, WIF impersonation, `serviceAccountTokenCreator` IAM.
 
 > Esta métrica refleja **estado de ejecución de pruebas hoy**, no porcentaje de cierre funcional del producto.
 
@@ -67,7 +79,7 @@
 - ✅ Editor de catálogo (10+ endpoints)
 - ✅ Bootstrap de proyecto desde template TMQ
 - ✅ Auditoría completa en `audit_logs`
-- ✅ 98/98 tests pytest pasando (suite completa — StaticPool fix + 5 tests PATCH /flags)
+- ✅ 103/103 tests pytest pasando (suite completa)
 - ✅ Lifespan hooks con validación de env vars
 - ✅ `GET /api/v1/review/queue` calcula `gps_critical` de forma estructurada (regla `requires_gps`, coordenadas válidas, consistencia PK/frente) (F4.2)
 - ✅ `POST /api/v1/evidences/upload-init` valida `mime_type` (JPEG/PNG/PDF) y tamaño máximo de 20MB por archivo (F4.4)
@@ -75,6 +87,9 @@
 - ✅ Rate limiting en endpoints críticos: `/auth/login`, `/auth/refresh`, `/evidences/upload-init`, `/sync/push` (429 + `Retry-After`) (F5.2)
 - ✅ Test E2E backend (integración local) cubre flujo: operativo `sync/push` → supervisor aprueba en review → operativo ve `COMPLETADA` en `sync/pull` (F5.4)
 - ✅ Script de ejecución E2E para staging disponible: `backend/scripts/e2e_staging_flow.py` (+ guía en `docs/RUNBOOK_CLOUD_RUN.md`) (F5.4)
+- ✅ `GET /catalog/bundle` acepta `?version_id=` opcional para pinear versión histórica exacta
+- ✅ Bundle meta incluye `compat: { schema_version: "1.0", breaking: false }` — declaración de compatibilidad sin código extra en clientes
+- ✅ Fix 1–4 catálogo multi-proyecto: guard `_projectId == normalized`, color_tokens/form_fields universales, fallback sin mezcla cross-proyecto, bootstrap registra proyecto en Sistema B
 
 ### FALTA / Deuda
 - ✅ `GET /api/v1/fronts?project_id=` expuesto + `POST /api/v1/fronts` (alta de frentes por proyecto)
@@ -98,7 +113,7 @@
 ### Implementado
 - ✅ Autenticación JWT con auto-refresh (Dio interceptor)
 - ✅ Registro con invite code
-- ✅ Drift SQLite schema v5 (15+ tablas)
+- ✅ Drift SQLite schema **v8** (20+ tablas)
 - ✅ Wizard de actividades (DynamicFormBuilder catalog-driven)
 - ✅ Push sync: `SyncService.pushPendingChanges()` + auto-sync 15min
 - ✅ Evento push: `POST /events/{uuid}` idempotente
@@ -107,8 +122,17 @@
 - ✅ Token storage seguro (`flutter_secure_storage`)
 - ✅ Agenda del equipo (timeline)
 - ✅ Catalog bundle con fallback a asset local
-- ✅ Settings móvil ahora permite configurar backend URL en runtime, con persistencia en `SharedPreferences` y aplicación en caliente sobre `ApiClient`
-- ✅ Eventos móvil ahora permite editar y eliminar desde la lista; los cambios se encolan y sincronizan al backend (`UPDATE`/`DELETE`)
+- ✅ Settings móvil: configurar backend URL en runtime (persistencia + apply en caliente)
+- ✅ Eventos móvil: editar y eliminar + sync `UPDATE/DELETE`; coalescing `UPSERT+DELETE→DROP`
+- ✅ `Activities.catalogVersionId` — columna Drift que congela la versión del catálogo por actividad (schema v7)
+- ✅ `CatalogIndex` + `CatalogBundleCache` — tablas Drift para persistencia offline versionada por proyecto (schema v8)
+- ✅ `CatalogOfflineRepository` — upsertIndex, saveBundle, getActiveVersionId, gcOrphanBundles() con GC ligado a actividades
+- ✅ Badge de catálogo en Settings: `● vX.Y.Z · actualizado/pendiente` por proyecto (leer de `catalog_index`)
+- ✅ `CatalogApi.getBundle(projectId, versionId?)` — descarga bundle completo con versión histórica opcional
+- ✅ `CatalogApi.getVersionsMultiProject(projectIds)` — check ligero en 1 request para N proyectos
+- ✅ `CatalogSyncService.syncAllIfNeeded(projectIds)` — 1 request de check, descarga solo los stale
+- ✅ Pull sync (server→mobile) con cursor compuesto, paginación, upsert local
+- ✅ Queue coalescing: UPDATE+404→CREATE fallback; UPSERT+DELETE→DROP sin tocar servidor
 
 ### FALTA
 - ✅ Pull sync (server → mobile) implementado con cursor compuesto (`since_version` + `after_uuid`), paginación y upsert local (F3.1)
@@ -165,7 +189,7 @@
 | Cloud SQL PostgreSQL 16 | ✅ Operacional |
 | GCS bucket (evidencias) | ✅ Operacional |
 | Secret Manager (JWT, DB) | ✅ Configurado |
-| CI/CD pipeline | ⚠️ Manual (`deploy_to_cloud_run.ps1`) |
+| CI/CD pipeline | ✅ Automatizado (GitHub Actions — test + build + deploy + smoke) |
 
 ---
 
@@ -220,13 +244,13 @@ Checklist operativo de Fase 1 (CI/CD): `docs/CI_CD_CIERRE_CHECKLIST.md`
 
 ### Día 3 — Staging + Release
 - [x] **QA/Backend**: Ejecutar corrida E2E real en staging con credenciales válidas (flujo operativo→review→pull).
-- [ ] **DevOps**: Dejar pipeline CI/CD automatizado para deploy (build + test + deploy) reemplazando paso manual principal.
+- [x] **DevOps**: Pipeline CI/CD automatizado activo — GitHub Actions ejecuta test + build + deploy + smoke test en push a `main`. Run `22880086051` en verde (2026-03-09).
 - [ ] **Done (Día 3)**: Acta de corrida staging adjunta + pipeline ejecutado al menos una vez con resultado exitoso.
 
 ### Criterio de 100% funcional-operativo
 - [x] Sin razones de rechazo hardcodeadas en backend.
 - [x] Corrida E2E staging exitosa documentada.
-- [ ] CI/CD automatizado activo (sin dependencia de `deploy_to_cloud_run.ps1` como ruta principal).
+- [x] CI/CD automatizado activo — pipeline completo en verde, run `22880086051` (2026-03-09).
 - [ ] Cobertura desktop ampliada en módulos no-auth y validada.
 - [ ] Cobertura desktop ampliada en módulos no-auth y validada (pendiente subir cobertura en `catalog` y `reports` contra baseline).
 

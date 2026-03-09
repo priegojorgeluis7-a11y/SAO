@@ -100,6 +100,13 @@ Estado actual Fase 1 (2026-03-09):
     - `GCP_PROJECT_ID` = `sao-prod-488416`.
 - Workflow falla con mensaje diagnóstico claro si ningún secret está configurado.
 
+Evidencia nueva recibida (2026-03-09, pendiente de confirmación de resultado):
+- Backend CI job: `https://github.com/priegojorgeluis7-a11y/SAO/actions/runs/22878699704/job/66377128860`
+- Nota: desde este entorno no fue posible leer el detalle del run por visibilidad/permisos (HTTP 404 al consultar la URL pública), por lo que falta confirmar en GitHub Actions:
+  - run `22878699704` en estado `success`;
+  - job `Deploy to Cloud Run` en `success`;
+  - `Smoke test` (`/health`) en `success`.
+
 ---
 
 ## 6) Actualizacion documental obligatoria
