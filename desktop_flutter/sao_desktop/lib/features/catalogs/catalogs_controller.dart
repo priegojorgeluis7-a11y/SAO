@@ -2,7 +2,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../data/repositories/catalog_repository.dart';
 
-enum CatalogTab { activities, subcategories, purposes, topics, relations, results, assistants }
+enum CatalogTab {
+  activities,
+  subcategories,
+  purposes,
+  topics,
+  relations,
+  results,
+  assistants
+}
 
 enum ActiveFilter { all, active, inactive }
 
@@ -91,6 +99,9 @@ class CatalogsPageState {
   final bool isMutating;
   final String? error;
   final DateTime? lastLoadedAt;
+  final String? versionId;
+  final String publicationStatus;
+  final bool hasPendingChanges;
 
   const CatalogsPageState({
     required this.selectedProject,
@@ -102,9 +113,13 @@ class CatalogsPageState {
     required this.isMutating,
     required this.error,
     required this.lastLoadedAt,
+    required this.versionId,
+    required this.publicationStatus,
+    required this.hasPendingChanges,
   });
 
-  CatalogTabUiState uiFor(CatalogTab tab) => uiByTab[tab] ?? const CatalogTabUiState();
+  CatalogTabUiState uiFor(CatalogTab tab) =>
+      uiByTab[tab] ?? const CatalogTabUiState();
 
   CatalogsPageState copyWith({
     String? selectedProject,
@@ -118,6 +133,10 @@ class CatalogsPageState {
     String? error,
     bool clearError = false,
     DateTime? lastLoadedAt,
+    String? versionId,
+    bool clearVersionId = false,
+    String? publicationStatus,
+    bool? hasPendingChanges,
   }) {
     return CatalogsPageState(
       selectedProject: selectedProject ?? this.selectedProject,
@@ -131,6 +150,9 @@ class CatalogsPageState {
       isMutating: isMutating ?? this.isMutating,
       error: clearError ? null : (error ?? this.error),
       lastLoadedAt: lastLoadedAt ?? this.lastLoadedAt,
+      versionId: clearVersionId ? null : (versionId ?? this.versionId),
+      publicationStatus: publicationStatus ?? this.publicationStatus,
+      hasPendingChanges: hasPendingChanges ?? this.hasPendingChanges,
     );
   }
 }
@@ -144,15 +166,20 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
             selectedProject: _repository.projectId,
             selectedTab: CatalogTab.activities,
             uiByTab: {
-              for (final tab in CatalogTab.values) tab: const CatalogTabUiState(),
+              for (final tab in CatalogTab.values)
+                tab: const CatalogTabUiState(),
             },
             catalog: _repository.data,
-            selectedRelationActivityId:
-                _repository.data.activities.isNotEmpty ? _repository.data.activities.first.id : null,
+            selectedRelationActivityId: _repository.data.activities.isNotEmpty
+                ? _repository.data.activities.first.id
+                : null,
             isLoading: false,
             isMutating: false,
             error: null,
             lastLoadedAt: null,
+            versionId: null,
+            publicationStatus: 'unknown',
+            hasPendingChanges: false,
           ),
         ) {
     refresh();
@@ -214,7 +241,8 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
 
   void toggleReorderMode() {
     final ui = state.uiFor(CatalogTab.activities);
-    _updateTabUi(CatalogTab.activities, ui.copyWith(reorderMode: !ui.reorderMode));
+    _updateTabUi(
+        CatalogTab.activities, ui.copyWith(reorderMode: !ui.reorderMode));
   }
 
   void setShowSuggestedOnly(bool value) {
@@ -245,7 +273,8 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     required String name,
     String? description,
   }) async {
-    await _mutate(() => _repository.createActivity(id: id, name: name, description: description));
+    await _mutate(() => _repository.createActivity(
+        id: id, name: name, description: description));
   }
 
   Future<void> updateActivity(
@@ -255,7 +284,8 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     bool? isActive,
   }) async {
     await _mutate(
-      () => _repository.updateActivity(id, name: name, description: description, isActive: isActive),
+      () => _repository.updateActivity(id,
+          name: name, description: description, isActive: isActive),
     );
   }
 
@@ -265,7 +295,8 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
 
   Future<void> restoreActivity(CatalogActivityItem item) async {
     await _mutate(() async {
-      await _repository.createActivity(id: item.id, name: item.name, description: item.description);
+      await _repository.createActivity(
+          id: item.id, name: item.name, description: item.description);
       if (!item.isActive) {
         await _repository.updateActivity(item.id, isActive: false);
       }
@@ -382,7 +413,8 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     String? type,
     String? description,
   }) async {
-    await _mutate(() => _repository.createTopic(id: id, name: name, type: type, description: description));
+    await _mutate(() => _repository.createTopic(
+        id: id, name: name, type: type, description: description));
   }
 
   Future<void> updateTopic(
@@ -598,7 +630,8 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
   void _syncAfterDataChange({bool isMutating = false}) {
     final data = _repository.data;
     final selected = state.selectedRelationActivityId;
-    final selectedStillExists = selected != null && data.activities.any((entry) => entry.id == selected);
+    final selectedStillExists = selected != null &&
+        data.activities.any((entry) => entry.id == selected);
     final normalizedUiByTab = _normalizeUiByTab(state.uiByTab, data);
 
     state = state.copyWith(
@@ -611,6 +644,9 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
       isMutating: isMutating,
       clearError: true,
       lastLoadedAt: DateTime.now(),
+      versionId: _repository.lastCatalogVersionId,
+      publicationStatus: _repository.lastCatalogStatus,
+      hasPendingChanges: _repository.hasPendingProjectOps,
     );
   }
 
@@ -628,15 +664,18 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
 
     final subUi = next[CatalogTab.subcategories] ?? const CatalogTabUiState();
     final subActivity = subUi.selectedActivityId;
-    if (subActivity != null && !data.activities.any((entry) => entry.id == subActivity)) {
-      next[CatalogTab.subcategories] = subUi.copyWith(clearSelectedActivityId: true);
+    if (subActivity != null &&
+        !data.activities.any((entry) => entry.id == subActivity)) {
+      next[CatalogTab.subcategories] =
+          subUi.copyWith(clearSelectedActivityId: true);
     }
 
     final purposeUi = next[CatalogTab.purposes] ?? const CatalogTabUiState();
     final purposeActivity = purposeUi.selectedActivityId;
     final purposeSubcategory = purposeUi.selectedSubcategoryId;
 
-    final activityValid = purposeActivity == null || data.activities.any((entry) => entry.id == purposeActivity);
+    final activityValid = purposeActivity == null ||
+        data.activities.any((entry) => entry.id == purposeActivity);
     final subcategoryValid = purposeSubcategory == null ||
         data.subcategories.any(
           (entry) =>
@@ -652,9 +691,11 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     final topicsUi = next[CatalogTab.topics] ?? const CatalogTabUiState();
     final topicType = topicsUi.selectedTopicType;
     if (topicType != null) {
-      final typeStillExists = data.topics.any((entry) => (entry.type ?? '').trim() == topicType);
+      final typeStillExists =
+          data.topics.any((entry) => (entry.type ?? '').trim() == topicType);
       if (!typeStillExists) {
-        next[CatalogTab.topics] = topicsUi.copyWith(clearSelectedTopicType: true);
+        next[CatalogTab.topics] =
+            topicsUi.copyWith(clearSelectedTopicType: true);
       }
     }
 

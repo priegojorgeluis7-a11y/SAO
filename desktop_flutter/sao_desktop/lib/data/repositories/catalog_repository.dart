@@ -24,6 +24,39 @@ class CatalogRepository {
   CatalogBundle? _lastBundle;
   CatalogBundle? get lastBundle => _lastBundle;
 
+  String? get lastCatalogVersionId {
+    final meta = _lastBundle?.meta ?? const <String, dynamic>{};
+    final versions = (meta['versions'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final version = (versions['effective'] ?? meta['version_id'])?.toString();
+    if (version == null || version.trim().isEmpty) {
+      return null;
+    }
+    return version.trim();
+  }
+
+  String get lastCatalogStatus {
+    final meta = _lastBundle?.meta ?? const <String, dynamic>{};
+    final versions = (meta['versions'] as Map?)?.cast<String, dynamic>() ??
+        const <String, dynamic>{};
+    final status = (versions['status'] ?? '').toString().trim().toLowerCase();
+    if (status.isEmpty) {
+      return 'unknown';
+    }
+    return status;
+  }
+
+  bool get hasPendingProjectOps {
+    final editor = _lastBundle?.editor;
+    if (editor == null) {
+      return false;
+    }
+    final layers = editor.layers;
+    final projectLayer = (layers['project'] as Map?)?.cast<String, dynamic>();
+    final ops = (projectLayer?['ops'] as List?) ?? const [];
+    return ops.isNotEmpty;
+  }
+
   CatalogData _data = CatalogData.empty();
   CatalogData get data => _data;
 
@@ -58,8 +91,10 @@ class CatalogRepository {
 
     // 2. Try /catalog/effective — fallback schema used by current backend.
     try {
-      final decoded = await _apiClient.getJson('/api/v1/catalog/effective?project_id=$encoded');
-      if (decoded is Map<String, dynamic> && decoded.containsKey('activities')) {
+      final decoded = await _apiClient
+          .getJson('/api/v1/catalog/effective?project_id=$encoded');
+      if (decoded is Map<String, dynamic> &&
+          decoded.containsKey('activities')) {
         _data = CatalogData.fromEffectiveJson(decoded);
         _ready = true;
         return;
@@ -68,7 +103,8 @@ class CatalogRepository {
 
     // 3. Try /catalog/editor — fallback for admin editor view.
     try {
-      final decoded = await _apiClient.getJson('/api/v1/catalog/editor?project_id=$encoded');
+      final decoded = await _apiClient
+          .getJson('/api/v1/catalog/editor?project_id=$encoded');
       if (decoded is Map<String, dynamic>) {
         _data = CatalogData.fromEditorJson(decoded);
         _lastEditorVersionId = _extractVersionIdFromEditor(decoded);
@@ -82,8 +118,10 @@ class CatalogRepository {
     _ready = true;
   }
 
-  Future<CatalogBundle?> getBundle(String projectId, {bool includeEditor = false}) async {
-    final normalized = projectId.trim().isEmpty ? _projectId : projectId.trim().toUpperCase();
+  Future<CatalogBundle?> getBundle(String projectId,
+      {bool includeEditor = false}) async {
+    final normalized =
+        projectId.trim().isEmpty ? _projectId : projectId.trim().toUpperCase();
     final encoded = Uri.encodeQueryComponent(normalized);
     final includeEditorFlag = includeEditor ? '&include_editor=true' : '';
     final decoded = await _apiClient.getJson(
@@ -97,7 +135,8 @@ class CatalogRepository {
 
   Future<void> _loadFromBundleAsset() async {
     try {
-      final raw = await rootBundle.loadString('assets/base_seed_catalog.bundle.json');
+      final raw =
+          await rootBundle.loadString('assets/base_seed_catalog.bundle.json');
       final decoded = jsonDecode(raw) as Map<String, dynamic>;
       final bundle = CatalogBundle.fromJson(decoded);
       _lastBundle = bundle;
@@ -468,7 +507,8 @@ class CatalogRepository {
     final queryProject = Uri.encodeQueryComponent(_projectId);
     final now = DateTime.now().toUtc().toIso8601String();
     final enrichedOps = ops.map((op) {
-      final opId = 'op_${DateTime.now().millisecondsSinceEpoch}_${_opRandom.nextInt(1 << 20)}';
+      final opId =
+          'op_${DateTime.now().millisecondsSinceEpoch}_${_opRandom.nextInt(1 << 20)}';
       final withDefaults = <String, dynamic>{
         ...op,
         'op_id': opId,
@@ -483,12 +523,16 @@ class CatalogRepository {
       return withDefaults;
     }).toList();
 
-    final summary = enrichedOps.map((o) => '${o['op']}:${o['entity']}:${o['id']}').join(', ');
+    final summary = enrichedOps
+        .map((o) => '${o['op']}:${o['entity']}:${o['id']}')
+        .join(', ');
     // ignore: avoid_print
-    print('[catalog_ops] PATCH /project-ops project=$_projectId ops=[$summary]');
+    print(
+        '[catalog_ops] PATCH /project-ops project=$_projectId ops=[$summary]');
 
     try {
-      await _apiClient.patchJson('/api/v1/catalog/project-ops?project_id=$queryProject', {
+      await _apiClient
+          .patchJson('/api/v1/catalog/project-ops?project_id=$queryProject', {
         'ops': enrichedOps,
       });
       // ignore: avoid_print
@@ -498,7 +542,8 @@ class CatalogRepository {
       // ignore: avoid_print
       print('[catalog_ops] project-ops FAILED: $e — trying bundle path');
       try {
-        await _apiClient.patchJson('/api/v1/catalog/bundle/project-ops?project_id=$queryProject', {
+        await _apiClient.patchJson(
+            '/api/v1/catalog/bundle/project-ops?project_id=$queryProject', {
           'ops': enrichedOps,
         });
         // ignore: avoid_print
@@ -506,7 +551,8 @@ class CatalogRepository {
         return;
       } catch (e2) {
         // ignore: avoid_print
-        print('[catalog_ops] bundle/project-ops FAILED: $e2 — falling back to editor CRUD');
+        print(
+            '[catalog_ops] bundle/project-ops FAILED: $e2 — falling back to editor CRUD');
         await _applyEditorOpsFallback(ops);
       }
     }
@@ -515,7 +561,8 @@ class CatalogRepository {
   Future<CatalogAdminHookResult> validateDraftCatalog() async {
     final queryProject = Uri.encodeQueryComponent(_projectId);
     try {
-      await _apiClient.postJson('/api/v1/catalog/validate?project_id=$queryProject', {});
+      await _apiClient
+          .postJson('/api/v1/catalog/validate?project_id=$queryProject', {});
       return const CatalogAdminHookResult(
         supported: true,
         success: true,
@@ -523,7 +570,8 @@ class CatalogRepository {
       );
     } catch (_) {
       try {
-        await _apiClient.postJson('/api/v1/catalog/bundle/validate?project_id=$queryProject', {});
+        await _apiClient.postJson(
+            '/api/v1/catalog/bundle/validate?project_id=$queryProject', {});
         return const CatalogAdminHookResult(
           supported: true,
           success: true,
@@ -531,12 +579,16 @@ class CatalogRepository {
         );
       } catch (_) {}
       try {
-        final decoded = await _apiClient.getJson('/api/v1/catalog/editor?project_id=$queryProject');
-        final versionId = decoded is Map<String, dynamic> ? _extractVersionIdFromEditor(decoded) : null;
+        final decoded = await _apiClient
+            .getJson('/api/v1/catalog/editor?project_id=$queryProject');
+        final versionId = decoded is Map<String, dynamic>
+            ? _extractVersionIdFromEditor(decoded)
+            : null;
         return CatalogAdminHookResult(
           supported: false,
           success: true,
-          message: 'Backend sin /bundle/validate; validación base en /catalog/editor completada.',
+          message:
+              'Backend sin /bundle/validate; validación base en /catalog/editor completada.',
           versionId: versionId,
         );
       } catch (error) {
@@ -557,7 +609,8 @@ class CatalogRepository {
       if (normalizedNotes != null && normalizedNotes.isNotEmpty) {
         payload['notes'] = normalizedNotes;
       }
-      await _apiClient.postJson('/api/v1/catalog/publish?project_id=$queryProject', payload);
+      await _apiClient.postJson(
+          '/api/v1/catalog/publish?project_id=$queryProject', payload);
       await loadProject(_projectId);
       return const CatalogAdminHookResult(
         supported: true,
@@ -571,7 +624,8 @@ class CatalogRepository {
         if (normalizedNotes != null && normalizedNotes.isNotEmpty) {
           payload['notes'] = normalizedNotes;
         }
-        await _apiClient.postJson('/api/v1/catalog/bundle/publish?project_id=$queryProject', payload);
+        await _apiClient.postJson(
+            '/api/v1/catalog/bundle/publish?project_id=$queryProject', payload);
         await loadProject(_projectId);
         return const CatalogAdminHookResult(
           supported: true,
@@ -595,12 +649,14 @@ class CatalogRepository {
       }
 
       try {
-        await _apiClient.postJson('/api/v1/catalog/versions/$draftVersionId/publish', payload);
+        await _apiClient.postJson(
+            '/api/v1/catalog/versions/$draftVersionId/publish', payload);
         await loadProject(_projectId);
         return CatalogAdminHookResult(
           supported: false,
           success: true,
-          message: 'Publicación completada usando /catalog/versions/{id}/publish.',
+          message:
+              'Publicación completada usando /catalog/versions/{id}/publish.',
           versionId: draftVersionId,
         );
       } catch (error) {
@@ -617,7 +673,8 @@ class CatalogRepository {
   Future<CatalogAdminHookResult> rollbackDraftCatalog() async {
     final queryProject = Uri.encodeQueryComponent(_projectId);
     try {
-      await _apiClient.postJson('/api/v1/catalog/rollback?project_id=$queryProject', {});
+      await _apiClient
+          .postJson('/api/v1/catalog/rollback?project_id=$queryProject', {});
       await loadProject(_projectId);
       return const CatalogAdminHookResult(
         supported: true,
@@ -626,7 +683,8 @@ class CatalogRepository {
       );
     } catch (_) {
       try {
-        await _apiClient.postJson('/api/v1/catalog/bundle/rollback?project_id=$queryProject', {});
+        await _apiClient.postJson(
+            '/api/v1/catalog/bundle/rollback?project_id=$queryProject', {});
         await loadProject(_projectId);
         return const CatalogAdminHookResult(
           supported: true,
@@ -637,7 +695,8 @@ class CatalogRepository {
       return const CatalogAdminHookResult(
         supported: false,
         success: false,
-        message: 'El backend actual no expone endpoint de rollback de catálogo.',
+        message:
+            'El backend actual no expone endpoint de rollback de catálogo.',
       );
     }
   }
@@ -647,15 +706,18 @@ class CatalogRepository {
       final entity = (op['entity'] ?? '').toString();
       final operation = (op['op'] ?? '').toString();
       final id = op['id']?.toString();
-      final payload = (op['payload'] as Map?)?.cast<String, dynamic>() ?? const <String, dynamic>{};
+      final payload = (op['payload'] as Map?)?.cast<String, dynamic>() ??
+          const <String, dynamic>{};
 
       switch (entity) {
         case 'activities':
           await _applyEntityOpFallback(
             operation: operation,
             createPath: '/api/v1/catalog/editor/activities',
-            updatePath: id != null ? '/api/v1/catalog/editor/activities/$id' : null,
-            deletePath: id != null ? '/api/v1/catalog/editor/activities/$id' : null,
+            updatePath:
+                id != null ? '/api/v1/catalog/editor/activities/$id' : null,
+            deletePath:
+                id != null ? '/api/v1/catalog/editor/activities/$id' : null,
             payload: payload,
           );
           break;
@@ -663,8 +725,10 @@ class CatalogRepository {
           await _applyEntityOpFallback(
             operation: operation,
             createPath: '/api/v1/catalog/editor/subcategories',
-            updatePath: id != null ? '/api/v1/catalog/editor/subcategories/$id' : null,
-            deletePath: id != null ? '/api/v1/catalog/editor/subcategories/$id' : null,
+            updatePath:
+                id != null ? '/api/v1/catalog/editor/subcategories/$id' : null,
+            deletePath:
+                id != null ? '/api/v1/catalog/editor/subcategories/$id' : null,
             payload: payload,
           );
           break;
@@ -672,8 +736,10 @@ class CatalogRepository {
           await _applyEntityOpFallback(
             operation: operation,
             createPath: '/api/v1/catalog/editor/purposes',
-            updatePath: id != null ? '/api/v1/catalog/editor/purposes/$id' : null,
-            deletePath: id != null ? '/api/v1/catalog/editor/purposes/$id' : null,
+            updatePath:
+                id != null ? '/api/v1/catalog/editor/purposes/$id' : null,
+            deletePath:
+                id != null ? '/api/v1/catalog/editor/purposes/$id' : null,
             payload: payload,
           );
           break;
@@ -690,8 +756,10 @@ class CatalogRepository {
           await _applyEntityOpFallback(
             operation: operation,
             createPath: '/api/v1/catalog/editor/results',
-            updatePath: id != null ? '/api/v1/catalog/editor/results/$id' : null,
-            deletePath: id != null ? '/api/v1/catalog/editor/results/$id' : null,
+            updatePath:
+                id != null ? '/api/v1/catalog/editor/results/$id' : null,
+            deletePath:
+                id != null ? '/api/v1/catalog/editor/results/$id' : null,
             payload: payload,
           );
           break;
@@ -699,17 +767,21 @@ class CatalogRepository {
           await _applyEntityOpFallback(
             operation: operation,
             createPath: '/api/v1/catalog/editor/attendees',
-            updatePath: id != null ? '/api/v1/catalog/editor/attendees/$id' : null,
-            deletePath: id != null ? '/api/v1/catalog/editor/attendees/$id' : null,
+            updatePath:
+                id != null ? '/api/v1/catalog/editor/attendees/$id' : null,
+            deletePath:
+                id != null ? '/api/v1/catalog/editor/attendees/$id' : null,
             payload: payload,
           );
           break;
         case 'activity_to_topics_suggested':
           if (operation == 'upsert') {
-            await _apiClient.postJson(_withProjectQuery('/api/v1/catalog/editor/rel-activity-topics'), {
-              'activity_id': payload['activity_id'],
-              'topic_id': payload['topic_id'],
-            });
+            await _apiClient.postJson(
+                _withProjectQuery('/api/v1/catalog/editor/rel-activity-topics'),
+                {
+                  'activity_id': payload['activity_id'],
+                  'topic_id': payload['topic_id'],
+                });
           } else if (operation == 'delete') {
             final parts = (id ?? '').split('|');
             if (parts.length == 2) {
@@ -717,7 +789,8 @@ class CatalogRepository {
               final topic = Uri.encodeQueryComponent(parts[1]);
               await _requestNoBody(
                 'DELETE',
-                _withProjectQuery('/api/v1/catalog/editor/rel-activity-topics?activity_id=$activity&topic_id=$topic'),
+                _withProjectQuery(
+                    '/api/v1/catalog/editor/rel-activity-topics?activity_id=$activity&topic_id=$topic'),
               );
             }
           }
@@ -727,7 +800,10 @@ class CatalogRepository {
         case 'purpose':
         case 'topic':
           if (operation == 'reorder') {
-            final ids = (op['ids'] as List?)?.map((entry) => entry.toString()).toList() ?? const <String>[];
+            final ids = (op['ids'] as List?)
+                    ?.map((entry) => entry.toString())
+                    .toList() ??
+                const <String>[];
             await _apiClient.postJson(
               '/api/v1/catalog/editor/reorder?project_id=${Uri.encodeQueryComponent(_projectId)}',
               {
@@ -751,12 +827,14 @@ class CatalogRepository {
     required Map<String, dynamic> payload,
   }) async {
     if (operation == 'upsert') {
-      final createPayload = Map<String, dynamic>.from(payload)..remove('active');
+      final createPayload = Map<String, dynamic>.from(payload)
+        ..remove('active');
       await _apiClient.postJson(_withProjectQuery(createPath), createPayload);
 
       final active = payload['active'];
       if (active is bool && !active && updatePath != null) {
-        await _apiClient.patchJson(_withProjectQuery(updatePath), {'is_active': false});
+        await _apiClient
+            .patchJson(_withProjectQuery(updatePath), {'is_active': false});
       }
       return;
     }
@@ -777,7 +855,8 @@ class CatalogRepository {
 
   Future<String?> _resolveDraftVersionId() async {
     final queryProject = Uri.encodeQueryComponent(_projectId);
-    final decoded = await _apiClient.getJson('/api/v1/catalog/versions?project_id=$queryProject&status=DRAFT&limit=1');
+    final decoded = await _apiClient.getJson(
+        '/api/v1/catalog/versions?project_id=$queryProject&status=DRAFT&limit=1');
     if (decoded is! List || decoded.isEmpty) {
       return null;
     }
@@ -828,7 +907,8 @@ class CatalogRepository {
         .where((entry) {
           if (!entry.isActive) return false;
           if (entry.activityId != normalizedActivity) return false;
-          final isGlobal = entry.subcategoryId == null || entry.subcategoryId!.trim().isEmpty;
+          final isGlobal = entry.subcategoryId == null ||
+              entry.subcategoryId!.trim().isEmpty;
           if (normalizedSubcategory == null || normalizedSubcategory.isEmpty) {
             return isGlobal;
           }
@@ -838,7 +918,8 @@ class CatalogRepository {
         .toList();
   }
 
-  List<CatItem> temasSugeridosFor(String activityId, {bool includeAllWhenAllowed = true}) {
+  List<CatItem> temasSugeridosFor(String activityId,
+      {bool includeAllWhenAllowed = true}) {
     final normalized = activityId.trim();
     if (normalized.isEmpty) return const <CatItem>[];
 
@@ -850,17 +931,21 @@ class CatalogRepository {
         .map((entry) => entry.topicId)
         .toSet();
 
-    final mode = _lastBundle?.effective.rules.topicPolicy.modeFor(normalized) ?? 'any';
-    final suggested = [for (final id in suggestedIds) if (mapById[id] != null) mapById[id]!]
-        .map((entry) => CatItem(id: entry.id, name: entry.name))
-        .toList();
+    final mode =
+        _lastBundle?.effective.rules.topicPolicy.modeFor(normalized) ?? 'any';
+    final suggested = [
+      for (final id in suggestedIds)
+        if (mapById[id] != null) mapById[id]!
+    ].map((entry) => CatItem(id: entry.id, name: entry.name)).toList();
 
     if (mode == 'suggested_only' || !includeAllWhenAllowed) {
       return suggested;
     }
 
     if (mode == 'any') {
-      return activeTopics.map((entry) => CatItem(id: entry.id, name: entry.name)).toList();
+      return activeTopics
+          .map((entry) => CatItem(id: entry.id, name: entry.name))
+          .toList();
     }
 
     return suggested;
@@ -951,7 +1036,8 @@ class CatalogData {
 
   Map<String, List<CatItem>> get purposesBySubcategory {
     final result = <String, List<CatItem>>{};
-    for (final item in purposes.where((item) => item.isActive && item.subcategoryId != null)) {
+    for (final item in purposes
+        .where((item) => item.isActive && item.subcategoryId != null)) {
       result.putIfAbsent(item.subcategoryId!, () => <CatItem>[]);
       result[item.subcategoryId!]!.add(CatItem(id: item.id, name: item.name));
     }
@@ -1036,17 +1122,18 @@ class CatalogData {
             ))
         .toList();
 
-    final assistants = (json['assistants'] as List? ?? json['attendees'] as List? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map((r) => CatalogAssistantItem(
-              id: (r['id'] ?? r['attendee_id'] ?? '').toString(),
-              type: (r['type'] ?? '').toString(),
-              name: strName(r),
-              description: r['description']?.toString(),
-              isActive: strActive(r),
-              sortOrder: strOrder(r),
-            ))
-        .toList();
+    final assistants =
+        (json['assistants'] as List? ?? json['attendees'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map((r) => CatalogAssistantItem(
+                  id: (r['id'] ?? r['attendee_id'] ?? '').toString(),
+                  type: (r['type'] ?? '').toString(),
+                  name: strName(r),
+                  description: r['description']?.toString(),
+                  isActive: strActive(r),
+                  sortOrder: strOrder(r),
+                ))
+            .toList();
 
     return CatalogData(
       activities: activities,
@@ -1086,10 +1173,11 @@ class CatalogData {
         .map(CatalogResultItem.fromJson)
         .toList();
 
-    final assistants = (json['assistants'] as List? ?? json['attendees'] as List? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .map(CatalogAssistantItem.fromJson)
-        .toList();
+    final assistants =
+        (json['assistants'] as List? ?? json['attendees'] as List? ?? const [])
+            .whereType<Map<String, dynamic>>()
+            .map(CatalogAssistantItem.fromJson)
+            .toList();
 
     return CatalogData(
       activities: activities,
@@ -1103,7 +1191,6 @@ class CatalogData {
   }
 
   factory CatalogData.fromBundle(CatalogBundle bundle) {
-
     final activities = bundle.effective.entities.activities
         .map(
           (row) => CatalogActivityItem(
@@ -1134,7 +1221,9 @@ class CatalogData {
           (row) => CatalogPurposeItem(
             id: (row['id'] ?? '').toString(),
             activityId: (row['activity_id'] ?? '').toString(),
-            subcategoryId: row.containsKey('subcategory_id') ? row['subcategory_id']?.toString() : null,
+            subcategoryId: row.containsKey('subcategory_id')
+                ? row['subcategory_id']?.toString()
+                : null,
             name: (row['name'] ?? '').toString(),
             isActive: (row['active'] as bool?) ?? true,
             sortOrder: (row['order'] as num?)?.toInt() ?? 0,
@@ -1436,6 +1525,7 @@ class CatalogAdminHookResult {
 }
 
 // Fallback de último recurso — coincide con el bundle asset y el seed de producción.
+// ignore: unused_element
 const _catalogFallbackJson = '''
 {
   "activities": [

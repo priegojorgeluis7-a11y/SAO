@@ -21,6 +21,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final state = ref.watch(catalogsControllerProvider);
     final controller = ref.read(catalogsControllerProvider.notifier);
     final projectsAsync = ref.watch(availableProjectsProvider);
+    final activeProjectId =
+        ref.watch(activeProjectIdProvider).trim().toUpperCase();
 
     final remoteProjects = projectsAsync.maybeWhen(
       data: (items) => items.where((item) => item.trim().isNotEmpty).toList(),
@@ -28,13 +30,26 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     );
     final projectOptions = <String>{
       ...(remoteProjects.isEmpty ? _fallbackProjects : remoteProjects),
-      if (state.selectedProject.trim().isNotEmpty) state.selectedProject.trim().toUpperCase(),
+      if (state.selectedProject.trim().isNotEmpty)
+        state.selectedProject.trim().toUpperCase(),
     }.toList()
       ..sort();
 
     if (state.selectedProject.trim().isEmpty && projectOptions.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         controller.setProject(projectOptions.first);
+        ref
+            .read(activeProjectIdProvider.notifier)
+            .select(projectOptions.first.trim().toUpperCase());
+        controller.refresh();
+      });
+    }
+
+    if (activeProjectId.isNotEmpty &&
+        activeProjectId != state.selectedProject &&
+        projectOptions.contains(activeProjectId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        controller.setProject(activeProjectId);
         controller.refresh();
       });
     }
@@ -68,11 +83,18 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
           CatalogsHeader(
             isBusy: state.isLoading || state.isMutating,
             selectedProject: state.selectedProject,
+            selectedTabLabel: state.selectedTab.label,
+            versionId: state.versionId,
+            publicationStatus: state.publicationStatus,
+            hasPendingChanges: state.hasPendingChanges,
             projectOptions: projectOptions,
             itemCount: _currentTabCount(state),
             lastLoadedAt: state.lastLoadedAt,
             onProjectSelected: (value) {
               if (value.trim().toUpperCase() == state.selectedProject) return;
+              ref
+                  .read(activeProjectIdProvider.notifier)
+                  .select(value.trim().toUpperCase());
               controller.setProject(value);
               controller.refresh();
             },
@@ -92,9 +114,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
             tab: state.selectedTab,
             tabUiState: tabUi,
             isBusy: state.isLoading || state.isMutating,
-            onQueryChanged: (value) => controller.updateQuery(state.selectedTab, value),
-            onFilterChanged: (value) => controller.updateActiveFilter(state.selectedTab, value),
-            onSortChanged: (value) => controller.updateSort(state.selectedTab, value),
+            visibleCount: _currentVisibleCount(state),
+            totalCount: _currentTabCount(state),
+            hasActiveFilters: _hasActiveFilters(state),
+            onQueryChanged: (value) =>
+                controller.updateQuery(state.selectedTab, value),
+            onFilterChanged: (value) =>
+                controller.updateActiveFilter(state.selectedTab, value),
+            onSortChanged: (value) =>
+                controller.updateSort(state.selectedTab, value),
             selectedActivityId: tabUi.selectedActivityId,
             selectedSubcategoryId: tabUi.selectedSubcategoryId,
             selectedTopicType: tabUi.selectedTopicType,
@@ -104,12 +132,26 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
               selectedActivityId: tabUi.selectedActivityId,
             ),
             topicTypeFilterOptions: _topicTypeFilterOptions(state),
-            onActivityScopeChanged: (value) => controller.updateActivityScope(state.selectedTab, value),
-            onSubcategoryScopeChanged: (value) => controller.updateSubcategoryScope(state.selectedTab, value),
-            onTopicTypeScopeChanged: (value) => controller.updateTopicTypeScope(state.selectedTab, value),
+            onActivityScopeChanged: (value) =>
+                controller.updateActivityScope(state.selectedTab, value),
+            onSubcategoryScopeChanged: (value) =>
+                controller.updateSubcategoryScope(state.selectedTab, value),
+            onTopicTypeScopeChanged: (value) =>
+                controller.updateTopicTypeScope(state.selectedTab, value),
             onAdd: () => _onCreatePressed(context, state.selectedTab),
             onRefresh: controller.refresh,
-            onToggleReorder: state.selectedTab == CatalogTab.activities ? controller.toggleReorderMode : null,
+            onClearFilters: () {
+              controller.updateQuery(state.selectedTab, '');
+              controller.updateActiveFilter(
+                  state.selectedTab, ActiveFilter.all);
+              controller.updateSort(state.selectedTab, const CatalogSortSpec());
+              controller.updateActivityScope(state.selectedTab, null);
+              controller.updateSubcategoryScope(state.selectedTab, null);
+              controller.updateTopicTypeScope(state.selectedTab, null);
+            },
+            onToggleReorder: state.selectedTab == CatalogTab.activities
+                ? controller.toggleReorderMode
+                : null,
           ),
           const SizedBox(height: 12),
           Expanded(
@@ -120,7 +162,6 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
               ),
             ),
           ),
-
         ],
       ),
     );
@@ -192,7 +233,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       if (draft.isEmpty) {
         return _buildEmptyState(
           title: 'No hay Actividades aún',
-          subtitle: 'Agrega una actividad para comenzar a configurar el catálogo.',
+          subtitle:
+              'Agrega una actividad para comenzar a configurar el catálogo.',
           ctaLabel: 'Agregar Actividad',
           onPressed: () => _onCreatePressed(context, CatalogTab.activities),
         );
@@ -208,7 +250,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
           });
 
           final ids = draft.map((item) => item.id).toList();
-          await ref.read(catalogsControllerProvider.notifier).reorderActivities(ids);
+          await ref
+              .read(catalogsControllerProvider.notifier)
+              .reorderActivities(ids);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               const SnackBar(content: Text('Orden de actividades actualizado')),
@@ -222,7 +266,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
             leading: const Icon(Icons.drag_indicator),
             title: Text(item.name),
             subtitle: Text(item.id),
-            trailing: _activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.activities, item.isActive)),
+            trailing: _activeChip(item.isActive,
+                onTap: () => _setFilter(CatalogTab.activities, item.isActive)),
           );
         },
       );
@@ -232,7 +277,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     if (items.isEmpty) {
       return _buildEmptyState(
         title: 'No hay Actividades aún',
-        subtitle: 'Usa la barra superior para buscar o agrega una actividad nueva.',
+        subtitle:
+            'Usa la barra superior para buscar o agrega una actividad nueva.',
         ctaLabel: 'Agregar Actividad',
         onPressed: () => _onCreatePressed(context, CatalogTab.activities),
       );
@@ -252,13 +298,16 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
               cells: [
                 DataCell(Text(item.id)),
                 DataCell(Text(item.name)),
-                DataCell(_activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.activities, item.isActive))),
+                DataCell(_activeChip(item.isActive,
+                    onTap: () =>
+                        _setFilter(CatalogTab.activities, item.isActive))),
                 DataCell(Text(item.sortOrder.toString())),
                 DataCell(
                   _RowActionsMenu(
                     isActive: item.isActive,
                     onEdit: () => _showActivityDialog(context, item: item),
-                    onDuplicate: () => _showActivityDialog(context, duplicateFrom: item),
+                    onDuplicate: () =>
+                        _showActivityDialog(context, duplicateFrom: item),
                     onToggleActive: () => _toggleActivity(item),
                     onDelete: () => _deleteActivity(item),
                   ),
@@ -296,12 +345,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 DataCell(Text(item.id)),
                 DataCell(Text(item.activityId)),
                 DataCell(Text(item.name)),
-                DataCell(_activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.subcategories, item.isActive))),
+                DataCell(_activeChip(item.isActive,
+                    onTap: () =>
+                        _setFilter(CatalogTab.subcategories, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
                     isActive: item.isActive,
                     onEdit: () => _showSubcategoryDialog(context, item: item),
-                    onDuplicate: () => _showSubcategoryDialog(context, duplicateFrom: item),
+                    onDuplicate: () =>
+                        _showSubcategoryDialog(context, duplicateFrom: item),
                     onToggleActive: () => _toggleSubcategory(item),
                     onDelete: () => _deleteSubcategory(item),
                   ),
@@ -341,12 +393,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 DataCell(Text(item.activityId)),
                 DataCell(Text(item.subcategoryId ?? '-')),
                 DataCell(Text(item.name)),
-                DataCell(_activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.purposes, item.isActive))),
+                DataCell(_activeChip(item.isActive,
+                    onTap: () =>
+                        _setFilter(CatalogTab.purposes, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
                     isActive: item.isActive,
                     onEdit: () => _showPurposeDialog(context, item: item),
-                    onDuplicate: () => _showPurposeDialog(context, duplicateFrom: item),
+                    onDuplicate: () =>
+                        _showPurposeDialog(context, duplicateFrom: item),
                     onToggleActive: () => _togglePurpose(item),
                     onDelete: () => _deletePurpose(item),
                   ),
@@ -384,12 +439,14 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 DataCell(Text(item.id)),
                 DataCell(Text(item.name)),
                 DataCell(Text(item.type ?? '-')),
-                DataCell(_activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.topics, item.isActive))),
+                DataCell(_activeChip(item.isActive,
+                    onTap: () => _setFilter(CatalogTab.topics, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
                     isActive: item.isActive,
                     onEdit: () => _showTopicDialog(context, item: item),
-                    onDuplicate: () => _showTopicDialog(context, duplicateFrom: item),
+                    onDuplicate: () =>
+                        _showTopicDialog(context, duplicateFrom: item),
                     onToggleActive: () => _toggleTopic(item),
                     onDelete: () => _deleteTopic(item),
                   ),
@@ -405,7 +462,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     if (state.catalog.activities.isEmpty) {
       return _buildEmptyState(
         title: 'No hay relaciones aún',
-        subtitle: 'Primero crea actividades y temas para configurar relaciones.',
+        subtitle:
+            'Primero crea actividades y temas para configurar relaciones.',
         ctaLabel: 'Agregar Relación',
         onPressed: () => _showRelationCreateDialog(context),
       );
@@ -421,8 +479,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       selectedActivityId: state.selectedRelationActivityId,
       query: tabUi.query,
       showSuggestedOnly: tabUi.showSuggestedOnly,
-      onSelectActivity: (activityId) => ref.read(catalogsControllerProvider.notifier).selectRelationActivity(activityId),
-      onToggleSuggestedOnly: (value) => ref.read(catalogsControllerProvider.notifier).setShowSuggestedOnly(value),
+      onSelectActivity: (activityId) => ref
+          .read(catalogsControllerProvider.notifier)
+          .selectRelationActivity(activityId),
+      onToggleSuggestedOnly: (value) => ref
+          .read(catalogsControllerProvider.notifier)
+          .setShowSuggestedOnly(value),
       onToggleTopic: (activityId, topicId, selected) async {
         final controller = ref.read(catalogsControllerProvider.notifier);
         if (selected) {
@@ -462,12 +524,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 DataCell(Text(item.id)),
                 DataCell(Text(item.category)),
                 DataCell(Text(item.name)),
-                DataCell(_activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.results, item.isActive))),
+                DataCell(_activeChip(item.isActive,
+                    onTap: () =>
+                        _setFilter(CatalogTab.results, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
                     isActive: item.isActive,
                     onEdit: () => _showResultDialog(context, item: item),
-                    onDuplicate: () => _showResultDialog(context, duplicateFrom: item),
+                    onDuplicate: () =>
+                        _showResultDialog(context, duplicateFrom: item),
                     onToggleActive: () => _toggleResult(item),
                     onDelete: () => _deleteResult(item),
                   ),
@@ -505,12 +570,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 DataCell(Text(item.id)),
                 DataCell(Text(item.type)),
                 DataCell(Text(item.name)),
-                DataCell(_activeChip(item.isActive, onTap: () => _setFilter(CatalogTab.assistants, item.isActive))),
+                DataCell(_activeChip(item.isActive,
+                    onTap: () =>
+                        _setFilter(CatalogTab.assistants, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
                     isActive: item.isActive,
                     onEdit: () => _showAssistantDialog(context, item: item),
-                    onDuplicate: () => _showAssistantDialog(context, duplicateFrom: item),
+                    onDuplicate: () =>
+                        _showAssistantDialog(context, duplicateFrom: item),
                     onToggleActive: () => _toggleAssistant(item),
                     onDelete: () => _deleteAssistant(item),
                   ),
@@ -555,8 +623,10 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
 
   Widget _activeChip(bool isActive, {VoidCallback? onTap}) {
     final colors = Theme.of(context).colorScheme;
-    final background = isActive ? colors.primaryContainer : colors.errorContainer;
-    final foreground = isActive ? colors.onPrimaryContainer : colors.onErrorContainer;
+    final background =
+        isActive ? colors.primaryContainer : colors.errorContainer;
+    final foreground =
+        isActive ? colors.onPrimaryContainer : colors.onErrorContainer;
 
     final child = Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -576,7 +646,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     if (onTap == null) return child;
     return Tooltip(
       message: isActive ? 'Filtrar: Activos' : 'Filtrar: Inactivos',
-      child: InkWell(onTap: onTap, borderRadius: BorderRadius.circular(14), child: child),
+      child: InkWell(
+          onTap: onTap, borderRadius: BorderRadius.circular(14), child: child),
     );
   }
 
@@ -616,9 +687,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final isDuplicate = duplicateFrom != null && item == null;
 
     final id = TextEditingController(
-      text: source == null
-          ? ''
-          : (isDuplicate ? '${source.id}_COPY' : source.id),
+      text:
+          source == null ? '' : (isDuplicate ? '${source.id}_COPY' : source.id),
     );
     final name = TextEditingController(text: source?.name ?? '');
     final description = TextEditingController(text: source?.description ?? '');
@@ -654,14 +724,17 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: description,
-                      decoration: const InputDecoration(labelText: 'Descripción'),
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
                     ),
                   ],
                 ),
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
               FilledButton(
                 onPressed: canSave ? () => Navigator.pop(context, true) : null,
                 child: const Text('Guardar'),
@@ -681,9 +754,11 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       fallbackName: name.text,
     );
     if (item == null) {
-      await controller.createActivity(id: resolvedId, name: name.text, description: description.text);
+      await controller.createActivity(
+          id: resolvedId, name: name.text, description: description.text);
     } else {
-      await controller.updateActivity(item.id, name: name.text, description: description.text);
+      await controller.updateActivity(item.id,
+          name: name.text, description: description.text);
     }
   }
 
@@ -698,9 +773,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
 
     var selectedActivity = source?.activityId ?? '';
     final id = TextEditingController(
-      text: source == null
-          ? ''
-          : (isDuplicate ? '${source.id}_COPY' : source.id),
+      text:
+          source == null ? '' : (isDuplicate ? '${source.id}_COPY' : source.id),
     );
     final name = TextEditingController(text: source?.name ?? '');
     final description = TextEditingController(text: source?.description ?? '');
@@ -710,8 +784,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
           final state = ref.read(catalogsControllerProvider);
-          final activities = [...state.catalog.activities]
-            ..sort((a, b) {
+          final activities = [...state.catalog.activities]..sort((a, b) {
               if (a.isActive == b.isActive) return a.name.compareTo(b.name);
               return a.isActive ? -1 : 1;
             });
@@ -720,15 +793,21 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
             selectedActivity = activities.first.id;
           }
 
-          final selectedActivityItem = activities.where((entry) => entry.id == selectedActivity).firstOrNull;
-          final selectedActivityActive = selectedActivityItem?.isActive ?? false;
+          final selectedActivityItem = activities
+              .where((entry) => entry.id == selectedActivity)
+              .firstOrNull;
+          final selectedActivityActive =
+              selectedActivityItem?.isActive ?? false;
 
-          final canSave = name.text.trim().isNotEmpty && selectedActivity.isNotEmpty;
+          final canSave =
+              name.text.trim().isNotEmpty && selectedActivity.isNotEmpty;
           return AlertDialog(
             title: Text(
               item != null
                   ? 'Editar subcategoría'
-                  : (isDuplicate ? 'Duplicar subcategoría' : 'Nueva subcategoría'),
+                  : (isDuplicate
+                      ? 'Duplicar subcategoría'
+                      : 'Nueva subcategoría'),
             ),
             content: SizedBox(
               width: 460,
@@ -736,69 +815,78 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                  TextField(
-                    controller: id,
-                    enabled: isCreate,
-                    decoration: const InputDecoration(labelText: 'ID'),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedActivity.isEmpty ? null : selectedActivity,
-                    items: activities
-                        .map(
-                          (entry) => DropdownMenuItem<String>(
-                            value: entry.id,
-                            enabled: entry.isActive,
-                            child: Text(entry.isActive ? entry.name : '${entry.name} (inactiva)'),
+                    TextField(
+                      controller: id,
+                      enabled: isCreate,
+                      decoration: const InputDecoration(labelText: 'ID'),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue:
+                          selectedActivity.isEmpty ? null : selectedActivity,
+                      items: activities
+                          .map(
+                            (entry) => DropdownMenuItem<String>(
+                              value: entry.id,
+                              enabled: entry.isActive,
+                              child: Text(entry.isActive
+                                  ? entry.name
+                                  : '${entry.name} (inactiva)'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) =>
+                          setLocalState(() => selectedActivity = value ?? ''),
+                      decoration: const InputDecoration(labelText: 'Actividad'),
+                    ),
+                    if (!selectedActivityActive && selectedActivity.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Esta actividad está inactiva. Actívala para agregar subcategorías.',
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  await ref
+                                      .read(catalogsControllerProvider.notifier)
+                                      .updateActivity(selectedActivity,
+                                          isActive: true);
+                                  setLocalState(() {});
+                                },
+                                child: const Text('Activar actividad'),
+                              ),
+                            ],
                           ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setLocalState(() => selectedActivity = value ?? ''),
-                    decoration: const InputDecoration(labelText: 'Actividad'),
-                  ),
-                  if (!selectedActivityActive && selectedActivity.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Wrap(
-                          spacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              'Esta actividad está inactiva. Actívala para agregar subcategorías.',
-                              style: TextStyle(color: Theme.of(context).colorScheme.error),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                await ref
-                                    .read(catalogsControllerProvider.notifier)
-                                    .updateActivity(selectedActivity, isActive: true);
-                                setLocalState(() {});
-                              },
-                              child: const Text('Activar actividad'),
-                            ),
-                          ],
                         ),
                       ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: name,
+                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      onChanged: (_) => setLocalState(() {}),
                     ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Nombre *'),
-                    onChanged: (_) => setLocalState(() {}),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: description,
-                    decoration: const InputDecoration(labelText: 'Descripción'),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: description,
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
+                    ),
+                  ],
+                ),
               ),
             ),
-            ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
               FilledButton(
                 onPressed: canSave ? () => Navigator.pop(context, true) : null,
                 child: const Text('Guardar'),
@@ -853,9 +941,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final isDuplicate = duplicateFrom != null && item == null;
 
     final id = TextEditingController(
-      text: source == null
-          ? ''
-          : (isDuplicate ? '${source.id}_COPY' : source.id),
+      text:
+          source == null ? '' : (isDuplicate ? '${source.id}_COPY' : source.id),
     );
     final name = TextEditingController(text: source?.name ?? '');
 
@@ -867,8 +954,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
           final state = ref.read(catalogsControllerProvider);
-          final activities = [...state.catalog.activities]
-            ..sort((a, b) {
+          final activities = [...state.catalog.activities]..sort((a, b) {
               if (a.isActive == b.isActive) return a.name.compareTo(b.name);
               return a.isActive ? -1 : 1;
             });
@@ -877,8 +963,11 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
             selectedActivity = activities.first.id;
           }
 
-          List<CatalogSubcategoryItem> subcategoriesForActivity(String activityId) {
-            final scoped = state.catalog.subcategories.where((entry) => entry.activityId == activityId).toList();
+          List<CatalogSubcategoryItem> subcategoriesForActivity(
+              String activityId) {
+            final scoped = state.catalog.subcategories
+                .where((entry) => entry.activityId == activityId)
+                .toList();
             scoped.sort((a, b) {
               if (a.isActive == b.isActive) return a.name.compareTo(b.name);
               return a.isActive ? -1 : 1;
@@ -886,23 +975,32 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
             return scoped;
           }
 
-          final scopedSubcategories = subcategoriesForActivity(selectedActivity);
+          final scopedSubcategories =
+              subcategoriesForActivity(selectedActivity);
           if (selectedSubcategory != null &&
-              !scopedSubcategories.any((entry) => entry.id == selectedSubcategory)) {
-            selectedSubcategory = scopedSubcategories.isNotEmpty ? scopedSubcategories.first.id : null;
+              !scopedSubcategories
+                  .any((entry) => entry.id == selectedSubcategory)) {
+            selectedSubcategory = scopedSubcategories.isNotEmpty
+                ? scopedSubcategories.first.id
+                : null;
           }
           if (selectedSubcategory == null && scopedSubcategories.isNotEmpty) {
             selectedSubcategory = scopedSubcategories.first.id;
           }
 
-          final selectedActivityItem = activities.where((entry) => entry.id == selectedActivity).firstOrNull;
-          final selectedActivityActive = selectedActivityItem?.isActive ?? false;
+          final selectedActivityItem = activities
+              .where((entry) => entry.id == selectedActivity)
+              .firstOrNull;
+          final selectedActivityActive =
+              selectedActivityItem?.isActive ?? false;
           final selectedSubcategoryItem = scopedSubcategories
               .where((entry) => entry.id == selectedSubcategory)
               .firstOrNull;
-          final selectedSubcategoryActive = selectedSubcategoryItem?.isActive ?? false;
+          final selectedSubcategoryActive =
+              selectedSubcategoryItem?.isActive ?? false;
 
-          final canSave = name.text.trim().isNotEmpty && selectedActivity.isNotEmpty;
+          final canSave =
+              name.text.trim().isNotEmpty && selectedActivity.isNotEmpty;
           return AlertDialog(
             title: Text(
               item != null
@@ -915,108 +1013,122 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                  TextField(
-                    controller: id,
-                    enabled: isCreate,
-                    decoration: const InputDecoration(labelText: 'ID'),
-                  ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedActivity.isEmpty ? null : selectedActivity,
-                    items: activities
-                        .map(
-                          (entry) => DropdownMenuItem<String>(
-                            value: entry.id,
-                            enabled: entry.isActive,
-                            child: Text(entry.isActive ? entry.name : '${entry.name} (inactiva)'),
+                    TextField(
+                      controller: id,
+                      enabled: isCreate,
+                      decoration: const InputDecoration(labelText: 'ID'),
+                    ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue:
+                          selectedActivity.isEmpty ? null : selectedActivity,
+                      items: activities
+                          .map(
+                            (entry) => DropdownMenuItem<String>(
+                              value: entry.id,
+                              enabled: entry.isActive,
+                              child: Text(entry.isActive
+                                  ? entry.name
+                                  : '${entry.name} (inactiva)'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) => setLocalState(() {
+                        selectedActivity = value ?? '';
+                        selectedSubcategory = null;
+                      }),
+                      decoration: const InputDecoration(labelText: 'Actividad'),
+                    ),
+                    if (!selectedActivityActive && selectedActivity.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Esta actividad está inactiva. Actívala para agregar propósitos.',
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  await ref
+                                      .read(catalogsControllerProvider.notifier)
+                                      .updateActivity(selectedActivity,
+                                          isActive: true);
+                                  setLocalState(() {});
+                                },
+                                child: const Text('Activar actividad'),
+                              ),
+                            ],
                           ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setLocalState(() {
-                      selectedActivity = value ?? '';
-                      selectedSubcategory = null;
-                    }),
-                    decoration: const InputDecoration(labelText: 'Actividad'),
-                  ),
-                  if (!selectedActivityActive && selectedActivity.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Wrap(
-                          spacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              'Esta actividad está inactiva. Actívala para agregar propósitos.',
-                              style: TextStyle(color: Theme.of(context).colorScheme.error),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                await ref
-                                    .read(catalogsControllerProvider.notifier)
-                                    .updateActivity(selectedActivity, isActive: true);
-                                setLocalState(() {});
-                              },
-                              child: const Text('Activar actividad'),
-                            ),
-                          ],
                         ),
                       ),
+                    const SizedBox(height: 8),
+                    DropdownButtonFormField<String>(
+                      initialValue: selectedSubcategory,
+                      items: scopedSubcategories
+                          .map(
+                            (entry) => DropdownMenuItem<String>(
+                              value: entry.id,
+                              enabled: entry.isActive,
+                              child: Text(entry.isActive
+                                  ? entry.name
+                                  : '${entry.name} (inactiva)'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) =>
+                          setLocalState(() => selectedSubcategory = value),
+                      decoration:
+                          const InputDecoration(labelText: 'Subcategoría'),
                     ),
-                  const SizedBox(height: 8),
-                  DropdownButtonFormField<String>(
-                    value: selectedSubcategory,
-                    items: scopedSubcategories
-                        .map(
-                          (entry) => DropdownMenuItem<String>(
-                            value: entry.id,
-                            enabled: entry.isActive,
-                            child: Text(entry.isActive ? entry.name : '${entry.name} (inactiva)'),
+                    if (!selectedSubcategoryActive &&
+                        selectedSubcategory != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Padding(
+                          padding: const EdgeInsets.only(top: 8),
+                          child: Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                'Esta subcategoría está inactiva. Actívala para agregar propósitos.',
+                                style: TextStyle(
+                                    color: Theme.of(context).colorScheme.error),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  await ref
+                                      .read(catalogsControllerProvider.notifier)
+                                      .updateSubcategory(selectedSubcategory!,
+                                          isActive: true);
+                                  setLocalState(() {});
+                                },
+                                child: const Text('Activar subcategoría'),
+                              ),
+                            ],
                           ),
-                        )
-                        .toList(),
-                    onChanged: (value) => setLocalState(() => selectedSubcategory = value),
-                    decoration: const InputDecoration(labelText: 'Subcategoría'),
-                  ),
-                  if (!selectedSubcategoryActive && selectedSubcategory != null)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Wrap(
-                          spacing: 8,
-                          crossAxisAlignment: WrapCrossAlignment.center,
-                          children: [
-                            Text(
-                              'Esta subcategoría está inactiva. Actívala para agregar propósitos.',
-                              style: TextStyle(color: Theme.of(context).colorScheme.error),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                await ref
-                                    .read(catalogsControllerProvider.notifier)
-                                    .updateSubcategory(selectedSubcategory!, isActive: true);
-                                setLocalState(() {});
-                              },
-                              child: const Text('Activar subcategoría'),
-                            ),
-                          ],
                         ),
                       ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: name,
+                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      onChanged: (_) => setLocalState(() {}),
                     ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: name,
-                    decoration: const InputDecoration(labelText: 'Nombre *'),
-                    onChanged: (_) => setLocalState(() {}),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-            ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
               FilledButton(
                 onPressed: canSave ? () => Navigator.pop(context, true) : null,
                 child: const Text('Guardar'),
@@ -1079,9 +1191,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final isDuplicate = duplicateFrom != null && item == null;
 
     final id = TextEditingController(
-      text: source == null
-          ? ''
-          : (isDuplicate ? '${source.id}_COPY' : source.id),
+      text:
+          source == null ? '' : (isDuplicate ? '${source.id}_COPY' : source.id),
     );
     final name = TextEditingController(text: source?.name ?? '');
     final type = TextEditingController(text: source?.type ?? '');
@@ -1116,18 +1227,23 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
-                    TextField(controller: type, decoration: const InputDecoration(labelText: 'Tipo')),
+                    TextField(
+                        controller: type,
+                        decoration: const InputDecoration(labelText: 'Tipo')),
                     const SizedBox(height: 8),
                     TextField(
                       controller: description,
-                      decoration: const InputDecoration(labelText: 'Descripción'),
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
                     ),
                   ],
                 ),
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
               FilledButton(
                 onPressed: canSave ? () => Navigator.pop(context, true) : null,
                 child: const Text('Guardar'),
@@ -1184,27 +1300,35 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 DropdownButtonFormField<String>(
-                  value: selectedActivity,
+                  initialValue: selectedActivity,
                   items: activities
-                      .map((entry) => DropdownMenuItem(value: entry.id, child: Text(entry.name)))
+                      .map((entry) => DropdownMenuItem(
+                          value: entry.id, child: Text(entry.name)))
                       .toList(),
-                  onChanged: (value) => setLocalState(() => selectedActivity = value ?? selectedActivity),
+                  onChanged: (value) => setLocalState(
+                      () => selectedActivity = value ?? selectedActivity),
                   decoration: const InputDecoration(labelText: 'Actividad'),
                 ),
                 DropdownButtonFormField<String>(
-                  value: selectedTopic,
+                  initialValue: selectedTopic,
                   items: topics
-                      .map((entry) => DropdownMenuItem(value: entry.id, child: Text(entry.name)))
+                      .map((entry) => DropdownMenuItem(
+                          value: entry.id, child: Text(entry.name)))
                       .toList(),
-                  onChanged: (value) => setLocalState(() => selectedTopic = value ?? selectedTopic),
+                  onChanged: (value) => setLocalState(
+                      () => selectedTopic = value ?? selectedTopic),
                   decoration: const InputDecoration(labelText: 'Tema'),
                 ),
               ],
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Guardar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('Guardar')),
           ],
         ),
       ),
@@ -1212,7 +1336,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
 
     if (saved != true) return;
 
-    await ref.read(catalogsControllerProvider.notifier).addRelation(selectedActivity, selectedTopic);
+    await ref
+        .read(catalogsControllerProvider.notifier)
+        .addRelation(selectedActivity, selectedTopic);
   }
 
   Future<void> _showResultDialog(
@@ -1225,9 +1351,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final isDuplicate = duplicateFrom != null && item == null;
 
     final id = TextEditingController(
-      text: source == null
-          ? ''
-          : (isDuplicate ? '${source.id}_COPY' : source.id),
+      text:
+          source == null ? '' : (isDuplicate ? '${source.id}_COPY' : source.id),
     );
     final category = TextEditingController(text: source?.category ?? '');
     final name = TextEditingController(text: source?.name ?? '');
@@ -1237,7 +1362,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final canSave = name.text.trim().isNotEmpty && category.text.trim().isNotEmpty;
+          final canSave =
+              name.text.trim().isNotEmpty && category.text.trim().isNotEmpty;
           return AlertDialog(
             title: Text(
               item != null
@@ -1258,7 +1384,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: category,
-                      decoration: const InputDecoration(labelText: 'Categoría *'),
+                      decoration:
+                          const InputDecoration(labelText: 'Categoría *'),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
@@ -1270,14 +1397,17 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: description,
-                      decoration: const InputDecoration(labelText: 'Descripción'),
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
                     ),
                   ],
                 ),
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
               FilledButton(
                 onPressed: canSave ? () => Navigator.pop(context, true) : null,
                 child: const Text('Guardar'),
@@ -1323,9 +1453,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final isDuplicate = duplicateFrom != null && item == null;
 
     final id = TextEditingController(
-      text: source == null
-          ? ''
-          : (isDuplicate ? '${source.id}_COPY' : source.id),
+      text:
+          source == null ? '' : (isDuplicate ? '${source.id}_COPY' : source.id),
     );
     final type = TextEditingController(text: source?.type ?? '');
     final name = TextEditingController(text: source?.name ?? '');
@@ -1335,7 +1464,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final canSave = name.text.trim().isNotEmpty && type.text.trim().isNotEmpty;
+          final canSave =
+              name.text.trim().isNotEmpty && type.text.trim().isNotEmpty;
           return AlertDialog(
             title: Text(
               item != null
@@ -1368,14 +1498,17 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: description,
-                      decoration: const InputDecoration(labelText: 'Descripción'),
+                      decoration:
+                          const InputDecoration(labelText: 'Descripción'),
                     ),
                   ],
                 ),
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
               FilledButton(
                 onPressed: canSave ? () => Navigator.pop(context, true) : null,
                 child: const Text('Guardar'),
@@ -1429,7 +1562,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     if (!mounted) return;
     _showUndoSnackBar(
       message: next ? 'Subcategoría activada' : 'Subcategoría desactivada',
-      onUndo: () => controller.updateSubcategory(item.id, isActive: item.isActive),
+      onUndo: () =>
+          controller.updateSubcategory(item.id, isActive: item.isActive),
     );
   }
 
@@ -1473,7 +1607,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     if (!mounted) return;
     _showUndoSnackBar(
       message: next ? 'Asistente activado' : 'Asistente desactivado',
-      onUndo: () => controller.updateAssistant(item.id, isActive: item.isActive),
+      onUndo: () =>
+          controller.updateAssistant(item.id, isActive: item.isActive),
     );
   }
 
@@ -1550,15 +1685,20 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
         title: const Text('Confirmar eliminación'),
         content: Text('¿Eliminar $label?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Eliminar')),
         ],
       ),
     );
     return result == true;
   }
 
-  void _showUndoSnackBar({required String message, required Future<void> Function() onUndo}) {
+  void _showUndoSnackBar(
+      {required String message, required Future<void> Function() onUndo}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
@@ -1571,25 +1711,27 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     );
   }
 
-  void _showBlockedByInactiveParentMessage(String parentType, String? parentId) {
+  void _showBlockedByInactiveParentMessage(
+      String parentType, String? parentId) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('No se puede crear porque el $parentType "${parentId ?? ''}" está inactivo.'),
+        content: Text(
+            'No se puede crear porque el $parentType "${parentId ?? ''}" está inactivo.'),
       ),
     );
   }
 
   void _setFilter(CatalogTab tab, bool isActive) {
-    ref
-        .read(catalogsControllerProvider.notifier)
-        .updateActiveFilter(tab, isActive ? ActiveFilter.active : ActiveFilter.inactive);
+    ref.read(catalogsControllerProvider.notifier).updateActiveFilter(
+        tab, isActive ? ActiveFilter.active : ActiveFilter.inactive);
   }
 
   List<CatalogActivityItem> _visibleActivities(CatalogsPageState state) {
     final ui = state.uiFor(CatalogTab.activities);
     final items = state.catalog.activities.where((item) {
       if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) return false;
-      return _matchesQuery(ui.query, [item.id, item.name, item.description ?? '']);
+      return _matchesQuery(
+          ui.query, [item.id, item.name, item.description ?? '']);
     }).toList();
 
     items.sort((a, b) => _sortCompare(
@@ -1609,9 +1751,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   List<CatalogSubcategoryItem> _visibleSubcategories(CatalogsPageState state) {
     final ui = state.uiFor(CatalogTab.subcategories);
     final items = state.catalog.subcategories.where((item) {
-      if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) return false;
-      if (ui.selectedActivityId != null && item.activityId != ui.selectedActivityId) return false;
-      return _matchesQuery(ui.query, [item.id, item.name, item.activityId, item.description ?? '']);
+      if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) {
+        return false;
+      }
+      if (ui.selectedActivityId != null &&
+          item.activityId != ui.selectedActivityId) {
+        return false;
+      }
+      return _matchesQuery(ui.query,
+          [item.id, item.name, item.activityId, item.description ?? '']);
     }).toList();
 
     items.sort((a, b) => _sortCompare(
@@ -1631,10 +1779,19 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   List<CatalogPurposeItem> _visiblePurposes(CatalogsPageState state) {
     final ui = state.uiFor(CatalogTab.purposes);
     final items = state.catalog.purposes.where((item) {
-      if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) return false;
-      if (ui.selectedActivityId != null && item.activityId != ui.selectedActivityId) return false;
-      if (ui.selectedSubcategoryId != null && item.subcategoryId != ui.selectedSubcategoryId) return false;
-      return _matchesQuery(ui.query, [item.id, item.name, item.activityId, item.subcategoryId ?? '']);
+      if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) {
+        return false;
+      }
+      if (ui.selectedActivityId != null &&
+          item.activityId != ui.selectedActivityId) {
+        return false;
+      }
+      if (ui.selectedSubcategoryId != null &&
+          item.subcategoryId != ui.selectedSubcategoryId) {
+        return false;
+      }
+      return _matchesQuery(ui.query,
+          [item.id, item.name, item.activityId, item.subcategoryId ?? '']);
     }).toList();
 
     items.sort((a, b) => _sortCompare(
@@ -1654,9 +1811,15 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   List<CatalogTopicItem> _visibleTopics(CatalogsPageState state) {
     final ui = state.uiFor(CatalogTab.topics);
     final items = state.catalog.topics.where((item) {
-      if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) return false;
-      if (ui.selectedTopicType != null && (item.type ?? '').trim() != ui.selectedTopicType) return false;
-      return _matchesQuery(ui.query, [item.id, item.name, item.type ?? '', item.description ?? '']);
+      if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) {
+        return false;
+      }
+      if (ui.selectedTopicType != null &&
+          (item.type ?? '').trim() != ui.selectedTopicType) {
+        return false;
+      }
+      return _matchesQuery(ui.query,
+          [item.id, item.name, item.type ?? '', item.description ?? '']);
     }).toList();
 
     items.sort((a, b) => _sortCompare(
@@ -1677,7 +1840,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final ui = state.uiFor(CatalogTab.results);
     final items = state.catalog.results.where((item) {
       if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) return false;
-      return _matchesQuery(ui.query, [item.id, item.name, item.category, item.description ?? '']);
+      return _matchesQuery(ui.query,
+          [item.id, item.name, item.category, item.description ?? '']);
     }).toList();
 
     items.sort((a, b) => _sortCompare(
@@ -1698,7 +1862,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final ui = state.uiFor(CatalogTab.assistants);
     final items = state.catalog.assistants.where((item) {
       if (!_matchesActiveFilter(item.isActive, ui.activeFilter)) return false;
-      return _matchesQuery(ui.query, [item.id, item.name, item.type, item.description ?? '']);
+      return _matchesQuery(
+          ui.query, [item.id, item.name, item.type, item.description ?? '']);
     }).toList();
 
     items.sort((a, b) => _sortCompare(
@@ -1732,7 +1897,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   List<CatItem> _activityFilterOptions(CatalogsPageState state) {
     final entries = [...state.catalog.activities]
       ..sort((a, b) => a.name.compareTo(b.name));
-    return entries.map((entry) => CatItem(id: entry.id, name: entry.name)).toList();
+    return entries
+        .map((entry) => CatItem(id: entry.id, name: entry.name))
+        .toList();
   }
 
   List<CatItem> _subcategoryFilterOptions(
@@ -1745,7 +1912,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     }).toList()
       ..sort((a, b) => a.name.compareTo(b.name));
 
-    return entries.map((entry) => CatItem(id: entry.id, name: entry.name)).toList();
+    return entries
+        .map((entry) => CatItem(id: entry.id, name: entry.name))
+        .toList();
   }
 
   List<CatItem> _topicTypeFilterOptions(CatalogsPageState state) {
@@ -1805,8 +1974,33 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     return _counts(state.catalog)[state.selectedTab] ?? 0;
   }
 
+  int _currentVisibleCount(CatalogsPageState state) {
+    return switch (state.selectedTab) {
+      CatalogTab.activities => _visibleActivities(state).length,
+      CatalogTab.subcategories => _visibleSubcategories(state).length,
+      CatalogTab.purposes => _visiblePurposes(state).length,
+      CatalogTab.topics => _visibleTopics(state).length,
+      CatalogTab.relations => state.catalog.relations.length,
+      CatalogTab.results => _visibleResults(state).length,
+      CatalogTab.assistants => _visibleAssistants(state).length,
+    };
+  }
+
+  bool _hasActiveFilters(CatalogsPageState state) {
+    final ui = state.uiFor(state.selectedTab);
+    return ui.query.trim().isNotEmpty ||
+        ui.activeFilter != ActiveFilter.all ||
+        ui.sort.field != CatalogSortField.name ||
+        ui.sort.ascending != true ||
+        ui.selectedActivityId != null ||
+        ui.selectedSubcategoryId != null ||
+        ui.selectedTopicType != null;
+  }
+
   Future<void> _onValidatePressed() async {
-    final result = await ref.read(catalogsControllerProvider.notifier).validateCatalogDraft();
+    final result = await ref
+        .read(catalogsControllerProvider.notifier)
+        .validateCatalogDraft();
     if (!mounted) return;
     _showHookResult(result);
   }
@@ -1824,14 +2018,17 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   }
 
   Future<void> _onRollbackPressed() async {
-    final result = await ref.read(catalogsControllerProvider.notifier).rollbackCatalogDraft();
+    final result = await ref
+        .read(catalogsControllerProvider.notifier)
+        .rollbackCatalogDraft();
     if (!mounted) return;
     _showHookResult(result);
   }
 
   void _showHookResult(CatalogAdminHookResult result) {
     final colors = Theme.of(context).colorScheme;
-    final color = result.success ? colors.primaryContainer : colors.errorContainer;
+    final color =
+        result.success ? colors.primaryContainer : colors.errorContainer;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(result.message),
@@ -1876,6 +2073,10 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
 class CatalogsHeader extends StatelessWidget {
   final bool isBusy;
   final String selectedProject;
+  final String selectedTabLabel;
+  final String? versionId;
+  final String publicationStatus;
+  final bool hasPendingChanges;
   final List<String> projectOptions;
   final int itemCount;
   final DateTime? lastLoadedAt;
@@ -1889,6 +2090,10 @@ class CatalogsHeader extends StatelessWidget {
     super.key,
     required this.isBusy,
     required this.selectedProject,
+    required this.selectedTabLabel,
+    required this.versionId,
+    required this.publicationStatus,
+    required this.hasPendingChanges,
     required this.projectOptions,
     required this.itemCount,
     required this.lastLoadedAt,
@@ -1912,18 +2117,40 @@ class CatalogsHeader extends StatelessWidget {
           spacing: 10,
           runSpacing: 10,
           children: [
-            _statusChip(context, 'Proyecto: $selectedProject'),
-            _statusChip(context, 'Última carga: $lastLoaded'),
-            _statusChip(context, '$itemCount elementos'),
+            _statusChip(context,
+                icon: Icons.apartment_rounded,
+                text: 'Proyecto: $selectedProject'),
+            _statusChip(context,
+                icon: Icons.layers_rounded, text: 'Sección: $selectedTabLabel'),
+            _statusChip(context,
+                icon: _statusIcon(publicationStatus),
+                text: 'Estado: ${_statusLabel(publicationStatus)}',
+                tone: _statusTone(publicationStatus)),
+            _statusChip(context,
+                icon: Icons.tag_rounded,
+                text: 'Versión: ${versionId ?? 'n/d'}'),
+            _statusChip(context,
+                icon: Icons.update_rounded, text: 'Última carga: $lastLoaded'),
+            _statusChip(context,
+                icon: Icons.dataset_rounded, text: '$itemCount elementos'),
+            _statusChip(context,
+                icon: hasPendingChanges
+                    ? Icons.edit_note_rounded
+                    : Icons.task_alt_rounded,
+                text: hasPendingChanges
+                    ? 'Cambios sin publicar'
+                    : 'Sin cambios pendientes',
+                tone:
+                    hasPendingChanges ? _ChipTone.warning : _ChipTone.success),
           ],
         ),
         const SizedBox(height: 8),
         Text(
           'Gestiona carga, validación, publicación y rollback del catálogo efectivo.',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-            fontWeight: FontWeight.w500,
-          ),
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                fontWeight: FontWeight.w500,
+              ),
         ),
         const SizedBox(height: 14),
         Wrap(
@@ -1934,9 +2161,12 @@ class CatalogsHeader extends StatelessWidget {
             SizedBox(
               width: 148,
               child: DropdownButtonFormField<String>(
-                initialValue: projectOptions.contains(selectedProject) ? selectedProject : null,
+                initialValue: projectOptions.contains(selectedProject)
+                    ? selectedProject
+                    : null,
                 isExpanded: true,
-                decoration: const InputDecoration(labelText: 'Proyecto', isDense: true),
+                decoration:
+                    const InputDecoration(labelText: 'Proyecto', isDense: true),
                 items: projectOptions
                     .map((id) => DropdownMenuItem(value: id, child: Text(id)))
                     .toList(),
@@ -1975,24 +2205,91 @@ class CatalogsHeader extends StatelessWidget {
     );
   }
 
-  Widget _statusChip(BuildContext context, String text) {
+  Widget _statusChip(BuildContext context,
+      {required IconData icon,
+      required String text,
+      _ChipTone tone = _ChipTone.neutral}) {
     final colors = Theme.of(context).colorScheme;
+    final (bg, border, fg) = switch (tone) {
+      _ChipTone.neutral => (
+          colors.surfaceContainerHighest,
+          colors.outlineVariant,
+          colors.onSurface,
+        ),
+      _ChipTone.success => (
+          Colors.green.withValues(alpha: 0.14),
+          Colors.green.withValues(alpha: 0.45),
+          Colors.green.shade800,
+        ),
+      _ChipTone.warning => (
+          Colors.amber.withValues(alpha: 0.20),
+          Colors.amber.withValues(alpha: 0.55),
+          Colors.amber.shade900,
+        ),
+      _ChipTone.error => (
+          Colors.red.withValues(alpha: 0.14),
+          Colors.red.withValues(alpha: 0.45),
+          Colors.red.shade800,
+        ),
+    };
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: colors.surfaceContainerHigh,
+        color: bg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: colors.outlineVariant),
+        border: Border.all(color: border),
       ),
-      child: Text(
-        text,
-        style: Theme.of(context).textTheme.labelMedium?.copyWith(
-          color: colors.onSurface,
-          fontWeight: FontWeight.w700,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: fg),
+          const SizedBox(width: 6),
+          Text(
+            text,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w700,
+                ),
+          ),
+        ],
       ),
     );
   }
+
+  String _statusLabel(String status) {
+    return switch (status.trim().toLowerCase()) {
+      'published' => 'Publicado',
+      'draft' => 'Borrador',
+      'warning' => 'Con observaciones',
+      _ => 'No definido',
+    };
+  }
+
+  IconData _statusIcon(String status) {
+    return switch (status.trim().toLowerCase()) {
+      'published' => Icons.verified_rounded,
+      'draft' => Icons.edit_document,
+      'warning' => Icons.warning_amber_rounded,
+      _ => Icons.help_outline_rounded,
+    };
+  }
+
+  _ChipTone _statusTone(String status) {
+    return switch (status.trim().toLowerCase()) {
+      'published' => _ChipTone.success,
+      'draft' => _ChipTone.warning,
+      'warning' => _ChipTone.warning,
+      _ => _ChipTone.neutral,
+    };
+  }
+}
+
+enum _ChipTone {
+  neutral,
+  success,
+  warning,
+  error,
 }
 
 class CatalogsTabBar extends StatelessWidget {
@@ -2028,6 +2325,9 @@ class CatalogsToolbar extends StatelessWidget {
   final CatalogTab tab;
   final CatalogTabUiState tabUiState;
   final bool isBusy;
+  final int visibleCount;
+  final int totalCount;
+  final bool hasActiveFilters;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<ActiveFilter> onFilterChanged;
   final ValueChanged<CatalogSortSpec> onSortChanged;
@@ -2042,6 +2342,7 @@ class CatalogsToolbar extends StatelessWidget {
   final ValueChanged<String?> onTopicTypeScopeChanged;
   final VoidCallback onAdd;
   final VoidCallback onRefresh;
+  final VoidCallback onClearFilters;
   final VoidCallback? onToggleReorder;
 
   const CatalogsToolbar({
@@ -2049,6 +2350,9 @@ class CatalogsToolbar extends StatelessWidget {
     required this.tab,
     required this.tabUiState,
     required this.isBusy,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.hasActiveFilters,
     required this.onQueryChanged,
     required this.onFilterChanged,
     required this.onSortChanged,
@@ -2063,6 +2367,7 @@ class CatalogsToolbar extends StatelessWidget {
     required this.onTopicTypeScopeChanged,
     required this.onAdd,
     required this.onRefresh,
+    required this.onClearFilters,
     required this.onToggleReorder,
   });
 
@@ -2097,8 +2402,10 @@ class CatalogsToolbar extends StatelessWidget {
                     },
               items: const [
                 DropdownMenuItem(value: ActiveFilter.all, child: Text('Todos')),
-                DropdownMenuItem(value: ActiveFilter.active, child: Text('Activos')),
-                DropdownMenuItem(value: ActiveFilter.inactive, child: Text('Inactivos')),
+                DropdownMenuItem(
+                    value: ActiveFilter.active, child: Text('Activos')),
+                DropdownMenuItem(
+                    value: ActiveFilter.inactive, child: Text('Inactivos')),
               ],
             ),
             DropdownButton<CatalogSortField>(
@@ -2110,17 +2417,25 @@ class CatalogsToolbar extends StatelessWidget {
                       onSortChanged(tabUiState.sort.copyWith(field: field));
                     },
               items: const [
-                DropdownMenuItem(value: CatalogSortField.name, child: Text('Ordenar: Nombre')),
-                DropdownMenuItem(value: CatalogSortField.id, child: Text('Ordenar: ID')),
-                DropdownMenuItem(value: CatalogSortField.active, child: Text('Ordenar: Activo')),
-                DropdownMenuItem(value: CatalogSortField.order, child: Text('Ordenar: Orden')),
+                DropdownMenuItem(
+                    value: CatalogSortField.name,
+                    child: Text('Ordenar: Nombre')),
+                DropdownMenuItem(
+                    value: CatalogSortField.id, child: Text('Ordenar: ID')),
+                DropdownMenuItem(
+                    value: CatalogSortField.active,
+                    child: Text('Ordenar: Activo')),
+                DropdownMenuItem(
+                    value: CatalogSortField.order,
+                    child: Text('Ordenar: Orden')),
               ],
             ),
             IconButton(
               tooltip: tabUiState.sort.ascending ? 'Ascendente' : 'Descendente',
               onPressed: isBusy
                   ? null
-                  : () => onSortChanged(tabUiState.sort.copyWith(ascending: !tabUiState.sort.ascending)),
+                  : () => onSortChanged(tabUiState.sort
+                      .copyWith(ascending: !tabUiState.sort.ascending)),
               icon: Icon(tabUiState.sort.ascending ? Icons.south : Icons.north),
             ),
             if (tab == CatalogTab.activities && onToggleReorder != null)
@@ -2183,6 +2498,25 @@ class CatalogsToolbar extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 8),
+        Row(
+          children: [
+            Text(
+              'Mostrando $visibleCount de $totalCount ${tab.entityLabel.toLowerCase()}s',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+            ),
+            const SizedBox(width: 12),
+            if (hasActiveFilters)
+              TextButton.icon(
+                onPressed: isBusy ? null : onClearFilters,
+                icon: const Icon(Icons.filter_alt_off_rounded, size: 16),
+                label: const Text('Limpiar filtros'),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -2240,7 +2574,8 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
   final bool showSuggestedOnly;
   final ValueChanged<String> onSelectActivity;
   final ValueChanged<bool> onToggleSuggestedOnly;
-  final Future<void> Function(String activityId, String topicId, bool currentlySelected) onToggleTopic;
+  final Future<void> Function(
+      String activityId, String topicId, bool currentlySelected) onToggleTopic;
   final VoidCallback onAddRelation;
   final bool isBusy;
 
@@ -2264,7 +2599,8 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
     final q = query.trim().toLowerCase();
     final filteredActivities = activities.where((entry) {
       if (q.isEmpty) return true;
-      return entry.id.toLowerCase().contains(q) || entry.name.toLowerCase().contains(q);
+      return entry.id.toLowerCase().contains(q) ||
+          entry.name.toLowerCase().contains(q);
     }).toList();
 
     final selectedActivity = filteredActivities
@@ -2276,9 +2612,11 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
         : topics;
 
     final selectedTopicIds = relations
-        .where((entry) => entry.activityId == selectedActivity?.id && entry.isActive)
+        .where((entry) =>
+            entry.activityId == selectedActivity?.id && entry.isActive)
         .map((entry) => entry.topicId)
         .toSet();
+    final selectedTopicsCount = selectedTopicIds.length;
 
     return Row(
       children: [
@@ -2293,6 +2631,11 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
                 final selected = item.id == selectedActivity?.id;
                 return ListTile(
                   selected: selected,
+                  selectedTileColor:
+                      Theme.of(context).colorScheme.primaryContainer,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                   title: Text(item.name),
                   subtitle: Text(item.id),
                   trailing: item.isActive
@@ -2320,7 +2663,8 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: selectedActivity == null
                   ? const Center(
-                      child: Text('Selecciona una actividad para editar relaciones'),
+                      child: Text(
+                          'Selecciona una actividad para editar relaciones'),
                     )
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2329,16 +2673,22 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
                           children: [
                             Expanded(
                               child: Text(
-                                'Temas de ${selectedActivity.name} (${selectedActivity.id})',
-                                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                'Temas de ${selectedActivity.name} (${selectedActivity.id}) · $selectedTopicsCount/${topicPool.length}',
+                                style: Theme.of(context)
+                                    .textTheme
+                                    .titleMedium
+                                    ?.copyWith(
                                       fontWeight: FontWeight.w700,
                                     ),
                               ),
                             ),
                             FilterChip(
-                              label: Text(showSuggestedOnly ? 'Solo activos' : 'Todos los temas'),
+                              label: Text(showSuggestedOnly
+                                  ? 'Solo activos'
+                                  : 'Todos los temas'),
                               selected: showSuggestedOnly,
-                              onSelected: (value) => onToggleSuggestedOnly(value),
+                              onSelected: (value) =>
+                                  onToggleSuggestedOnly(value),
                             ),
                             const SizedBox(width: 8),
                             OutlinedButton.icon(
@@ -2350,10 +2700,11 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
                         ),
                         if (!selectedActivity.isActive)
                           Padding(
-                            padding: EdgeInsets.only(top: 8),
+                            padding: const EdgeInsets.only(top: 8),
                             child: Text(
                               'Actividad inactiva: la edición de relaciones está bloqueada.',
-                              style: TextStyle(color: Theme.of(context).colorScheme.error),
+                              style: TextStyle(
+                                  color: Theme.of(context).colorScheme.error),
                             ),
                           ),
                         const SizedBox(height: 10),
@@ -2363,13 +2714,18 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
                               spacing: 8,
                               runSpacing: 8,
                               children: topicPool.map((topic) {
-                                final selected = selectedTopicIds.contains(topic.id);
+                                final selected =
+                                    selectedTopicIds.contains(topic.id);
                                 return FilterChip(
                                   selected: selected,
                                   label: Text('${topic.name} (${topic.id})'),
-                                  onSelected: (!selectedActivity.isActive || isBusy)
-                                      ? null
-                                      : (_) => onToggleTopic(selectedActivity.id, topic.id, selected),
+                                  onSelected:
+                                      (!selectedActivity.isActive || isBusy)
+                                          ? null
+                                          : (_) => onToggleTopic(
+                                              selectedActivity.id,
+                                              topic.id,
+                                              selected),
                                 );
                               }).toList(),
                             ),
