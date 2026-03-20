@@ -1,7 +1,7 @@
 # SAO — Estado del Proyecto
-**Fecha:** 2026-03-09 (actualizado sesión noche)
+**Fecha:** 2026-03-10 (actualizado cierre Firestore)
 **Versión:** 0.2.3
-**Deployment:** ✅ Cloud Run en producción (`sao-api` / `sao-prod-488416`)
+**Deployment:** ✅ Cloud Run en producción (`sao-api` / `sao-prod-488416`) — revision `sao-api-00062-v8v`
 **Auditoría:** Completada 2026-03-04 (ver `docs/AUDIT_REPORT.md`)
 **Plan 100% local:** Iniciado 2026-03-04 (ver `docs/PLAN_100_LOCAL.md`)
 **F0 completado:** 2026-03-04 — F0.1..F0.5 ✅
@@ -25,15 +25,32 @@
 
 ---
 
+## Actualización Cierre Firestore (2026-03-10)
+
+- ✅ Runtime productivo en modo Firestore-only (`DATA_BACKEND=firestore`).
+- ✅ Cloud Run desacoplado de Cloud SQL (`run.googleapis.com/cloudsql-instances` vacio).
+- ✅ Incidente `429 no available instance` mitigado retirando revision inestable y reenrutando trafico a revision estable.
+- ✅ Regresion Firestore ejecutada en verde:
+	- `test_catalog_bundle`: 4 passed
+	- `test_sync`: 2 passed
+	- `test_auth`: 3 passed
+	- `test_firestore_e2e_flow`: 3 passed
+- ✅ E2E real en produccion (operativo -> review -> pull) PASS:
+	- `Activity UUID`: `328256b9-3ba6-4219-b43e-f78484396f80`
+	- `Push status`: `CREATED`
+	- `Final execution_state`: `COMPLETADA`
+
+---
+
 ## Estado General
 
 | Componente | Estado | Avance | Bloqueadores |
 |------------|--------|--------|-------------|
-| Backend FastAPI | ✅ En producción + local | **99%** | FCM push catalog (baja prioridad) |
+| Backend FastAPI | ✅ En producción + local | **100% (flujo principal validado E2E)** | FCM push catalog (baja prioridad) |
 | App Móvil Flutter | ✅ Operativa | **100%** | — |
 | Desktop Admin Flutter | 🟡 Funcional (pendiente endurecimiento final) | **95%** | Cobertura unitaria parcial fuera de auth |
 | Load Testing / QA | 🟡 E2E local + staging real ejecutado | **98%** | Falta automatizar corrida en pipeline |
-| Cloud Run / Cloud SQL | 🟡 En producción | **95%** | CI/CD aún manual |
+| Cloud Run / Cloud SQL | ✅ En producción (Firestore runtime, Cloud SQL desacoplado) | **100%** | CI/CD automatizado activo |
 | Documentación | ✅ Auditada y actualizada | 90% | — |
 
 ---
@@ -245,7 +262,7 @@ Checklist operativo de Fase 1 (CI/CD): `docs/CI_CD_CIERRE_CHECKLIST.md`
 ### Día 3 — Staging + Release
 - [x] **QA/Backend**: Ejecutar corrida E2E real en staging con credenciales válidas (flujo operativo→review→pull).
 - [x] **DevOps**: Pipeline CI/CD automatizado activo — GitHub Actions ejecuta test + build + deploy + smoke test en push a `main`. Run `22880086051` en verde (2026-03-09).
-- [ ] **Done (Día 3)**: Acta de corrida staging adjunta + pipeline ejecutado al menos una vez con resultado exitoso.
+- [x] **Done (Día 3)**: Acta de corrida staging adjunta + pipeline ejecutado al menos una vez con resultado exitoso.
 
 ### Criterio de 100% funcional-operativo
 - [x] Sin razones de rechazo hardcodeadas en backend.

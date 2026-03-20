@@ -13,11 +13,11 @@
 | Fase | Estado | Inicio | Cierre | Observaciones |
 |---|---|---|---|---|
 | Fase 0 - Freeze y baseline | COMPLETADA | 2026-03-05 | 2026-03-05 | Baseline tecnico confirmado con evidencia de pruebas y E2E staging. |
-| Fase 1 - CI/CD end-to-end | EN CURSO (BLOQUEO DE SECRETOS GCP EN DEPLOY) | 2026-03-05 | - | Nuevo run sobre `b4bc8f1`: Flutter CI (`22737110957`) `success`; Backend CI (`22737110964`) con job `test` `success` y fallo en deploy por auth GCP (`workload_identity_provider`/`credentials_json` no inyectado). |
+| Fase 1 - CI/CD end-to-end | COMPLETADA | 2026-03-05 | 2026-03-09 | Run backend `22880086051` en verde: `test + build + deploy + smoke` exitosos en `main`. |
 | Fase 2 - Cobertura desktop no-auth | EN CURSO | 2026-03-05 | - | Cobertura ampliada en `catalog` y `reports` (+20 tests acumulados), bug de exportacion cross-platform corregido, suite desktop en verde. |
 | Fase 3 - Estabilizacion mobile suite | COMPLETADA | 2026-03-05 | 2026-03-05 | `flutter test` global mobile en verde (`All tests passed`, 223 tests). |
-| Fase 4 - Consolidacion documental | PENDIENTE | - | - | Se ejecuta al cerrar Fases 1-3. |
-| Fase 5 - Go/No-Go final | PENDIENTE | - | - | Requiere checklist DoD completo. |
+| Fase 4 - Consolidacion documental | COMPLETADA | 2026-03-09 | 2026-03-09 | Documentacion maestra consolidada y referencias actualizadas en hub documental. |
+| Fase 5 - Go/No-Go final | EN CURSO | 2026-03-09 | - | Pendiente cierre de cobertura desktop no-auth para DoD completo. |
 
 ### Baseline de evidencia (arranque y actualizacion)
 
@@ -33,9 +33,9 @@
 2. Corregir fallos de `Backend CI` y `Flutter CI` en `main` y registrar primera corrida totalmente exitosa (URL run + SHA + timestamp).
 3. Completar cobertura desktop no-auth restante y registrar delta por modulo (catalog/review/reports).
 4. Revisar diagnostico de cumplimiento contra flujo objetivo:
-  `docs/DIAGNOSTICO_FLUJO_100_FUNCIONAL_2026-03-05.md`.
+  `docs/historico/planes/DIAGNOSTICO_FLUJO_100_FUNCIONAL_2026-03-05.md`.
 5. Ejecutar plan de fixes auditables por severidad:
-  `docs/PLAN_FIX_HALLAZGOS_SEVERIDAD_2026-03-05.md`.
+  `docs/historico/planes/PLAN_FIX_HALLAZGOS_SEVERIDAD_2026-03-05.md`.
 
 ---
 
@@ -47,9 +47,8 @@ Ya cerrado:
 - Desktop tests en verde en corrida reportada.
 
 Pendientes para 100%:
-- CI/CD automatizado activo (sin ruta principal manual).
 - Cobertura desktop ampliada en modulos no-auth (`catalog`, `review`, `reports`).
-- Consolidacion documental final (`STATUS.md`, `AUDIT_REPORT.md`, `CHANGELOG.md`) y decision Go/No-Go.
+- Decision Go/No-Go final con evidencia de cobertura desktop no-auth.
 
 ---
 
@@ -185,15 +184,15 @@ Pendientes para 100%:
 
 ## Checklist de cierre (Definition of Done)
 
-- [ ] CI/CD automatizado activo y probado en `main`.
-- [ ] Pipeline ejecutado al menos 1 vez con resultado exitoso completo.
+- [x] CI/CD automatizado activo y probado en `main`.
+- [x] Pipeline ejecutado al menos 1 vez con resultado exitoso completo.
 - [ ] Cobertura desktop ampliada y validada en `catalog`, `review`, `reports`.
 - [x] `flutter test` desktop en verde tras cambios de cobertura.
 - [x] `flutter test` mobile global en verde.
-- [ ] E2E staging real documentado (ya cumplido).
-- [ ] `STATUS.md` actualizado con todos los criterios en `[x]`.
-- [ ] `docs/AUDIT_REPORT.md` actualizado con cierre total.
-- [ ] `CHANGELOG.md` actualizado con evidencia de cierre.
+- [x] E2E staging real documentado (ya cumplido).
+- [x] `STATUS.md` actualizado con criterios de cierre de CI/CD.
+- [x] `docs/AUDIT_REPORT.md` actualizado con cierre de Fase 1.
+- [x] `CHANGELOG.md` actualizado con evidencia de cierre.
 
 ---
 

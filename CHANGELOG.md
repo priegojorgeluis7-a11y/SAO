@@ -2,6 +2,32 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.4] - 2026-03-09
+### Changed
+- Closed CI/CD Phase 1 for backend with complete GitHub Actions pipeline in green (`test + build + deploy + smoke`).
+- Standardized deployment authentication via Workload Identity Federation (WIF) in backend workflow.
+- Consolidated project documentation governance with:
+	- `docs/DOCUMENTO_MAESTRO_EJECUCION_SAO.md`
+	- `docs/DOCUMENTO_MAESTRO_SISTEMA.md`
+	- `docs/README.md` (documentation hub)
+	- `docs/historico/README.md` + historical folder split (`auditorias/`, `planes/`).
+
+### Verified
+- Backend CI run: `22880086051` -> `success`.
+- Deploy to Cloud Run: `success`.
+- Smoke test `/health`: `success`.
+
+### Notes
+- Remaining technical closure item: increase desktop non-auth coverage (`catalog`, `reports`) against baseline targets.
+
+## [0.2.3] - 2026-03-05
+### Verified
+- Re-ran real Cloud Run E2E (`backend/scripts/e2e_staging_flow.py`) with assignment users:
+	- `operativo.asignaciones@sao.mx`
+	- `admin.asignaciones@sao.mx`
+- Evidence: `Activity UUID=8124c360-283e-48f1-949c-782ff21f32cd`, `Push status=CREATED`, `Final execution_state=COMPLETADA`.
+- Debug snapshot: `baseline current_version=2`, `catalog_version_id=13194331-c6ce-4b81-8c42-c66d98e9df17`, `timestamp_utc=2026-03-05T23:05:49.835800+00:00`.
+
 ## [0.2.2] - 2026-03-05
 ### Changed
 - Completed real staging E2E execution using `backend/scripts/e2e_staging_flow.py` against Cloud Run (`https://sao-api-fjzra25vya-uc.a.run.app`) for project `TMQ`.

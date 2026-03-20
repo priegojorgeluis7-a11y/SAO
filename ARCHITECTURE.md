@@ -1,6 +1,13 @@
 # SAO — Architecture Reference
 **Sistema de Administración Operativa**
-**Versión:** 1.2.0 | **Fecha:** 2026-03-04
+**Versión:** 1.3.0 | **Fecha:** 2026-03-05
+
+## Actualizacion 2026-03-10
+
+- Backend desplegado y validado en Cloud Run revision `sao-api-00053-sm5`.
+- En produccion controlada se ejecuto E2E real en modo Firestore con resultado PASS.
+- `review_decision` (`POST /api/v1/review/activity/{id}/decision`) ya tiene rama Firestore operativa.
+- Persiste deuda de cierre: varios endpoints siguen SQL-dependientes (`activities`, `events`, partes de `catalog` y `review`).
 
 ---
 
@@ -86,21 +93,27 @@ backend/app/
 ```
 lib/
 ├── core/
+│   ├── catalog/
+│   │   ├── api/       # CatalogApi (getCurrentVersion, getDiff, getEffective, getBundle, getVersionsMultiProject)
+│   │   ├── sync/      # CatalogSyncService (ensureCatalogUpToDate, syncAllIfNeeded)
+│   │   └── state/     # catalog_providers.dart, CatalogSyncController, CatalogSyncStatus
 │   ├── config/        # AppConfig: API URL, timeouts
 │   ├── network/       # ApiClient (Dio, JWT auto-refresh)
 │   ├── auth/          # TokenStorage (flutter_secure_storage)
-│   ├── sync/          # SyncOrchestrator, PendingSyncService
+│   ├── storage/       # KvStore (SharedPreferences wrapper)
 │   └── routing/       # go_router + AuthRedirectResolver
 ├── data/
-│   └── local/         # Drift SQLite: tables.dart, app_db.dart, DAOs
+│   └── local/         # Drift SQLite schema v8: tables.dart, app_db.dart, DAOs
 ├── features/
 │   ├── auth/          # Login, Signup, AuthProviders
 │   ├── activities/    # Wizard + DynamicFormBuilder
 │   ├── agenda/        # Agenda del equipo (timeline)
-│   ├── catalog/       # CatalogRepository (bundle loading)
-│   ├── events/        # Report event sheet
-│   ├── home/          # HomePage con FABs
-│   ├── settings/      # Configuración
+│   ├── catalog/
+│   │   ├── catalog_repository.dart          # Bundle loading, currentVersionId
+│   │   └── data/catalog_offline_repository.dart  # CatalogIndex + CatalogBundleCache + GC
+│   ├── events/        # ReportEventSheet, edit/delete, sync UPDATE/DELETE
+│   ├── home/          # HomePage con FABs (actividad + evento)
+│   ├── settings/      # Backend URL runtime, badge catálogo por proyecto
 │   └── sync/          # SyncService, AutoSyncService, SyncCenterPage
 └── ui/
     ├── theme/         # SaoColors (tokens centralizados)
@@ -121,7 +134,7 @@ lib/
 ├── app/shell.dart     # NavigationRail: Dashboard, Ops, Planning, Catalogs, Users, Reports
 ├── core/
 │   ├── config/data_mode.dart  # dart-define SAO_BACKEND_URL
-│   └── auth/          # TokenStore (en memoria — deuda: no persiste)
+│   └── auth/          # TokenStore (JSON file en Documents/sao_session.json — persiste entre reinicios; deuda: sin cifrado)
 ├── data/repositories/
 │   ├── backend_api_client.dart  # HttpClient nativo (deuda: sin JWT refresh)
 │   ├── catalog_repository.dart  # Bundle loading + CatalogData
@@ -203,7 +216,14 @@ DRAFT → [validate] → PUBLISHED → [deprecate] → DEPRECATED
 ```json
 {
   "schema": "sao.catalog.bundle.v1",
-  "meta": { "project_id", "bundle_id", "generated_at", "versions" },
+  "meta": {
+    "project_id": "TMQ",
+    "bundle_id": "TMQ@2026-03-05T18:11:00Z",
+    "generated_at": "...",
+    "etag": "sha256:abc12345",
+    "versions": { "effective": "TMQ@2026-03-05T18:11:00Z", "status": "published" },
+    "compat": { "schema_version": "1.0", "breaking": false }
+  },
   "effective": {
     "entities": {
       "activities":    [...],   // 6 tipos: CAM/REU/ASP/CIN/SOC/AIN
@@ -216,15 +236,21 @@ DRAFT → [validate] → PUBLISHED → [deprecate] → DEPRECATED
     "relations": {
       "activity_to_topics_suggested": [...]
     },
+    "color_tokens": { "status.*": "...", "severity.*": "..." },
+    "form_fields":  [...],
     "rules": {
-      "cascades": {},
-      "constraints": [],
-      "topicPolicy": { "defaultMode": "any", "byActivity": {} }
+      "cascades": { "subcategories_by_activity": true, "purposes_by_activity_and_subcategory": true },
+      "null_semantics": {},
+      "topic_policy": { "default": "any" }
     }
   },
-  "editor": { "layers": [], "validation": {}, "history": [] }
+  "editor": { "layers": {}, "validation": {} }
 }
 ```
+
+**Parámetros del endpoint:**
+- `GET /catalog/bundle?project_id=TMQ` — versión activa
+- `GET /catalog/bundle?project_id=TMQ&version_id=TMQ@2026-03-04T...` — versión histórica exacta
 
 ### 4.3 Uso del Bundle en Clientes
 
@@ -243,25 +269,28 @@ DRAFT → [validate] → PUBLISHED → [deprecate] → DEPRECATED
 | Backend | Google Cloud Storage | Evidencias (fotos, PDFs) |
 | Mobile | Drift (SQLite) | Operación offline |
 | Mobile | flutter_secure_storage | Tokens JWT |
-| Desktop | HttpClient en memoria | Tokens JWT (deuda: no persiste) |
+| Desktop | JSON file (Documents/sao_session.json) | Tokens JWT (persistentes; deuda: sin cifrado — sin flutter_secure_storage) |
 
 ### 5.1 Tablas Drift (Mobile)
 
-Versión actual del schema: **5**
+Versión actual del schema: **8**
 
-| Tabla | Propósito |
-|-------|-----------|
-| `Activities` | Actividades locales (DRAFT→SYNCED) |
-| `ActivityFields` | Respuestas dinámicas de formulario |
-| `ActivityLog` | Historial local de acciones |
-| `Evidences` | Metadatos de evidencia (LOCAL_ONLY→UPLOADED) |
-| `PendingUploads` | Cola de uploads con retry logic |
-| `SyncQueue` | Outbox para push al backend |
-| `CatActivities` / `CatSubcategories` / `CatPurposes` / `CatTopics` / `CatResults` / `CatAttendees` | Catálogo efectivo local |
-| `CatalogVersions` | Versión del catálogo descargado |
-| `LocalEvents` | Eventos reportados localmente (schema v5) |
-| `Projects` / `ProjectSegments` | Proyectos y segmentos del usuario |
-| `Users` / `Roles` | Perfil y rol del usuario actual |
+| Tabla | Propósito | Desde |
+|-------|-----------|-------|
+| `Activities` | Actividades locales (DRAFT→SYNCED); incluye `catalog_version_id` | v1/v7 |
+| `ActivityFields` | Respuestas dinámicas de formulario | v1 |
+| `ActivityLog` | Historial local de acciones | v1 |
+| `Evidences` | Metadatos de evidencia (LOCAL_ONLY→UPLOADED) | v1 |
+| `PendingUploads` | Cola de uploads con retry logic | v4 |
+| `SyncQueue` / `SyncState` | Outbox para push al backend + cursor | v1 |
+| `CatActivities` / `CatSubcategories` / `CatPurposes` / `CatTopics` / `CatResults` / `CatAttendees` | Catálogo efectivo local (normalizado) | v3 |
+| `CatalogVersions` / `CatalogActivityTypes` / `CatalogFields` | Schema versionado de catálogo (Sistema A) | v1 |
+| `CatalogIndex` | Versión activa del bundle por proyecto (`project_id → active_version_id`) | v8 |
+| `CatalogBundleCache` | Bundle JSON completo por (project_id, version_id) con GC ligado a actividades | v8 |
+| `LocalEvents` | Eventos reportados localmente | v5 |
+| `AgendaAssignments` | Asignaciones del equipo (agenda) | v6 |
+| `Projects` / `ProjectSegments` | Proyectos y segmentos del usuario | v1 |
+| `Users` / `Roles` | Perfil y rol del usuario actual | v1 |
 
 ---
 
@@ -270,10 +299,10 @@ Versión actual del schema: **5**
 Ver [SYNC.md](docs/SYNC.md) para detalle completo.
 
 **Resumen:**
-- **Push (mobile → server):** Outbox `SyncQueue` con entidades ACTIVITY y EVENT. `SyncService.pushPendingChanges()` → `POST /sync/push` (batch por proyecto). Auto-sync cada 15min + trigger en reconexión.
-- **Pull (server → mobile):** `POST /sync/pull?since_version=N` — **PARCIALMENTE IMPLEMENTADO** (orquestador existe sin fetch real).
+- **Push (mobile → server):** Outbox `SyncQueue` con entidades ACTIVITY y EVENT. `SyncService.pushPendingChanges()` → `POST /sync/push` (batch por proyecto). Auto-sync cada 15min + trigger en reconexión. Queue coalescing: UPSERT+DELETE→DROP; UPDATE+404→CREATE fallback.
+- **Pull (server → mobile):** `POST /sync/pull?since_version=N&after_uuid=X` — implementado con cursor compuesto, paginación (`has_more`), upsert local en Drift. Pull de eventos via `GET /events?project_id&since_version`.
 - **Evidencias:** Presign → Upload → Confirm (3 pasos con retry en `PendingUploads`).
-- **Catálogo:** Bundle completo descargado; diff incremental pendiente.
+- **Catálogo:** Diff incremental via `GET /catalog/diff`. Check ligero multiproyecto: `CatalogApi.getVersionsMultiProject(projectIds)` → 1 request para N proyectos. Bundle completo con versión histórica: `GET /catalog/bundle?project_id=X&version_id=Y`. Persistencia offline en `CatalogIndex` + `CatalogBundleCache` (GC seguro — retiene versiones mientras haya actividades que las referencien).
 
 ---
 
@@ -326,14 +355,24 @@ Ver [DESIGN_TOKENS.md](docs/DESIGN_TOKENS.md).
 
 ---
 
-## 10. Gaps Conocidos (al 2026-03-04)
+## 10. Gaps Conocidos (al 2026-03-05)
 
-| Gap | Impacto | Tracker |
-|-----|---------|---------|
-| Pull sync mobile no implementado | Coordinador aprueba pero operativo no ve resultado | SERVICES_MATRIX.md |
-| PIN offline | Operativo sin red no puede autenticarse | AUDIT_REPORT.md |
-| Endpoints fronts/locations faltantes | RBAC scope parcial | AUDIT_REPORT.md |
-| Project ID hardcoded en desktop (7 archivos) | Multi-proyecto roto | AUDIT_REPORT.md §1.5 |
-| Workflow hardcoded en status_catalog.dart | Desconexión con backend | AUDIT_REPORT.md §1.4 |
-| Desktop sin JWT auto-refresh | Sesión expira sin aviso | AUDIT_REPORT.md §4 |
-| Observations sin prefijo /api/v1 | Ruta inconsistente | AUDIT_REPORT.md §4 |
+Todos los gaps críticos del diagnóstico `DIAGNOSTICO_FLUJO_100_FUNCIONAL_2026-03-05.md` están cerrados. Quedan únicamente 2 items de baja prioridad:
+
+| Gap | Estado | Nota |
+|-----|--------|------|
+| Pull sync mobile | ✅ Cerrado | F3.1/F3.2 — cursor compuesto + paginación |
+| PIN offline | ✅ Cerrado | F5.1 — hash SHA-256 local + endpoint `/auth/me/pin` |
+| Endpoints fronts/locations | ✅ Cerrado | `/fronts`, `/locations/states`, `/locations` |
+| Project ID hardcoded en desktop | ✅ Cerrado | F0.2 — `activeProjectIdProvider` |
+| Workflow hardcoded en status_catalog.dart | ✅ Cerrado | F1.2/F1.3 — catalog-driven desde bundle |
+| Desktop sin JWT auto-refresh | ✅ Cerrado | F5.3 — interceptor Dio con refresh |
+| Observations sin prefijo /api/v1 | ✅ Falsa alarma | prefijo ya correcto en `main.py` |
+| Catálogo mobile sin índice/versionado histórico | ✅ Cerrado | `CatalogIndex` + `CatalogBundleCache` schema v8 |
+| Actividad no congela versión de catálogo | ✅ Cerrado | `Activities.catalogVersionId` schema v7 |
+| Bundle sin `version_id` como parámetro | ✅ Cerrado | `GET /catalog/bundle?version_id=...` |
+| Check de versiones por proyecto individual | ✅ Cerrado | `getVersionsMultiProject()` + `syncAllIfNeeded()` |
+| UX estado de catálogo | ✅ Cerrado | Badge `● vX · actualizado/pendiente` en Settings |
+| Bundle sin declaración de breaking changes | ✅ Cerrado | `meta.compat.schema_version + meta.compat.breaking` |
+| FCM push para invalidación de catálogo | ⚠️ Pendiente (baja) | Pull periódico ya cubre el caso |
+| CI/CD automatizado activo | ⚠️ Pendiente | `GCP_WORKLOAD_IDENTITY_PROVIDER` en Actions |

@@ -132,6 +132,12 @@ Leyenda: ✅ OK · 🟡 PARCIAL · ❌ FALTA
 | Asignaciones | ✅ `GET /assignments` | ❌ Sin pantalla de asignaciones | ✅ `assignments_repository.dart` | 🟡 PARCIAL | - | |
 | Scope fronts/locations | ❌ Sin endpoints | ❌ FALTA | ❌ FALTA | ❌ FALTA | Models existen | |
 
+## Índices Firestore
+
+Ver inventario completo, estados y runbook de rollout/rollback en:
+- [docs/FIRESTORE_INDEXES.md](FIRESTORE_INDEXES.md) — índices compuestos requeridos por colección
+- [docs/RUNBOOK_CLOUD_RUN.md §13](RUNBOOK_CLOUD_RUN.md) — procedimiento de creación y rollback
+
 ---
 
 ## Observaciones

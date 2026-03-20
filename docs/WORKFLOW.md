@@ -1,6 +1,14 @@
 # SAO — Workflow de Actividades
 **Versión:** 1.0.0 | **Fecha:** 2026-03-04
 
+## Actualizacion 2026-03-10
+
+- El flujo base operativo -> review -> pull fue validado en produccion controlada con resultado PASS.
+- `POST /review/activity/{id}/decision` ya opera en modo Firestore para approve/reject/approve_exception.
+- Evidencia del flujo validado:
+     - push status: `CREATED`
+     - estado final en pull: `COMPLETADA`
+
 ---
 
 ## 1. Estados y Transiciones
@@ -64,6 +72,8 @@
 | `aprobado` | `sincronizado` | Confirmación automática del servidor | SYSTEM | Automático |
 | `conflicto` | `en_revision` | Resolución manual | COORD | Pendiente UI |
 | Cualquier estado | `APPROVE_EXCEPTION` | Circunstancia excepcional | **ADMIN** | `POST /review/activity/{id}/decision` |
+
+Nota operativa 2026-03-10: la transición de decisión ya no depende de SQL en modo `DATA_BACKEND=firestore`.
 
 ---
 

@@ -9,17 +9,17 @@
 - [x] Repositorio con workflows activos:
   - [x] `.github/workflows/backend-ci.yml`
   - [x] `.github/workflows/flutter-ci.yml`
-- [ ] Rama `main` protegida con checks requeridos (si aplica politica del repo).
-- [ ] Permiso para configurar Secrets y Actions en GitHub.
+- [x] Rama `main` protegida con checks requeridos (si aplica politica del repo).
+- [x] Permiso para configurar Secrets y Actions en GitHub.
 
 ---
 
 ## 2) Secrets requeridos (GitHub)
 
 ### Backend deploy (Cloud Run)
-- [ ] `GCP_PROJECT_ID`
-- [ ] `GCP_WORKLOAD_IDENTITY_PROVIDER`
-- [ ] `GCP_SERVICE_ACCOUNT`
+- [x] `GCP_PROJECT_ID`
+- [x] `GCP_WORKLOAD_IDENTITY_PROVIDER`
+- [x] `GCP_SERVICE_ACCOUNT`
 
 ### Opcionales recomendados
 - [ ] `E2E_OPERATIVO_PASSWORD`
@@ -29,13 +29,13 @@
 
 ## 3) Configuracion GCP (WIF)
 
-- [ ] Workload Identity Federation configurada para GitHub Actions.
-- [ ] Service Account con permisos minimos para:
-  - [ ] Cloud Build
-  - [ ] Artifact Registry
-  - [ ] Cloud Run Admin
-  - [ ] Service Account User
-- [ ] Artifact Registry repo `sao` disponible en `us-central1`.
+- [x] Workload Identity Federation configurada para GitHub Actions.
+- [x] Service Account con permisos minimos para:
+  - [x] Cloud Build
+  - [x] Artifact Registry
+  - [x] Cloud Run Admin
+  - [x] Service Account User
+- [x] Artifact Registry repo `sao` disponible en `us-central1`.
 
 ---
 
@@ -46,10 +46,10 @@
 - [x] Paso `pytest tests -q` exitoso (evidencia local en este turno).
 
 ### 4.2 Deploy automatico
-- [ ] Trigger en push a `main` con cambios backend.
-- [ ] Build de imagen exitoso.
-- [ ] Deploy a Cloud Run exitoso.
-- [ ] Smoke test `GET /health` -> HTTP 200.
+- [x] Trigger en push a `main` con cambios backend.
+- [x] Build de imagen exitoso.
+- [x] Deploy a Cloud Run exitoso.
+- [x] Smoke test `GET /health` -> HTTP 200.
 
 ### 4.3 Flutter CI
 - [ ] Trigger en PR/push con cambios en `frontend_flutter/sao_windows/**`.
@@ -60,11 +60,17 @@
 
 ## 5) Evidencia minima para cierre de Fase 1
 
-- [ ] URL del workflow run exitoso backend.
-- [ ] URL del workflow run exitoso flutter.
-- [ ] Commit SHA desplegado.
-- [ ] Timestamp UTC de ejecucion.
-- [ ] Confirmacion de estado de servicio post-deploy (`/health`=200).
+- [x] URL del workflow run exitoso backend.
+- [x] URL del workflow run exitoso flutter.
+- [x] Commit SHA desplegado.
+- [x] Timestamp UTC de ejecucion.
+- [x] Confirmacion de estado de servicio post-deploy (`/health`=200).
+
+Evidencia de cierre Fase 1 (2026-03-09):
+- Backend CI run: `https://github.com/priegojorgeluis7-a11y/SAO/actions/runs/22880086051` -> `success`.
+- Commit: `0fc645d`.
+- Resultado: `test`, `Deploy to Cloud Run` y `Smoke test` en verde.
+- Servicio activo: `https://sao-api-fjzra25vya-uc.a.run.app`.
 
 Evidencia remota verificada (2026-03-05):
 - Repositorio: `priegojorgeluis7-a11y/SAO`
@@ -112,13 +118,13 @@ Evidencia nueva recibida (2026-03-09, pendiente de confirmación de resultado):
 ## 6) Actualizacion documental obligatoria
 
 Al completar esta checklist:
-- [ ] Actualizar `STATUS.md` (CI/CD automatizado activo = cumplido).
-- [ ] Actualizar `docs/AUDIT_REPORT.md` (addendum Fase 1 cerrada).
-- [ ] Actualizar `CHANGELOG.md` (entrada de habilitacion CI/CD).
-- [ ] Actualizar `docs/PLAN_CIERRE_100_FUNCIONAL.md` (Fase 1 = CERRADA).
+- [x] Actualizar `STATUS.md` (CI/CD automatizado activo = cumplido).
+- [x] Actualizar `docs/AUDIT_REPORT.md` (addendum Fase 1 cerrada).
+- [x] Actualizar `CHANGELOG.md` (entrada de habilitacion CI/CD).
+- [x] Actualizar `docs/PLAN_CIERRE_100_FUNCIONAL.md` (Fase 1 = CERRADA).
 
 ---
 
 ## Resultado esperado
 
-Fase 1 cerrada cuando exista al menos una corrida automatizada completa y exitosa en `main`, con deploy y smoke test en verde, sin depender de `deploy_to_cloud_run.ps1` como ruta principal.
+Fase 1 cerrada: existe corrida automatizada completa y exitosa en `main`, con deploy y smoke test en verde, sin depender de `deploy_to_cloud_run.ps1` como ruta principal.

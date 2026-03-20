@@ -5,13 +5,19 @@ Sistema enterprise para gestión de operaciones de campo en proyectos de infraes
 [![License](https://img.shields.io/badge/license-Proprietary-red.svg)]()
 [![Flutter](https://img.shields.io/badge/Flutter-3.24+-blue.svg)](https://flutter.dev)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-green.svg)](https://fastapi.tiangolo.com/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16+-blue.svg)](https://www.postgresql.org/)
+[![Firestore](https://img.shields.io/badge/Firestore-Cloud%20Native-orange.svg)](https://firebase.google.com/docs/firestore)
 
 ---
 
 ## 📖 Descripción
 
 **SAO** es un sistema de gestión operativa diseñado para proyectos de infraestructura ferroviaria como el Tren México-Querétaro (TMQ). Permite a equipos de campo registrar actividades, eventos, evidencias y flujos de trabajo completos con **operación offline-first** y sincronización incremental.
+
+## 🧭 Documentación Maestra
+
+- Documento maestro del sistema: `docs/DOCUMENTO_MAESTRO_SISTEMA.md`
+- Centro de documentación (índice organizado): `docs/README.md`
+- Estado operativo y avances: `STATUS.md`
 
 ### 🎯 Características Principales
 
@@ -31,7 +37,7 @@ Sistema enterprise para gestión de operaciones de campo en proyectos de infraes
 ```
 ┌────────────────────────────────────────────────────────┐
 │                  BACKEND (FastAPI)                     │
-│  PostgreSQL • SQLAlchemy • JWT Auth • MinIO/S3        │
+│  Firestore • JWT Auth • Cloud Storage                 │
 └──────────────┬───────────────────┬─────────────────────┘
                │                   │
      ┌─────────▼────────┐  ┌──────▼─────────┐
@@ -49,7 +55,7 @@ Sistema enterprise para gestión de operaciones de campo en proyectos de infraes
 
 | Componente | Tecnología |
 |------------|------------|
-| **Backend** | FastAPI 0.115, PostgreSQL 16, SQLAlchemy 2.0, Alembic |
+| **Backend** | FastAPI 0.115, Firestore, JWT |
 | **Móvil** | Flutter 3.24+, Drift, Riverpod 2.6, go_router |
 | **Desktop** | Flutter Windows, fluent_ui |
 | **Storage** | MinIO / AWS S3 (evidencias) |
@@ -63,10 +69,8 @@ Sistema enterprise para gestión de operaciones de campo en proyectos de infraes
 ```
 SAO/
 ├── backend/                    # FastAPI Backend
-│   ├── alembic/               # Migraciones DB
 │   ├── app/
 │   │   ├── api/               # Endpoints REST
-│   │   ├── models/            # SQLAlchemy models
 │   │   ├── schemas/           # Pydantic DTOs
 │   │   ├── services/          # Lógica de negocio
 │   │   └── core/              # Config, auth, RBAC
@@ -105,7 +109,6 @@ SAO/
 
 - **Python 3.11+** (backend)
 - **Flutter 3.24+** (móvil + desktop)
-- **PostgreSQL 16+** (database)
 - **Docker** (opcional, para desarrollo local)
 
 ### 1. Backend
@@ -118,17 +121,11 @@ python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
 # Instalar dependencias
-pip install -r requirements.txt
+pip install -r requirements.firestore-runtime.txt
 
-# Configurar BD
+# Configurar entorno
 cp .env.example .env
-# Editar .env con tu DATABASE_URL
-
-# Ejecutar migraciones
-alembic upgrade head
-
-# Ejecutar seeds iniciales
-python -m app.seeds.initial_data
+# Editar .env con DATA_BACKEND=firestore, JWT_SECRET, GCS_BUCKET, FIRESTORE_PROJECT_ID
 
 # Iniciar servidor
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000

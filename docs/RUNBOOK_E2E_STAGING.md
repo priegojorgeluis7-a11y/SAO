@@ -274,3 +274,88 @@ Secrets requeridos en GitHub: `E2E_OPERATIVO_PASSWORD`, `E2E_SUPERVISOR_PASSWORD
 ---
 
 **Última actualización:** 2026-03-05 (incluye corrida real de staging exitosa)
+
+---
+
+## Política de rollback cuando el gate E2E falla en CI
+
+### Cuándo aplica
+El job `post-deploy-e2e` en `.github/workflows/backend-ci.yml` falla después de un deploy a `main`.
+La imagen ya fue desplegada en Cloud Run pero el flujo operativo está roto.
+
+### Paso 1 — Identificar la revisión anterior sana
+
+```bash
+PROJECT="sao-prod-488416"
+REGION="us-central1"
+SERVICE="sao-api"
+
+# Listar revisiones con tráfico
+gcloud run revisions list \
+  --service "$SERVICE" \
+  --region "$REGION" \
+  --project "$PROJECT" \
+  --format="table(name,status.conditions[0].status,metadata.labels['serving.knative.dev/lastPinned'])"
+```
+
+### Paso 2 — Redirigir tráfico a la revisión anterior
+
+```bash
+PREV_REVISION="sao-api-XXXXX-YYY"   # nombre de la revisión anterior sana
+
+gcloud run services update-traffic "$SERVICE" \
+  --region "$REGION" \
+  --project "$PROJECT" \
+  --to-revisions "$PREV_REVISION=100"
+```
+
+Verificar que el tráfico fue redirigido:
+
+```bash
+gcloud run services describe "$SERVICE" \
+  --region "$REGION" \
+  --project "$PROJECT" \
+  --format="value(status.traffic)"
+```
+
+### Paso 3 — Re-ejecutar el gate E2E manualmente contra la revisión anterior
+
+```bash
+SERVICE_URL=$(gcloud run services describe "$SERVICE" \
+  --region "$REGION" --project "$PROJECT" --format="value(status.url)")
+TOKEN=$(gcloud auth print-identity-token --audiences="$SERVICE_URL")
+
+python backend/scripts/e2e_staging_flow.py \
+  --base-url "$SERVICE_URL" \
+  --operativo-email "e2e-operativo@sao.mx" \
+  --operativo-password "$OPERATIVO_PASS" \
+  --supervisor-email "e2e-supervisor@sao.mx" \
+  --supervisor-password "$SUPERVISOR_PASS" \
+  --identity-token "$TOKEN" \
+  --verbose
+```
+
+### Paso 4 — Crear hotfix y re-deplegar
+
+1. Abrir PR desde rama `hotfix/<descripcion>` sobre `main`.
+2. El pipeline `backend-ci` corre tests + smoke automáticamente.
+3. Al mergear a `main`, el `post-deploy-e2e` gate debe pasar antes de considerar el deploy cerrado.
+4. Eliminar la revisión fallida una vez confirmado el hotfix estable.
+
+```bash
+FAILED_REVISION="sao-api-FALLIDA-XXX"
+gcloud run revisions delete "$FAILED_REVISION" \
+  --region "$REGION" \
+  --project "$PROJECT" \
+  --quiet
+```
+
+### Decisión de escalamiento
+
+| Tiempo sin resolución | Acción |
+|-----------------------|--------|
+| < 30 min | Investigar logs Cloud Run + evidencia del artefacto `e2e-evidence-<sha>` en GitHub Actions |
+| 30–60 min | Aplicar rollback (Paso 2) y abrir hotfix |
+| > 60 min | Escalar a responsable de infraestructura; evaluar congelamiento de deploys |
+
+**Última actualización:** 2026-03-16

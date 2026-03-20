@@ -3,6 +3,17 @@
 **Auditor:** Arquitecto Principal (automated scan)
 **Alcance:** backend/ · frontend_flutter/sao_windows/ · desktop_flutter/sao_desktop/
 
+## Addendum 2026-03-09 — Cierre Fase 1 CI/CD
+
+Resultado de revalidacion de despliegue automatizado:
+- Workflow backend en GitHub Actions completo y en verde.
+- Evidencia: run `22880086051` con `test`, `build`, `Deploy to Cloud Run` y `Smoke test` exitosos.
+- Servicio activo posterior al deploy: `https://sao-api-fjzra25vya-uc.a.run.app`.
+
+Conclusión:
+- Criterio de cierre de Fase 1 (CI/CD end-to-end) queda **CERRADO**.
+- La ruta principal de despliegue pasa a pipeline automatizado en `main`.
+
 ## Addendum 2026-03-05 — Corrida E2E Real en Staging (flujo operativo -> review -> pull)
 
 Resultado de validacion en entorno real Cloud Run:

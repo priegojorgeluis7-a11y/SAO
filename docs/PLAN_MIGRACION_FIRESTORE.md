@@ -212,3 +212,119 @@ Smoke de salud posterior a deploy:
 - `GET /health` -> `status=healthy`
 - `checks.postgres=ok`
 - `checks.firestore=ok`
+
+## 14. Estado firestore-only y brecha actual (2026-03-10)
+Estado observado tras cambiar `DATA_BACKEND=firestore`:
+- `GET /health` responde `healthy` con `data_backend=firestore`.
+- Rutas de negocio con dependencia SQL (`get_db`) no quedan operativas hasta completar migracion de identidad/catalogos/sync.
+
+Hallazgo clave:
+- Coleccion `users` en Firestore sin datos (`users_sample_count=0`).
+- Sin usuarios en Firestore, `auth/login` no puede autenticar en modo firestore-only.
+
+Decision tecnica inmediata:
+- Completar migracion de identidad a Firestore (usuarios, roles/proyectos) antes de declarar firestore-only productivo.
+
+## 15. Checklist ejecutable para cierre de migracion (P0/P1/P2)
+
+Objetivo de esta seccion:
+- Tener una ruta operativa verificable para declarar cierre real de migracion a Firestore.
+- Evitar cierre parcial con rutas aun dependientes de SQL.
+
+### 15.1 P0 - Bloqueantes de cierre (obligatorio antes de declarar firestore-only)
+
+- [ ] Inventario final de endpoints SQL-dependientes.
+	- Evidencia: lista en `docs/SERVICES_MATRIX.md` marcada por endpoint (`firestore-ok` vs `sql-dependiente`).
+- [ ] Migrar autenticacion/autorizacion faltante a Firestore.
+	- Incluye: resolucion de usuario actual, roles, permisos y alcance por proyecto sin `get_db`.
+	- Evidencia: smoke auth completo con `DATA_BACKEND=firestore` y sin errores 5xx.
+- [ ] Migrar flujo de catalogos (lectura y versionado) para no depender de SQL.
+	- Incluye: `version/current`, resolucion de version efectiva y validacion de tipos de actividad.
+	- Evidencia: app registra actividad con catalogo real del proyecto (sin fallback mock/seed).
+- [ ] Migrar flujo sync critico en firestore-only.
+	- Incluye: `sync/pull`, `sync/push`, validaciones de catalogo y conflicto basico.
+	- Evidencia: corrida E2E con push/pull exitosa en firestore-only.
+- [ ] Backfill completo de entidades de negocio pendientes.
+	- Evidencia: conteos por entidad/proyecto con desviacion 0 o desviacion explicada/aceptada.
+
+### 15.2 P1 - Estabilizacion y calidad (recomendado para salida productiva segura)
+
+- [ ] Suite de regresion backend en modo firestore-only.
+	- Incluir pruebas de `activities`, `review`, `sync`, `catalog`, `auth`.
+- [ ] E2E funcional en entorno real (staging o prod controlado) con usuarios reales.
+	- Cobertura minima: login, alta actividad, evidencia, review, sync, consulta posterior.
+- [ ] Observabilidad y alertamiento.
+	- Dashboard con: errores 5xx, latencia p95, errores de Firestore, ratio de fallos sync.
+	- Alertas activas para degradacion en auth/sync/catalog.
+- [ ] Seguridad operativa.
+	- Rotar credenciales temporales usadas en pruebas.
+	- Validar secretos vigentes y permisos minimos de servicio.
+
+### 15.3 P2 - Cierre tecnico y reduccion de deuda
+
+- [ ] Retirar codigo dual-write y feature flags ya no requeridos.
+	- Mantener solo flags utiles para contingencia real.
+- [ ] Limpiar scripts y seeds legacy de SQL no usados en operacion firestore-only.
+- [ ] Actualizar runbooks y arquitectura final.
+	- `docs/RUNBOOK_CLOUD_RUN.md`, `docs/ARCHITECTURE.md`, `docs/WORKFLOW.md`.
+- [ ] Definir decision final de Cloud SQL (retiro definitivo o contingencia por ventana limitada).
+
+### 15.4 Definicion de terminado (DoD)
+
+Se considera migracion completada cuando se cumpla todo lo siguiente:
+- [ ] `DATA_BACKEND=firestore` en produccion, sin fallback operativo a PostgreSQL.
+- [ ] Endpoints criticos de negocio operan sin dependencia SQL.
+- [ ] E2E de flujo principal pasa en firestore-only.
+- [ ] Monitoreo sin incidentes severos durante ventana de observacion (minimo 7 dias).
+- [ ] Documentacion operativa y tecnica actualizada con estado final.
+
+### 15.5 Comandos de validacion sugeridos (evidencia de cierre)
+
+1. Salud del backend:
+	 - `GET /health` debe reportar `data_backend=firestore` y `checks.firestore=ok`.
+2. Paridad puntual (si aplica a entidades remanentes):
+	 - Reusar patron de `backend/scripts/verify_firestore_parity.py` por entidad/proyecto.
+3. E2E base:
+	 - Ejecutar script E2E local/staging con usuario operativo y aprobador.
+4. Verificacion de catalogo efectivo:
+	 - Confirmar que app consume catalogo remoto/caché real por proyecto y no assets mock.
+
+### 15.6 Estado actual contra checklist (resumen rapido)
+
+- P0: en progreso (auth basico firestore-only ya funcional; faltan modulos SQL-dependientes de negocio).
+- P1: parcial (smoke de salud y login realizados; falta regresion/E2E completa firestore-only).
+- P2: pendiente (limpieza final de deuda y cierre documental integral).
+
+## 16. Avance implementado en codigo (2026-03-09, corte actual)
+
+Cambios ya aplicados para desbloquear `DATA_BACKEND=firestore`:
+
+- [x] `GET /catalog/version/current` con resolucion en Firestore.
+	- Usa `catalog_current/{PROJECT_ID}` y fallback a `catalog_versions`.
+- [x] `GET /catalog/effective` en firestore-only.
+	- Soporta lectura de payload efectivo o conversion desde bundle Firestore.
+- [x] `GET /catalog/bundle` y `GET /catalog/workflow` en firestore-only.
+	- Lectura desde `catalog_bundles` (por proyecto/version).
+- [x] `GET /catalog/check-updates` en firestore-only.
+	- Compara `current_hash` contra hash/version publicado en Firestore.
+- [x] `GET /catalog/versions?project_ids=...` en firestore-only.
+	- Retorna digest ligero por proyecto (version/hash/fecha).
+- [x] `POST /sync/pull` en firestore-only.
+	- Cursor por `since_version`/`after_uuid`/`until_version`/`limit`.
+- [x] `POST /sync/push` en firestore-only.
+	- Upsert por `uuid`, manejo de conflictos y `force_override`.
+	- Validacion de `catalog_version_id` y `activity_type_code` contra catalogo Firestore.
+
+Pendiente inmediato (siguiente bloque tecnico):
+- [x] `GET /catalog/versions` listado detallado (no digest) en firestore-only para `project_id`.
+- [x] Endpoints editor/admin de catalogo (`project-ops`, `validate`, `publish`, `rollback`) en firestore-only.
+	- Persistencia de estado editable/publicado y rollback sobre `catalog_bundles`, `catalog_versions`, `catalog_current`.
+- [ ] Suite de pruebas de regresion para los nuevos flujos firestore-only.
+	- Avance: tests de regresion firestore-only agregados para endpoints admin de catalogo en `backend/tests/test_catalog_bundle.py` (`project-ops`, `validate`, `publish`, `rollback`).
+	- Avance: tests de regresion firestore-only agregados para `sync` en `backend/tests/test_sync.py` (`pull`, `push`, verificacion de rama Firestore).
+	- Avance: tests de regresion firestore-only agregados para `auth` en `backend/tests/test_auth.py` (login exitoso/error y control de acceso por proyecto en modo Firestore).
+	- Avance: tests integrados firestore-only `auth + catalog + sync` agregados en `backend/tests/test_firestore_e2e_flow.py` (flujo happy-path, control de alcance por proyecto y validacion de `activity_type_code` contra catalogo).
+	- Avance: smoke suite unificada agregada en `backend/scripts/run_firestore_regression_smoke.ps1`.
+	- Avance: smoke suite integrada en CI (`.github/workflows/backend-ci.yml`, job `firestore-smoke`).
+	- Resultado actual del smoke suite: `4 passed` (catalog) + `2 passed` (sync) + `3 passed` (auth) + `3 passed` (integrado auth+catalog+sync).
+	- Pendiente: ampliar cobertura E2E/regresion para flujos completos de `sync` + `catalog` + `auth` en modo firestore-only.
