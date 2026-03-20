@@ -242,7 +242,8 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                       },
                       child: GestureDetector(
                         onPanUpdate: _handlePanUpdate,
-                        child: Container(
+                        child: ClipRect(
+                          child: Container(
                           color: SaoColors.gray100,
                           child: Center(
                             child: Transform.translate(
@@ -282,6 +283,7 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                             ),
                           ),
                         ),
+                        ),  // ClipRect
                       ),
                     ),
                   ),

@@ -14,12 +14,14 @@ import '../../../ui/theme/sao_typography.dart';
 class CatalogSubstitutionModal extends StatefulWidget {
   final String currentValue;
   final String fieldName;
+  final List<CatalogItem> items;
   final Function(String selectedValue) onSubstitute;
 
   const CatalogSubstitutionModal({
     super.key,
     required this.currentValue,
     required this.fieldName,
+    required this.items,
     required this.onSubstitute,
   });
 
@@ -31,52 +33,11 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
   final TextEditingController _searchController = TextEditingController();
   String _selectedValue = '';
 
-  // TODO: Cargar desde API real
-  final List<CatalogItem> _catalogItems = [
-    CatalogItem(
-      id: '1',
-      code: 'EXC-001',
-      name: 'Excavación simple sin entibación',
-      category: 'Excavaciones',
-      description: 'Excavación manual o mecánica de menor complejidad',
-      standards: ['NTC 5581', 'ISO 1803'],
-      isRecommended: true,
-    ),
-    CatalogItem(
-      id: '2',
-      code: 'EXC-002',
-      name: 'Excavación con entibación',
-      category: 'Excavaciones',
-      description: 'Excavación con sistemas de contención',
-      standards: ['NTC 5581'],
-      isRecommended: false,
-    ),
-    CatalogItem(
-      id: '3',
-      code: 'COM-001',
-      name: 'Compactación de base',
-      category: 'Compactación',
-      description: 'Compactación de capas base con detalles específicos',
-      standards: ['NTC 2017'],
-      isRecommended: false,
-    ),
-    CatalogItem(
-      id: '4',
-      code: 'ASF-001',
-      name: 'Colocación de asfalto',
-      category: 'Asfalto',
-      description: 'Mezcla asfáltica en caliente aplicada en capas',
-      standards: ['INVIAS Especificaciones', 'INV E-754'],
-      isRecommended: true,
-    ),
-  ];
-
   List<CatalogItem> get _filteredItems {
-    if (_searchController.text.isEmpty) {
-      return _catalogItems;
-    }
+    final all = widget.items;
+    if (_searchController.text.isEmpty) return all;
     final query = _searchController.text.toLowerCase();
-    return _catalogItems
+    return all
         .where((item) =>
             item.name.toLowerCase().contains(query) ||
             item.code.toLowerCase().contains(query) ||

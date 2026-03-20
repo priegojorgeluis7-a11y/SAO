@@ -64,8 +64,8 @@ class _EventRow {
 // Provider
 // ---------------------------------------------------------------------------
 
-final _eventsProvider =
-    FutureProvider.autoDispose.family<List<_EventRow>, String>((ref, projectId) async {
+final _eventsProvider = FutureProvider.autoDispose
+    .family<List<_EventRow>, String>((ref, projectId) async {
   try {
     final decoded = await const BackendApiClient()
         .getJson('/api/v1/events?project_id=$projectId&page_size=100');
@@ -87,7 +87,8 @@ final _eventsProvider =
   }
 });
 
-final _projectsListProvider = FutureProvider.autoDispose<List<String>>((ref) async {
+final _projectsListProvider =
+    FutureProvider.autoDispose<List<String>>((ref) async {
   try {
     final decoded =
         await const BackendApiClient().getJson('/api/v1/catalog/projects');
@@ -119,7 +120,13 @@ class _EventsPageState extends ConsumerState<EventsPage> {
   bool _showOnlyUnresolved = false;
   bool _isResolving = false;
 
-  static const _severityOptions = ['Todos', 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'];
+  static const _severityOptions = [
+    'Todos',
+    'LOW',
+    'MEDIUM',
+    'HIGH',
+    'CRITICAL'
+  ];
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +148,8 @@ class _EventsPageState extends ConsumerState<EventsPage> {
               const Spacer(),
               // Project selector
               projectsAsync.when(
-                loading: () => const SizedBox(width: 160, child: LinearProgressIndicator()),
+                loading: () => const SizedBox(
+                    width: 160, child: LinearProgressIndicator()),
                 error: (_, __) => const SizedBox.shrink(),
                 data: (projects) {
                   final options = projects.isEmpty ? ['TMQ'] : projects;
@@ -158,7 +166,8 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                         isDense: true,
                       ),
                       items: options
-                          .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                          .map(
+                              (p) => DropdownMenuItem(value: p, child: Text(p)))
                           .toList(),
                       onChanged: (v) {
                         if (v != null) setState(() => _selectedProject = v);
@@ -191,13 +200,22 @@ class _EventsPageState extends ConsumerState<EventsPage> {
               FilterChip(
                 label: const Text('Sin resolver'),
                 selected: _showOnlyUnresolved,
+                backgroundColor: AppColors.gray100,
+                selectedColor: AppColors.primary.withValues(alpha: 0.14),
+                checkmarkColor: AppColors.primary,
+                labelStyle: const TextStyle(
+                  color: AppColors.gray900,
+                  fontWeight: FontWeight.w600,
+                ),
+                side: BorderSide(color: AppColors.gray300),
                 onSelected: (v) => setState(() => _showOnlyUnresolved = v),
               ),
               const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.refresh_rounded),
                 tooltip: 'Actualizar',
-                onPressed: () => ref.invalidate(_eventsProvider(_selectedProject)),
+                onPressed: () =>
+                    ref.invalidate(_eventsProvider(_selectedProject)),
               ),
             ],
           ),
@@ -213,21 +231,17 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                     ref.invalidate(_eventsProvider(_selectedProject)),
               ),
               data: (events) {
-                var filtered = events
-                    .where((e) => e.deletedAt == null)
-                    .toList();
+                var filtered =
+                    events.where((e) => e.deletedAt == null).toList();
                 if (_severityFilter != 'Todos') {
                   filtered = filtered
                       .where((e) => e.severity == _severityFilter)
                       .toList();
                 }
                 if (_showOnlyUnresolved) {
-                  filtered = filtered
-                      .where((e) => !e.isResolved)
-                      .toList();
+                  filtered = filtered.where((e) => !e.isResolved).toList();
                 }
-                filtered.sort(
-                    (a, b) => b.occurredAt.compareTo(a.occurredAt));
+                filtered.sort((a, b) => b.occurredAt.compareTo(a.occurredAt));
 
                 if (filtered.isEmpty) {
                   return _EmptyState(projectId: _selectedProject);
@@ -259,8 +273,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                               child: Text(
                                 event.title,
                                 style: const TextStyle(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w500),
+                                    fontSize: 13, fontWeight: FontWeight.w500),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -352,6 +365,19 @@ class _SeverityChip extends StatelessWidget {
   final String severity;
   const _SeverityChip({required this.severity});
 
+  Color _foreground(String severity) {
+    switch (severity) {
+      case 'LOW':
+        return const Color(0xFF14532D);
+      case 'HIGH':
+        return const Color(0xFF9A3412);
+      case 'CRITICAL':
+        return const Color(0xFF7F1D1D);
+      default:
+        return const Color(0xFF78350F);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (severity) {
@@ -364,13 +390,14 @@ class _SeverityChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.14),
+        color: color.withValues(alpha: 0.16),
         borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: color.withValues(alpha: 0.36)),
       ),
       child: Text(
         label,
         style: TextStyle(
-          color: color,
+          color: _foreground(severity),
           fontSize: 11,
           fontWeight: FontWeight.w700,
         ),
@@ -389,14 +416,19 @@ class _StatusChip extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
         color: isResolved
-            ? AppColors.success.withOpacity(0.14)
-            : AppColors.warning.withOpacity(0.14),
+            ? AppColors.success.withValues(alpha: 0.16)
+            : AppColors.warning.withValues(alpha: 0.20),
         borderRadius: BorderRadius.circular(4),
+        border: Border.all(
+          color: isResolved
+              ? AppColors.success.withValues(alpha: 0.40)
+              : AppColors.warning.withValues(alpha: 0.45),
+        ),
       ),
       child: Text(
         isResolved ? 'Resuelto' : 'Abierto',
         style: TextStyle(
-          color: isResolved ? AppColors.success : AppColors.warning,
+          color: isResolved ? const Color(0xFF065F46) : const Color(0xFF78350F),
           fontSize: 11,
           fontWeight: FontWeight.w600,
         ),
@@ -415,13 +447,11 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.campaign_outlined,
-              size: 64, color: AppColors.gray300),
+          Icon(Icons.campaign_outlined, size: 64, color: AppColors.gray300),
           const SizedBox(height: 16),
           const Text(
             'Sin eventos registrados',
-            style:
-                TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Text(

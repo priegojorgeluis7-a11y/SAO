@@ -25,6 +25,8 @@ final databaseProvider = Provider<AppDatabase>((ref) {
 class AppDatabase extends _$AppDatabase {
   AppDatabase(String path) : super(NativeDatabase(File(path)));
 
+  AppDatabase.memory() : super(NativeDatabase.memory());
+
   @override
   int get schemaVersion => 1;
 
@@ -32,7 +34,6 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
-          await _seedInitialData();
         },
       );
 
@@ -136,6 +137,6 @@ class AppDatabase extends _$AppDatabase {
       ));
     }
 
-    // No se precargan actividades/evidencias para evitar datos de demostración.
+    // No se precargan actividades/evidencias en bootstrap.
   }
 }

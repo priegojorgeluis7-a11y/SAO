@@ -12,10 +12,12 @@ class AdminApiException implements Exception {
 }
 
 abstract class AdminApiTransport {
-  Future<dynamic> get(String path, {Map<String, String>? queryParams, String? token});
+  Future<dynamic> get(String path,
+      {Map<String, String>? queryParams, String? token});
   Future<dynamic> post(String path, {Object? body, String? token});
   Future<dynamic> put(String path, {Object? body, String? token});
   Future<dynamic> patch(String path, {Object? body, String? token});
+  Future<void> delete(String path, {String? token});
 }
 
 class HttpAdminApiTransport implements AdminApiTransport {
@@ -49,13 +51,13 @@ class HttpAdminApiTransport implements AdminApiTransport {
         'POST' => await client.postUrl(uri),
         'PUT' => await client.putUrl(uri),
         'PATCH' => await client.patchUrl(uri),
+        'DELETE' => await client.deleteUrl(uri),
         _ => throw StateError('Unsupported method: $method'),
       };
 
       request.headers.contentType = ContentType.json;
       if (token != null && token.isNotEmpty) {
-        request.headers
-            .set(HttpHeaders.authorizationHeader, 'Bearer $token');
+        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
       }
 
       if (body != null) {
@@ -101,6 +103,11 @@ class HttpAdminApiTransport implements AdminApiTransport {
   Future<dynamic> patch(String path, {Object? body, String? token}) {
     return _send('PATCH', path, body: body, token: token);
   }
+
+  @override
+  Future<void> delete(String path, {String? token}) async {
+    await _send('DELETE', path, token: token);
+  }
 }
 
 class SessionUser {
@@ -108,7 +115,8 @@ class SessionUser {
   final String email;
   final String fullName;
 
-  const SessionUser({required this.id, required this.email, required this.fullName});
+  const SessionUser(
+      {required this.id, required this.email, required this.fullName});
 
   factory SessionUser.fromJson(Map<String, dynamic> json) {
     return SessionUser(
@@ -145,6 +153,13 @@ class AdminProject {
   final String status;
   final String startDate;
   final String? endDate;
+  final int frontsCount;
+  final int municipalitiesCount;
+  final int statesCount;
+  final List<AdminProjectFront> fronts;
+  final List<AdminProjectLocation> locationScope;
+  final List<AdminProjectFrontLocation> frontLocationScope;
+  final List<AdminProjectState> states;
 
   const AdminProject({
     required this.id,
@@ -152,15 +167,154 @@ class AdminProject {
     required this.status,
     required this.startDate,
     required this.endDate,
+    required this.frontsCount,
+    required this.municipalitiesCount,
+    required this.statesCount,
+    required this.fronts,
+    required this.locationScope,
+    required this.frontLocationScope,
+    required this.states,
   });
 
   factory AdminProject.fromJson(Map<String, dynamic> json) {
+    final frontsRaw =
+      json['fronts'] ?? json['frentes'] ?? json['project_fronts'] ?? const [];
+    final locationScopeRaw = json['location_scope'] ??
+      json['locationScope'] ??
+      json['locations'] ??
+      json['coverage'] ??
+      json['location_scopes'] ??
+      const [];
+    final frontLocationScopeRaw = json['front_location_scope'] ??
+      json['frontLocationScope'] ??
+      json['front_location_scopes'] ??
+      json['fronts_location_scope'] ??
+      const [];
+    final statesRaw = json['states'] ?? json['estados'] ?? const [];
+    final frontsList = frontsRaw is List ? frontsRaw : const [];
+    final locationScopeList = locationScopeRaw is List ? locationScopeRaw : const [];
+    final frontLocationScopeList =
+        frontLocationScopeRaw is List ? frontLocationScopeRaw : const [];
+    final statesList = statesRaw is List ? statesRaw : const [];
+
+    int _toInt(dynamic value) {
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return int.tryParse('$value') ?? 0;
+    }
+
     return AdminProject(
-      id: json['id'] as String,
-      name: json['name'] as String,
-      status: json['status'] as String,
-      startDate: json['start_date'] as String,
-      endDate: json['end_date'] as String?,
+      id: (json['id'] ?? json['project_id'] ?? json['code'] ?? '').toString(),
+      name: (json['name'] ?? json['nombre'] ?? '').toString(),
+      status: (json['status'] ?? json['estado'] ?? 'active').toString(),
+      startDate: (json['start_date'] ?? json['startDate'] ?? '').toString(),
+      endDate: (json['end_date'] ?? json['endDate'])?.toString(),
+      frontsCount: _toInt(
+      json['fronts_count'] ?? json['frontsCount'] ?? json['frentes_count'],
+      ),
+      municipalitiesCount: _toInt(
+      json['municipalities_count'] ??
+        json['municipalitiesCount'] ??
+        json['municipios_count'],
+      ),
+      statesCount:
+        _toInt(json['states_count'] ?? json['statesCount'] ?? json['estados_count']),
+        fronts: frontsList
+          .map((item) =>
+              AdminProjectFront.fromJson(item as Map<String, dynamic>))
+          .toList(),
+        locationScope: locationScopeList
+          .map((item) =>
+              AdminProjectLocation.fromJson(item as Map<String, dynamic>))
+          .toList(),
+        frontLocationScope: frontLocationScopeList
+          .map((item) =>
+              AdminProjectFrontLocation.fromJson(item as Map<String, dynamic>))
+          .toList(),
+        states: statesList
+          .map((item) =>
+              AdminProjectState.fromJson(item as Map<String, dynamic>))
+          .toList(),
+    );
+  }
+}
+
+class AdminProjectFront {
+  final String code;
+  final String name;
+  final int? pkStart;
+  final int? pkEnd;
+
+  const AdminProjectFront({
+    required this.code,
+    required this.name,
+    required this.pkStart,
+    required this.pkEnd,
+  });
+
+  factory AdminProjectFront.fromJson(Map<String, dynamic> json) {
+    return AdminProjectFront(
+      code: (json['code'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      pkStart: json['pk_start'] as int?,
+      pkEnd: json['pk_end'] as int?,
+    );
+  }
+}
+
+class AdminProjectLocation {
+  final String estado;
+  final String municipio;
+
+  const AdminProjectLocation({
+    required this.estado,
+    required this.municipio,
+  });
+
+  factory AdminProjectLocation.fromJson(Map<String, dynamic> json) {
+    return AdminProjectLocation(
+      estado: (json['estado'] ?? '').toString(),
+      municipio: (json['municipio'] ?? '').toString(),
+    );
+  }
+}
+
+class AdminProjectState {
+  final String estado;
+  final int municipiosCount;
+
+  const AdminProjectState({
+    required this.estado,
+    required this.municipiosCount,
+  });
+
+  factory AdminProjectState.fromJson(Map<String, dynamic> json) {
+    return AdminProjectState(
+      estado: (json['estado'] ?? '').toString(),
+      municipiosCount: json['municipios_count'] as int? ?? 0,
+    );
+  }
+}
+
+class AdminProjectFrontLocation {
+  final String frontCode;
+  final String? frontName;
+  final String estado;
+  final String municipio;
+
+  const AdminProjectFrontLocation({
+    required this.frontCode,
+    required this.frontName,
+    required this.estado,
+    required this.municipio,
+  });
+
+  factory AdminProjectFrontLocation.fromJson(Map<String, dynamic> json) {
+    return AdminProjectFrontLocation(
+      frontCode: (json['front_code'] ?? json['code'] ?? '').toString(),
+      frontName: (json['front_name'] ?? json['name'])?.toString(),
+      estado: (json['estado'] ?? '').toString(),
+      municipio: (json['municipio'] ?? '').toString(),
     );
   }
 }
@@ -251,8 +405,38 @@ class ProjectsRepository {
 
   ProjectsRepository(this.transport);
 
+  bool _matchesLocationScope(
+    AdminProject project,
+    List<Map<String, dynamic>> expectedScope,
+  ) {
+    final expected = {
+      for (final item in expectedScope)
+        '${(item['estado'] ?? '').toString().trim().toLowerCase()}|${(item['municipio'] ?? '').toString().trim().toLowerCase()}',
+    };
+    final actual = {
+      for (final item in project.locationScope)
+        '${item.estado.trim().toLowerCase()}|${item.municipio.trim().toLowerCase()}',
+    };
+    return expected.difference(actual).isEmpty;
+  }
+
+  Future<AdminProject?> _fetchProjectById(String token, String projectId) async {
+    final response =
+        await transport.get('/api/v1/projects', token: token) as List<dynamic>;
+    final wanted = projectId.trim().toLowerCase();
+    for (final item in response) {
+      if (item is! Map<String, dynamic>) continue;
+      final parsed = AdminProject.fromJson(item);
+      if (parsed.id.trim().toLowerCase() == wanted) {
+        return parsed;
+      }
+    }
+    return null;
+  }
+
   Future<List<AdminProject>> list(String token) async {
-    final response = await transport.get('/api/v1/projects', token: token) as List<dynamic>;
+    final response =
+        await transport.get('/api/v1/projects', token: token) as List<dynamic>;
     return response
         .map((e) => AdminProject.fromJson(e as Map<String, dynamic>))
         .toList();
@@ -265,9 +449,14 @@ class ProjectsRepository {
     required String startDate,
     String status = 'active',
     String? endDate,
+    bool bootstrapFromTmq = false,
+    String? baseCatalogVersion,
     List<Map<String, dynamic>>? fronts,
     List<Map<String, dynamic>>? locationScope,
+    List<Map<String, dynamic>>? frontLocationScope,
   }) async {
+    final resolvedFronts = fronts ?? const [];
+    final resolvedLocationScope = locationScope ?? const [];
     final response = await transport.post(
       '/api/v1/projects',
       token: token,
@@ -276,12 +465,51 @@ class ProjectsRepository {
         'name': name,
         'status': status,
         'start_date': startDate,
+        'startDate': startDate,
         'end_date': endDate,
-        'fronts': fronts ?? const [],
-        'location_scope': locationScope ?? const [],
+        'endDate': endDate,
+        'bootstrap_from_tmq': bootstrapFromTmq,
+        'bootstrapFromTmq': bootstrapFromTmq,
+        'base_catalog_version': baseCatalogVersion,
+        'baseCatalogVersion': baseCatalogVersion,
+        'fronts': resolvedFronts,
+        'frentes': resolvedFronts,
+        'project_fronts': resolvedFronts,
+        'location_scope': resolvedLocationScope,
+        'locationScope': resolvedLocationScope,
+        'location_scopes': resolvedLocationScope,
+        'locations': resolvedLocationScope,
+        'coverage': resolvedLocationScope,
+        'front_location_scope': frontLocationScope ?? const [],
+        'frontLocationScope': frontLocationScope ?? const [],
+        'front_location_scopes': frontLocationScope ?? const [],
       },
     );
-    return AdminProject.fromJson(response as Map<String, dynamic>);
+
+    var parsed = AdminProject.fromJson(response as Map<String, dynamic>);
+    if (resolvedLocationScope.isNotEmpty && !_matchesLocationScope(parsed, resolvedLocationScope)) {
+      try {
+        await transport.post(
+          '/api/v1/projects/$id/locations',
+          token: token,
+          body: resolvedLocationScope,
+        );
+      } catch (_) {
+        // Continue to explicit verification below.
+      }
+
+      final latest = await _fetchProjectById(token, id);
+      if (latest != null) {
+        parsed = latest;
+      }
+      if (!_matchesLocationScope(parsed, resolvedLocationScope)) {
+        throw AdminApiException(
+          422,
+          'El backend no persistio la cobertura de estados/municipios para este proyecto. Actualiza/reinicia API para aplicar el fix de /projects/{id}/locations.',
+        );
+      }
+    }
+    return parsed;
   }
 
   Future<AdminProject> update(
@@ -291,7 +519,12 @@ class ProjectsRepository {
     required String status,
     required String startDate,
     String? endDate,
+    List<Map<String, dynamic>>? fronts,
+    List<Map<String, dynamic>>? locationScope,
+    List<Map<String, dynamic>>? frontLocationScope,
   }) async {
+    final resolvedFronts = fronts ?? const [];
+    final resolvedLocationScope = locationScope ?? const [];
     final response = await transport.put(
       '/api/v1/projects/$projectId',
       token: token,
@@ -299,10 +532,53 @@ class ProjectsRepository {
         'name': name,
         'status': status,
         'start_date': startDate,
+        'startDate': startDate,
         'end_date': endDate,
+        'endDate': endDate,
+        'fronts': resolvedFronts,
+        'frentes': resolvedFronts,
+        'project_fronts': resolvedFronts,
+        'location_scope': resolvedLocationScope,
+        'locationScope': resolvedLocationScope,
+        'location_scopes': resolvedLocationScope,
+        'locations': resolvedLocationScope,
+        'coverage': resolvedLocationScope,
+        'front_location_scope': frontLocationScope ?? const [],
+        'frontLocationScope': frontLocationScope ?? const [],
+        'front_location_scopes': frontLocationScope ?? const [],
       },
     );
-    return AdminProject.fromJson(response as Map<String, dynamic>);
+
+    // Compatibility fallback for deployments that still require dedicated
+    // project locations endpoint.
+    var parsed = AdminProject.fromJson(response as Map<String, dynamic>);
+    if (resolvedLocationScope.isNotEmpty && !_matchesLocationScope(parsed, resolvedLocationScope)) {
+      try {
+        await transport.post(
+          '/api/v1/projects/$projectId/locations',
+          token: token,
+          body: resolvedLocationScope,
+        );
+      } catch (_) {
+        // Continue to explicit verification below.
+      }
+
+      final latest = await _fetchProjectById(token, projectId);
+      if (latest != null) {
+        parsed = latest;
+      }
+      if (!_matchesLocationScope(parsed, resolvedLocationScope)) {
+        throw AdminApiException(
+          422,
+          'El backend no persistio la cobertura de estados/municipios para este proyecto. Actualiza/reinicia API para aplicar el fix de /projects/{id}/locations.',
+        );
+      }
+    }
+    return parsed;
+  }
+
+  Future<void> delete(String token, String projectId) async {
+    await transport.delete('/api/v1/projects/$projectId', token: token);
   }
 }
 
@@ -349,6 +625,28 @@ class UsersRepository {
     );
     return AdminUserItem.fromJson(response as Map<String, dynamic>);
   }
+
+  Future<AdminUserItem> update(
+    String token,
+    String userId, {
+    String? fullName,
+    String? role,
+    String? projectId,
+    String? status,
+  }) async {
+    final body = <String, dynamic>{};
+    if (fullName != null) body['full_name'] = fullName;
+    if (role != null) body['role'] = role;
+    if (projectId != null) body['project_id'] = projectId;
+    if (status != null) body['status'] = status;
+
+    final response = await transport.patch(
+      '/api/v1/users/admin/$userId',
+      token: token,
+      body: body,
+    );
+    return AdminUserItem.fromJson(response as Map<String, dynamic>);
+  }
 }
 
 class AuditRepository {
@@ -381,6 +679,75 @@ class AuditRepository {
 
     return response
         .map((e) => AuditItem.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+}
+
+// ─── Assignments ─────────────────────────────────────────────────────────────
+
+class AdminAssignmentItem {
+  final String id;
+  final String projectId;
+  final String assigneeUserId;
+  final String title;
+  final String status;
+  final String? frente;
+  final DateTime startAt;
+  final DateTime endAt;
+
+  const AdminAssignmentItem({
+    required this.id,
+    required this.projectId,
+    required this.assigneeUserId,
+    required this.title,
+    required this.status,
+    required this.frente,
+    required this.startAt,
+    required this.endAt,
+  });
+
+  factory AdminAssignmentItem.fromJson(Map<String, dynamic> json) {
+    DateTime _parse(String? raw) =>
+        DateTime.tryParse(raw ?? '')?.toLocal() ?? DateTime.now();
+    return AdminAssignmentItem(
+      id: (json['id'] ?? '').toString(),
+      projectId: (json['project_id'] ?? '').toString(),
+      assigneeUserId: (json['assignee_user_id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      status: (json['status'] ?? '').toString(),
+      frente: json['frente']?.toString(),
+      startAt: _parse(json['start_at']?.toString()),
+      endAt: _parse(json['end_at']?.toString()),
+    );
+  }
+}
+
+class AssignmentsAdminRepository {
+  final AdminApiTransport transport;
+
+  AssignmentsAdminRepository(this.transport);
+
+  /// Returns all assignments for [projectId] within the given range.
+  /// Pass [include_all]=true so privileged callers see every assignee.
+  Future<List<AdminAssignmentItem>> list(
+    String token, {
+    required String projectId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final response = await transport.get(
+      '/api/v1/assignments',
+      token: token,
+      queryParams: {
+        'project_id': projectId,
+        'from': from.toUtc().toIso8601String(),
+        'to': to.toUtc().toIso8601String(),
+        'include_all': 'true',
+      },
+    ) as List<dynamic>;
+
+    return response
+        .map((e) => AdminAssignmentItem.fromJson(e as Map<String, dynamic>))
         .toList();
   }
 }

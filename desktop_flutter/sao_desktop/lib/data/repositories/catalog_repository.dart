@@ -150,21 +150,26 @@ class CatalogRepository {
     required String id,
     required String name,
     String? description,
+    String? projectId,
   }) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'activities',
-        'id': id.trim(),
-        'payload': {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'activities',
           'id': id.trim(),
-          'name': name.trim(),
-          'description': description,
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+          'payload': {
+            'id': id.trim(),
+            'name': name.trim(),
+            'description': description,
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> updateActivity(
@@ -172,27 +177,34 @@ class CatalogRepository {
     String? name,
     String? description,
     bool? isActive,
+    String? projectId,
   }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
     final payload = <String, dynamic>{};
     if (name != null) payload['name'] = name.trim();
     if (description != null) payload['description'] = description;
     if (isActive != null) payload['active'] = isActive;
-    await _patchProjectOps([
-      {
-        'op': 'patch',
-        'entity': 'activities',
-        'id': id,
-        'payload': payload,
-      }
-    ]);
-    await loadProject(_projectId);
+    await _patchProjectOps(
+      [
+        {
+          'op': 'patch',
+          'entity': 'activities',
+          'id': id,
+          'payload': payload,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deleteActivity(String id) async {
-    await _patchProjectOps([
-      {'op': 'delete', 'entity': 'activities', 'id': id}
-    ]);
-    await loadProject(_projectId);
+  Future<void> deleteActivity(String id, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [{'op': 'delete', 'entity': 'activities', 'id': id}],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> createSubcategory({
@@ -200,22 +212,27 @@ class CatalogRepository {
     required String activityId,
     required String name,
     String? description,
+    String? projectId,
   }) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'subcategories',
-        'id': id.trim(),
-        'payload': {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'subcategories',
           'id': id.trim(),
-          'activity_id': activityId.trim(),
-          'name': name.trim(),
-          'description': description,
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+          'payload': {
+            'id': id.trim(),
+            'activity_id': activityId.trim(),
+            'name': name.trim(),
+            'description': description,
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> updateSubcategory(
@@ -224,28 +241,35 @@ class CatalogRepository {
     String? name,
     String? description,
     bool? isActive,
+    String? projectId,
   }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
     final payload = <String, dynamic>{};
     if (activityId != null) payload['activity_id'] = activityId.trim();
     if (name != null) payload['name'] = name.trim();
     if (description != null) payload['description'] = description;
     if (isActive != null) payload['active'] = isActive;
-    await _patchProjectOps([
-      {
-        'op': 'patch',
-        'entity': 'subcategories',
-        'id': id,
-        'payload': payload,
-      }
-    ]);
-    await loadProject(_projectId);
+    await _patchProjectOps(
+      [
+        {
+          'op': 'patch',
+          'entity': 'subcategories',
+          'id': id,
+          'payload': payload,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deleteSubcategory(String id) async {
-    await _patchProjectOps([
-      {'op': 'delete', 'entity': 'subcategories', 'id': id}
-    ]);
-    await loadProject(_projectId);
+  Future<void> deleteSubcategory(String id, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [{'op': 'delete', 'entity': 'subcategories', 'id': id}],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> createPurpose({
@@ -253,22 +277,27 @@ class CatalogRepository {
     required String activityId,
     String? subcategoryId,
     required String name,
+    String? projectId,
   }) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'purposes',
-        'id': id.trim(),
-        'payload': {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'purposes',
           'id': id.trim(),
-          'activity_id': activityId.trim(),
-          'subcategory_id': subcategoryId,
-          'name': name.trim(),
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+          'payload': {
+            'id': id.trim(),
+            'activity_id': activityId.trim(),
+            'subcategory_id': subcategoryId,
+            'name': name.trim(),
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> updatePurpose(
@@ -277,28 +306,35 @@ class CatalogRepository {
     String? subcategoryId,
     String? name,
     bool? isActive,
+    String? projectId,
   }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
     final payload = <String, dynamic>{};
     if (activityId != null) payload['activity_id'] = activityId.trim();
     if (subcategoryId != null) payload['subcategory_id'] = subcategoryId.trim();
     if (name != null) payload['name'] = name.trim();
     if (isActive != null) payload['active'] = isActive;
-    await _patchProjectOps([
-      {
-        'op': 'patch',
-        'entity': 'purposes',
-        'id': id,
-        'payload': payload,
-      }
-    ]);
-    await loadProject(_projectId);
+    await _patchProjectOps(
+      [
+        {
+          'op': 'patch',
+          'entity': 'purposes',
+          'id': id,
+          'payload': payload,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deletePurpose(String id) async {
-    await _patchProjectOps([
-      {'op': 'delete', 'entity': 'purposes', 'id': id}
-    ]);
-    await loadProject(_projectId);
+  Future<void> deletePurpose(String id, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [{'op': 'delete', 'entity': 'purposes', 'id': id}],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> createTopic({
@@ -306,22 +342,27 @@ class CatalogRepository {
     required String name,
     String? type,
     String? description,
+    String? projectId,
   }) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'topics',
-        'id': id.trim(),
-        'payload': {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'topics',
           'id': id.trim(),
-          'name': name.trim(),
-          'type': type,
-          'description': description,
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+          'payload': {
+            'id': id.trim(),
+            'name': name.trim(),
+            'type': type,
+            'description': description,
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> updateTopic(
@@ -330,28 +371,35 @@ class CatalogRepository {
     String? type,
     String? description,
     bool? isActive,
+    String? projectId,
   }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
     final payload = <String, dynamic>{};
     if (name != null) payload['name'] = name.trim();
     if (type != null) payload['type'] = type;
     if (description != null) payload['description'] = description;
     if (isActive != null) payload['active'] = isActive;
-    await _patchProjectOps([
-      {
-        'op': 'patch',
-        'entity': 'topics',
-        'id': id,
-        'payload': payload,
-      }
-    ]);
-    await loadProject(_projectId);
+    await _patchProjectOps(
+      [
+        {
+          'op': 'patch',
+          'entity': 'topics',
+          'id': id,
+          'payload': payload,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deleteTopic(String id) async {
-    await _patchProjectOps([
-      {'op': 'delete', 'entity': 'topics', 'id': id}
-    ]);
-    await loadProject(_projectId);
+  Future<void> deleteTopic(String id, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [{'op': 'delete', 'entity': 'topics', 'id': id}],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> createResult({
@@ -359,22 +407,27 @@ class CatalogRepository {
     required String category,
     required String name,
     String? description,
+    String? projectId,
   }) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'results',
-        'id': id.trim(),
-        'payload': {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'results',
           'id': id.trim(),
-          'category': category.trim(),
-          'name': name.trim(),
-          'description': description,
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+          'payload': {
+            'id': id.trim(),
+            'category': category.trim(),
+            'name': name.trim(),
+            'description': description,
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> updateResult(
@@ -383,28 +436,35 @@ class CatalogRepository {
     String? name,
     String? description,
     bool? isActive,
+    String? projectId,
   }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
     final payload = <String, dynamic>{};
     if (category != null) payload['category'] = category.trim();
     if (name != null) payload['name'] = name.trim();
     if (description != null) payload['description'] = description;
     if (isActive != null) payload['active'] = isActive;
-    await _patchProjectOps([
-      {
-        'op': 'patch',
-        'entity': 'results',
-        'id': id,
-        'payload': payload,
-      }
-    ]);
-    await loadProject(_projectId);
+    await _patchProjectOps(
+      [
+        {
+          'op': 'patch',
+          'entity': 'results',
+          'id': id,
+          'payload': payload,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deleteResult(String id) async {
-    await _patchProjectOps([
-      {'op': 'delete', 'entity': 'results', 'id': id}
-    ]);
-    await loadProject(_projectId);
+  Future<void> deleteResult(String id, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [{'op': 'delete', 'entity': 'results', 'id': id}],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> createAssistant({
@@ -412,22 +472,27 @@ class CatalogRepository {
     required String type,
     required String name,
     String? description,
+    String? projectId,
   }) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'assistants',
-        'id': id.trim(),
-        'payload': {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'assistants',
           'id': id.trim(),
-          'type': type.trim(),
-          'name': name.trim(),
-          'description': description,
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+          'payload': {
+            'id': id.trim(),
+            'type': type.trim(),
+            'name': name.trim(),
+            'description': description,
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> updateAssistant(
@@ -436,66 +501,85 @@ class CatalogRepository {
     String? name,
     String? description,
     bool? isActive,
+    String? projectId,
   }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
     final payload = <String, dynamic>{};
     if (type != null) payload['type'] = type.trim();
     if (name != null) payload['name'] = name.trim();
     if (description != null) payload['description'] = description;
     if (isActive != null) payload['active'] = isActive;
-    await _patchProjectOps([
-      {
-        'op': 'patch',
-        'entity': 'assistants',
-        'id': id,
-        'payload': payload,
-      }
-    ]);
-    await loadProject(_projectId);
+    await _patchProjectOps(
+      [
+        {
+          'op': 'patch',
+          'entity': 'assistants',
+          'id': id,
+          'payload': payload,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deleteAssistant(String id) async {
-    await _patchProjectOps([
-      {'op': 'delete', 'entity': 'assistants', 'id': id}
-    ]);
-    await loadProject(_projectId);
+  Future<void> deleteAssistant(String id, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [{'op': 'delete', 'entity': 'assistants', 'id': id}],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> addRelation(String activityId, String topicId) async {
-    await _patchProjectOps([
-      {
-        'op': 'upsert',
-        'entity': 'activity_to_topics_suggested',
-        'id': '$activityId|$topicId',
-        'payload': {
-          'activity_id': activityId,
-          'topic_id': topicId,
-          'active': true,
-        },
-      }
-    ]);
-    await loadProject(_projectId);
+  Future<void> addRelation(String activityId, String topicId, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'upsert',
+          'entity': 'activity_to_topics_suggested',
+          'id': '$activityId|$topicId',
+          'payload': {
+            'activity_id': activityId,
+            'topic_id': topicId,
+            'active': true,
+          },
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> deleteRelation(String activityId, String topicId) async {
-    await _patchProjectOps([
-      {
-        'op': 'delete',
-        'entity': 'activity_to_topics_suggested',
-        'id': '$activityId|$topicId',
-      }
-    ]);
-    await loadProject(_projectId);
+  Future<void> deleteRelation(String activityId, String topicId, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'delete',
+          'entity': 'activity_to_topics_suggested',
+          'id': '$activityId|$topicId',
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
-  Future<void> reorder(String entity, List<String> ids) async {
-    await _patchProjectOps([
-      {
-        'op': 'reorder',
-        'entity': entity,
-        'ids': ids,
-      }
-    ]);
-    await loadProject(_projectId);
+  Future<void> reorder(String entity, List<String> ids, {String? projectId}) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    await _patchProjectOps(
+      [
+        {
+          'op': 'reorder',
+          'entity': entity,
+          'ids': ids,
+        }
+      ],
+      projectId: normalizedProjectId,
+    );
+    await loadProject(normalizedProjectId);
   }
 
   Future<void> _patchProjectOps(
@@ -503,8 +587,10 @@ class CatalogRepository {
     String? reason,
     String? ticket,
     String actor = 'desktop-admin',
+    String? projectId,
   }) async {
-    final queryProject = Uri.encodeQueryComponent(_projectId);
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    final queryProject = Uri.encodeQueryComponent(normalizedProjectId);
     final now = DateTime.now().toUtc().toIso8601String();
     final enrichedOps = ops.map((op) {
       final opId =
@@ -512,7 +598,7 @@ class CatalogRepository {
       final withDefaults = <String, dynamic>{
         ...op,
         'op_id': opId,
-        'scope': {'project_id': _projectId},
+        'scope': {'project_id': normalizedProjectId},
         'meta': {
           'who': actor,
           'when': now,
@@ -528,7 +614,7 @@ class CatalogRepository {
         .join(', ');
     // ignore: avoid_print
     print(
-        '[catalog_ops] PATCH /project-ops project=$_projectId ops=[$summary]');
+        '[catalog_ops] PATCH /project-ops project=$normalizedProjectId ops=[$summary]');
 
     try {
       await _apiClient
@@ -1047,10 +1133,21 @@ class CatalogData {
   /// Parses the /catalog/effective response (production schema).
   /// Fields use _effective suffix: name_effective, is_enabled_effective, sort_order_effective.
   factory CatalogData.fromEffectiveJson(Map<String, dynamic> json) {
+    bool asBool(dynamic value, {bool fallback = true}) {
+      if (value is bool) return value;
+      if (value is num) return value != 0;
+      if (value is String) {
+        final normalized = value.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return fallback;
+    }
+
     String strName(Map<String, dynamic> r) =>
         (r['name_effective'] ?? r['name'] ?? '').toString();
     bool strActive(Map<String, dynamic> r) =>
-        (r['is_enabled_effective'] ?? r['is_active'] as bool?) ?? true;
+        asBool(r['is_enabled_effective'] ?? r['is_active'] ?? r['active']);
     int strOrder(Map<String, dynamic> r) =>
         (r['sort_order_effective'] ?? r['sort_order'] as num?)?.toInt() ?? 0;
 
@@ -1106,7 +1203,7 @@ class CatalogData {
         .map((r) => CatalogRelationItem(
               activityId: (r['activity_id'] ?? '').toString(),
               topicId: (r['topic_id'] ?? '').toString(),
-              isActive: (r['is_active'] as bool?) ?? true,
+              isActive: asBool(r['is_active'] ?? r['active']),
             ))
         .toList();
 
@@ -1325,11 +1422,22 @@ class CatalogActivityItem {
   });
 
   factory CatalogActivityItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogActivityItem(
       id: (json['id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       description: json['description']?.toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
       sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
     );
   }
@@ -1353,12 +1461,23 @@ class CatalogSubcategoryItem {
   });
 
   factory CatalogSubcategoryItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogSubcategoryItem(
       id: (json['id'] ?? '').toString(),
       activityId: (json['activity_id'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       description: json['description']?.toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
       sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
     );
   }
@@ -1382,12 +1501,23 @@ class CatalogPurposeItem {
   });
 
   factory CatalogPurposeItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogPurposeItem(
       id: (json['id'] ?? '').toString(),
       activityId: (json['activity_id'] ?? '').toString(),
       subcategoryId: json['subcategory_id']?.toString(),
       name: (json['name'] ?? '').toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
       sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
     );
   }
@@ -1411,12 +1541,23 @@ class CatalogTopicItem {
   });
 
   factory CatalogTopicItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogTopicItem(
       id: (json['id'] ?? '').toString(),
       type: json['type']?.toString(),
       name: (json['name'] ?? '').toString(),
       description: json['description']?.toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
       sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
     );
   }
@@ -1434,10 +1575,21 @@ class CatalogRelationItem {
   });
 
   factory CatalogRelationItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogRelationItem(
       activityId: (json['activity_id'] ?? '').toString(),
       topicId: (json['topic_id'] ?? '').toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
     );
   }
 }
@@ -1460,12 +1612,23 @@ class CatalogResultItem {
   });
 
   factory CatalogResultItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogResultItem(
       id: (json['id'] ?? '').toString(),
       category: (json['category'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       description: json['description']?.toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
       sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
     );
   }
@@ -1489,12 +1652,23 @@ class CatalogAssistantItem {
   });
 
   factory CatalogAssistantItem.fromJson(Map<String, dynamic> json) {
+    bool parseActive(dynamic raw) {
+      if (raw is bool) return raw;
+      if (raw is num) return raw != 0;
+      if (raw is String) {
+        final normalized = raw.trim().toLowerCase();
+        if (normalized == 'true' || normalized == '1') return true;
+        if (normalized == 'false' || normalized == '0') return false;
+      }
+      return true;
+    }
+
     return CatalogAssistantItem(
       id: (json['id'] ?? json['attendee_id'] ?? '').toString(),
       type: (json['type'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       description: json['description']?.toString(),
-      isActive: (json['is_active'] as bool?) ?? true,
+      isActive: parseActive(json['is_active'] ?? json['active']),
       sortOrder: (json['sort_order'] as num?)?.toInt() ?? 0,
     );
   }

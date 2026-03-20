@@ -1,5 +1,6 @@
 // lib/ui/widgets/sao_badge.dart
 import 'package:flutter/material.dart';
+import '../helpers/sao_contrast.dart';
 import '../theme/sao_colors.dart';
 import '../theme/sao_radii.dart';
 import '../theme/sao_spacing.dart';
@@ -38,6 +39,8 @@ class SaoBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final textColor = SaoContrast.getContrastColor(backgroundColor);
+    
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.sm,
@@ -49,7 +52,7 @@ class SaoBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: SaoTypography.badgeText.copyWith(color: color),
+        style: SaoTypography.badgeText.copyWith(color: textColor),
       ),
     );
   }

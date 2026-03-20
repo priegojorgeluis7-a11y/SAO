@@ -36,7 +36,7 @@ class ActivityFormPanel extends StatefulWidget {
 }
 
 class _ActivityFormPanelState extends State<ActivityFormPanel> {
-  // Simulación de datos de catálogo (en producción vendrían de la base de datos)
+  // Valores de catálogo/campo para comparar cambios reales en revisión.
   Map<String, String> _catalogValues = {};
   Map<String, String> _fieldValues = {};
   final Map<String, bool> _acceptedPulse = {};
@@ -58,20 +58,23 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
   void _loadCatalogData() {
     if (widget.activity == null) return;
 
-    // TODO: Obtener datos reales del catálogo desde la base de datos
-    // Por ahora simulamos algunos cambios para demostrar la funcionalidad
+    final currentType = widget.activity!.activityType?.name ?? 'Sin tipo';
+    final currentTitle = widget.activity!.activity.title;
+    final currentDescription = widget.activity!.activity.description ?? 'Sin descripción';
+    final currentFront = widget.activity!.front?.name ?? 'Sin frente';
+
     _catalogValues = {
-      'activityType': widget.activity!.activityType?.name ?? 'Excavación Manual',
-      'title': 'Excavación de zanja tramo 142+000',
-      'description': widget.activity!.activity.description ?? 'Descripción del catálogo',
-      'front': widget.activity!.front?.name ?? 'Frente Norte',
+      'activityType': currentType,
+      'title': currentTitle,
+      'description': currentDescription,
+      'front': currentFront,
     };
 
     _fieldValues = {
-      'activityType': widget.activity!.activityType?.name ?? 'Excavación Mecánica',
-      'title': widget.activity!.activity.title,
-      'description': widget.activity!.activity.description ?? 'Descripción modificada en campo - cambios detectados',
-      'front': widget.activity!.front?.name ?? 'Frente Norte',
+      'activityType': currentType,
+      'title': currentTitle,
+      'description': currentDescription,
+      'front': currentFront,
     };
   }
 

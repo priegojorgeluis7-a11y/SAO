@@ -5,6 +5,10 @@ import '../../core/providers/project_providers.dart';
 import '../../data/repositories/catalog_repository.dart';
 import 'catalogs_controller.dart';
 
+Color _readableForeground(Color background) {
+  return background.computeLuminance() > 0.5 ? Colors.black : Colors.white;
+}
+
 class CatalogsPage extends ConsumerStatefulWidget {
   const CatalogsPage({super.key});
 
@@ -64,10 +68,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       catalogsControllerProvider.select((s) => s.error),
       (_, next) {
         if (next != null && next.isNotEmpty) {
+          final background = Theme.of(context).colorScheme.errorContainer;
+          final foreground = _readableForeground(background);
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(next),
-              backgroundColor: Theme.of(context).colorScheme.errorContainer,
+              content: Text(next, style: TextStyle(color: foreground)),
+              backgroundColor: background,
               duration: const Duration(seconds: 6),
             ),
           );
@@ -82,8 +88,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
         children: [
           CatalogsHeader(
             isBusy: state.isLoading || state.isMutating,
+            isEditMode: state.isEditMode,
             selectedProject: state.selectedProject,
-            selectedTabLabel: state.selectedTab.label,
             versionId: state.versionId,
             publicationStatus: state.publicationStatus,
             hasPendingChanges: state.hasPendingChanges,
@@ -99,6 +105,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
               controller.refresh();
             },
             onRefresh: controller.refresh,
+            onEditModeChanged: controller.setEditMode,
             onValidate: _onValidatePressed,
             onPublish: _onPublishPressed,
             onRollback: _onRollbackPressed,
@@ -114,6 +121,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
             tab: state.selectedTab,
             tabUiState: tabUi,
             isBusy: state.isLoading || state.isMutating,
+            isEditMode: state.isEditMode,
             visibleCount: _currentVisibleCount(state),
             totalCount: _currentTabCount(state),
             hasActiveFilters: _hasActiveFilters(state),
@@ -204,22 +212,85 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       return const Center(child: CircularProgressIndicator());
     }
 
-    switch (state.selectedTab) {
-      case CatalogTab.activities:
-        return _buildActivitiesContent(state);
-      case CatalogTab.subcategories:
-        return _buildSubcategoriesContent(state);
-      case CatalogTab.purposes:
-        return _buildPurposesContent(state);
-      case CatalogTab.topics:
-        return _buildTopicsContent(state);
-      case CatalogTab.relations:
-        return _buildRelationsContent(state);
-      case CatalogTab.results:
-        return _buildResultsContent(state);
-      case CatalogTab.assistants:
-        return _buildAssistantsContent(state);
+    final tabContent = switch (state.selectedTab) {
+      CatalogTab.activities => _buildActivitiesContent(state),
+      CatalogTab.subcategories => _buildSubcategoriesContent(state),
+      CatalogTab.purposes => _buildPurposesContent(state),
+      CatalogTab.topics => _buildTopicsContent(state),
+      CatalogTab.relations => _buildRelationsContent(state),
+      CatalogTab.results => _buildResultsContent(state),
+      CatalogTab.assistants => _buildAssistantsContent(state),
+    };
+
+    if (state.isEditMode) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _buildSectionHeading(state.selectedTab.label, isLocked: false),
+          const SizedBox(height: 8),
+          Expanded(child: tabContent),
+        ],
+      );
     }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _buildSectionHeading(state.selectedTab.label, isLocked: true),
+        const SizedBox(height: 8),
+        _buildReadOnlySectionBanner(state.selectedTab.label),
+        const SizedBox(height: 10),
+        Expanded(child: tabContent),
+      ],
+    );
+  }
+
+  Widget _buildSectionHeading(String sectionLabel, {required bool isLocked}) {
+    final colors = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        Icon(
+          isLocked ? Icons.lock_outline_rounded : Icons.edit_note_rounded,
+          size: 18,
+          color: isLocked ? colors.onSurfaceVariant : colors.primary,
+        ),
+        const SizedBox(width: 8),
+        Text(
+          sectionLabel,
+          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: colors.onSurface,
+              ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildReadOnlySectionBanner(String sectionLabel) {
+    final colors = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: colors.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: colors.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.lock_outline_rounded, size: 18, color: colors.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Modo Ver activo en "$sectionLabel": puedes explorar, pero no modificar.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: colors.onSurface,
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildActivitiesContent(CatalogsPageState state) {
@@ -304,6 +375,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                 DataCell(Text(item.sortOrder.toString())),
                 DataCell(
                   _RowActionsMenu(
+                    enabled: state.isEditMode,
                     isActive: item.isActive,
                     onEdit: () => _showActivityDialog(context, item: item),
                     onDuplicate: () =>
@@ -350,6 +422,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                         _setFilter(CatalogTab.subcategories, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
+                    enabled: state.isEditMode,
                     isActive: item.isActive,
                     onEdit: () => _showSubcategoryDialog(context, item: item),
                     onDuplicate: () =>
@@ -398,6 +471,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                         _setFilter(CatalogTab.purposes, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
+                    enabled: state.isEditMode,
                     isActive: item.isActive,
                     onEdit: () => _showPurposeDialog(context, item: item),
                     onDuplicate: () =>
@@ -443,6 +517,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     onTap: () => _setFilter(CatalogTab.topics, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
+                    enabled: state.isEditMode,
                     isActive: item.isActive,
                     onEdit: () => _showTopicDialog(context, item: item),
                     onDuplicate: () =>
@@ -474,7 +549,10 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     return ActivityTopicRelationsEditor(
       activities: [...state.catalog.activities]
         ..sort((a, b) => a.name.compareTo(b.name)),
-      topics: _visibleTopics(state),
+      // Use the full topics dataset for relations.
+      // Applying Topics-tab filters here can hide just-selected relations.
+      topics: [...state.catalog.topics]
+        ..sort((a, b) => a.name.compareTo(b.name)),
       relations: state.catalog.relations,
       selectedActivityId: state.selectedRelationActivityId,
       query: tabUi.query,
@@ -486,6 +564,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
           .read(catalogsControllerProvider.notifier)
           .setShowSuggestedOnly(value),
       onToggleTopic: (activityId, topicId, selected) async {
+        if (!state.isEditMode) {
+          return;
+        }
         final controller = ref.read(catalogsControllerProvider.notifier);
         if (selected) {
           await controller.deleteRelation(activityId, topicId);
@@ -494,6 +575,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
         }
       },
       onAddRelation: () => _showRelationCreateDialog(context),
+      isEditMode: state.isEditMode,
       isBusy: state.isMutating,
     );
   }
@@ -529,6 +611,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                         _setFilter(CatalogTab.results, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
+                    enabled: state.isEditMode,
                     isActive: item.isActive,
                     onEdit: () => _showResultDialog(context, item: item),
                     onDuplicate: () =>
@@ -575,6 +658,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                         _setFilter(CatalogTab.assistants, item.isActive))),
                 DataCell(
                   _RowActionsMenu(
+                    enabled: state.isEditMode,
                     isActive: item.isActive,
                     onEdit: () => _showAssistantDialog(context, item: item),
                     onDuplicate: () =>
@@ -652,6 +736,18 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   }
 
   Future<void> _onCreatePressed(BuildContext context, CatalogTab tab) async {
+    final state = ref.read(catalogsControllerProvider);
+    if (!state.isEditMode) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Activa Modo Editar para modificar el catálogo.'),
+          ),
+        );
+      }
+      return;
+    }
+
     switch (tab) {
       case CatalogTab.activities:
         await _showActivityDialog(context);
@@ -1280,6 +1376,18 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   }
 
   Future<void> _showRelationCreateDialog(BuildContext context) async {
+    final stateSnapshot = ref.read(catalogsControllerProvider);
+    if (!stateSnapshot.isEditMode) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Activa Modo Editar para agregar relaciones.'),
+          ),
+        );
+      }
+      return;
+    }
+
     final state = ref.read(catalogsControllerProvider);
     final activities = state.catalog.activities;
     final topics = state.catalog.topics;
@@ -2029,9 +2137,13 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final colors = Theme.of(context).colorScheme;
     final color =
         result.success ? colors.primaryContainer : colors.errorContainer;
+    final foreground = _readableForeground(color);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(result.message),
+        content: Text(
+          result.message,
+          style: TextStyle(color: foreground),
+        ),
         backgroundColor: color,
       ),
     );
@@ -2072,8 +2184,8 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
 
 class CatalogsHeader extends StatelessWidget {
   final bool isBusy;
+  final bool isEditMode;
   final String selectedProject;
-  final String selectedTabLabel;
   final String? versionId;
   final String publicationStatus;
   final bool hasPendingChanges;
@@ -2082,6 +2194,7 @@ class CatalogsHeader extends StatelessWidget {
   final DateTime? lastLoadedAt;
   final ValueChanged<String> onProjectSelected;
   final VoidCallback onRefresh;
+  final ValueChanged<bool> onEditModeChanged;
   final Future<void> Function() onValidate;
   final Future<void> Function() onPublish;
   final Future<void> Function() onRollback;
@@ -2089,8 +2202,8 @@ class CatalogsHeader extends StatelessWidget {
   const CatalogsHeader({
     super.key,
     required this.isBusy,
+    required this.isEditMode,
     required this.selectedProject,
-    required this.selectedTabLabel,
     required this.versionId,
     required this.publicationStatus,
     required this.hasPendingChanges,
@@ -2099,6 +2212,7 @@ class CatalogsHeader extends StatelessWidget {
     required this.lastLoadedAt,
     required this.onProjectSelected,
     required this.onRefresh,
+    required this.onEditModeChanged,
     required this.onValidate,
     required this.onPublish,
     required this.onRollback,
@@ -2106,100 +2220,185 @@ class CatalogsHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final lastLoaded = lastLoadedAt == null
         ? 'Sin carga previa'
         : '${lastLoadedAt!.hour.toString().padLeft(2, '0')}:${lastLoadedAt!.minute.toString().padLeft(2, '0')}';
+    final publishedState = _statusLabel(publicationStatus);
+
+    final changedColor = hasPendingChanges
+        ? Colors.amber.withValues(alpha: 0.2)
+        : Colors.green.withValues(alpha: 0.14);
+    final changedBorder = hasPendingChanges
+        ? Colors.amber.withValues(alpha: 0.6)
+        : Colors.green.withValues(alpha: 0.45);
+    final changedText = hasPendingChanges
+        ? 'Cambios sin publicar'
+        : 'Sin cambios pendientes';
+    final changedIcon = hasPendingChanges
+        ? Icons.edit_note_rounded
+        : Icons.task_alt_rounded;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Wrap(
-          spacing: 10,
-          runSpacing: 10,
-          children: [
-            _statusChip(context,
-                icon: Icons.apartment_rounded,
-                text: 'Proyecto: $selectedProject'),
-            _statusChip(context,
-                icon: Icons.layers_rounded, text: 'Sección: $selectedTabLabel'),
-            _statusChip(context,
-                icon: _statusIcon(publicationStatus),
-                text: 'Estado: ${_statusLabel(publicationStatus)}',
-                tone: _statusTone(publicationStatus)),
-            _statusChip(context,
-                icon: Icons.tag_rounded,
-                text: 'Versión: ${versionId ?? 'n/d'}'),
-            _statusChip(context,
-                icon: Icons.update_rounded, text: 'Última carga: $lastLoaded'),
-            _statusChip(context,
-                icon: Icons.dataset_rounded, text: '$itemCount elementos'),
-            _statusChip(context,
-                icon: hasPendingChanges
-                    ? Icons.edit_note_rounded
-                    : Icons.task_alt_rounded,
-                text: hasPendingChanges
-                    ? 'Cambios sin publicar'
-                    : 'Sin cambios pendientes',
-                tone:
-                    hasPendingChanges ? _ChipTone.warning : _ChipTone.success),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Gestiona carga, validación, publicación y rollback del catálogo efectivo.',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-                fontWeight: FontWeight.w500,
-              ),
-        ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            SizedBox(
-              width: 148,
-              child: DropdownButtonFormField<String>(
-                initialValue: projectOptions.contains(selectedProject)
-                    ? selectedProject
-                    : null,
-                isExpanded: true,
-                decoration:
-                    const InputDecoration(labelText: 'Proyecto', isDense: true),
-                items: projectOptions
-                    .map((id) => DropdownMenuItem(value: id, child: Text(id)))
-                    .toList(),
-                onChanged: isBusy
-                    ? null
-                    : (value) {
-                        if (value != null && value.isNotEmpty) {
-                          onProjectSelected(value);
-                        }
-                      },
-              ),
-            ),
-            FilledButton.icon(
-              onPressed: isBusy ? null : onRefresh,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Actualizar'),
-            ),
-            OutlinedButton.icon(
-              onPressed: isBusy ? null : () => onValidate(),
-              icon: const Icon(Icons.rule),
-              label: const Text('Validar'),
-            ),
-            FilledButton.icon(
-              onPressed: isBusy ? null : () => onPublish(),
-              icon: const Icon(Icons.publish),
-              label: const Text('Publicar'),
-            ),
-            OutlinedButton.icon(
-              onPressed: isBusy ? null : () => onRollback(),
-              icon: const Icon(Icons.restore),
-              label: const Text('Rollback'),
-            ),
-          ],
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 1040;
+            final summary = Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text(
+                  'Última sincronización: $lastLoaded',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(
+                  '• $itemCount elementos',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                Text(
+                  '• Estado: $publishedState',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                ),
+                _statusChip(
+                  context,
+                  icon: changedIcon,
+                  text: changedText,
+                  customBackground: changedColor,
+                  customBorder: changedBorder,
+                ),
+                PopupMenuButton<String>(
+                  tooltip: 'Información avanzada',
+                  icon: const Icon(Icons.info_outline_rounded, size: 20),
+                  itemBuilder: (_) => [
+                    PopupMenuItem<String>(
+                      enabled: false,
+                      child: Text('Versión: ${versionId ?? 'n/d'}'),
+                    ),
+                    PopupMenuItem<String>(
+                      enabled: false,
+                      child: Text('Proyecto: $selectedProject'),
+                    ),
+                    PopupMenuItem<String>(
+                      enabled: false,
+                      child: Text('Estado técnico: $publicationStatus'),
+                    ),
+                    PopupMenuItem<String>(
+                      enabled: false,
+                      child: Text('Última carga: $lastLoaded'),
+                    ),
+                  ],
+                ),
+              ],
+            );
+
+            final filterBar = Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                SizedBox(
+                  width: 168,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: projectOptions.contains(selectedProject)
+                        ? selectedProject
+                        : null,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Proyecto',
+                      isDense: true,
+                    ),
+                    items: projectOptions
+                        .map((id) => DropdownMenuItem(value: id, child: Text(id)))
+                        .toList(),
+                    onChanged: isBusy
+                        ? null
+                        : (value) {
+                            if (value != null && value.isNotEmpty) {
+                              onProjectSelected(value);
+                            }
+                          },
+                  ),
+                ),
+                SegmentedButton<bool>(
+                  segments: const [
+                    ButtonSegment<bool>(value: false, label: Text('Modo Ver')),
+                    ButtonSegment<bool>(value: true, label: Text('Modo Editar')),
+                  ],
+                  selected: {isEditMode},
+                  onSelectionChanged:
+                      isBusy ? null : (set) => onEditModeChanged(set.first),
+                ),
+              ],
+            );
+
+            final actionsBar = Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: isBusy ? null : onRefresh,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Actualizar'),
+                ),
+                FilledButton.icon(
+                  onPressed: isBusy ? null : () => onValidate(),
+                  icon: const Icon(Icons.rule),
+                  label: const Text('Validar'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: (isBusy || !isEditMode) ? null : () => onPublish(),
+                  icon: const Icon(Icons.publish),
+                  label: const Text('Publicar'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: (isBusy || !isEditMode) ? null : () => onRollback(),
+                  icon: const Icon(Icons.restore),
+                  label: const Text('Rollback'),
+                ),
+              ],
+            );
+
+            if (compact) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  summary,
+                  const SizedBox(height: 10),
+                  filterBar,
+                  const SizedBox(height: 10),
+                  actionsBar,
+                ],
+              );
+            }
+
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: summary),
+                    const SizedBox(width: 12),
+                    actionsBar,
+                  ],
+                ),
+                const SizedBox(height: 10),
+                filterBar,
+              ],
+            );
+          },
         ),
       ],
     );
@@ -2208,30 +2407,12 @@ class CatalogsHeader extends StatelessWidget {
   Widget _statusChip(BuildContext context,
       {required IconData icon,
       required String text,
-      _ChipTone tone = _ChipTone.neutral}) {
+      Color? customBackground,
+      Color? customBorder}) {
     final colors = Theme.of(context).colorScheme;
-    final (bg, border, fg) = switch (tone) {
-      _ChipTone.neutral => (
-          colors.surfaceContainerHighest,
-          colors.outlineVariant,
-          colors.onSurface,
-        ),
-      _ChipTone.success => (
-          Colors.green.withValues(alpha: 0.14),
-          Colors.green.withValues(alpha: 0.45),
-          Colors.green.shade800,
-        ),
-      _ChipTone.warning => (
-          Colors.amber.withValues(alpha: 0.20),
-          Colors.amber.withValues(alpha: 0.55),
-          Colors.amber.shade900,
-        ),
-      _ChipTone.error => (
-          Colors.red.withValues(alpha: 0.14),
-          Colors.red.withValues(alpha: 0.45),
-          Colors.red.shade800,
-        ),
-    };
+    final bg = customBackground ?? colors.surfaceContainerHighest;
+    final border = customBorder ?? colors.outlineVariant;
+    final fg = _readableForeground(bg);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2265,31 +2446,6 @@ class CatalogsHeader extends StatelessWidget {
       _ => 'No definido',
     };
   }
-
-  IconData _statusIcon(String status) {
-    return switch (status.trim().toLowerCase()) {
-      'published' => Icons.verified_rounded,
-      'draft' => Icons.edit_document,
-      'warning' => Icons.warning_amber_rounded,
-      _ => Icons.help_outline_rounded,
-    };
-  }
-
-  _ChipTone _statusTone(String status) {
-    return switch (status.trim().toLowerCase()) {
-      'published' => _ChipTone.success,
-      'draft' => _ChipTone.warning,
-      'warning' => _ChipTone.warning,
-      _ => _ChipTone.neutral,
-    };
-  }
-}
-
-enum _ChipTone {
-  neutral,
-  success,
-  warning,
-  error,
 }
 
 class CatalogsTabBar extends StatelessWidget {
@@ -2306,17 +2462,50 @@ class CatalogsTabBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return SegmentedButton<CatalogTab>(
-      segments: CatalogTab.values
-          .map(
-            (tab) => ButtonSegment<CatalogTab>(
-              value: tab,
-              label: Text('${tab.label} (${counts[tab] ?? 0})'),
+    final colors = Theme.of(context).colorScheme;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: CatalogTab.values.map((tab) {
+          final selected = tab == selectedTab;
+          return Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: ChoiceChip(
+              selected: selected,
+              shape: StadiumBorder(
+                side: BorderSide(color: colors.outlineVariant),
+              ),
+              selectedColor: colors.primaryContainer,
+              backgroundColor: colors.surface,
+              onSelected: (_) => onTabChanged(tab),
+              label: RichText(
+                text: TextSpan(
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: selected
+                            ? _readableForeground(colors.primaryContainer)
+                            : colors.onSurface,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                      ),
+                  children: [
+                    TextSpan(text: tab.label),
+                    TextSpan(
+                      text: ' (${counts[tab] ?? 0})',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: selected
+                                ? _readableForeground(
+                                        colors.primaryContainer)
+                                    .withValues(alpha: 0.78)
+                                : colors.onSurfaceVariant,
+                            fontWeight: FontWeight.w500,
+                          ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          )
-          .toList(),
-      selected: {selectedTab},
-      onSelectionChanged: (set) => onTabChanged(set.first),
+          );
+        }).toList(),
+      ),
     );
   }
 }
@@ -2325,6 +2514,7 @@ class CatalogsToolbar extends StatelessWidget {
   final CatalogTab tab;
   final CatalogTabUiState tabUiState;
   final bool isBusy;
+  final bool isEditMode;
   final int visibleCount;
   final int totalCount;
   final bool hasActiveFilters;
@@ -2350,6 +2540,7 @@ class CatalogsToolbar extends StatelessWidget {
     required this.tab,
     required this.tabUiState,
     required this.isBusy,
+    required this.isEditMode,
     required this.visibleCount,
     required this.totalCount,
     required this.hasActiveFilters,
@@ -2442,6 +2633,22 @@ class CatalogsToolbar extends StatelessWidget {
               FilterChip(
                 label: const Text('Modo ordenar'),
                 selected: tabUiState.reorderMode,
+                backgroundColor:
+                    Theme.of(context).colorScheme.surfaceContainerHigh,
+                selectedColor: Theme.of(context).colorScheme.primaryContainer,
+                checkmarkColor:
+                    Theme.of(context).colorScheme.onPrimaryContainer,
+                labelStyle: TextStyle(
+                  color: tabUiState.reorderMode
+                      ? _readableForeground(
+                          Theme.of(context).colorScheme.primaryContainer)
+                      : _readableForeground(
+                          Theme.of(context).colorScheme.surfaceContainerHigh),
+                  fontWeight: FontWeight.w600,
+                ),
+                side: BorderSide(
+                  color: Theme.of(context).colorScheme.outlineVariant,
+                ),
                 onSelected: isBusy ? null : (_) => onToggleReorder!(),
               ),
             if (tab == CatalogTab.subcategories || tab == CatalogTab.purposes)
@@ -2522,7 +2729,7 @@ class CatalogsToolbar extends StatelessWidget {
           runSpacing: 8,
           children: [
             FilledButton.icon(
-              onPressed: isBusy ? null : onAdd,
+              onPressed: (isBusy || !isEditMode) ? null : onAdd,
               icon: const Icon(Icons.add),
               label: Text('Agregar ${tab.entityLabel}'),
             ),
@@ -2577,6 +2784,7 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
   final Future<void> Function(
       String activityId, String topicId, bool currentlySelected) onToggleTopic;
   final VoidCallback onAddRelation;
+  final bool isEditMode;
   final bool isBusy;
 
   const ActivityTopicRelationsEditor({
@@ -2591,13 +2799,16 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
     required this.onToggleSuggestedOnly,
     required this.onToggleTopic,
     required this.onAddRelation,
+    required this.isEditMode,
     required this.isBusy,
   });
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
     final q = query.trim().toLowerCase();
     final filteredActivities = activities.where((entry) {
+      if (showSuggestedOnly && !entry.isActive) return false;
       if (q.isEmpty) return true;
       return entry.id.toLowerCase().contains(q) ||
           entry.name.toLowerCase().contains(q);
@@ -2629,24 +2840,44 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
               itemBuilder: (context, index) {
                 final item = filteredActivities[index];
                 final selected = item.id == selectedActivity?.id;
+                final selectedColor =
+                    Theme.of(context).colorScheme.primaryContainer;
+                final selectedForeground = _readableForeground(selectedColor);
                 return ListTile(
                   selected: selected,
-                  selectedTileColor:
-                      Theme.of(context).colorScheme.primaryContainer,
+                  selectedTileColor: selectedColor,
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  title: Text(item.name),
-                  subtitle: Text(item.id),
+                  title: Text(
+                    item.name,
+                    style: TextStyle(
+                      color: selected
+                          ? selectedForeground
+                          : Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                  subtitle: Text(
+                    item.id,
+                    style: TextStyle(
+                      color: selected
+                          ? selectedForeground.withValues(alpha: 0.88)
+                          : Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
                   trailing: item.isActive
                       ? Icon(
                           Icons.check_circle,
-                          color: Theme.of(context).colorScheme.primary,
+                          color: selected
+                              ? selectedForeground
+                              : Theme.of(context).colorScheme.primary,
                           size: 18,
                         )
                       : Icon(
                           Icons.pause_circle,
-                          color: Theme.of(context).colorScheme.error,
+                          color: selected
+                              ? selectedForeground
+                              : Theme.of(context).colorScheme.error,
                           size: 18,
                         ),
                   onTap: () => onSelectActivity(item.id),
@@ -2687,12 +2918,26 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
                                   ? 'Solo activos'
                                   : 'Todos los temas'),
                               selected: showSuggestedOnly,
+                              backgroundColor: colors.surfaceContainerHigh,
+                              selectedColor: colors.primaryContainer,
+                              checkmarkColor: colors.onPrimaryContainer,
+                              labelStyle: TextStyle(
+                                color: showSuggestedOnly
+                                    ? _readableForeground(
+                                        colors.primaryContainer)
+                                    : _readableForeground(
+                                        colors.surfaceContainerHigh),
+                                fontWeight: FontWeight.w600,
+                              ),
+                              side: BorderSide(color: colors.outlineVariant),
                               onSelected: (value) =>
                                   onToggleSuggestedOnly(value),
                             ),
                             const SizedBox(width: 8),
                             OutlinedButton.icon(
-                              onPressed: isBusy ? null : onAddRelation,
+                              onPressed: (isBusy || !isEditMode)
+                                  ? null
+                                  : onAddRelation,
                               icon: const Icon(Icons.add_link),
                               label: const Text('Agregar relación'),
                             ),
@@ -2719,13 +2964,28 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
                                 return FilterChip(
                                   selected: selected,
                                   label: Text('${topic.name} (${topic.id})'),
-                                  onSelected:
-                                      (!selectedActivity.isActive || isBusy)
-                                          ? null
-                                          : (_) => onToggleTopic(
-                                              selectedActivity.id,
-                                              topic.id,
-                                              selected),
+                                  backgroundColor: colors.surfaceContainerHigh,
+                                  disabledColor: colors.surfaceContainerHighest,
+                                  selectedColor: colors.secondaryContainer,
+                                  checkmarkColor: colors.onSecondaryContainer,
+                                  labelStyle: TextStyle(
+                                    color: selected
+                                        ? _readableForeground(
+                                            colors.secondaryContainer)
+                                        : _readableForeground(
+                                            colors.surfaceContainerHigh),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                  side:
+                                      BorderSide(color: colors.outlineVariant),
+                                  onSelected: (!selectedActivity.isActive ||
+                                          isBusy ||
+                                          !isEditMode)
+                                      ? null
+                                      : (_) => onToggleTopic(
+                                          selectedActivity.id,
+                                          topic.id,
+                                          selected),
                                 );
                               }).toList(),
                             ),
@@ -2742,6 +3002,7 @@ class ActivityTopicRelationsEditor extends StatelessWidget {
 }
 
 class _RowActionsMenu extends StatelessWidget {
+  final bool enabled;
   final bool isActive;
   final VoidCallback onEdit;
   final VoidCallback onDuplicate;
@@ -2749,6 +3010,7 @@ class _RowActionsMenu extends StatelessWidget {
   final VoidCallback onDelete;
 
   const _RowActionsMenu({
+    required this.enabled,
     required this.isActive,
     required this.onEdit,
     required this.onDuplicate,
@@ -2759,7 +3021,8 @@ class _RowActionsMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      tooltip: 'Más acciones',
+      enabled: enabled,
+      tooltip: enabled ? 'Más acciones' : 'Activa Modo Editar',
       onSelected: (value) {
         switch (value) {
           case 'edit':

@@ -10,15 +10,7 @@ class BackendApiClient {
   /// Returns the backend base URL from dart-define SAO_BACKEND_URL.
   /// Throws if not configured to fail fast with a clear message.
   String get _baseUrl {
-    final url = AppDataMode.backendBaseUrl.trim();
-    if (url.isEmpty) {
-      throw StateError(
-        'SAO_BACKEND_URL no está configurado. '
-        'Ejecuta con --dart-define=SAO_BACKEND_URL=https://... '
-        'o define la variable de entorno.',
-      );
-    }
-    return url;
+    return AppDataMode.requireRealBackendUrl();
   }
 
   String _resolveAccessToken() {
@@ -42,6 +34,7 @@ class BackendApiClient {
       final request = switch (method) {
         'GET' => await client.getUrl(uri),
         'POST' => await client.postUrl(uri),
+        'PUT' => await client.putUrl(uri),
         'PATCH' => await client.patchUrl(uri),
         'DELETE' => await client.deleteUrl(uri),
         _ => throw StateError('Unsupported method: $method'),
@@ -107,6 +100,10 @@ class BackendApiClient {
 
   Future<dynamic> patchJson(String path, Map<String, dynamic> payload) async {
     return _sendJson('PATCH', path, payload: payload);
+  }
+
+  Future<dynamic> putJson(String path, Map<String, dynamic> payload) async {
+    return _sendJson('PUT', path, payload: payload);
   }
 
   Future<dynamic> deleteJson(String path) async {

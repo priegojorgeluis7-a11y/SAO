@@ -1,8 +1,16 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../data/catalog/activity_status.dart';
+import '../../data/database/app_database.dart' as db;
+import '../../core/config/data_mode.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
 import '../../data/repositories/activity_repository.dart';
+import '../../data/repositories/catalog_repository.dart';
 import '../../ui/sao_ui.dart';
 import '../../ui/widgets/sao_validation_search_bar.dart';
 import 'widgets/activity_queue_panel.dart';
@@ -11,13 +19,20 @@ import 'widgets/evidence_gallery_panel_pro.dart';
 import 'widgets/board_shortcuts.dart';
 
 class ValidationPageNewDesign extends ConsumerStatefulWidget {
-  const ValidationPageNewDesign({super.key});
+  final String? initialActivityId;
+
+  const ValidationPageNewDesign({super.key, this.initialActivityId});
 
   @override
   ConsumerState<ValidationPageNewDesign> createState() => _ValidationPageNewDesignState();
 }
 
-class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesign> {
+class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesign>
+    with SingleTickerProviderStateMixin {
+  static const _kDismissedStorageKey = 'sao_validation_dismissed_ids_v1';
+  final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  String _dismissedProjectScope = '';
+
   ActivityWithDetails? _selectedActivity;
   List<ActivityWithDetails> _visibleActivities = const [];
   int _selectedEvidenceIndex = 0;
@@ -25,29 +40,197 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
   String _queueTab = 'PENDING';
   bool _filterPending = false;
   bool _filterRejected = false;
-  bool _filterGps = false;
   bool _filterChanges = false;
+  bool _filterOnlyConflicts = false;   // "Solo conflictos" quick-switch
   String? _selectedRejectReasonCode;
   late TextEditingController _reviewCommentsController;
   List<ActivityTimelineEntry> _timelineEntries = const [];
   bool _timelineLoading = false;
   String? _timelineError;
 
+  // Filtros avanzados
+  String? _filterFront;
+  DateTime? _filterDateFrom;
+  DateTime? _filterDateTo;
+
+  // Bulk selection
+  final Set<String> _bulkSelectedIds = {};
+  final Set<String> _dismissedActivityIds = {};
+  bool _autoSelectDone = false;
+
+  // ── Panel animations ────────────────────────────────────────────────────
+  late AnimationController _panelAnim;
+  late Animation<Offset> _slideB;      // columna B: desplazamiento
+  late Animation<Offset> _slideC;      // columna C: empieza 80ms después
+  late Animation<double>  _fadePanel;  // fade del contenedor
+  late Animation<double>  _fadeContent;// fade del contenido (cascada)
+  late Animation<double>  _fadeScrim;  // scrim sobre la cola
+
+  static const _kOpen  = Duration(milliseconds: 280);
+  static const _kClose = Duration(milliseconds: 180);
+
+  // Auto-refresh
+  static const _autoRefreshInterval = Duration(hours: 4);
+  Timer? _autoRefreshTimer;
+  int _secondsUntilRefresh = _autoRefreshInterval.inSeconds;
+  Timer? _countdownTimer;
+
   @override
   void initState() {
     super.initState();
     _reviewCommentsController = TextEditingController();
+    final initialProjectId = ref.read(activeProjectIdProvider).trim().toUpperCase();
+    ref.read(operationsProjectFilterProvider.notifier).state = initialProjectId;
+    _dismissedProjectScope = initialProjectId;
+
+    _panelAnim = AnimationController(vsync: this, duration: _kOpen);
+    _panelAnim.value = 1.0;
+
+    // B entra desde 6% a la derecha con easeOutCubic
+    _slideB = Tween<Offset>(
+      begin: const Offset(0.06, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _panelAnim,
+      curve: Curves.easeOutCubic,
+    ));
+
+    // C entra desde 10% con un inicio retrasado 10% (cascada)
+    _slideC = Tween<Offset>(
+      begin: const Offset(0.10, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _panelAnim,
+      curve: const Interval(0.10, 1.0, curve: Curves.easeOutCubic),
+    ));
+
+    _fadePanel = CurvedAnimation(
+      parent: _panelAnim,
+      curve: Curves.easeOut,
+    );
+
+    // El contenido empieza a aparecer cuando el contenedor ya avanzó un 35%
+    _fadeContent = CurvedAnimation(
+      parent: _panelAnim,
+      curve: const Interval(0.35, 1.0, curve: Curves.easeOut),
+    );
+
+    _fadeScrim = CurvedAnimation(
+      parent: _panelAnim,
+      curve: Curves.easeOut,
+    );
+
+    _startAutoRefresh();
+  }
+
+  String _dismissedStorageKeyForScope(String projectId) {
+    final scope = projectId.trim().isEmpty ? 'global' : projectId.trim();
+    return '$_kDismissedStorageKey:$scope';
+  }
+
+  Future<void> _handleProjectScopeChanged(String projectId) async {
+    setState(() {
+      _dismissedProjectScope = projectId;
+      _dismissedActivityIds.clear();
+      _bulkSelectedIds.clear();
+      _selectedActivity = null;
+      _selectedEvidenceIndex = 0;
+    });
+  }
+
+  Future<void> _loadDismissedActivityIds() async {
+    // Persisted hidden queue entries disabled to avoid project views appearing empty.
+    return;
+  }
+
+  Future<void> _persistDismissedActivityIds() async {
+    // Persisted hidden queue entries disabled to avoid project views appearing empty.
+    return;
   }
 
   @override
   void dispose() {
+    _panelAnim.dispose();
     _reviewCommentsController.dispose();
+    _autoRefreshTimer?.cancel();
+    _countdownTimer?.cancel();
     super.dispose();
+  }
+
+  // Selecciona actividad y orquesta la animación
+  void _selectActivity(ActivityWithDetails activity) {
+    setState(() {
+      _selectedActivity = activity;
+      _selectedEvidenceIndex = 0;
+    });
+    _loadTimelineForActivity(activity.activity.id);
+    unawaited(_hydrateSelectedActivity(activity));
+  }
+
+  void _deselectActivity() {
+    setState(() => _selectedActivity = null);
+  }
+
+  void _startAutoRefresh() {
+    _autoRefreshTimer?.cancel();
+    _countdownTimer?.cancel();
+    _secondsUntilRefresh = _autoRefreshInterval.inSeconds;
+
+    _autoRefreshTimer = Timer.periodic(_autoRefreshInterval, (_) {
+      if (!mounted) return;
+      ref.invalidate(pendingActivitiesProvider);
+      setState(() => _secondsUntilRefresh = _autoRefreshInterval.inSeconds);
+    });
+
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      setState(() {
+        if (_secondsUntilRefresh > 0) _secondsUntilRefresh--;
+      });
+    });
+  }
+
+  void _manualRefresh() {
+    setState(() {
+      _dismissedActivityIds.clear();
+    });
+    unawaited(_persistDismissedActivityIds());
+    ref.invalidate(pendingActivitiesProvider);
+    _startAutoRefresh();
+  }
+
+  String _formatRefreshCountdown() {
+    final total = _secondsUntilRefresh;
+    final hours = total ~/ 3600;
+    final minutes = (total % 3600) ~/ 60;
+    final seconds = total % 60;
+
+    if (hours > 0) {
+      return '${hours}h ${minutes.toString().padLeft(2, '0')}m';
+    }
+    if (minutes > 0) {
+      return '${minutes}m ${seconds.toString().padLeft(2, '0')}s';
+    }
+    return '${seconds}s';
   }
 
   @override
   Widget build(BuildContext context) {
-    final activitiesAsync = ref.watch(pendingActivitiesProvider);
+    final selectedProjectFilter =
+        ref.watch(operationsProjectFilterProvider).trim().toUpperCase();
+    final availableProjectsAsync = ref.watch(availableProjectsProvider);
+    final projectOptions = _buildProjectOptions(
+      availableProjectsAsync.valueOrNull ?? const <String>[],
+      selectedProjectFilter,
+    );
+
+    final activitiesAsync = ref.watch(pendingActivitiesProvider).whenData(
+      (activities) => activities.toList(growable: false),
+    );
+    final opsSummaryItems = activitiesAsync.maybeWhen(
+      data: (items) => items,
+      orElse: () => const <ActivityWithDetails>[],
+    );
 
     return BoardShortcuts(
       onApprove: () {
@@ -65,7 +248,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
         });
       },
       child: Scaffold(
-        backgroundColor: SaoColors.gray50,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
         body: Column(
           children: [
             // Top bar con nueva busqueda inteligente
@@ -87,17 +270,56 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                   // Header con título
                   Row(
                     children: [
-                      Icon(Icons.verified_rounded, 
+                      Icon(Icons.verified_rounded,
                            color: SaoColors.primary, size: 28),
                       SizedBox(width: 12),
                       Text(
-                        'Validación de Actividades - Nuevo Diseño',
+                        'Validación de Actividades',
                         style: SaoTypography.pageTitle.copyWith(
                           color: SaoColors.primary,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-
+                      Spacer(),
+                      // Auto-refresh indicator
+                      Tooltip(
+                        message: 'Actualización automática cada 4 h',
+                        child: InkWell(
+                          onTap: _manualRefresh,
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: SaoColors.gray100,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: SaoColors.border),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(
+                                    value: _secondsUntilRefresh / _autoRefreshInterval.inSeconds,
+                                    strokeWidth: 2,
+                                    color: SaoColors.primary,
+                                    backgroundColor: SaoColors.gray300,
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  _formatRefreshCountdown(),
+                                  style: SaoTypography.caption.copyWith(
+                                    color: SaoColors.gray600,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                   SizedBox(height: 16),
@@ -124,182 +346,192 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                       },
                       orElse: () => null,
                     ),
-                    projectName: ref.watch(activeProjectIdProvider),
-                    onFilterPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Filtros avanzados - Próximamente'),
-                          backgroundColor: SaoColors.info,
-                        ),
-                      );
+                    projectName: selectedProjectFilter,
+                    projectOptions: projectOptions,
+                    onProjectChanged: (projectId) {
+                      unawaited(_setProjectFilter(projectId));
                     },
+                    allProjectsLabel: 'Todos',
+                    onFilterPressed: () => _showAdvancedFilters(),
                 ),
-                SizedBox(height: 12),
-                Wrap(
-                  spacing: SaoSpacing.sm,
-                  runSpacing: SaoSpacing.sm,
-                  children: [
-                    _buildFilterChip(
-                      label: 'Pendiente',
-                      selected: _filterPending,
-                      onSelected: (v) => setState(() => _filterPending = v),
-                    ),
-                    _buildFilterChip(
-                      label: 'Rechazado',
-                      selected: _filterRejected,
-                      onSelected: (v) => setState(() => _filterRejected = v),
-                    ),
-                    _buildFilterChip(
-                      label: 'GPS Critico',
-                      selected: _filterGps,
-                      onSelected: (v) => setState(() => _filterGps = v),
-                    ),
-                    _buildFilterChip(
-                      label: 'Con Cambios',
-                      selected: _filterChanges,
-                      onSelected: (v) => setState(() => _filterChanges = v),
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 10),
+                _buildConflictSummaryStrip(),
+                const SizedBox(height: 8),
+                _OperationsHealthStrip(items: opsSummaryItems),
               ],
             ),
           ),
           
-          // Paneles principales con nuevo diseno
+          // ── Bulk action bar (visible when items are selected) ──
+          if (_bulkSelectedIds.isNotEmpty)
+            _BulkActionBar(
+              selectedCount: _bulkSelectedIds.length,
+              visibleActivities: _visibleActivities,
+              bulkSelectedIds: _bulkSelectedIds,
+              onClear: () => setState(() => _bulkSelectedIds.clear()),
+              onApproveAll: _bulkApproveSelected,
+              onDeleteAll: _bulkDeleteSelected,
+            ),
+
+          // ── Tres columnas 20 / 45 / 35 ─────────────────────────
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Panel izquierdo: tarjetas inteligentes
-                  SizedBox(
-                    width: 320,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: SaoColors.surface,
-                        borderRadius: BorderRadius.circular(SaoRadii.lg),
-                        border: Border.all(color: SaoColors.primary.withOpacity(0.4), width: 2),
-                        boxShadow: [
-                          BoxShadow(
-                            color: SaoColors.primary.withOpacity(0.08),
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: ActivityQueuePanel(
-                        activitiesAsync: activitiesAsync,
-                        selectedActivity: _selectedActivity,
-                        searchQuery: _searchQuery,
-                        queueTab: _queueTab,
-                        filterPending: _filterPending,
-                        filterRejected: _filterRejected,
-                        filterGps: _filterGps,
-                        filterChanges: _filterChanges,
-                        onQueueTabChanged: (tab) {
-                          setState(() => _queueTab = tab);
-                        },
-                        onVisibleActivitiesChanged: (activities) {
-                          _visibleActivities = activities;
-                        },
-                        onSelectActivity: (activity) {
-                          setState(() {
-                            _selectedActivity = activity;
-                            _selectedEvidenceIndex = 0;
-                          });
-                          _loadTimelineForActivity(activity.activity.id);
-                        },
-                      ),
+                  // ── A. Cola compacta (20%) + scrim ───────────
+                  Expanded(
+                    flex: 20,
+                    child: Stack(
+                      children: [
+                        ActivityQueuePanel(
+                      activitiesAsync: activitiesAsync,
+                      selectedActivity: _selectedActivity,
+                      searchQuery: _searchQuery,
+                      queueTab: _queueTab,
+                      filterPending: _filterPending,
+                      filterRejected: _filterRejected,
+                      filterChanges: _filterChanges,
+                      filterOnlyConflicts: _filterOnlyConflicts,
+                      filterFront: _filterFront,
+                      filterDateFrom: _filterDateFrom,
+                      filterDateTo: _filterDateTo,
+                      bulkSelectedIds: _bulkSelectedIds,
+                      onBulkToggle: (id) => setState(() {
+                        if (_bulkSelectedIds.contains(id)) {
+                          _bulkSelectedIds.remove(id);
+                        } else {
+                          _bulkSelectedIds.add(id);
+                        }
+                      }),
+                      onBulkSelectAll: () => setState(() {
+                        _bulkSelectedIds.addAll(
+                            _visibleActivities.map((a) => a.activity.id));
+                      }),
+                      onBulkClear: () =>
+                          setState(() => _bulkSelectedIds.clear()),
+                      onQueueTabChanged: (tab) =>
+                          setState(() => _queueTab = tab),
+                      onVisibleActivitiesChanged: (activities) {
+                        WidgetsBinding.instance.addPostFrameCallback((_) {
+                          if (!mounted) return;
+                          setState(() => _visibleActivities = activities);
+                          final targetId = widget.initialActivityId;
+                          if (targetId != null && !_autoSelectDone && activities.isNotEmpty) {
+                            final match = activities.cast<ActivityWithDetails?>().firstWhere(
+                              (a) => a!.activity.id == targetId,
+                              orElse: () => null,
+                            );
+                            if (match != null) {
+                              _autoSelectDone = true;
+                              _selectActivity(match);
+                            }
+                          }
+                        });
+                      },
+                      onSelectActivity: _selectActivity,
+                    ),
+                  ],
                     ),
                   ),
-                  SizedBox(width: 16),
-                  
-                  // Panel central: verdad tecnica interactiva
+                  const SizedBox(width: 10),
+
+                  // ── B. Diff / Detalles (45%) — slide + fade ───
                   Expanded(
-                    flex: 3,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: SaoColors.surface,
-                        borderRadius: BorderRadius.circular(SaoRadii.lg),
-                        border: Border.all(
-                          color: SaoColors.info.withOpacity(0.4),
-                          width: 2,
+                    flex: 45,
+                    child: ClipRect(
+                      child: SlideTransition(
+                        position: _slideB,
+                        child: FadeTransition(
+                          opacity: _fadePanel,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius:
+                                  BorderRadius.circular(SaoRadii.md),
+                              border: Border.all(color: Theme.of(context).colorScheme.outline),
+                            ),
+                            // Contenido con fade en cascada
+                            child: FadeTransition(
+                              opacity: _fadeContent,
+                              child: ActivityDetailsPanelPro(
+                                activity: _selectedActivity,
+                                timelineEntries: _timelineEntries,
+                                timelineLoading: _timelineLoading,
+                                timelineError: _timelineError,
+                                onFieldChanged: (field, value) async {
+                                  await _handleQuickFieldChange(field, value);
+                                },
+                                onAcceptChange: (field) {
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(SnackBar(
+                                    content:
+                                        Text('Cambio aceptado: $field'),
+                                    backgroundColor: SaoColors.success,
+                                  ));
+                                },
+                                onRevertChange: (field) {
+                                  ScaffoldMessenger.of(context)
+                                      .showSnackBar(SnackBar(
+                                    content:
+                                        Text('Cambio revertido: $field'),
+                                    backgroundColor: SaoColors.warning,
+                                  ));
+                                },
+                                onCatalogAdd: (field, capturedValue) async {
+                                  await _handleCatalogAdd(field, capturedValue);
+                                },
+                                onCatalogLink: (field, capturedValue, selectedValue) async {
+                                  await _handleCatalogLink(field, capturedValue, selectedValue);
+                                },
+                                onCatalogCorrection: (field, capturedValue) async {
+                                  await _handleCatalogCorrection(field, capturedValue);
+                                },
+                              ),
+                            ),
+                          ),
                         ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: SaoColors.info.withOpacity(0.08),
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: ActivityDetailsPanelPro(
-                        activity: _selectedActivity,
-                        timelineEntries: _timelineEntries,
-                        timelineLoading: _timelineLoading,
-                        timelineError: _timelineError,
-                        onFieldChanged: (field, value) {
-                          print('Campo $field cambiado a: $value');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Campo "$field" modificado'),
-                              duration: Duration(seconds: 1),
-                              backgroundColor: SaoColors.info,
-                            ),
-                          );
-                        },
-                        onAcceptChange: (field) {
-                          print('Cambio aceptado en campo: $field');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Cambio aceptado: $field'),
-                              backgroundColor: SaoColors.success,
-                            ),
-                          );
-                        },
-                        onRevertChange: (field) {
-                          print('Cambio revertido en campo: $field');
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Cambio revertido: $field'),
-                              backgroundColor: SaoColors.warning,
-                            ),
-                          );
-                        },
                       ),
                     ),
                   ),
-                  SizedBox(width: 16),
-                  
-                  // Panel derecho: visor profesional de evidencias
+                  const SizedBox(width: 10),
+
+                  // ── C. Evidencias + Mapa (35%) — slide retrasado (cascada)
                   Expanded(
-                    flex: 2,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: SaoColors.surface,
-                        borderRadius: BorderRadius.circular(SaoRadii.lg),
-                        border: Border.all(color: SaoColors.success.withOpacity(0.4), width: 2),
-                        boxShadow: [
-                          BoxShadow(
-                            color: SaoColors.success.withOpacity(0.08),
-                            blurRadius: 12,
-                            offset: Offset(0, 4),
+                    flex: 35,
+                    child: ClipRect(
+                      child: SlideTransition(
+                        position: _slideC,
+                        child: FadeTransition(
+                          opacity: _fadePanel,
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: Theme.of(context).colorScheme.surface,
+                              borderRadius:
+                                  BorderRadius.circular(SaoRadii.md),
+                              border:
+                                  Border.all(color: Theme.of(context).colorScheme.outline),
+                            ),
+                            child: FadeTransition(
+                              opacity: _fadeContent,
+                              child: EvidenceGalleryPanelPro(
+                                activity: _selectedActivity,
+                                selectedIndex: _selectedEvidenceIndex,
+                                onSelectEvidence: (index) => setState(
+                                    () =>
+                                        _selectedEvidenceIndex = index),
+                                onCaptionChanged:
+                                    (evidenceId, caption) =>
+                                        _saveEvidenceCaption(
+                                            evidenceId, caption),
+                              ),
+                            ),
                           ),
-                        ],
-                      ),
-                      child: EvidenceGalleryPanelPro(
-                        activity: _selectedActivity,
-                        selectedIndex: _selectedEvidenceIndex,
-                        onSelectEvidence: (index) {
-                          setState(() => _selectedEvidenceIndex = index);
-                        },
-                        onCaptionChanged: (evidenceId, caption) {
-                          _saveEvidenceCaption(evidenceId, caption);
-                        },
+                        ),
                       ),
                     ),
                   ),
-                  SizedBox(width: 16),
                 ],
               ),
             ),
@@ -308,22 +540,36 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
           // Footer con acciones rapidas
           if (_selectedActivity != null)
             Container(
-              padding: EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(
+                  horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
-                border: Border(
+                border: const Border(
                   top: BorderSide(color: SaoColors.border),
                 ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.keyboard_rounded, color: SaoColors.gray600),
-                  SizedBox(width: 8),
+                  const Icon(Icons.keyboard_rounded,
+                      color: SaoColors.gray400, size: 14),
+                  const SizedBox(width: 6),
                   Text(
-                    'Atajos: Enter = Aprobar | R = Rechazar | Esc = Siguiente',
-                    style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
+                    'Enter = Validar  ·  R = Rechazar  ·  Del = Eliminar  ·  Esc = Limpiar selección  ·  A/C = resolver cambio de catálogo',
+                    style: SaoTypography.caption
+                        .copyWith(color: SaoColors.gray400),
                   ),
                   Spacer(),
+                  ElevatedButton.icon(
+                    onPressed: _selectedActivity == null ? null : () => _deleteSelectedActivity(),
+                    icon: Icon(Icons.delete_outline_rounded),
+                    label: Text('Eliminar'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: SaoColors.gray700,
+                      foregroundColor: SaoColors.onPrimary,
+                      disabledBackgroundColor: SaoColors.gray300,
+                    ),
+                  ),
+                  SizedBox(width: 12),
                   ElevatedButton.icon(
                     onPressed: _selectedActivity == null ? null : () => _showRejectDialog(),
                     icon: Icon(Icons.cancel_rounded),
@@ -348,7 +594,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     label: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text('Aprobar'),
+                        Text('Validar y enviar'),
                         SizedBox(width: SaoSpacing.xs),
                         _buildShortcutPill('Enter'),
                       ],
@@ -365,6 +611,125 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
         ],
       ),
       ),
+    );
+  }
+
+  Future<void> _showAdvancedFilters() async {
+    // Extraer frentes únicos de las actividades cargadas
+    final activitiesSnapshot = ref.read(pendingActivitiesProvider).value ?? const [];
+    final fronts = activitiesSnapshot
+        .map((a) => a.front?.name ?? 'Sin asignar')
+        .toSet()
+        .toList()
+      ..sort();
+
+    // Valores temporales dentro del diálogo
+    String? tempFront = _filterFront;
+    DateTime? tempFrom = _filterDateFrom;
+    DateTime? tempTo = _filterDateTo;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setLocal) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16)),
+            title: Row(
+              children: [
+                Icon(Icons.filter_alt_rounded, color: SaoColors.primary),
+                const SizedBox(width: 10),
+                const Text('Filtros avanzados'),
+              ],
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // --- Frente ---
+                  Text('Frente',
+                      style: SaoTypography.caption
+                          .copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    value: tempFront,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      hintText: 'Todos los frentes',
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8)),
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 10),
+                    ),
+                    items: [
+                      const DropdownMenuItem<String>(
+                          value: null, child: Text('Todos los frentes')),
+                      ...fronts.map((f) =>
+                          DropdownMenuItem(value: f, child: Text(f))),
+                    ],
+                    onChanged: (v) => setLocal(() => tempFront = v),
+                  ),
+                  const SizedBox(height: 20),
+                  // --- Fecha desde ---
+                  Text('Fecha desde',
+                      style: SaoTypography.caption
+                          .copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  _DatePickerField(
+                    value: tempFrom,
+                    hint: 'Sin límite inferior',
+                    onPicked: (d) => setLocal(() => tempFrom = d),
+                    onCleared: () => setLocal(() => tempFrom = null),
+                  ),
+                  const SizedBox(height: 16),
+                  // --- Fecha hasta ---
+                  Text('Fecha hasta',
+                      style: SaoTypography.caption
+                          .copyWith(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  _DatePickerField(
+                    value: tempTo,
+                    hint: 'Sin límite superior',
+                    onPicked: (d) => setLocal(() => tempTo = d),
+                    onCleared: () => setLocal(() => tempTo = null),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () {
+                  setState(() {
+                    _filterFront = null;
+                    _filterDateFrom = null;
+                    _filterDateTo = null;
+                  });
+                  Navigator.pop(ctx);
+                },
+                child: Text('Limpiar',
+                    style: TextStyle(color: SaoColors.gray600)),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  setState(() {
+                    _filterFront = tempFront;
+                    _filterDateFrom = tempFrom;
+                    _filterDateTo = tempTo;
+                  });
+                  Navigator.pop(ctx);
+                },
+                child: const Text('Aplicar'),
+              ),
+            ],
+          );
+        });
+      },
     );
   }
 
@@ -395,6 +760,20 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     }
   }
 
+  Future<void> _hydrateSelectedActivity(ActivityWithDetails summary) async {
+    final repo = ref.read(activityRepositoryProvider);
+    try {
+      final hydrated = await repo.hydrateReviewActivity(summary);
+      if (!mounted || hydrated == null) return;
+      if (_selectedActivity?.activity.id != summary.activity.id) return;
+      setState(() {
+        _selectedActivity = hydrated;
+      });
+    } catch (_) {
+      // Keep summary data if backend detail hydration fails.
+    }
+  }
+
   Widget _buildShortcutPill(String label) {
     return Container(
       padding: EdgeInsets.symmetric(
@@ -412,6 +791,86 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
           color: SaoColors.onPrimary,
           fontWeight: FontWeight.w600,
         ),
+      ),
+    );
+  }
+
+  bool _isConflict(ActivityWithDetails activity) {
+    return activity.flags.gpsMismatch ||
+        activity.flags.catalogChanged ||
+        activity.flags.checklistIncomplete;
+  }
+
+  void _jumpToNextConflict() {
+    final conflicts = _visibleActivities.where(_isConflict).toList();
+    if (conflicts.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay conflictos en la vista actual')),
+      );
+      return;
+    }
+
+    if (_selectedActivity == null) {
+      _selectActivity(conflicts.first);
+      return;
+    }
+
+    final currentIndex = conflicts.indexWhere(
+      (a) => a.activity.id == _selectedActivity!.activity.id,
+    );
+    final next = currentIndex == -1 || currentIndex + 1 >= conflicts.length
+        ? conflicts.first
+        : conflicts[currentIndex + 1];
+    _selectActivity(next);
+  }
+
+  Widget _buildConflictSummaryStrip() {
+    if (_visibleActivities.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final total = _visibleActivities.length;
+    final conflicts = _visibleActivities.where(_isConflict).length;
+    final healthy = total - conflicts;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: conflicts > 0
+            ? SaoColors.warning.withOpacity(0.08)
+            : SaoColors.success.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: conflicts > 0 ? SaoColors.warning : SaoColors.success,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            conflicts > 0 ? Icons.warning_amber_rounded : Icons.verified_rounded,
+            size: 18,
+            color: conflicts > 0 ? SaoColors.warning : SaoColors.success,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              conflicts > 0
+                  ? 'Hay $conflicts actividades con conflicto en esta vista ($healthy sin conflicto).'
+                  : 'No hay conflictos en la vista actual ($healthy actividades saludables).',
+              style: SaoTypography.caption.copyWith(
+                color: SaoColors.gray700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          if (conflicts > 0)
+            TextButton.icon(
+              onPressed: _jumpToNextConflict,
+              icon: const Icon(Icons.skip_next_rounded, size: 16),
+              label: const Text('Ir al siguiente conflicto'),
+            ),
+        ],
       ),
     );
   }
@@ -457,7 +916,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                 SizedBox(width: SaoSpacing.md),
                 Expanded(
                   child: Text(
-                    'Actividad aprobada correctamente',
+                    'Actividad validada y enviada a Reportes',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -719,6 +1178,323 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     }
   }
 
+  Future<void> _handleQuickFieldChange(String field, String value) async {
+    if (_selectedActivity == null) {
+      return;
+    }
+    if (!_ensureRealBackendAvailable()) {
+      return;
+    }
+
+    final activityId = _selectedActivity!.activity.id;
+    final repo = ref.read(activityRepositoryProvider);
+
+    try {
+      switch (field) {
+        case 'title':
+          await repo.updateActivityFields(activityId, title: value);
+          break;
+        case 'description':
+          await repo.updateActivityFields(activityId, description: value);
+          break;
+        default:
+          break;
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Campo "$field" guardado'),
+          duration: const Duration(seconds: 1),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+      ref.invalidate(pendingActivitiesProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo guardar "$field": $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleCatalogAdd(String field, String capturedValue) async {
+    final activity = _selectedActivity;
+    if (activity == null) return;
+    if (!_ensureRealBackendAvailable()) {
+      return;
+    }
+
+    final value = capturedValue.trim();
+    if (value.isEmpty || value.toLowerCase() == 'sin propósito capturado') {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay valor válido para agregar al catálogo'),
+          backgroundColor: SaoColors.warning,
+        ),
+      );
+      return;
+    }
+
+    final projectId = activity.activity.projectId.trim().isNotEmpty
+        ? activity.activity.projectId
+        : ref.read(activeProjectIdProvider);
+    final catalogRepo = ref.read(catalogRepositoryProvider);
+    final repo = ref.read(activityRepositoryProvider);
+
+    try {
+      await catalogRepo.loadProject(projectId);
+
+      switch (field) {
+        case 'subcategoria':
+          final activityId = await _ensureCatalogActivity(catalogRepo, projectId);
+          await catalogRepo.createSubcategory(
+            id: _buildCatalogEntityId('subcat', value),
+            activityId: activityId,
+            name: value,
+            projectId: projectId,
+          );
+          break;
+        case 'tema':
+          await catalogRepo.createTopic(
+            id: _buildCatalogEntityId('topic', value),
+            name: value,
+            type: 'OPERATIVO',
+            projectId: projectId,
+          );
+          break;
+        case 'proposito':
+          final activityId = await _ensureCatalogActivity(catalogRepo, projectId);
+          await catalogRepo.createPurpose(
+            id: _buildCatalogEntityId('purpose', value),
+            activityId: activityId,
+            name: value,
+            projectId: projectId,
+          );
+          break;
+        case 'municipio':
+          final currentDescription = activity.activity.description ?? '';
+          final mergedDescription =
+              _mergeMunicipalityMarker(currentDescription, value, mode: 'validado');
+          await repo.updateActivityFields(
+            activity.activity.id,
+            description: mergedDescription,
+          );
+          break;
+        default:
+          return;
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('"$value" agregado en flujo de catálogo ($field)'),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+      ref.invalidate(pendingActivitiesProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al agregar en catálogo: $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleCatalogLink(
+    String field,
+    String capturedValue,
+    String selectedValue,
+  ) async {
+    final activity = _selectedActivity;
+    if (activity == null) return;
+    if (!_ensureRealBackendAvailable()) {
+      return;
+    }
+
+    final repo = ref.read(activityRepositoryProvider);
+    try {
+      switch (field) {
+        case 'subcategoria':
+          await repo.updateActivityFields(activity.activity.id, title: selectedValue);
+          break;
+        case 'tema':
+          await repo.updateActivityFields(
+            activity.activity.id,
+            activityTypeCode: selectedValue,
+          );
+          break;
+        case 'proposito':
+          await repo.updateActivityFields(activity.activity.id, description: selectedValue);
+          break;
+        case 'municipio':
+          final currentDescription = activity.activity.description ?? '';
+          final mergedDescription = _mergeMunicipalityMarker(
+            currentDescription,
+            selectedValue,
+            mode: 'vinculado',
+          );
+          await repo.updateActivityFields(
+            activity.activity.id,
+            description: mergedDescription,
+          );
+          break;
+        default:
+          return;
+      }
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Vinculación aplicada: "$capturedValue" -> "$selectedValue"'),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+
+      // Ensure UI reflects persisted backend values after linking.
+      final refreshed = await repo.getActivityById(activity.activity.id);
+      if (!mounted) return;
+      if (refreshed != null && _selectedActivity?.activity.id == activity.activity.id) {
+        setState(() {
+          _selectedActivity = refreshed;
+        });
+      }
+
+      ref.invalidate(pendingActivitiesProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo vincular en catálogo: $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleCatalogCorrection(String field, String capturedValue) async {
+    final activity = _selectedActivity;
+    if (activity == null) return;
+    if (!_ensureRealBackendAvailable()) {
+      return;
+    }
+
+    final repo = ref.read(activityRepositoryProvider);
+    final comment = 'Corrección solicitada en $field: $capturedValue';
+    try {
+      await repo.markNeedsFixStrictBackend(
+        activity.activity.id,
+        comment,
+        'MISSING_INFO',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Solicitud de corrección enviada para $field'),
+          backgroundColor: SaoColors.warning,
+        ),
+      );
+      ref.invalidate(pendingActivitiesProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo solicitar corrección: $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<String> _ensureCatalogActivity(CatalogRepository catalogRepo, String projectId) async {
+    final selected = _selectedActivity;
+    final candidateName =
+        (selected?.activityType?.name ?? selected?.activity.title ?? 'General')
+            .trim();
+    final normalizedName = candidateName.toLowerCase();
+
+    for (final item in catalogRepo.data.activities) {
+      if (item.name.trim().toLowerCase() == normalizedName) {
+        return item.id;
+      }
+    }
+
+    final generatedId = _buildCatalogEntityId('act', candidateName);
+    await catalogRepo.createActivity(
+      id: generatedId,
+      name: candidateName,
+      description: 'Generada desde validación de operaciones',
+      projectId: projectId,
+    );
+    return generatedId;
+  }
+
+  String _buildCatalogEntityId(String prefix, String value) {
+    final source = value
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ñ', 'n');
+    final normalized = source.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
+    final compact = normalized.replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    final suffix = DateTime.now().millisecondsSinceEpoch;
+    final safe = compact.isEmpty ? 'item' : compact;
+    return '${prefix}_${safe}_$suffix';
+  }
+
+  String _mergeMunicipalityMarker(
+    String description,
+    String municipality, {
+    required String mode,
+  }) {
+    final markerPrefix = mode == 'validado'
+        ? 'Municipio validado:'
+        : 'Municipio vinculado:';
+    final cleanMunicipality = municipality.trim();
+
+    final keptLines = description
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .where(
+          (line) =>
+              !line.toLowerCase().startsWith('municipio vinculado:') &&
+              !line.toLowerCase().startsWith('municipio validado:'),
+        )
+        .toList(growable: true);
+
+    if (cleanMunicipality.isNotEmpty) {
+      keptLines.add('$markerPrefix $cleanMunicipality');
+    }
+
+    return keptLines.join('\n').trim();
+  }
+
+  bool _ensureRealBackendAvailable() {
+    if (AppDataMode.backendBaseUrl.trim().isNotEmpty) {
+      return true;
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Este flujo requiere backend real configurado (SAO_BACKEND_URL).'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+    return false;
+  }
+
   /// Carga la siguiente actividad en la cola
   void _loadNextActivity(String processedActivityId) {
     final queue = _visibleActivities;
@@ -740,6 +1516,171 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     });
   }
 
+  /// Aprueba en lote todas las actividades seleccionadas sin conflictos
+  Future<void> _bulkApproveSelected() async {
+    final repo = ref.read(activityRepositoryProvider);
+    final toApprove = _visibleActivities
+        .where((a) =>
+            _bulkSelectedIds.contains(a.activity.id) &&
+            !a.flags.catalogChanged &&
+            !a.flags.checklistIncomplete)
+        .toList();
+
+    if (toApprove.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'No hay actividades sin conflictos en la selección'),
+            backgroundColor: SaoColors.warning,
+          ),
+        );
+      }
+      return;
+    }
+
+    int approved = 0;
+    for (final activity in toApprove) {
+      try {
+        await repo.approveActivity(activity.activity.id, 'usr-admin-001');
+        approved++;
+      } catch (_) {}
+    }
+
+    if (mounted) {
+      setState(() => _bulkSelectedIds.clear());
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$approved actividades validadas'),
+          backgroundColor: SaoColors.success,
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<bool> _confirmDeleteDialog({required int count}) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar actividades'),
+        content: Text(
+          count == 1
+              ? 'Esta acción eliminará la actividad seleccionada. ¿Deseas continuar?'
+              : 'Esta acción eliminará $count actividades seleccionadas. ¿Deseas continuar?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: SaoColors.error),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
+  Future<void> _deleteSelectedActivity() async {
+    if (_selectedActivity == null) return;
+    final shouldDelete = await _confirmDeleteDialog(count: 1);
+    if (!shouldDelete) return;
+
+    final activityId = _selectedActivity!.activity.id;
+    try {
+      await _removeActivityFromQueue(activityId);
+      if (!mounted) return;
+      setState(() {
+        _dismissedActivityIds.add(activityId);
+        _bulkSelectedIds.remove(activityId);
+        _selectedActivity = null;
+        _selectedEvidenceIndex = 0;
+      });
+      unawaited(_persistDismissedActivityIds());
+      ref.invalidate(pendingActivitiesProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Actividad eliminada correctamente'),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al eliminar: $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _bulkDeleteSelected() async {
+    if (_bulkSelectedIds.isEmpty) return;
+    final ids = _bulkSelectedIds.toList(growable: false);
+    final shouldDelete = await _confirmDeleteDialog(count: ids.length);
+    if (!shouldDelete) return;
+
+    // UX first: remove immediately from current view even if backend retries are needed.
+    if (mounted) {
+      setState(() {
+        _dismissedActivityIds.addAll(ids);
+      });
+      unawaited(_persistDismissedActivityIds());
+    }
+
+    var deleted = 0;
+    for (final id in ids) {
+      try {
+        await _removeActivityFromQueue(id);
+        deleted++;
+      } catch (_) {}
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _bulkSelectedIds.clear();
+      if (_selectedActivity != null && ids.contains(_selectedActivity!.activity.id)) {
+        _selectedActivity = null;
+        _selectedEvidenceIndex = 0;
+      }
+    });
+    ref.invalidate(pendingActivitiesProvider);
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          deleted == ids.length
+              ? '$deleted actividades eliminadas'
+              : deleted > 0
+                  ? '$deleted de ${ids.length} eliminadas. El resto se ocultó en esta vista.'
+                  : '${ids.length} actividades ocultadas en esta vista (sin confirmación de servidor).',
+        ),
+        backgroundColor: deleted > 0 ? SaoColors.success : SaoColors.warning,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<void> _removeActivityFromQueue(String activityId) async {
+    final repo = ref.read(activityRepositoryProvider);
+    try {
+      await repo.deleteActivity(activityId);
+      return;
+    } catch (_) {
+      // Fallback operativo: rechazo para sacar de la cola cuando DELETE no aplica.
+      await repo.rejectActivity(
+        activityId,
+        'usr-admin-001',
+        'Eliminada desde validación',
+        'MISSING_INFO',
+      );
+    }
+  }
+
   /// Maneja cuando se arrastra una tarjeta a la zona de revisar
   void _handleDropForReview(ActivityWithDetails activity) {
     setState(() => _selectedActivity = activity);
@@ -757,10 +1698,550 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       ),
     );
   }
+
+  List<String> _buildProjectOptions(List<String> projects, String selectedProjectId) {
+    final normalized = <String>{
+      for (final projectId in projects)
+        if (projectId.trim().isNotEmpty) projectId.trim().toUpperCase(),
+    };
+    if (selectedProjectId.isNotEmpty) {
+      normalized.add(selectedProjectId);
+    }
+    final result = normalized.toList()..sort();
+    return result;
+  }
+
+  Future<void> _setProjectFilter(String projectId) async {
+    final normalizedProjectId = projectId.trim().toUpperCase();
+    final currentProjectId = ref.read(operationsProjectFilterProvider).trim().toUpperCase();
+    if (normalizedProjectId == currentProjectId) return;
+    ref.read(operationsProjectFilterProvider.notifier).state = normalizedProjectId;
+    await _handleProjectScopeChanged(normalizedProjectId);
+  }
 }
 
-// Provider para obtener actividades pendientes
+// ─────────────────────────────────────────────────────────────────────────────
+// "SOLO CONFLICTOS" TOGGLE
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _SoloConflictosSwitch extends StatelessWidget {
+  final bool value;
+  final ValueChanged<bool> onChanged;
+
+  const _SoloConflictosSwitch({required this.value, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => onChanged(!value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        padding: const EdgeInsets.symmetric(
+            horizontal: SaoSpacing.sm, vertical: SaoSpacing.xxs),
+        decoration: BoxDecoration(
+          color: value
+              ? SaoColors.warning.withValues(alpha: 0.12)
+              : SaoColors.gray100,
+          borderRadius: BorderRadius.circular(SaoRadii.full),
+          border: Border.all(
+            color: value ? SaoColors.warning : SaoColors.border,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.warning_amber_rounded,
+              size: 14,
+              color: value ? SaoColors.warning : SaoColors.gray400,
+            ),
+            const SizedBox(width: SaoSpacing.xs),
+            Text(
+              'Solo conflictos',
+              style: SaoTypography.caption.copyWith(
+                color: value ? SaoColors.warning : SaoColors.gray600,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _OperationsHealthStrip extends StatelessWidget {
+  final List<ActivityWithDetails> items;
+  const _OperationsHealthStrip({required this.items});
+
+  int _pending(List<ActivityWithDetails> values) {
+    return values
+        .where(
+          (a) => ActivityStatus.normalize(a.activity.status) ==
+              ActivityStatus.pendingReview,
+        )
+        .length;
+  }
+
+  int _observations(List<ActivityWithDetails> values) {
+    return values
+        .where((a) => a.flags.catalogChanged || a.flags.checklistIncomplete)
+        .length;
+  }
+
+  int _readyToApprove(List<ActivityWithDetails> values) {
+    return values
+        .where((a) => !a.flags.catalogChanged && !a.flags.checklistIncomplete)
+        .length;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final pending = _pending(items);
+    final observations = _observations(items);
+    final readyToApprove = _readyToApprove(items);
+    final withEvidence = items.where((a) => a.evidences.isNotEmpty).length;
+    final withoutConflicts =
+        items.where((a) => !a.flags.catalogChanged && !a.flags.checklistIncomplete).length;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+      decoration: BoxDecoration(
+        color: SaoColors.gray50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: SaoColors.border),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 56,
+            height: 56,
+            child: _OpsMiniPieChart(
+              pending: pending,
+              observations: observations,
+              readyToApprove: readyToApprove,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 6,
+              children: [
+                _OpsSummaryChip(
+                  color: SaoColors.actionPrimary,
+                  label: 'Pendientes',
+                  count: pending,
+                ),
+                _OpsSummaryChip(
+                  color: const Color(0xFFD97706),
+                  label: 'Con observaciones',
+                  count: observations,
+                ),
+                _OpsSummaryChip(
+                  color: SaoColors.success,
+                  label: 'Listas para aprobar',
+                  count: readyToApprove,
+                ),
+                _OpsSummaryChip(
+                  color: SaoColors.gray600,
+                  label: 'Total',
+                  count: items.length,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 10),
+          SizedBox(
+            width: 290,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _OpsCoverageBar(
+                  label: 'Con evidencias',
+                  value: '$withEvidence/${items.length}',
+                  ratio: items.isEmpty ? 0 : withEvidence / items.length,
+                  color: SaoColors.actionPrimary,
+                ),
+                const SizedBox(height: 6),
+                _OpsCoverageBar(
+                  label: 'Sin conflictos',
+                  value: '$withoutConflicts/${items.length}',
+                  ratio: items.isEmpty ? 0 : withoutConflicts / items.length,
+                  color: const Color(0xFF7C3AED),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _OpsSummaryChip extends StatelessWidget {
+  final Color color;
+  final String label;
+  final int count;
+
+  const _OpsSummaryChip({
+    required this.color,
+    required this.label,
+    required this.count,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        '$label: $count',
+        style: SaoTypography.caption.copyWith(
+          color: color,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+class _OpsMiniPieChart extends StatelessWidget {
+  final int pending;
+  final int observations;
+  final int readyToApprove;
+
+  const _OpsMiniPieChart({
+    required this.pending,
+    required this.observations,
+    required this.readyToApprove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final total = pending + observations + readyToApprove;
+    if (total == 0) {
+      return Container(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          border: Border.all(color: SaoColors.gray200),
+        ),
+        child: Center(
+          child: Text(
+            '0',
+            style: SaoTypography.caption.copyWith(color: SaoColors.gray400),
+          ),
+        ),
+      );
+    }
+
+    return CustomPaint(
+      painter: _OpsPiePainter(
+        segments: [
+          _OpsPieSegment(value: pending / total, color: SaoColors.actionPrimary),
+          _OpsPieSegment(value: observations / total, color: const Color(0xFFD97706)),
+          _OpsPieSegment(value: readyToApprove / total, color: SaoColors.success),
+        ],
+      ),
+      child: const Center(
+        child: SizedBox(
+          width: 24,
+          height: 24,
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OpsPieSegment {
+  final double value;
+  final Color color;
+  const _OpsPieSegment({required this.value, required this.color});
+}
+
+class _OpsPiePainter extends CustomPainter {
+  final List<_OpsPieSegment> segments;
+  const _OpsPiePainter({required this.segments});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final stroke = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 10
+      ..strokeCap = StrokeCap.butt;
+
+    double start = -1.57079632679;
+    for (final segment in segments) {
+      if (segment.value <= 0) continue;
+      stroke.color = segment.color;
+      final sweep = 6.28318530718 * segment.value;
+      canvas.drawArc(
+        Rect.fromCircle(center: center, radius: size.shortestSide / 2 - 5),
+        start,
+        sweep,
+        false,
+        stroke,
+      );
+      start += sweep;
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _OpsPiePainter oldDelegate) {
+    if (oldDelegate.segments.length != segments.length) return true;
+    for (var i = 0; i < segments.length; i++) {
+      if (segments[i].value != oldDelegate.segments[i].value ||
+          segments[i].color != oldDelegate.segments[i].color) {
+        return true;
+      }
+    }
+    return false;
+  }
+}
+
+class _OpsCoverageBar extends StatelessWidget {
+  final String label;
+  final String value;
+  final double ratio;
+  final Color color;
+
+  const _OpsCoverageBar({
+    required this.label,
+    required this.value,
+    required this.ratio,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                label,
+                style: SaoTypography.caption.copyWith(
+                  fontSize: 11,
+                  color: SaoColors.gray600,
+                ),
+              ),
+            ),
+            Text(
+              value,
+              style: SaoTypography.caption.copyWith(
+                fontSize: 11,
+                color: SaoColors.gray700,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: LinearProgressIndicator(
+            value: ratio.clamp(0, 1),
+            minHeight: 6,
+            backgroundColor: color.withValues(alpha: 0.12),
+            valueColor: AlwaysStoppedAnimation<Color>(color),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BULK ACTION BAR
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _BulkActionBar extends StatelessWidget {
+  final int selectedCount;
+  final List<ActivityWithDetails> visibleActivities;
+  final Set<String> bulkSelectedIds;
+  final VoidCallback onClear;
+  final VoidCallback onApproveAll;
+  final VoidCallback onDeleteAll;
+
+  const _BulkActionBar({
+    required this.selectedCount,
+    required this.visibleActivities,
+    required this.bulkSelectedIds,
+    required this.onClear,
+    required this.onApproveAll,
+    required this.onDeleteAll,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // Count clean (no-conflict) selected
+    final cleanCount = visibleActivities
+        .where((a) =>
+            bulkSelectedIds.contains(a.activity.id) &&
+            !a.flags.catalogChanged &&
+            !a.flags.checklistIncomplete)
+        .length;
+
+    return Container(
+      padding: const EdgeInsets.symmetric(
+          horizontal: SaoSpacing.lg, vertical: SaoSpacing.sm),
+      decoration: BoxDecoration(
+        color: SaoColors.primary.withValues(alpha: 0.04),
+        border: const Border(
+          bottom: BorderSide(color: SaoColors.border),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_box_rounded,
+              size: 16, color: SaoColors.primary),
+          const SizedBox(width: SaoSpacing.sm),
+          Text(
+            '$selectedCount seleccionadas',
+            style: SaoTypography.bodyText.copyWith(
+              color: SaoColors.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          if (cleanCount > 0) ...[
+            const SizedBox(width: SaoSpacing.xs),
+            Text(
+              '($cleanCount sin conflictos)',
+              style: SaoTypography.caption.copyWith(
+                color: SaoColors.gray500,
+              ),
+            ),
+          ],
+          const Spacer(),
+          TextButton(
+            onPressed: onClear,
+            child: const Text('Cancelar selección'),
+          ),
+          const SizedBox(width: SaoSpacing.sm),
+          FilledButton.icon(
+            onPressed: onDeleteAll,
+            style: FilledButton.styleFrom(
+              backgroundColor: SaoColors.error,
+              padding: const EdgeInsets.symmetric(
+                  horizontal: SaoSpacing.lg, vertical: SaoSpacing.sm),
+            ),
+            icon: const Icon(Icons.delete_outline_rounded, size: 16),
+            label: const Text('Eliminar selección'),
+          ),
+          const SizedBox(width: SaoSpacing.sm),
+          if (cleanCount > 0)
+            FilledButton.icon(
+              onPressed: onApproveAll,
+              style: FilledButton.styleFrom(
+                backgroundColor: SaoColors.success,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: SaoSpacing.lg, vertical: SaoSpacing.sm),
+              ),
+              icon: const Icon(Icons.check_circle_rounded, size: 16),
+              label: Text('Aprobar $cleanCount sin conflictos'),
+            )
+          else
+            Tooltip(
+              message:
+                  'Todas las seleccionadas tienen conflictos que requieren revisión manual',
+              child: FilledButton.icon(
+                onPressed: null,
+                style: FilledButton.styleFrom(
+                  backgroundColor: SaoColors.gray300,
+                ),
+                icon: const Icon(Icons.check_circle_rounded, size: 16),
+                label: const Text('Aprobar selección'),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+final operationsProjectFilterProvider = StateProvider<String>((ref) => '');
+
 final pendingActivitiesProvider = StreamProvider<List<ActivityWithDetails>>((ref) {
   final repo = ref.watch(activityRepositoryProvider);
-  return repo.watchPendingReview();
+  final projectId = ref.watch(operationsProjectFilterProvider).trim().toUpperCase();
+  return repo.watchPendingReview(
+    projectId: projectId.isEmpty ? null : projectId,
+  );
 });
+
+/// Campo de selección de fecha con botón de limpiar
+class _DatePickerField extends StatelessWidget {
+  final DateTime? value;
+  final String hint;
+  final ValueChanged<DateTime> onPicked;
+  final VoidCallback onCleared;
+
+  const _DatePickerField({
+    required this.value,
+    required this.hint,
+    required this.onPicked,
+    required this.onCleared,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = value == null
+        ? hint
+        : '${value!.day.toString().padLeft(2, '0')}/${value!.month.toString().padLeft(2, '0')}/${value!.year}';
+
+    return InkWell(
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: value ?? DateTime.now(),
+          firstDate: DateTime(2020),
+          lastDate: DateTime(2030),
+        );
+        if (picked != null) onPicked(picked);
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          border: Border.all(color: SaoColors.border),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.calendar_today_rounded,
+                size: 16, color: SaoColors.gray600),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                label,
+                style: SaoTypography.bodyText.copyWith(
+                  color: value == null ? SaoColors.gray400 : SaoColors.gray900,
+                ),
+              ),
+            ),
+            if (value != null)
+              GestureDetector(
+                onTap: onCleared,
+                child: Icon(Icons.close_rounded,
+                    size: 16, color: SaoColors.gray400),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

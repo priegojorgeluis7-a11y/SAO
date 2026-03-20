@@ -1,8 +1,11 @@
 import 'dart:convert';
 import 'dart:io';
 
-import 'package:path_provider/path_provider.dart';
+import '../session/legacy_file_session_store.dart';
+import '../session/secure_session_store.dart';
+import '../session/session_store.dart';
 
+/// Typed container for the loaded session.
 class TokenSessionData {
   final String accessToken;
   final String refreshToken;
@@ -18,19 +21,31 @@ class TokenSessionData {
   bool get hasRefreshToken => refreshToken.trim().isNotEmpty;
 }
 
-/// Persists the access token to disk so the user stays logged in
-/// across app restarts. Uses a simple JSON file in the documents directory.
+/// Static facade for session token management.
+///
+/// Maintains an in-memory cache so callers (BackendApiClient, SessionController)
+/// avoid repeated keychain lookups.  Persistence is delegated to the active
+/// [DesktopSessionStore], which defaults to [SecureSessionStore] (OS vault).
+///
+/// Test hook: call [setFileResolverForTest] to redirect I/O to a temp file
+/// (backwards-compatible with existing tests).
 class TokenStore {
   TokenStore._();
+
+  // Production store — OS credential vault (DPAPI on Windows).
+  // Replaced during tests via setFileResolverForTest.
+  static DesktopSessionStore _store = SecureSessionStore();
 
   static String _current = '';
   static String _refresh = '';
   static int? _accessExpiresAtEpoch;
-  static Future<File> Function()? _fileResolverForTest;
 
-  /// The in-memory token, set after login or restore.
+  /// The in-memory access token (empty if not authenticated).
   static String get current => _current;
+
+  /// The in-memory refresh token (empty if none).
   static String get currentRefreshToken => _refresh;
+
   static int? get accessTokenExpiresAtEpoch => _accessExpiresAtEpoch;
 
   static bool get hasToken => _current.trim().isNotEmpty;
@@ -50,6 +65,7 @@ class TokenStore {
     return now >= (expiresAt - 60);
   }
 
+  /// Persists tokens in the OS vault and updates the in-memory cache.
   static Future<void> save(
     String token, {
     String refreshToken = '',
@@ -66,38 +82,28 @@ class TokenStore {
     } else {
       _accessExpiresAtEpoch = null;
     }
-    final file = await _file();
-    await file.writeAsString(
-      jsonEncode({
-        'token': _current,
-        'refresh_token': _refresh,
-        'access_expires_at_epoch': _accessExpiresAtEpoch,
-      }),
-    );
+    await _store.write(SessionData(
+      accessToken: _current,
+      refreshToken: _refresh,
+      accessExpiresAtEpoch: _accessExpiresAtEpoch,
+    ));
   }
 
-  /// Loads the persisted token. Returns empty string if none found.
+  /// Loads the persisted access token into the in-memory cache.
+  /// Returns empty string if nothing is stored.
   static Future<String> load() async {
     final session = await loadSession();
     return session.accessToken;
   }
 
+  /// Loads the full session from persistent storage into the in-memory cache.
   static Future<TokenSessionData> loadSession() async {
     try {
-      final file = await _file();
-      if (await file.exists()) {
-        final raw = await file.readAsString();
-        final map = jsonDecode(raw) as Map<String, dynamic>;
-        _current = (map['token'] as String?) ?? '';
-        _refresh = (map['refresh_token'] as String?) ?? '';
-        final expiresRaw = map['access_expires_at_epoch'];
-        if (expiresRaw is int) {
-          _accessExpiresAtEpoch = expiresRaw;
-        } else if (expiresRaw is String) {
-          _accessExpiresAtEpoch = int.tryParse(expiresRaw);
-        } else {
-          _accessExpiresAtEpoch = null;
-        }
+      final data = await _store.read();
+      if (data != null) {
+        _current = data.accessToken;
+        _refresh = data.refreshToken;
+        _accessExpiresAtEpoch = data.accessExpiresAtEpoch;
       }
     } catch (_) {
       _current = '';
@@ -111,26 +117,63 @@ class TokenStore {
     );
   }
 
+  /// Clears the in-memory cache, the OS vault, and any legacy file remnants.
   static Future<void> clear() async {
     _current = '';
     _refresh = '';
     _accessExpiresAtEpoch = null;
+    await _store.clear();
+    // Belt-and-suspenders: remove legacy file if it somehow still exists.
+    await const LegacyFileSessionStore().deleteIfExists();
+  }
+
+  /// Test hook: redirects persistence to a plain JSON file via [resolver].
+  /// Pass null to restore the default [SecureSessionStore].
+  ///
+  /// Keeps backwards compatibility with existing tests that used the old
+  /// file-based implementation directly.
+  static void setFileResolverForTest(Future<File> Function()? resolver) {
+    if (resolver == null) {
+      _store = SecureSessionStore();
+    } else {
+      _store = _FileSessionStore(resolver);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Private file-based store — used only in tests via setFileResolverForTest.
+// ---------------------------------------------------------------------------
+
+class _FileSessionStore implements DesktopSessionStore {
+  final Future<File> Function() _fileResolver;
+
+  _FileSessionStore(this._fileResolver);
+
+  @override
+  Future<SessionData?> read() async {
     try {
-      final file = await _file();
+      final file = await _fileResolver();
+      if (!await file.exists()) return null;
+      final raw = await file.readAsString();
+      final map = jsonDecode(raw) as Map<String, dynamic>;
+      return SessionData.fromMap(map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> write(SessionData data) async {
+    final file = await _fileResolver();
+    await file.writeAsString(jsonEncode(data.toMap()));
+  }
+
+  @override
+  Future<void> clear() async {
+    try {
+      final file = await _fileResolver();
       if (await file.exists()) await file.delete();
     } catch (_) {}
-  }
-
-  static Future<File> _file() async {
-    final resolver = _fileResolverForTest;
-    if (resolver != null) {
-      return resolver();
-    }
-    final dir = await getApplicationDocumentsDirectory();
-    return File('${dir.path}/sao_session.json');
-  }
-
-  static void setFileResolverForTest(Future<File> Function()? resolver) {
-    _fileResolverForTest = resolver;
   }
 }

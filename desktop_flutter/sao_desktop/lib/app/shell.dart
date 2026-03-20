@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/operations/validation_page_new_design.dart';
 import '../features/planning/planning_page.dart';
-import '../features/catalogs/catalogs_page.dart';
-import '../features/users/users_page.dart';
 import '../features/events/events_page.dart';
+import '../features/ocr/ocr_minutes_page.dart';
 import '../features/reports/reports_page.dart';
+import '../features/profile/profile_settings_page.dart';
+import '../features/completed_activities/completed_activities_page.dart';
+import '../features/structure/structure_page.dart';
 import '../features/ui_catalog/ui_catalog_page.dart';
-import '../features/auth/app_session_controller.dart';
+import '../core/providers/app_refresh_provider.dart';
 import '../core/theme/app_colors.dart';
 
 class AppShell extends ConsumerStatefulWidget {
@@ -28,12 +30,12 @@ class _AppShellState extends ConsumerState<AppShell> {
   List<_NavItem> get _navItems {
     final items = [
       _NavItem(
-        icon: Icons.dashboard_rounded,
+        icon: Icons.grid_view_rounded,
         label: 'Dashboard',
         page: const DashboardPage(),
       ),
       _NavItem(
-        icon: Icons.railway_alert,
+        icon: Icons.rule_folder_rounded,
         label: 'Operaciones',
         page: const ValidationPageNewDesign(),
       ),
@@ -43,14 +45,14 @@ class _AppShellState extends ConsumerState<AppShell> {
         page: const PlanningPage(),
       ),
       _NavItem(
-        icon: Icons.category_rounded,
-        label: 'Catálogos',
-        page: const CatalogsPage(),
+        icon: Icons.task_alt_rounded,
+        label: 'Completadas',
+        page: const CompletedActivitiesPage(),
       ),
       _NavItem(
-        icon: Icons.people_rounded,
-        label: 'Usuarios',
-        page: const UsersPage(),
+        icon: Icons.account_tree_rounded,
+        label: 'Estructura',
+        page: const StructurePage(),
       ),
       _NavItem(
         icon: Icons.campaign_rounded,
@@ -58,11 +60,20 @@ class _AppShellState extends ConsumerState<AppShell> {
         page: const EventsPage(),
       ),
       _NavItem(
-        icon: Icons.description_rounded,
+        icon: Icons.person_rounded,
+        label: 'Configuración',
+        page: const ProfileSettingsPage(),
+      ),
+      _NavItem(
+        icon: Icons.document_scanner_rounded,
+        label: 'OCR Minutas',
+        page: const OcrMinutesPage(),
+      ),
+      _NavItem(
+        icon: Icons.insert_drive_file_rounded,
         label: 'Reportes',
         page: const ReportsPage(),
       ),
-      // Design system storybook — only in debug builds
       if (kDebugMode)
         _NavItem(
           icon: Icons.palette_rounded,
@@ -75,15 +86,13 @@ class _AppShellState extends ConsumerState<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(currentAppUserProvider);
+    final appRefreshToken = ref.watch(appRefreshTokenProvider);
     final navItems = _navItems;
-
-    // Clamp index in case UiCatalog was removed in release builds
     final safeIndex = _selectedIndex.clamp(0, navItems.length - 1);
 
     return CallbackShortcuts(
       bindings: {
-        SingleActivator(LogicalKeyboardKey.f5): () {
+        const SingleActivator(LogicalKeyboardKey.f5): () {
           if (!mounted) return;
           setState(() => _refreshToken++);
         },
@@ -93,124 +102,22 @@ class _AppShellState extends ConsumerState<AppShell> {
         child: Scaffold(
           body: Row(
             children: [
-          // Navigation Rail
-          NavigationRail(
-            selectedIndex: safeIndex,
-            onDestinationSelected: (index) {
-              setState(() => _selectedIndex = index);
-            },
-            labelType: NavigationRailLabelType.all,
-            destinations: navItems.map((item) {
-              return NavigationRailDestination(
-                icon: Icon(item.icon),
-                label: Text(item.label),
-              );
-            }).toList(),
-            leading: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.apartment_rounded,
-                    size: 40,
-                    color: AppColors.primary,
-                  ),
-                  SizedBox(height: 8),
-                  Text(
-                    'SAO',
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.primary,
-                    ),
-                  ),
-                ],
+              // ── Sidebar custom ─────────────────────────────────────────
+              _SideNav(
+                selectedIndex: safeIndex,
+                items: navItems,
+                onSelect: (i) => setState(() => _selectedIndex = i),
               ),
-            ),
-          ),
 
-          const VerticalDivider(thickness: 1, width: 1),
+              const VerticalDivider(thickness: 1, width: 1),
 
-          // Main Content
-          Expanded(
-            child: Column(
-              children: [
-                // Top Bar
-                Container(
-                  height: 60,
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  decoration: const BoxDecoration(
-                    color: AppColors.surface,
-                    border: Border(
-                      bottom: BorderSide(color: AppColors.border),
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Text(
-                        navItems[safeIndex].label,
-                        style: const TextStyle(
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      IconButton(
-                        icon: const Icon(Icons.refresh_rounded),
-                        tooltip: 'Actualizar vista',
-                        onPressed: () {
-                          setState(() => _refreshToken++);
-                        },
-                      ),
-                      // User info
-                      const CircleAvatar(
-                        backgroundColor: AppColors.primary,
-                        child: Icon(Icons.person, color: AppColors.onPrimary),
-                      ),
-                      const SizedBox(width: 12),
-                      Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            user?.fullName.isNotEmpty == true
-                                ? user!.fullName
-                                : (user?.email ?? 'Usuario'),
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          Text(
-                            user?.role.isNotEmpty == true ? user!.role : 'SAO',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppColors.gray500,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(width: 8),
-                      // Logout button
-                      IconButton(
-                        icon: const Icon(Icons.logout_rounded),
-                        tooltip: 'Cerrar sesión',
-                        onPressed: () => _confirmLogout(context),
-                      ),
-                    ],
-                  ),
+              // ── Contenido principal ────────────────────────────────────
+              Expanded(
+                child: KeyedSubtree(
+                  key: ValueKey('page-$safeIndex-$_refreshToken-$appRefreshToken'),
+                  child: navItems[safeIndex].page,
                 ),
-
-                // Page Content
-                Expanded(
-                  child: KeyedSubtree(
-                    key: ValueKey('page-$safeIndex-$_refreshToken'),
-                    child: navItems[safeIndex].page,
-                  ),
-                ),
-              ],
-            ),
-          ),
+              ),
             ],
           ),
         ),
@@ -218,30 +125,195 @@ class _AppShellState extends ConsumerState<AppShell> {
     );
   }
 
-  void _confirmLogout(BuildContext context) {
-    showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Cerrar sesión'),
-        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancelar'),
+}
+
+// ── Color de acento de la barra activa (teal del logo) ─────────────────────
+const _kNavAccent      = Color(0xFF104848); // teal oscuro del logo
+const _kNavAccentDark  = Color(0xFF5EEAD4); // teal claro para dark mode
+
+// ── Sidebar ────────────────────────────────────────────────────────────────
+
+class _SideNav extends StatelessWidget {
+  final int selectedIndex;
+  final List<_NavItem> items;
+  final ValueChanged<int> onSelect;
+
+  const _SideNav({
+    required this.selectedIndex,
+    required this.items,
+    required this.onSelect,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs     = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Container(
+      width: 86,
+      color: cs.surface,
+      child: Column(
+        children: [
+          // ── Logo (sin texto "SAO" — el icono habla por sí solo) ───────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(0, 24, 0, 20),
+            child: Image.asset(
+              'assets/images/logo_tren.png',
+              width: 50,
+              height: 50,
+              fit: BoxFit.contain,
+              color: isDark ? Colors.white : null,
+              colorBlendMode: isDark ? BlendMode.srcIn : null,
+            ),
           ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Cerrar sesión'),
+          Divider(
+              height: 1,
+              thickness: 1,
+              color: Theme.of(context).dividerColor),
+          const SizedBox(height: 4),
+          // ── Items ─────────────────────────────────────────────────────
+          Expanded(
+            child: SingleChildScrollView(
+              child: Column(
+                children: items.asMap().entries.map((e) {
+                  return _NavTile(
+                    icon: e.value.icon,
+                    label: e.value.label,
+                    selected: e.key == selectedIndex,
+                    onTap: () => onSelect(e.key),
+                  );
+                }).toList(),
+              ),
+            ),
           ),
+          const SizedBox(height: 6),
         ],
       ),
-    ).then((confirmed) {
-      if (confirmed == true && mounted) {
-        ref.read(appSessionControllerProvider.notifier).logout();
-      }
-    });
+    );
   }
 }
+
+class _NavTile extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _NavTile({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  State<_NavTile> createState() => _NavTileState();
+}
+
+class _NavTileState extends State<_NavTile> {
+  bool _hovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark  = Theme.of(context).brightness == Brightness.dark;
+    final accent  = isDark ? _kNavAccentDark : _kNavAccent;
+
+    final Color iconColor;
+    final Color labelColor;
+    final Color bgColor;
+    final Color barColor;
+
+    if (widget.selected) {
+      iconColor  = accent;
+      labelColor = accent;
+      bgColor    = accent.withValues(alpha: isDark ? 0.14 : 0.09);
+      barColor   = accent;
+    } else if (_hovered) {
+      iconColor  = isDark ? const Color(0xFFCBD5E1) : AppColors.gray700;
+      labelColor = isDark ? const Color(0xFFCBD5E1) : AppColors.gray700;
+      bgColor    = isDark
+          ? Colors.white.withValues(alpha: 0.05)
+          : AppColors.gray100;
+      barColor   = Colors.transparent;
+    } else {
+      iconColor  = isDark ? const Color(0xFF64748B) : AppColors.gray400;
+      labelColor = isDark ? const Color(0xFF64748B) : AppColors.gray500;
+      bgColor    = Colors.transparent;
+      barColor   = Colors.transparent;
+    }
+
+    return MouseRegion(
+      cursor: SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTap: widget.onTap,
+        // ── Row: barra izquierda (3px fija) + contenido con bg redondeado
+        child: Row(
+          children: [
+            // Barra indicadora — siempre 3px, solo colorea cuando activo
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 150),
+              width: 3,
+              height: 58, // cubre el área del tile
+              decoration: BoxDecoration(
+                color: barColor,
+                borderRadius: const BorderRadius.only(
+                  topRight: Radius.circular(3),
+                  bottomRight: Radius.circular(3),
+                ),
+              ),
+            ),
+            // Contenido con fondo de esquinas derechas redondeadas
+            Expanded(
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  curve: Curves.easeOut,
+                  decoration: BoxDecoration(
+                    color: bgColor,
+                    borderRadius: const BorderRadius.only(
+                      topRight: Radius.circular(8),
+                      bottomRight: Radius.circular(8),
+                      topLeft: Radius.circular(6),
+                      bottomLeft: Radius.circular(6),
+                    ),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 9),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(widget.icon, size: 22, color: iconColor),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.label,
+                        style: TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: widget.selected
+                              ? FontWeight.w600
+                              : FontWeight.w500,
+                          color: labelColor,
+                          height: 1.2,
+                        ),
+                        textAlign: TextAlign.center,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Model ──────────────────────────────────────────────────────────────────
 
 class _NavItem {
   final IconData icon;

@@ -102,6 +102,7 @@ class CatalogsPageState {
   final String? versionId;
   final String publicationStatus;
   final bool hasPendingChanges;
+  final bool isEditMode;
 
   const CatalogsPageState({
     required this.selectedProject,
@@ -116,6 +117,7 @@ class CatalogsPageState {
     required this.versionId,
     required this.publicationStatus,
     required this.hasPendingChanges,
+    required this.isEditMode,
   });
 
   CatalogTabUiState uiFor(CatalogTab tab) =>
@@ -137,6 +139,7 @@ class CatalogsPageState {
     bool clearVersionId = false,
     String? publicationStatus,
     bool? hasPendingChanges,
+    bool? isEditMode,
   }) {
     return CatalogsPageState(
       selectedProject: selectedProject ?? this.selectedProject,
@@ -153,6 +156,7 @@ class CatalogsPageState {
       versionId: clearVersionId ? null : (versionId ?? this.versionId),
       publicationStatus: publicationStatus ?? this.publicationStatus,
       hasPendingChanges: hasPendingChanges ?? this.hasPendingChanges,
+      isEditMode: isEditMode ?? this.isEditMode,
     );
   }
 }
@@ -180,9 +184,14 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
             versionId: null,
             publicationStatus: 'unknown',
             hasPendingChanges: false,
+            isEditMode: false,
           ),
         ) {
     refresh();
+  }
+
+  void setEditMode(bool value) {
+    state = state.copyWith(isEditMode: value);
   }
 
   void setProject(String projectId) {
@@ -265,7 +274,13 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
   }
 
   Future<void> reorderActivities(List<String> orderedIds) async {
-    await _mutate(() => _repository.reorder('activity', orderedIds));
+    await _mutate(
+      () => _repository.reorder(
+        'activity',
+        orderedIds,
+        projectId: state.selectedProject,
+      ),
+    );
   }
 
   Future<void> createActivity({
@@ -274,7 +289,11 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     String? description,
   }) async {
     await _mutate(() => _repository.createActivity(
-        id: id, name: name, description: description));
+      id: id,
+      name: name,
+      description: description,
+      projectId: state.selectedProject,
+    ));
   }
 
   Future<void> updateActivity(
@@ -284,21 +303,34 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     bool? isActive,
   }) async {
     await _mutate(
-      () => _repository.updateActivity(id,
-          name: name, description: description, isActive: isActive),
+      () => _repository.updateActivity(
+        id,
+        name: name,
+        description: description,
+        isActive: isActive,
+        projectId: state.selectedProject,
+      ),
     );
   }
 
   Future<void> deleteActivity(String id) async {
-    await _mutate(() => _repository.deleteActivity(id));
+    await _mutate(() => _repository.deleteActivity(id, projectId: state.selectedProject));
   }
 
   Future<void> restoreActivity(CatalogActivityItem item) async {
     await _mutate(() async {
       await _repository.createActivity(
-          id: item.id, name: item.name, description: item.description);
+        id: item.id,
+        name: item.name,
+        description: item.description,
+        projectId: state.selectedProject,
+      );
       if (!item.isActive) {
-        await _repository.updateActivity(item.id, isActive: false);
+        await _repository.updateActivity(
+          item.id,
+          isActive: false,
+          projectId: state.selectedProject,
+        );
       }
     });
   }
@@ -315,6 +347,7 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         activityId: activityId,
         name: name,
         description: description,
+        projectId: state.selectedProject,
       ),
     );
   }
@@ -333,12 +366,13 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         name: name,
         description: description,
         isActive: isActive,
+        projectId: state.selectedProject,
       ),
     );
   }
 
   Future<void> deleteSubcategory(String id) async {
-    await _mutate(() => _repository.deleteSubcategory(id));
+    await _mutate(() => _repository.deleteSubcategory(id, projectId: state.selectedProject));
   }
 
   Future<void> restoreSubcategory(CatalogSubcategoryItem item) async {
@@ -348,9 +382,14 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         activityId: item.activityId,
         name: item.name,
         description: item.description,
+        projectId: state.selectedProject,
       );
       if (!item.isActive) {
-        await _repository.updateSubcategory(item.id, isActive: false);
+        await _repository.updateSubcategory(
+          item.id,
+          isActive: false,
+          projectId: state.selectedProject,
+        );
       }
     });
   }
@@ -367,6 +406,7 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         activityId: activityId,
         subcategoryId: subcategoryId,
         name: name,
+        projectId: state.selectedProject,
       ),
     );
   }
@@ -385,12 +425,13 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         subcategoryId: subcategoryId,
         name: name,
         isActive: isActive,
+        projectId: state.selectedProject,
       ),
     );
   }
 
   Future<void> deletePurpose(String id) async {
-    await _mutate(() => _repository.deletePurpose(id));
+    await _mutate(() => _repository.deletePurpose(id, projectId: state.selectedProject));
   }
 
   Future<void> restorePurpose(CatalogPurposeItem item) async {
@@ -400,9 +441,14 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         activityId: item.activityId,
         subcategoryId: item.subcategoryId,
         name: item.name,
+        projectId: state.selectedProject,
       );
       if (!item.isActive) {
-        await _repository.updatePurpose(item.id, isActive: false);
+        await _repository.updatePurpose(
+          item.id,
+          isActive: false,
+          projectId: state.selectedProject,
+        );
       }
     });
   }
@@ -414,7 +460,12 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     String? description,
   }) async {
     await _mutate(() => _repository.createTopic(
-        id: id, name: name, type: type, description: description));
+      id: id,
+      name: name,
+      type: type,
+      description: description,
+      projectId: state.selectedProject,
+    ));
   }
 
   Future<void> updateTopic(
@@ -431,12 +482,13 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         type: type,
         description: description,
         isActive: isActive,
+        projectId: state.selectedProject,
       ),
     );
   }
 
   Future<void> deleteTopic(String id) async {
-    await _mutate(() => _repository.deleteTopic(id));
+    await _mutate(() => _repository.deleteTopic(id, projectId: state.selectedProject));
   }
 
   Future<void> restoreTopic(CatalogTopicItem item) async {
@@ -446,9 +498,14 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         name: item.name,
         type: item.type,
         description: item.description,
+        projectId: state.selectedProject,
       );
       if (!item.isActive) {
-        await _repository.updateTopic(item.id, isActive: false);
+        await _repository.updateTopic(
+          item.id,
+          isActive: false,
+          projectId: state.selectedProject,
+        );
       }
     });
   }
@@ -465,6 +522,7 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         category: category,
         name: name,
         description: description,
+        projectId: state.selectedProject,
       ),
     );
   }
@@ -483,12 +541,13 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         name: name,
         description: description,
         isActive: isActive,
+        projectId: state.selectedProject,
       ),
     );
   }
 
   Future<void> deleteResult(String id) async {
-    await _mutate(() => _repository.deleteResult(id));
+    await _mutate(() => _repository.deleteResult(id, projectId: state.selectedProject));
   }
 
   Future<void> restoreResult(CatalogResultItem item) async {
@@ -498,9 +557,14 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         category: item.category,
         name: item.name,
         description: item.description,
+        projectId: state.selectedProject,
       );
       if (!item.isActive) {
-        await _repository.updateResult(item.id, isActive: false);
+        await _repository.updateResult(
+          item.id,
+          isActive: false,
+          projectId: state.selectedProject,
+        );
       }
     });
   }
@@ -517,6 +581,7 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         type: type,
         name: name,
         description: description,
+        projectId: state.selectedProject,
       ),
     );
   }
@@ -535,12 +600,13 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         name: name,
         description: description,
         isActive: isActive,
+        projectId: state.selectedProject,
       ),
     );
   }
 
   Future<void> deleteAssistant(String id) async {
-    await _mutate(() => _repository.deleteAssistant(id));
+    await _mutate(() => _repository.deleteAssistant(id, projectId: state.selectedProject));
   }
 
   Future<void> restoreAssistant(CatalogAssistantItem item) async {
@@ -550,23 +616,46 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
         type: item.type,
         name: item.name,
         description: item.description,
+        projectId: state.selectedProject,
       );
       if (!item.isActive) {
-        await _repository.updateAssistant(item.id, isActive: false);
+        await _repository.updateAssistant(
+          item.id,
+          isActive: false,
+          projectId: state.selectedProject,
+        );
       }
     });
   }
 
   Future<void> addRelation(String activityId, String topicId) async {
-    await _mutate(() => _repository.addRelation(activityId, topicId));
+    await _mutate(
+      () => _repository.addRelation(
+        activityId,
+        topicId,
+        projectId: state.selectedProject,
+      ),
+    );
   }
 
   Future<void> deleteRelation(String activityId, String topicId) async {
-    await _mutate(() => _repository.deleteRelation(activityId, topicId));
+    await _mutate(
+      () => _repository.deleteRelation(
+        activityId,
+        topicId,
+        projectId: state.selectedProject,
+      ),
+    );
   }
 
   Future<void> restoreRelation(CatalogRelationItem item) async {
-    await _mutate(() => _repository.addRelation(item.activityId, item.topicId));
+    await _mutate(
+      () => _repository.addRelation(
+        item.activityId,
+        item.topicId,
+        projectId: state.selectedProject,
+      ),
+    );
   }
 
   Future<CatalogAdminHookResult> validateCatalogDraft() async {

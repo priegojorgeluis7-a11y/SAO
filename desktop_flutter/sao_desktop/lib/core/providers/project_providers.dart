@@ -1,13 +1,13 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../data/repositories/backend_api_client.dart';
 
 // ---------------------------------------------------------------------------
-// Projects list — loaded from backend, no hardcoded fallback
+// Projects list
 // ---------------------------------------------------------------------------
 
-/// Loads the list of project IDs the user has access to from GET /api/v1/projects.
-/// Returns an empty list on error (caller decides how to handle).
+/// Loads project IDs from GET /api/v1/projects. Empty list on error.
 final availableProjectsProvider =
     FutureProvider.autoDispose<List<String>>((ref) async {
   const client = BackendApiClient();
@@ -21,10 +21,51 @@ final availableProjectsProvider =
 });
 
 // ---------------------------------------------------------------------------
-// Active project — set by login flow or user selection
+// Active project — persisted across sessions via secure storage
 // ---------------------------------------------------------------------------
 
-/// The currently selected project ID.
-/// Initialized to empty; set when [availableProjectsProvider] resolves
-/// (auto-selects first project) or when the user explicitly changes it.
-final activeProjectIdProvider = StateProvider<String>((ref) => '');
+const _kProjectKey = 'sao_active_project_id';
+const _storage = FlutterSecureStorage();
+
+class _ActiveProjectNotifier extends StateNotifier<String> {
+  _ActiveProjectNotifier() : super('') {
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final saved = await _storage.read(key: _kProjectKey);
+      if (!mounted) return;
+      final normalized = _normalizeProjectId(saved);
+      if (normalized.isNotEmpty) {
+        state = normalized;
+      }
+    } catch (_) {
+      // Ignore read errors — stays empty
+    }
+  }
+
+  void select(String projectId) {
+    final normalized = _normalizeProjectId(projectId);
+    if (normalized == state) return;
+    state = normalized;
+    if (normalized.isEmpty) {
+      _storage.delete(key: _kProjectKey).ignore();
+    } else {
+      _storage.write(key: _kProjectKey, value: normalized).ignore();
+    }
+  }
+
+  String _normalizeProjectId(String? projectId) {
+    final value = (projectId ?? '').trim().toUpperCase();
+    if (value.isEmpty || value == 'ALL' || value == 'TODOS') {
+      return '';
+    }
+    return value;
+  }
+}
+
+final activeProjectIdProvider =
+    StateNotifierProvider<_ActiveProjectNotifier, String>(
+  (_) => _ActiveProjectNotifier(),
+);

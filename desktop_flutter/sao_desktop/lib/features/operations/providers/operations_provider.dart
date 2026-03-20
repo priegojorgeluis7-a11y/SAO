@@ -1,48 +1,54 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/enums/shared_enums.dart';
 import '../../../data/repositories/catalog_repository.dart';
+import '../../../data/repositories/activity_repository.dart';
 
-// Provider simplificado para demostración que usa catálogos reales
 final operationsDataProvider = FutureProvider<OperationsData>((ref) async {
+  final activityRepo = ref.watch(activityRepositoryProvider);
   final catalogRepo = CatalogRepository();
-  
-  // Inicializar catálogos
+
   await catalogRepo.init();
-  
-  // Generar datos de demostración usando el catálogo real
-  final demoItems = _generateDemoItems(catalogRepo);
-  
+  final pending = await activityRepo.watchPendingReview().first;
+
   return OperationsData(
-    operationItems: demoItems,
+    operationItems: pending.map(_toOperationItem).toList(growable: false),
     catalogRepo: catalogRepo,
   );
 });
 
-List<OperationItem> _generateDemoItems(CatalogRepository catalogRepo) {
-  final activities = catalogRepo.getActivityTypes();
-  final states = catalogRepo.getStates();
-  final municipalities = catalogRepo.getMunicipalities();
-  
-  return List.generate(15, (i) {
-    final activity = activities[i % activities.length];
-    final riskLevels = [RiskLevel.bajo, RiskLevel.medio, RiskLevel.alto, RiskLevel.prioritario];
-    final risk = riskLevels[i % 4];
-    
-    return OperationItem(
-      id: 'ACT-${1000 + i}',
-      type: activity.name,  // 📱 Del catálogo real
-      pk: '142+${(i * 10).toString().padLeft(3, '0')}',
-      engineer: 'Ing. Ramírez',
-      municipality: municipalities[i % municipalities.length],  // 📱 Del catálogo real 
-      state: states[i % states.length],  // 📱 Del catálogo real
-      isNew: i < 4,
-      risk: risk.code,  // 📱 Homologado con app móvil
-      syncedAgo: '${(i + 2)} min',
-      gpsDeltaMeters: (i % 5 == 0) ? 450 : (i % 7 == 0) ? 35 : 3,
-      description: 'Actividad de ${activity.name.toLowerCase()} en zona ${i + 1}',
-      classification: ['Ambiental', 'Social', 'Jurídico', 'Técnico'][i % 4],
-    );
-  });
+OperationItem _toOperationItem(ActivityWithDetails details) {
+  final activity = details.activity;
+  final createdAt = activity.createdAt;
+  final age = DateTime.now().difference(createdAt);
+  final isNew = age.inHours < 24;
+
+  final risk = details.flags.gpsMismatch
+      ? RiskLevel.prioritario.code
+      : details.flags.checklistIncomplete
+          ? RiskLevel.alto.code
+          : details.flags.catalogChanged
+              ? RiskLevel.medio.code
+              : RiskLevel.bajo.code;
+
+  final gpsDeltaMeters = details.flags.gpsMismatch ? 450.0 : 0.0;
+  final syncedAgo = age.inMinutes < 60
+      ? '${age.inMinutes} min'
+      : '${age.inHours} h';
+
+  return OperationItem(
+    id: activity.id,
+    type: details.activityType?.name ?? activity.title,
+    pk: (activity.description ?? '-').trim().isEmpty ? '-' : activity.description!.trim(),
+    engineer: details.assignedUser?.fullName ?? activity.assignedTo,
+    municipality: details.municipality?.name ?? 'Sin municipio',
+    state: details.municipality?.state ?? 'Sin estado',
+    isNew: isNew,
+    risk: risk,
+    syncedAgo: syncedAgo,
+    gpsDeltaMeters: gpsDeltaMeters,
+    description: (activity.description ?? activity.title).trim(),
+    classification: details.activityType?.code ?? 'GENERAL',
+  );
 }
 
 class OperationsData {

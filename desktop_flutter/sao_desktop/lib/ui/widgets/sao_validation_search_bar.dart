@@ -19,12 +19,18 @@ class SaoValidationSearchBar extends StatefulWidget {
     this.onFilterPressed,
     this.resultCount,
     this.projectName,
+    this.projectOptions,
+    this.onProjectChanged,
+    this.allProjectsLabel = 'Todos',
   });
 
   final ValueChanged<String> onSearchChanged;
   final VoidCallback? onFilterPressed;
   final int? resultCount;
   final String? projectName;
+  final List<String>? projectOptions;
+  final ValueChanged<String>? onProjectChanged;
+  final String allProjectsLabel;
 
   @override
   State<SaoValidationSearchBar> createState() => _SaoValidationSearchBarState();
@@ -38,6 +44,7 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
   @override
   void initState() {
     super.initState();
+    _controller.addListener(_handleControllerChanged);
     _focusNode.addListener(() {
       setState(() => _hasFocus = _focusNode.hasFocus);
     });
@@ -45,9 +52,15 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
 
   @override
   void dispose() {
+    _controller.removeListener(_handleControllerChanged);
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  void _handleControllerChanged() {
+    if (!mounted) return;
+    setState(() {});
   }
 
   void _clear() {
@@ -57,6 +70,12 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
 
   @override
   Widget build(BuildContext context) {
+    final hasProjectSelector = widget.projectName != null;
+    final canChangeProject =
+      widget.projectOptions != null && widget.onProjectChanged != null;
+    final effectiveProjectName =
+      (widget.projectName ?? '').trim().isEmpty ? widget.allProjectsLabel : widget.projectName!.trim();
+
     return Container(
       height: 48,
       decoration: BoxDecoration(
@@ -79,7 +98,7 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
       child: Row(
         children: [
           // Selector de proyecto (opcional)
-          if (widget.projectName != null) ...[
+          if (hasProjectSelector) ...[
             Padding(
               padding: const EdgeInsets.only(left: SaoSpacing.md),
               child: Row(
@@ -103,13 +122,47 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
                           color: SaoColors.primary,
                         ),
                         const SizedBox(width: 6),
-                        Text(
-                          widget.projectName!,
-                          style: SaoTypography.caption.copyWith(
-                            color: SaoColors.primary,
-                            fontWeight: FontWeight.w600,
+                        if (canChangeProject)
+                          DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: (widget.projectName ?? '').trim(),
+                              isDense: true,
+                              borderRadius: BorderRadius.circular(SaoRadii.md),
+                              icon: Icon(
+                                Icons.expand_more_rounded,
+                                size: 18,
+                                color: SaoColors.primary,
+                              ),
+                              style: SaoTypography.caption.copyWith(
+                                color: SaoColors.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              items: [
+                                DropdownMenuItem<String>(
+                                  value: '',
+                                  child: Text(widget.allProjectsLabel),
+                                ),
+                                ...widget.projectOptions!.map(
+                                  (projectId) => DropdownMenuItem<String>(
+                                    value: projectId,
+                                    child: Text(projectId),
+                                  ),
+                                ),
+                              ],
+                              onChanged: (value) {
+                                if (value == null) return;
+                                widget.onProjectChanged!(value);
+                              },
+                            ),
+                          )
+                        else
+                          Text(
+                            effectiveProjectName,
+                            style: SaoTypography.caption.copyWith(
+                              color: SaoColors.primary,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
-                        ),
                       ],
                     ),
                   ),
@@ -127,7 +180,7 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
           // Icono de búsqueda
           Padding(
             padding: EdgeInsets.only(
-              left: widget.projectName == null ? SaoSpacing.md : 0,
+              left: hasProjectSelector ? 0 : SaoSpacing.md,
             ),
             child: Icon(
               Icons.search_rounded,

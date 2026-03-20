@@ -100,13 +100,24 @@ class AppTheme {
         ),
       ),
       chipTheme: ChipThemeData(
-        backgroundColor: AppColors.gray50,
-        selectedColor: AppColors.primary.withOpacity(0.12),
+        backgroundColor: AppColors.gray100,
+        selectedColor: AppColors.primary.withOpacity(0.16),
+        disabledColor: AppColors.gray200,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
           side: const BorderSide(color: AppColors.border),
         ),
-        labelStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+        labelStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: AppColors.gray800,
+        ),
+        secondaryLabelStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: AppColors.primary,
+        ),
+        checkmarkColor: AppColors.primary,
       ),
       dividerTheme: const DividerThemeData(
         color: AppColors.border,
