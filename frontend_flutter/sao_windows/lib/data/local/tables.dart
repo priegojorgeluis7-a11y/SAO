@@ -206,12 +206,38 @@ class CatAttendees extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+// ---------- Catálogo offline versionado (Brecha 2) ----------
+/// Índice ligero: una fila por proyecto, almacena el version_id activo y hash.
+class CatalogIndex extends Table {
+  TextColumn get projectId => text()();
+  TextColumn get activeVersionId => text()();
+  TextColumn get hash => text().nullable()();
+  DateTimeColumn get updatedAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {projectId};
+}
+
+/// Cache persistente de bundles descargados, por proyecto+version.
+/// Permite retener versiones históricas mientras existan actividades que las referencian.
+class CatalogBundleCache extends Table {
+  TextColumn get projectId => text()();
+  TextColumn get versionId => text()();
+  TextColumn get jsonBlob => text()(); // JSON serializado del bundle completo
+  DateTimeColumn get createdAt => dateTime()();
+
+  @override
+  Set<Column> get primaryKey => {projectId, versionId};
+}
+
 // ---------- Núcleo operativo ----------
 class Activities extends Table {
   TextColumn get id => text()(); // uuid
   TextColumn get projectId => text().references(Projects, #id)();
   TextColumn get segmentId => text().nullable().references(ProjectSegments, #id)();
   TextColumn get activityTypeId => text().references(CatalogActivityTypes, #id)();
+  // Versión del catálogo vigente al momento de captura (congela el catálogo offline).
+  TextColumn get catalogVersionId => text().nullable()();
 
   TextColumn get title => text().withLength(min: 1, max: 140)();
   TextColumn get description => text().nullable()();

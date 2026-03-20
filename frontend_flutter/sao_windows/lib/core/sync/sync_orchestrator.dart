@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 
 import '../catalog/state/catalog_providers.dart';
 import '../catalog/sync/catalog_sync_service.dart';
@@ -72,7 +73,13 @@ class SyncOrchestrator extends StateNotifier<SyncOrchestratorState> {
     state = const SyncOrchestratorState(status: SyncOrchestratorStatus.syncing);
 
     try {
-      await _catalogSyncRunner.ensureCatalogUpToDate(projectId);
+      try {
+        await _catalogSyncRunner.ensureCatalogUpToDate(projectId);
+      } catch (e) {
+        if (!_isOptionalCatalogError(e)) {
+          rethrow;
+        }
+      }
       await _activitySyncService.syncProject(projectId);
       await _assignmentSyncService.syncPending();
       await _evidenceSyncService.syncPending();
@@ -84,12 +91,82 @@ class SyncOrchestrator extends StateNotifier<SyncOrchestratorState> {
     } catch (e) {
       state = SyncOrchestratorState(
         status: SyncOrchestratorStatus.error,
-        errorMessage: e.toString(),
+        errorMessage: _formatSyncError(e),
         updatedAt: DateTime.now(),
       );
     } finally {
       _isSyncing = false;
     }
+  }
+
+  bool _isOptionalCatalogError(Object error) {
+    if (error is! DioException) {
+      return false;
+    }
+    final statusCode = error.response?.statusCode;
+    return statusCode == 403 || statusCode == 404;
+  }
+
+  String _formatSyncError(Object error) {
+    if (error is DioException) {
+      final statusCode = error.response?.statusCode;
+      final path = error.requestOptions.path;
+      final detail = _extractBackendDetail(error.response?.data);
+
+      if (statusCode == 403) {
+        return detail?.isNotEmpty == true
+            ? 'HTTP 403 en $path: $detail'
+            : 'HTTP 403 en $path: el usuario no tiene permiso para esta operacion.';
+      }
+
+      if (statusCode != null) {
+        return detail?.isNotEmpty == true
+            ? 'HTTP $statusCode en $path: $detail'
+            : 'HTTP $statusCode en $path durante la sincronizacion.';
+      }
+
+      return 'No fue posible sincronizar por un error de red.';
+    }
+
+    final text = error.toString().trim();
+    if (text.isEmpty) {
+      return 'No fue posible sincronizar. Intenta nuevamente.';
+    }
+    return text;
+  }
+
+  String? _extractBackendDetail(dynamic data) {
+    if (data is Map<String, dynamic>) {
+      final detail = data['detail'];
+      if (detail is String && detail.trim().isNotEmpty) {
+        return detail.trim();
+      }
+      if (detail is List && detail.isNotEmpty) {
+        final messages = detail
+            .map((item) {
+              if (item is Map<String, dynamic> && item['msg'] != null) {
+                return item['msg'].toString();
+              }
+              return item.toString();
+            })
+            .where((msg) => msg.trim().isNotEmpty)
+            .join('; ');
+        if (messages.isNotEmpty) {
+          return messages;
+        }
+      }
+
+      final message = data['message'];
+      if (message is String && message.trim().isNotEmpty) {
+        return message.trim();
+      }
+    }
+
+    if (data is String && data.trim().isNotEmpty) {
+      return data.trim();
+    }
+
+    return null;
   }
 }
 

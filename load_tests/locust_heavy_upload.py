@@ -8,9 +8,15 @@ Run: locust -f load_tests/locust_heavy_upload.py --host=http://localhost:8000 --
 from locust import HttpUser, task, between, events
 import random
 import io
+import os
 
-TEST_EMAIL = "testuser@test.com"
-TEST_PASSWORD = "password123"
+TEST_EMAIL = os.getenv("SAO_LOADTEST_EMAIL", "testuser@test.com")
+TEST_PASSWORD = os.getenv("SAO_LOADTEST_PASSWORD")
+
+if not TEST_PASSWORD:
+    raise RuntimeError(
+        "Missing SAO_LOADTEST_PASSWORD environment variable for load tests"
+    )
 
 class SaoHeavyUploadUser(HttpUser):
     """Simulates peak load: multiple concurrent uploads"""

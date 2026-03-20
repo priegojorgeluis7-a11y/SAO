@@ -6,6 +6,8 @@ import 'package:get_it/get_it.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/network/api_client.dart';
+import '../../data/local/app_db.dart';
+import 'data/catalog_offline_repository.dart';
 import 'models/catalog_bundle_models.dart';
 
 class ProjectFrontOption {
@@ -32,6 +34,9 @@ class CatalogRepository {
 
   CatalogData _data = CatalogData.fromJson({});
   CatalogData get data => _data;
+
+  /// Devuelve el version_id del bundle activo (null si no hay bundle o no expone versión).
+  String? get currentVersionId => _data.versionId;
 
   // Items personalizados agregados por el usuario
   CustomCatalogData _customData = CustomCatalogData.empty();
@@ -129,14 +134,10 @@ class CatalogRepository {
       return;
     }
 
-    // 5. Fallback to bundled asset JSON (offline / first launch).
-    try {
-      final raw = await rootBundle.loadString('assets/base_seed_catalog.bundle.json');
-      final map = jsonDecode(raw) as Map<String, dynamic>;
-      _data = CatalogData.fromJson(map);
-    } catch (_) {
-      _data = CatalogData.fromJson({});
-    }
+    // 5. Do not fallback to bundled seed JSON.
+    // Using seed data in production can surface mock activities that do not
+    // belong to the real project catalog.
+    _data = CatalogData.fromJson({});
 
     _ready = true;
   }
@@ -160,6 +161,35 @@ class CatalogRepository {
       await file.writeAsString(jsonEncode(bundle));
     } catch (_) {
       // Silently fail
+    }
+    // Also persist to Drift-backed store for versioned offline retention.
+    await _persistOfflineBundle(projectId, bundle);
+  }
+
+  /// Persiste el bundle en las tablas Drift `catalog_index` y `catalog_bundles`.
+  Future<void> _persistOfflineBundle(
+    String projectId,
+    Map<String, dynamic> bundle,
+  ) async {
+    try {
+      final db = GetIt.instance<AppDb>();
+      final offlineRepo = CatalogOfflineRepository(db: db);
+      final meta = (bundle['meta'] as Map?)?.cast<String, dynamic>() ?? {};
+      final versionId = meta['version_id']?.toString();
+      final hash = meta['hash']?.toString() ?? meta['catalog_hash']?.toString();
+      if (versionId == null || versionId.isEmpty) return;
+      await offlineRepo.saveBundle(
+        projectId: projectId,
+        versionId: versionId,
+        bundleJson: bundle,
+      );
+      await offlineRepo.upsertIndex(
+        projectId: projectId,
+        versionId: versionId,
+        hash: hash,
+      );
+    } catch (_) {
+      // Silently fail — Drift tables may not exist yet on first install.
     }
   }
 
@@ -630,6 +660,8 @@ class CatalogRepository {
 
 class CatalogData {
   final String version;
+  /// ID semántico de la versión del catálogo (ej: "tmq-v1"). Null si no hay bundle.
+  final String? versionId;
   final List<CatItem> actividades;
 
   final Map<String, List<CatItem>> subcategoriasByActividad;
@@ -648,6 +680,7 @@ class CatalogData {
 
   CatalogData({
     required this.version,
+    this.versionId,
     required this.actividades,
     required this.subcategoriasByActividad,
     required this.propositosBySubcat,
@@ -996,6 +1029,7 @@ class CatalogData {
 
     return CatalogData(
       version: (bundle.meta['bundle_id'] ?? bundle.meta['project_id'] ?? 'bundle').toString(),
+      versionId: bundle.meta['version_id']?.toString(),
       actividades: actividades,
       subcategoriasByActividad: subcatsByAct,
       propositosBySubcat: purposesBySub,

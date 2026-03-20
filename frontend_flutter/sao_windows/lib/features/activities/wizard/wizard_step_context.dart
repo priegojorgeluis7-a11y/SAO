@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
+import '../../../core/utils/format_utils.dart';
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import 'wizard_controller.dart';
@@ -22,7 +27,6 @@ class _WizardStepContextState extends State<WizardStepContext> {
   final GlobalKey _riskKey = GlobalKey();
   final GlobalKey _locationKey = GlobalKey();
   bool _showRiskError = false;
-  late final TextEditingController _referenciaController;
   late final TextEditingController _coloniaController;
   late final TextEditingController _estadoController;
   late final TextEditingController _municipioController;
@@ -32,7 +36,6 @@ class _WizardStepContextState extends State<WizardStepContext> {
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
-    _referenciaController = TextEditingController(text: widget.controller.colonia);
     _coloniaController = TextEditingController(text: widget.controller.colonia);
     _estadoController = TextEditingController(text: widget.controller.estadoId ?? '');
     _municipioController = TextEditingController(text: widget.controller.municipioId ?? '');
@@ -42,7 +45,6 @@ class _WizardStepContextState extends State<WizardStepContext> {
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
-    _referenciaController.dispose();
     _coloniaController.dispose();
     _estadoController.dispose();
     _municipioController.dispose();
@@ -51,12 +53,6 @@ class _WizardStepContextState extends State<WizardStepContext> {
   }
 
   void _onControllerChanged() {
-    if (_referenciaController.text != widget.controller.colonia) {
-      _referenciaController.value = TextEditingValue(
-        text: widget.controller.colonia,
-        selection: TextSelection.collapsed(offset: widget.controller.colonia.length),
-      );
-    }
     if (_coloniaController.text != widget.controller.colonia) {
       _coloniaController.value = TextEditingValue(
         text: widget.controller.colonia,
@@ -111,6 +107,19 @@ class _WizardStepContextState extends State<WizardStepContext> {
     }
   }
 
+  Color _riskColor(RiskLevel level) {
+    switch (level) {
+      case RiskLevel.bajo:
+        return SaoColors.riskLow;
+      case RiskLevel.medio:
+        return SaoColors.riskMedium;
+      case RiskLevel.alto:
+        return SaoColors.riskHigh;
+      case RiskLevel.prioritario:
+        return SaoColors.riskPriority;
+    }
+  }
+
   Future<void> _openEditContextSheet() async {
     if (!widget.controller.isUnplanned) return;
     await showModalBottomSheet<void>(
@@ -131,6 +140,60 @@ class _WizardStepContextState extends State<WizardStepContext> {
         },
       ),
     );
+  }
+
+  Future<void> _captureOperativeLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Activa la ubicación del dispositivo para usar la posición del operativo.',
+            backgroundColor: SaoColors.warning,
+          ),
+        );
+        return;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'No se otorgaron permisos de ubicación.',
+            backgroundColor: SaoColors.warning,
+          ),
+        );
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+      );
+
+      widget.controller.setOperativeCoordinates(
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracy: position.accuracy,
+      );
+      widget.controller.useOperativeCoordinates();
+    } catch (_) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo obtener la ubicación del operativo en este momento.',
+          backgroundColor: SaoColors.warning,
+        ),
+      );
+    }
   }
 
   void _handleNext() {
@@ -157,9 +220,10 @@ class _WizardStepContextState extends State<WizardStepContext> {
       
       // Mostrar snackbar
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⚠️ ${validation.firstError?.message ?? "Completa los datos obligatorios"}'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: validation.firstError?.message ?? 'Completa los datos obligatorios',
             backgroundColor: SaoColors.warning,
             duration: const Duration(seconds: 2),
           ),
@@ -323,7 +387,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
               ]
               else
                 TextField(
-                  controller: _referenciaController,
+                  controller: _coloniaController,
                   decoration: const InputDecoration(
                     labelText: 'Referencia / Lugar',
                     hintText: 'Descripción de la ubicación',
@@ -399,9 +463,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
                           },
                         ),
                         const SizedBox(height: 6),
-                        const Text(
-                          'TODO: conectar matriz de riesgo desde catálogo real versionado/effective.',
-                          style: SaoTypography.caption,
+                        Text(
+                          'Sin opciones de riesgo en catálogo. Escribe el nivel manualmente.',
+                          style: SaoTypography.caption.copyWith(color: SaoColors.onSurfaceVariant),
                         ),
                       ],
                     );
@@ -413,10 +477,12 @@ class _WizardStepContextState extends State<WizardStepContext> {
                     children: parsedOptions.map((entry) {
                       final level = entry.level!;
                       final selected = c.risk == level;
-                      return ChoiceChip(
-                        label: Text(entry.label),
+                      return _riskChip(
+                        label: entry.label,
+                        level: level,
+                        color: _riskColor(level),
                         selected: selected,
-                        onSelected: (_) {
+                        onTap: () {
                           c.setRisk(level);
                           setState(() => _showRiskError = false);
                         },
@@ -558,6 +624,13 @@ class _WizardStepContextState extends State<WizardStepContext> {
                 const Text(
                   'Ubicación específica',
                   style: SaoTypography.cardTitle,
+                ),
+              const SizedBox(height: 12),
+
+              if (c.hasAssignmentCoordinates || c.hasOperativeCoordinates || c.hasValidGpsCoordinates)
+                _LocationMapSection(
+                  controller: c,
+                  onCaptureOperativeLocation: _captureOperativeLocation,
                 ),
               const SizedBox(height: 12),
               
@@ -735,7 +808,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? color.withOpacity(0.15) : SaoColors.gray50,
+          color: selected ? color.withValues(alpha: 0.15) : SaoColors.gray50,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: selected ? color : SaoColors.gray300,
@@ -779,7 +852,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: SaoColors.gray200),
         boxShadow: [
-          BoxShadow(blurRadius: 10, offset: const Offset(0, 4), color: SaoColors.gray900.withOpacity(0.04)),
+          BoxShadow(blurRadius: 10, offset: const Offset(0, 4), color: SaoColors.gray900.withValues(alpha: 0.04)),
         ],
       ),
       child: child,
@@ -799,7 +872,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? SaoColors.info.withOpacity(0.1) : SaoColors.surface,
+          color: selected ? SaoColors.info.withValues(alpha: 0.1) : SaoColors.surface,
           border: Border.all(
             color: selected ? SaoColors.info : SaoColors.gray300,
             width: selected ? 2 : 1,
@@ -958,7 +1031,7 @@ class _PKInputState extends State<_PKInput> {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'PK completo: ${_formatPkDisplay(widget.value!)}',
+              'PK completo: ${formatPk(widget.value!)}',
               style: SaoTypography.caption.copyWith(
                 fontWeight: FontWeight.w600,
                 color: SaoColors.info,
@@ -969,10 +1042,126 @@ class _PKInputState extends State<_PKInput> {
     );
   }
 
-  String _formatPkDisplay(int pk) {
-    final km = pk ~/ 1000;
-    final m = pk % 1000;
-    return '$km+${m.toString().padLeft(3, '0')}';
+}
+
+class _LocationMapSection extends StatelessWidget {
+  const _LocationMapSection({
+    required this.controller,
+    required this.onCaptureOperativeLocation,
+  });
+
+  final WizardController controller;
+  final Future<void> Function() onCaptureOperativeLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    final selectedLat = controller.geoLat;
+    final selectedLon = controller.geoLon;
+    final assignmentLat = controller.assignmentGeoLat;
+    final assignmentLon = controller.assignmentGeoLon;
+    final operativeLat = controller.operativeGeoLat;
+    final operativeLon = controller.operativeGeoLon;
+
+    final center = (selectedLat != null && selectedLon != null)
+        ? LatLng(selectedLat, selectedLon)
+        : (assignmentLat != null && assignmentLon != null)
+            ? LatLng(assignmentLat, assignmentLon)
+            : (operativeLat != null && operativeLon != null)
+                ? LatLng(operativeLat, operativeLon)
+                : null;
+
+    final markerWidgets = <Marker>[];
+    if (assignmentLat != null && assignmentLon != null) {
+      markerWidgets.add(
+        Marker(
+          point: LatLng(assignmentLat, assignmentLon),
+          width: 28,
+          height: 28,
+          child: const Icon(Icons.flag_circle_rounded, color: SaoColors.info, size: 26),
+        ),
+      );
+    }
+    if (operativeLat != null && operativeLon != null) {
+      markerWidgets.add(
+        Marker(
+          point: LatLng(operativeLat, operativeLon),
+          width: 28,
+          height: 28,
+          child: const Icon(Icons.person_pin_circle_rounded, color: SaoColors.success, size: 26),
+        ),
+      );
+    }
+    if (selectedLat != null && selectedLon != null) {
+      markerWidgets.add(
+        Marker(
+          point: LatLng(selectedLat, selectedLon),
+          width: 36,
+          height: 36,
+          child: const Icon(Icons.location_on_rounded, color: SaoColors.error, size: 32),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            if (controller.hasAssignmentCoordinates)
+              OutlinedButton.icon(
+                onPressed: controller.useAssignmentCoordinates,
+                icon: const Icon(Icons.flag_circle_rounded, size: 16),
+                label: const Text('Usar ubicación de asignación'),
+              ),
+            if (controller.hasOperativeCoordinates)
+              OutlinedButton.icon(
+                onPressed: controller.useOperativeCoordinates,
+                icon: const Icon(Icons.person_pin_circle_rounded, size: 16),
+                label: const Text('Usar ubicación de operativo'),
+              ),
+            OutlinedButton.icon(
+              onPressed: () => onCaptureOperativeLocation(),
+              icon: const Icon(Icons.my_location_rounded, size: 16),
+              label: const Text('Actualizar ubicación operativo'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (center != null)
+          ClipRRect(
+            borderRadius: BorderRadius.circular(12),
+            child: SizedBox(
+              height: 220,
+              child: FlutterMap(
+                options: MapOptions(
+                  initialCenter: center,
+                  initialZoom: 14,
+                  onLongPress: (_, point) {
+                    controller.setManualMapPoint(
+                      latitude: point.latitude,
+                      longitude: point.longitude,
+                    );
+                  },
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'mx.sao.app',
+                  ),
+                  MarkerLayer(markers: markerWidgets),
+                ],
+              ),
+            ),
+          ),
+        const SizedBox(height: 6),
+        Text(
+          'Bandera azul: asignación · pin verde: operativo · pin rojo: punto final. Mantén presionado en el mapa para mover el punto final.',
+          style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
+        ),
+      ],
+    );
   }
 }
 
@@ -1123,9 +1312,9 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
                   onChanged: c.setFrontName,
                 ),
                 const SizedBox(height: 6),
-                const Text(
-                  'TODO: conectar selector de frentes desde catálogo materializado.',
-                  style: SaoTypography.caption,
+                Text(
+                  'Sin frentes en catálogo para este proyecto. Captura el nombre manualmente.',
+                  style: SaoTypography.caption.copyWith(color: SaoColors.onSurfaceVariant),
                 ),
               ],
               const SizedBox(height: 14),
@@ -1253,11 +1442,6 @@ class _UnplannedBannerState extends State<_UnplannedBanner> {
                   ),
                 ),
                 onChanged: c.setUnplannedReason,
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'TODO: conectar motivos de actividad no planeada desde catálogo real.',
-                style: SaoTypography.caption,
               ),
 
               const SizedBox(height: 12),

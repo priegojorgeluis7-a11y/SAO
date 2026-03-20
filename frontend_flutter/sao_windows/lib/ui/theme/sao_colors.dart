@@ -42,10 +42,10 @@ class SaoColors {
   static const riskCritical = riskPriority;      // ⚠️ Alias para compatibilidad
 
   // Backgrounds de riesgo (con opacidad)
-  static final riskLowBg = riskLow.withOpacity(0.14);
-  static final riskMediumBg = riskMedium.withOpacity(0.14);
-  static final riskHighBg = riskHigh.withOpacity(0.14);
-  static final riskPriorityBg = riskPriority.withOpacity(0.14);  // 📱 Homologado
+  static final riskLowBg = riskLow.withValues(alpha: 0.14);
+  static final riskMediumBg = riskMedium.withValues(alpha: 0.14);
+  static final riskHighBg = riskHigh.withValues(alpha: 0.14);
+  static final riskPriorityBg = riskPriority.withValues(alpha: 0.14);  // 📱 Homologado
   static final riskCriticalBg = riskPriorityBg;               // ⚠️ Alias para compatibilidad
 
   // ============================================================
@@ -105,12 +105,12 @@ class SaoColors {
   static const statusBorrador = Color(0xFF6B7280);       // ⚪ Gris - Borrador/sin enviar
 
   // Backgrounds de estados operativos (con opacidad)
-  static final statusPendienteBg = statusPendiente.withOpacity(0.14);
-  static final statusEnCampoBg = statusEnCampo.withOpacity(0.14);
-  static final statusEnValidacionBg = statusEnValidacion.withOpacity(0.14);
-  static final statusAprobadoBg = statusAprobado.withOpacity(0.14);
-  static final statusRechazadoBg = statusRechazado.withOpacity(0.14);
-  static final statusBorradorBg = statusBorrador.withOpacity(0.14);
+  static final statusPendienteBg = statusPendiente.withValues(alpha: 0.14);
+  static final statusEnCampoBg = statusEnCampo.withValues(alpha: 0.14);
+  static final statusEnValidacionBg = statusEnValidacion.withValues(alpha: 0.14);
+  static final statusAprobadoBg = statusAprobado.withValues(alpha: 0.14);
+  static final statusRechazadoBg = statusRechazado.withValues(alpha: 0.14);
+  static final statusBorradorBg = statusBorrador.withValues(alpha: 0.14);
 
   // ============================================================
   // HELPERS: Obtener color de riesgo

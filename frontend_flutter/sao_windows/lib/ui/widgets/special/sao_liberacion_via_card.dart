@@ -47,7 +47,7 @@ class SaoLiberacionViaCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(SaoSpacing.md),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.14),
+              color: statusColor.withValues(alpha: 0.14),
               borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(SaoRadii.md - 2),
                 topRight: Radius.circular(SaoRadii.md - 2),

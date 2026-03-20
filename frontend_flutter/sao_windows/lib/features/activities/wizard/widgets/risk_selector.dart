@@ -57,10 +57,10 @@ class RiskSelector extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: selected ? color.withOpacity(0.14) : AppColors.gray50,
+            color: selected ? color.withValues(alpha: 0.14) : AppColors.gray50,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: selected ? color.withOpacity(0.6) : AppColors.border,
+              color: selected ? color.withValues(alpha: 0.6) : AppColors.border,
             ),
           ),
           child: Center(

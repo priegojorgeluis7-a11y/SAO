@@ -8,12 +8,15 @@ class AgendaAssignmentRecord {
     required this.id,
     required this.projectId,
     required this.resourceId,
+    this.resourceName,
     this.activityId,
     required this.title,
     required this.frente,
     required this.municipio,
     required this.estado,
     this.pk,
+    this.latitude,
+    this.longitude,
     required this.startAt,
     required this.endAt,
     required this.risk,
@@ -23,12 +26,15 @@ class AgendaAssignmentRecord {
   final String id;
   final String projectId;
   final String resourceId;
+  final String? resourceName;
   final String? activityId;
   final String title;
   final String frente;
   final String municipio;
   final String estado;
   final int? pk;
+  final double? latitude;
+  final double? longitude;
   final DateTime startAt;
   final DateTime endAt;
   final RiskLevel risk;
@@ -43,6 +49,13 @@ abstract class AssignmentsLocalStore {
   });
 
   Future<void> upsertAssignments(List<AgendaAssignmentRecord> records);
+
+  Future<void> replaceSyncedInRange({
+    required String projectId,
+    required DateTime from,
+    required DateTime to,
+    required List<AgendaAssignmentRecord> records,
+  });
 
   Future<List<AgendaItem>> listPending({String? projectId});
 
@@ -119,6 +132,32 @@ class AssignmentsDao implements AssignmentsLocalStore {
           ),
           mode: drift.InsertMode.insertOrReplace,
         );
+      }
+    });
+  }
+
+  @override
+  Future<void> replaceSyncedInRange({
+    required String projectId,
+    required DateTime from,
+    required DateTime to,
+    required List<AgendaAssignmentRecord> records,
+  }) async {
+    await _db.transaction(() async {
+      await (_db.delete(_db.agendaAssignments)
+            ..where(
+              (t) =>
+                  t.projectId.equals(projectId) &
+                  t.startAt.isSmallerThanValue(to) &
+                  t.endAt.isBiggerThanValue(from) &
+                  (t.syncStatus.equals('synced') |
+                      t.syncStatus.equals('uploading') |
+                      t.syncStatus.equals('error')),
+            ))
+          .go();
+
+      if (records.isNotEmpty) {
+        await upsertAssignments(records);
       }
     });
   }

@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../data/events_provider.dart';
+import '../data/event_types_catalog.dart';
 import '../models/event_dto.dart';
 import '../../../core/utils/uuid.dart' show uuidV4;
 
@@ -69,15 +71,6 @@ class _ReportEventSheetState extends ConsumerState<_ReportEventSheet> {
   final _step1Key = GlobalKey<FormState>();
   final _step2Key = GlobalKey<FormState>();
 
-  static const _eventTypes = [
-    ('DERRAME', 'Derrame / Fuga', Icons.water_damage_rounded),
-    ('ACCIDENTE', 'Accidente', Icons.personal_injury_rounded),
-    ('BLOQUEO', 'Bloqueo de vía', Icons.block_rounded),
-    ('INCENDIO', 'Incendio', Icons.local_fire_department_rounded),
-    ('VANDALISMO', 'Vandalismo', Icons.warning_rounded),
-    ('FALLA_EQUIPO', 'Falla de equipo', Icons.build_rounded),
-    ('OTRO', 'Otro', Icons.report_problem_rounded),
-  ];
 
   @override
   void dispose() {
@@ -113,6 +106,7 @@ class _ReportEventSheetState extends ConsumerState<_ReportEventSheet> {
   }
 
   Future<void> _submit() async {
+    final types = ref.read(eventTypesCatalogProvider);
     final dto = EventDTO(
       uuid: uuidV4(),
       projectId: widget.projectId,
@@ -120,7 +114,7 @@ class _ReportEventSheetState extends ConsumerState<_ReportEventSheet> {
       eventTypeCode: _eventTypeCode,
       title: _titleCtrl.text.trim().isNotEmpty
           ? _titleCtrl.text.trim()
-          : _eventTypeLabel(_eventTypeCode),
+          : _eventTypeLabel(_eventTypeCode, types),
       description: _descCtrl.text.trim().isNotEmpty ? _descCtrl.text.trim() : null,
       severity: _severity.value,
       locationPkMeters: _pkCtrl.text.trim().isNotEmpty
@@ -132,26 +126,23 @@ class _ReportEventSheetState extends ConsumerState<_ReportEventSheet> {
     await ref.read(reportEventControllerProvider.notifier).submit(dto);
   }
 
-  String _eventTypeLabel(String code) {
-    return _eventTypes
-        .firstWhere(
-          (t) => t.$1 == code,
-          orElse: () => (code, code, Icons.report_rounded),
-        )
-        .$2;
+  String _eventTypeLabel(String code, List<EventTypeTuple> types) {
+    return eventTypeLabel(code, types);
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(reportEventControllerProvider);
+    final eventTypes = ref.watch(eventTypesCatalogProvider);
     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
 
     ref.listen(reportEventControllerProvider, (_, next) {
       if (next.success) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('✅ Evento registrado — se sincronizará cuando haya red'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Evento registrado — se sincronizará cuando haya red',
             backgroundColor: SaoColors.success,
           ),
         );
@@ -211,7 +202,7 @@ class _ReportEventSheetState extends ConsumerState<_ReportEventSheet> {
                     formKey: _step1Key,
                     selectedType: _eventTypeCode,
                     severity: _severity,
-                    eventTypes: _eventTypes,
+                    eventTypes: eventTypes,
                     onTypeChanged: (v) => setState(() => _eventTypeCode = v),
                     onSeverityChanged: (v) => setState(() => _severity = v),
                   ),
@@ -222,7 +213,7 @@ class _ReportEventSheetState extends ConsumerState<_ReportEventSheet> {
                     pkCtrl: _pkCtrl,
                   ),
                   _Step3(
-                    eventTypeLabel: _eventTypeLabel(_eventTypeCode),
+                    eventTypeLabel: _eventTypeLabel(_eventTypeCode, eventTypes),
                     severity: _severity,
                     title: _titleCtrl.text.trim(),
                     description: _descCtrl.text.trim(),

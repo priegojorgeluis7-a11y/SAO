@@ -3,7 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:crypto/crypto.dart';
 import 'dart:convert';
-import '../../../core/config/app_config.dart';
+import '../../../core/network/api_config.dart';
 import '../../../core/services/connectivity_service.dart';
 import '../../../core/utils/logger.dart';
 import 'models/login_request.dart';
@@ -20,6 +20,7 @@ class AuthService {
   static const String _offlinePinHashKey = 'offline_pin_hash';
 
   late final Dio _dio;
+  final ApiConfig _apiConfig;
   final FlutterSecureStorage _secureStorage;
   final SharedPreferences _prefs;
   final ConnectivityService _connectivityService;
@@ -28,16 +29,20 @@ class AuthService {
     this._secureStorage,
     this._prefs,
     this._connectivityService,
+    this._apiConfig,
   ) {
+    final baseUrl = _apiConfig.baseUrl;
     _dio = Dio(BaseOptions(
-      baseUrl: AppConfig.baseApiUrl,
-      connectTimeout: AppConfig.connectionTimeout,
-      receiveTimeout: AppConfig.receiveTimeout,
+      baseUrl: baseUrl,
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 10),
       headers: {
         'Content-Type': 'application/json',
         'Accept': 'application/json',
       },
     ));
+
+    appLogger.i('AuthService backend URL: $baseUrl');
 
     // Interceptor para agregar token automáticamente
     _dio.interceptors.add(InterceptorsWrapper(
@@ -68,6 +73,15 @@ class AuthService {
         return handler.next(error);
       },
     ));
+  }
+
+  /// Updates authentication client base URL at runtime.
+  void updateBaseUrl(String baseUrl) {
+    final normalized = baseUrl.trim();
+    if (normalized.isEmpty) return;
+    _apiConfig.setBaseUrl(normalized);
+    _dio.options.baseUrl = normalized;
+    appLogger.i('AuthService base URL updated to: $normalized');
   }
 
   /// Verifica si hay conexión a internet
@@ -259,6 +273,29 @@ class AuthService {
     if (savedHash == null || savedHash.isEmpty) return false;
 
     return _hashPin(pin, email) == savedHash;
+  }
+
+  /// Cambia la contraseña del usuario autenticado
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    final online = await isOnline;
+    if (!online) {
+      throw Exception('Se requiere conexión para cambiar la contraseña');
+    }
+    try {
+      await _dio.put<dynamic>(
+        '/auth/me/password',
+        data: {
+          'current_password': currentPassword,
+          'new_password': newPassword,
+        },
+      );
+      appLogger.i('Contraseña cambiada exitosamente');
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 400) {
+        throw Exception('La contraseña actual es incorrecta');
+      }
+      throw Exception('Error al cambiar contraseña: ${e.message}');
+    }
   }
 
   /// Limpia todo (incluyendo último usuario)

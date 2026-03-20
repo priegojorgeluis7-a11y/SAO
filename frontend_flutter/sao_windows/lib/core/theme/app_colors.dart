@@ -29,10 +29,10 @@ class AppColors {
   static const riskCritical = Color(0xFFDC2626); // 🔴 Rojo
 
   // Backgrounds de riesgo (con opacidad)
-  static final riskLowBg = riskLow.withOpacity(0.14);
-  static final riskMediumBg = riskMedium.withOpacity(0.14);
-  static final riskHighBg = riskHigh.withOpacity(0.14);
-  static final riskCriticalBg = riskCritical.withOpacity(0.14);
+  static final riskLowBg = riskLow.withValues(alpha: 0.14);
+  static final riskMediumBg = riskMedium.withValues(alpha: 0.14);
+  static final riskHighBg = riskHigh.withValues(alpha: 0.14);
+  static final riskCriticalBg = riskCritical.withValues(alpha: 0.14);
 
   // Alertas
   static const alertBg = Color(0xFFFFFBEB);

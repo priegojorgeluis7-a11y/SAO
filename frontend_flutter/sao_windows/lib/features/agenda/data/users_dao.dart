@@ -18,6 +18,7 @@ class AgendaCachedUser {
 abstract class UsersLocalStore {
   Future<List<AgendaCachedUser>> getActiveUsersByRole(int roleId);
   Future<void> upsertUsers(List<AgendaCachedUser> users);
+  Future<void> replaceUsersByRole(int roleId, List<AgendaCachedUser> users);
 }
 
 class UsersDao implements UsersLocalStore {
@@ -60,6 +61,44 @@ class UsersDao implements UsersLocalStore {
           ),
           mode: drift.InsertMode.insertOrReplace,
         );
+      }
+    });
+  }
+
+  @override
+  Future<void> replaceUsersByRole(int roleId, List<AgendaCachedUser> users) async {
+    await _db.transaction(() async {
+      // Do not hard-delete users because other tables may reference them.
+      // Keep referential integrity by upserting current snapshot and
+      // soft-disabling users missing from latest backend response.
+      await _db.batch((batch) {
+        for (final user in users) {
+          batch.insert(
+            _db.users,
+            UsersCompanion.insert(
+              id: user.id,
+              name: user.fullName,
+              roleId: user.roleId,
+              isActive: drift.Value(user.isActive),
+            ),
+            mode: drift.InsertMode.insertOrReplace,
+          );
+        }
+      });
+
+      final keepIds = users.map((u) => u.id).toSet();
+
+      if (keepIds.isEmpty) {
+        await (_db.update(_db.users)
+              ..where((t) => t.roleId.equals(roleId) & t.isActive.equals(true)))
+            .write(const UsersCompanion(isActive: drift.Value(false)));
+      } else {
+        await (_db.update(_db.users)
+              ..where((t) =>
+                  t.roleId.equals(roleId) &
+                  t.isActive.equals(true) &
+                  t.id.isNotIn(keepIds)))
+            .write(const UsersCompanion(isActive: drift.Value(false)));
       }
     });
   }

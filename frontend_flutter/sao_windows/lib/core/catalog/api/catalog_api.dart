@@ -66,4 +66,39 @@ class CatalogApi {
     );
     return Map<String, dynamic>.from(response.data as Map);
   }
+
+  /// Descarga el bundle completo para un proyecto.
+  /// Si se pasa [versionId], se obtiene esa versión histórica exacta.
+  Future<Map<String, dynamic>> getBundle({
+    required String projectId,
+    String? versionId,
+  }) async {
+    final queryParameters = <String, dynamic>{
+      'project_id': projectId,
+    };
+    if (versionId != null) {
+      queryParameters['version_id'] = versionId;
+    }
+
+    final response = await _apiClient.get<dynamic>(
+      '/catalog/bundle',
+      queryParameters: queryParameters,
+    );
+    return Map<String, dynamic>.from(response.data as Map);
+  }
+
+  /// Check ligero multiproyecto: devuelve un mapa {projectId → versionDigest}.
+  /// Una sola llamada en lugar de N llamadas a /catalog/version/current.
+  Future<Map<String, Map<String, dynamic>?>> getVersionsMultiProject(
+    List<String> projectIds,
+  ) async {
+    final response = await _apiClient.get<dynamic>(
+      '/catalog/versions',
+      queryParameters: {'project_ids': projectIds.join(',')},
+    );
+    final raw = Map<String, dynamic>.from(response.data as Map);
+    return raw.map(
+      (k, v) => MapEntry(k, v == null ? null : Map<String, dynamic>.from(v as Map)),
+    );
+  }
 }

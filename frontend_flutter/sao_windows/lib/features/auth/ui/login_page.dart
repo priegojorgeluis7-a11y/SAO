@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_typography.dart';
@@ -76,11 +77,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     // Listen for authentication success/failure
     ref.listen(authControllerProvider, (previous, next) {
       if (next.error != null && next.error!.isNotEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(next.error!),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: next.error!,
             backgroundColor: SaoColors.error,
-            behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 4),
           ),
         );

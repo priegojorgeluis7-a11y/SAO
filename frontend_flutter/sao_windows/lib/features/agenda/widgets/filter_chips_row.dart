@@ -24,7 +24,7 @@ class FilterChipsRow extends StatelessWidget {
       ('Todos', 'Todos', Icons.apps_rounded),
       ...resources
           .where((r) => r.isActive)
-          .map((r) => (r.id, r.name.split(' ').first, Icons.person_rounded)),
+          .map((r) => (r.id, _chipLabel(r.name), Icons.person_rounded)),
     ];
 
     return Container(
@@ -95,5 +95,13 @@ class FilterChipsRow extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Devuelve "Nombre I." para que el chip sea compacto pero no ambiguo.
+  /// Ejemplos: "José García" → "José G."  /  "María" → "María"
+  static String _chipLabel(String fullName) {
+    final parts = fullName.trim().split(RegExp(r'\s+'));
+    if (parts.length <= 1) return parts.first;
+    return '${parts.first} ${parts[1][0].toUpperCase()}.';
   }
 }

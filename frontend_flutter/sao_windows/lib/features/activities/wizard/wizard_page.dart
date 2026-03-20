@@ -1,4 +1,6 @@
 // lib/features/activities/wizard/wizard_page.dart
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
@@ -37,8 +39,11 @@ class ActivityWizardPage extends ConsumerStatefulWidget {
 }
 
 class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage> {
+  static const int _stepCount = 4;
+
   final PageController _pager = PageController();
   late final WizardController c;
+  Timer? _autoSaveDebounce;
   int step = 0;
 
   @override
@@ -59,19 +64,30 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage> {
       isUnplanned: widget.isUnplanned,
     );
 
+    c.addListener(_scheduleAutoSave);
+
     // ignore: unawaited_futures
     c.init();
   }
 
   @override
   void dispose() {
+    _autoSaveDebounce?.cancel();
+    c.removeListener(_scheduleAutoSave);
     _pager.dispose();
     c.dispose();
     super.dispose();
   }
 
+  void _scheduleAutoSave() {
+    _autoSaveDebounce?.cancel();
+    _autoSaveDebounce = Timer(const Duration(milliseconds: 1200), () {
+      unawaited(c.saveDraftSilently());
+    });
+  }
+
   void next() {
-    if (step < 3) {
+    if (step < _stepCount - 1) {
       _pager.nextPage(duration: const Duration(milliseconds: 250), curve: Curves.easeInOut);
       setState(() => step++);
     }
@@ -82,12 +98,15 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage> {
       _pager.previousPage(duration: const Duration(milliseconds: 250), curve: Curves.easeInOut);
       setState(() => step--);
     } else {
-      Navigator.pop(context);
+      // Save draft before leaving so data is not lost
+      c.saveDraftSilently().then((_) {
+        if (mounted) Navigator.pop(context);
+      });
     }
   }
 
   void jumpToStep(int targetStep) {
-    if (targetStep < 0 || targetStep > 3 || targetStep == step) return;
+    if (targetStep < 0 || targetStep >= _stepCount || targetStep == step) return;
     _pager.animateToPage(
       targetStep,
       duration: const Duration(milliseconds: 300),
@@ -108,8 +127,8 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage> {
             surfaceTintColor: SaoColors.surface,
             title: Text(
               widget.isUnplanned
-                  ? 'Actividad no planeada (${step + 1}/4)'
-                  : 'Registrar actividad (${step + 1}/4)',
+                  ? 'Actividad no planeada (${step + 1}/$_stepCount)'
+                  : 'Registrar actividad (${step + 1}/$_stepCount)',
             ),
             leading: IconButton(icon: const Icon(Icons.arrow_back), onPressed: back),
             bottom: PreferredSize(
@@ -117,7 +136,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage> {
               child: TweenAnimationBuilder<double>(
                 duration: const Duration(milliseconds: 400),
                 curve: Curves.easeInOut,
-                tween: Tween(begin: 0, end: (step + 1) / 4),
+                tween: Tween(begin: 0, end: (step + 1) / _stepCount),
                 builder: (context, value, child) {
                   return LinearProgressIndicator(
                     value: value,

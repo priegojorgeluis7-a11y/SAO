@@ -365,6 +365,21 @@ class AuthNotifier extends StateNotifier<AuthState> {
     );
   }
 
+  /// Cambia la contraseña del usuario autenticado
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    state = state.copyWith(isLoading: true, error: null);
+    try {
+      await _authService.changePassword(currentPassword, newPassword);
+      state = state.copyWith(isLoading: false);
+    } catch (e) {
+      state = state.copyWith(
+        isLoading: false,
+        error: e.toString().replaceAll('Exception: ', ''),
+      );
+      rethrow;
+    }
+  }
+
   /// Limpia el error
   void clearError() {
     state = state.copyWith(error: null);

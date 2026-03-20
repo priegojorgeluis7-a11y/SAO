@@ -1,9 +1,11 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:get_it/get_it.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/auth/token_storage.dart';
 import '../../../core/auth/pin_storage.dart';
+import '../../../core/services/biometric_service.dart';
 import '../../../core/storage/kv_store.dart';
 import '../data/auth_repository.dart';
 import '../application/auth_controller.dart';
@@ -22,6 +24,7 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
   final apiClient = GetIt.I<ApiClient>();
   final tokenStorage = GetIt.I<TokenStorage>();
   final kvStore = GetIt.I<KvStore>();
+  final prefs = GetIt.I<SharedPreferences>();
   final pinStorage = ref.watch(pinStorageProvider);
 
   return AuthRepository(
@@ -29,6 +32,7 @@ final authRepositoryProvider = Provider<AuthRepository>((ref) {
     tokenStorage: tokenStorage,
     kvStore: kvStore,
     pinStorage: pinStorage,
+    prefs: prefs,
   );
 });
 
@@ -38,7 +42,12 @@ final authControllerProvider =
     StateNotifierProvider<AuthController, AuthState>((ref) {
   final repository = ref.watch(authRepositoryProvider);
   final pinStorage = ref.watch(pinStorageProvider);
-  return AuthController(repository, pinStorage: pinStorage);
+  final biometricService = GetIt.I<BiometricService>();
+  return AuthController(
+    repository,
+    biometricService: biometricService,
+    pinStorage: pinStorage,
+  );
 });
 
 final authStateProvider = Provider<AsyncValue<AuthState>>((ref) {

@@ -61,19 +61,19 @@ class EventDTO {
   });
 
   factory EventDTO.fromJson(Map<String, dynamic> json) => EventDTO(
-        uuid: json['uuid'] as String,
+      uuid: (json['uuid'] ?? '').toString(),
         serverId: json['server_id'] as int?,
-        projectId: json['project_id'] as String,
-        reportedByUserId: json['reported_by_user_id'] as String,
-        eventTypeCode: json['event_type_code'] as String,
-        title: json['title'] as String,
-        description: json['description'] as String?,
-        severity: json['severity'] as String,
+      projectId: (json['project_id'] ?? '').toString(),
+      reportedByUserId: (json['reported_by_user_id'] ?? '').toString(),
+      eventTypeCode: (json['event_type_code'] ?? 'UNKNOWN').toString(),
+      title: (json['title'] ?? '').toString(),
+      description: json['description']?.toString(),
+      severity: (json['severity'] ?? 'MEDIUM').toString(),
         locationPkMeters: json['location_pk_meters'] as int?,
-        occurredAt: json['occurred_at'] as String,
-        resolvedAt: json['resolved_at'] as String?,
-        deletedAt: json['deleted_at'] as String?,
-        formFieldsJson: json['form_fields_json'] as String?,
+      occurredAt: (json['occurred_at'] ?? DateTime.now().toUtc().toIso8601String()).toString(),
+      resolvedAt: json['resolved_at']?.toString(),
+      deletedAt: json['deleted_at']?.toString(),
+      formFieldsJson: json['form_fields_json']?.toString(),
         syncVersion: (json['sync_version'] as int?) ?? 0,
       );
 

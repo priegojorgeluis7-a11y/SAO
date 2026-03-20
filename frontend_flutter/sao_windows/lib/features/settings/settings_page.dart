@@ -3,27 +3,110 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../auth/data/auth_provider.dart';
 import '../auth/application/auth_providers.dart';
+import '../auth/data/auth_service.dart';
 import '../sync/data/sync_api_repository.dart';
 import '../catalog/data/catalog_api_repository.dart';
 import '../catalog/data/catalog_local_repository.dart';
-import '../catalog/application/catalog_sync_service.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_config.dart';
+import '../../core/catalog/state/catalog_providers.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../core/utils/logger.dart';
+import '../../core/utils/snackbar.dart';
+
+// ---------------------------------------------------------------------------
+// Providers de ajustes
+// ---------------------------------------------------------------------------
+
+/// Estado combinado de biometría: si el dispositivo la soporta y si está activa.
+final _biometricStateProvider =
+    FutureProvider.autoDispose<({bool canUse, bool enabled})>((ref) async {
+  final notifier = ref.read(authControllerProvider.notifier);
+  final canUse = await notifier.canUseBiometrics();
+  if (!canUse) return (canUse: false, enabled: false);
+  final enabled = await notifier.isBiometricEnabled();
+  return (canUse: canUse, enabled: enabled);
+});
+
+// ---------------------------------------------------------------------------
+// SettingsPage
+// ---------------------------------------------------------------------------
 
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   static const _apiBaseUrlKey = 'api_base_url_override';
 
+  String _safeInitial(String? fullName) {
+    final trimmed = (fullName ?? '').trim();
+    if (trimmed.isEmpty) return '?';
+    return trimmed[0].toUpperCase();
+  }
+
+  // ---- Dialogo: cambiar contraseña ----------------------------------------
+
+  Future<void> _showChangePasswordDialog(
+      BuildContext context, WidgetRef ref) async {
+    final formKey = GlobalKey<FormState>();
+    final currentCtrl = TextEditingController();
+    final newCtrl = TextEditingController();
+    final confirmCtrl = TextEditingController();
+
+    try {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => _ChangePasswordDialog(
+          formKey: formKey,
+          currentCtrl: currentCtrl,
+          newCtrl: newCtrl,
+          confirmCtrl: confirmCtrl,
+        ),
+      );
+
+      if (confirmed != true || !context.mounted) return;
+
+      await ref
+          .read(authControllerProvider.notifier)
+          .changePassword(currentCtrl.text, newCtrl.text);
+
+      if (context.mounted) {
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Contraseña actualizada correctamente',
+            backgroundColor: SaoColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        final message = e
+            .toString()
+            .replaceFirst(RegExp(r'^[A-Za-z]+Exception:\s*'), '');
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: message,
+            backgroundColor: SaoColors.error,
+          ),
+        );
+      }
+    } finally {
+      currentCtrl.dispose();
+      newCtrl.dispose();
+      confirmCtrl.dispose();
+    }
+  }
+
+  // ---- Dialogo: configurar backend URL ------------------------------------
+
   Future<void> _configureBackendUrl(BuildContext context) async {
     final prefs = getIt<SharedPreferences>();
     final apiConfig = getIt<ApiConfig>();
     final apiClient = getIt<ApiClient>();
+    final authService = getIt<AuthService>();
     final stored = prefs.getString(_apiBaseUrlKey)?.trim();
     final current = (stored != null && stored.isNotEmpty)
         ? stored
@@ -68,7 +151,8 @@ class SettingsPage extends ConsumerWidget {
               child: const Text('Cancelar'),
             ),
             TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop('__RESET__'),
+              onPressed: () =>
+                  Navigator.of(dialogContext).pop('__RESET__'),
               child: const Text('Usar predeterminada'),
             ),
             FilledButton(
@@ -90,12 +174,14 @@ class SettingsPage extends ConsumerWidget {
     if (submittedUrl == '__RESET__') {
       await prefs.remove(_apiBaseUrlKey);
       apiConfig.resetBaseUrl();
-      final defaultUrl = ApiConfig.defaultBaseUrl;
+      const defaultUrl = ApiConfig.defaultBaseUrl;
       apiClient.updateBaseUrl(defaultUrl);
+      authService.updateBaseUrl(defaultUrl);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Backend restablecido a: $defaultUrl'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Backend restablecido a: $defaultUrl',
             backgroundColor: SaoColors.info,
           ),
         );
@@ -105,21 +191,26 @@ class SettingsPage extends ConsumerWidget {
 
     await prefs.setString(_apiBaseUrlKey, submittedUrl);
     apiClient.updateBaseUrl(submittedUrl);
+  authService.updateBaseUrl(submittedUrl);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Backend actualizado a: $submittedUrl'),
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Backend actualizado a: $submittedUrl',
           backgroundColor: SaoColors.success,
         ),
       );
     }
   }
 
+  // ---- Build --------------------------------------------------------------
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final authState = ref.watch(authProvider);
+    final authState = ref.watch(authControllerProvider);
     final theme = Theme.of(context);
-    final isTutorialGuest = GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
+    final isTutorialGuest =
+        GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
     final syncRoute = isTutorialGuest ? '/sync?tutorial=1' : '/sync';
 
     return Scaffold(
@@ -129,6 +220,7 @@ class SettingsPage extends ConsumerWidget {
       ),
       body: ListView(
         children: [
+          // Banner modo tutorial
           if (isTutorialGuest)
             Container(
               margin: const EdgeInsets.fromLTRB(16, 12, 16, 6),
@@ -143,62 +235,112 @@ class SettingsPage extends ConsumerWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.school_outlined, size: 18, color: SaoColors.infoIcon),
+                      Icon(Icons.school_outlined,
+                          size: 18, color: SaoColors.infoIcon),
                       SizedBox(width: 6),
                       Text(
                         'Modo tutorial · Vista Ajustes',
-                        style: TextStyle(fontWeight: FontWeight.w700, color: SaoColors.infoText),
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: SaoColors.infoText),
                       ),
                     ],
                   ),
                   SizedBox(height: 8),
                   Text('Aquí se configuran seguridad, sync y datos locales.'),
-                  Text('En operación real, verifica biometría y reglas de sincronización.'),
+                  Text(
+                      'En operación real, verifica biometría y reglas de sincronización.'),
                 ],
               ),
             ),
 
-          // Información del usuario
+          // Tarjeta de usuario (tappable → /profile)
           if (authState.user != null) ...[
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+            Material(
+              color: theme.colorScheme.primaryContainer,
+              child: InkWell(
+                onTap: () => context.push('/profile'),
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      CircleAvatar(
-                        radius: 30,
-                        backgroundColor: theme.colorScheme.primary,
-                        child: Text(
-                          authState.user!.fullName[0].toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: theme.colorScheme.onPrimary,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              authState.user!.fullName,
-                              style: theme.textTheme.titleLarge?.copyWith(
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 30,
+                            backgroundColor: theme.colorScheme.primary,
+                            child: Text(
+                              _safeInitial(authState.user!.fullName),
+                              style: TextStyle(
+                                fontSize: 24,
                                 fontWeight: FontWeight.bold,
+                                color: theme.colorScheme.onPrimary,
                               ),
                             ),
-                            const SizedBox(height: 4),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  authState.user!.fullName,
+                                  style: theme.textTheme.titleLarge?.copyWith(
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  authState.user!.email,
+                                  style: theme.textTheme.bodyMedium?.copyWith(
+                                    color: theme.colorScheme.onPrimaryContainer
+                                        .withValues(alpha: 0.7),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            Icons.chevron_right,
+                            color: theme.colorScheme.onPrimaryContainer
+                                .withValues(alpha: 0.5),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: authState.user!.isActive
+                              ? SaoColors.success.withValues(alpha: 0.12)
+                              : SaoColors.gray300,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              authState.user!.isActive
+                                  ? Icons.check_circle
+                                  : Icons.block,
+                              size: 16,
+                              color: authState.user!.isActive
+                                  ? SaoColors.success
+                                  : SaoColors.gray700,
+                            ),
+                            const SizedBox(width: 4),
                             Text(
-                              authState.user!.email,
-                              style: theme.textTheme.bodyMedium?.copyWith(
-                                color: theme.colorScheme.onPrimaryContainer
-                                    .withOpacity(0.7),
+                              authState.user!.status.toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: authState.user!.isActive
+                                    ? SaoColors.success
+                                    : SaoColors.gray700,
                               ),
                             ),
                           ],
@@ -206,108 +348,24 @@ class SettingsPage extends ConsumerWidget {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: authState.user!.isActive
-                          ? SaoColors.success.withOpacity(0.12)
-                          : SaoColors.gray300,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          authState.user!.isActive
-                              ? Icons.check_circle
-                              : Icons.block,
-                          size: 16,
-                          color: authState.user!.isActive
-                              ? SaoColors.success
-                              : SaoColors.gray700,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          authState.user!.status.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.bold,
-                            color: authState.user!.isActive
-                                ? SaoColors.success
-                                : SaoColors.gray700,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+                ),
               ),
             ),
             const Divider(),
           ],
 
-          // Sección de cuenta
-          const ListTile(
-            leading: Icon(Icons.account_circle_outlined),
-            title: Text('Cuenta'),
-            subtitle: Text('Información de usuario'),
-            enabled: false,
-          ),
-          const ListTile(
-            leading: Icon(Icons.lock_outline),
-            title: Text('Cambiar contraseña'),
-            subtitle: Text('Actualizar credenciales'),
-            enabled: false,
+          // Cambiar contraseña
+          ListTile(
+            leading: const Icon(Icons.lock_outline),
+            title: const Text('Cambiar contraseña'),
+            subtitle: const Text('Actualizar credenciales'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => _showChangePasswordDialog(context, ref),
           ),
           const Divider(),
 
-          // Sección de seguridad
-          ListTile(
-            leading: const Icon(Icons.fingerprint),
-            title: const Text('Inicio rápido con biometría'),
-            subtitle: const Text('Usa huella o Face ID para entrar'),
-            trailing: StatefulBuilder(
-              builder: (context, setState) {
-                return FutureBuilder<bool>(
-                  future: ref.read(authProvider.notifier).canUseBiometrics(),
-                  builder: (context, canUseSnapshot) {
-                    if (!canUseSnapshot.hasData || !canUseSnapshot.data!) {
-                      return const SizedBox.shrink();
-                    }
-
-                    return FutureBuilder<bool>(
-                      future:
-                          ref.read(authProvider.notifier).isBiometricEnabled(),
-                      builder: (context, enabledSnapshot) {
-                        if (!enabledSnapshot.hasData) {
-                          return const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          );
-                        }
-
-                        return Switch(
-                          value: enabledSnapshot.data!,
-                          onChanged: (value) async {
-                            await ref
-                                .read(authProvider.notifier)
-                                .setBiometricEnabled(value);
-                            // Refrescar el estado
-                            setState(() {});
-                          },
-                        );
-                      },
-                    );
-                  },
-                );
-              },
-            ),
-          ),
+          // Biometría
+          const _BiometricTile(),
           const Divider(),
 
           // Sección de aplicación
@@ -318,6 +376,7 @@ class SettingsPage extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => _configureBackendUrl(context),
           ),
+          const _CatalogVersionTile(),
           ListTile(
             leading: const Icon(Icons.sync_outlined),
             title: const Text('Sincronización'),
@@ -325,22 +384,9 @@ class SettingsPage extends ConsumerWidget {
             trailing: const Icon(Icons.chevron_right),
             onTap: () => context.push(syncRoute),
           ),
-          ListTile(
-            leading: const Icon(Icons.storage_outlined),
-            title: const Text('Almacenamiento'),
-            subtitle: const Text('Gestionar datos locales'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => context.push(syncRoute),
-          ),
-          const ListTile(
-            leading: Icon(Icons.info_outline),
-            title: Text('Acerca de'),
-            subtitle: Text('Versión 1.0.0'),
-            enabled: false,
-          ),
           const Divider(),
 
-          // DEBUG ONLY: Sync smoke test (Phase 3D)
+          // DEBUG ONLY
           if (kDebugMode) ...[
             ListTile(
               leading: const Icon(Icons.bug_report, color: SaoColors.warning),
@@ -348,27 +394,27 @@ class SettingsPage extends ConsumerWidget {
                 '🧪 DEBUG: Test Sync Pull',
                 style: TextStyle(color: SaoColors.warning),
               ),
-              subtitle: const Text('Pull activities from TMQ (Phase 3D smoke test)'),
+              subtitle: const Text(
+                  'Pull activities from TMQ (Phase 3D smoke test)'),
               trailing: const Icon(Icons.play_arrow),
               onTap: () async {
                 try {
                   appLogger.i('🧪 Starting Sync Pull smoke test...');
-                  
+
                   final syncRepo = SyncApiRepository();
                   final response = await syncRepo.pullActivities(
                     projectId: 'TMQ',
                     sinceVersion: 0,
                     limit: 50,
                   );
-                  
+
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '✅ Sync Pull Success!\n'
-                          'Current version: ${response.currentVersion}\n'
-                          'Activities pulled: ${response.activities.length}',
-                        ),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Sync Pull Success!\n'
+                            'Current version: ${response.currentVersion}\n'
+                            'Activities pulled: ${response.activities.length}',
                         backgroundColor: SaoColors.success,
                         duration: const Duration(seconds: 5),
                       ),
@@ -377,9 +423,10 @@ class SettingsPage extends ConsumerWidget {
                 } catch (e) {
                   appLogger.e('❌ Sync Pull smoke test failed: $e');
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('❌ Sync Pull Failed:\n$e'),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Sync Pull Failed:\n$e',
                         backgroundColor: SaoColors.error,
                         duration: const Duration(seconds: 5),
                       ),
@@ -394,28 +441,28 @@ class SettingsPage extends ConsumerWidget {
                 '🧪 DEBUG: Test Catalog Fetch',
                 style: TextStyle(color: SaoColors.info),
               ),
-              subtitle: const Text('Fetch latest catalog from TMQ (Phase 4A smoke test)'),
+              subtitle: const Text(
+                  'Fetch latest catalog from TMQ (Phase 4A smoke test)'),
               trailing: const Icon(Icons.play_arrow),
               onTap: () async {
                 try {
                   appLogger.i('🧪 Starting Catalog Fetch smoke test...');
-                  
+
                   final catalogRepo = CatalogApiRepository();
                   final catalog = await catalogRepo.fetchLatestCatalog(
                     projectId: 'TMQ',
                   );
-                  
+
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '✅ Catalog Fetch Success!\n'
-                          'Version: ${catalog.versionNumber}\n'
-                          'Hash: ${catalog.hash.substring(0, 8)}...\n'
-                          'Activity Types: ${catalog.activityTypes.length}\n'
-                          'Event Types: ${catalog.eventTypes.length}\n'
-                          'Form Fields: ${catalog.formFields.length}',
-                        ),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Catalog Fetch Success!\n'
+                            'Version: ${catalog.versionNumber}\n'
+                            'Hash: ${catalog.hash.substring(0, 8)}...\n'
+                            'Activity Types: ${catalog.activityTypes.length}\n'
+                            'Event Types: ${catalog.eventTypes.length}\n'
+                            'Form Fields: ${catalog.formFields.length}',
                         backgroundColor: SaoColors.success,
                         duration: const Duration(seconds: 5),
                       ),
@@ -424,9 +471,10 @@ class SettingsPage extends ConsumerWidget {
                 } catch (e) {
                   appLogger.e('❌ Catalog Fetch smoke test failed: $e');
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('❌ Catalog Fetch Failed:\n$e'),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Catalog Fetch Failed:\n$e',
                         backgroundColor: SaoColors.error,
                         duration: const Duration(seconds: 5),
                       ),
@@ -441,37 +489,39 @@ class SettingsPage extends ConsumerWidget {
                 '🧪 DEBUG: Test Catalog Persist',
                 style: TextStyle(color: SaoColors.info),
               ),
-              subtitle: const Text('Fetch + save catalog to Drift DB (Phase 4B smoke test)'),
+              subtitle: const Text(
+                  'Fetch + save catalog to Drift DB (Phase 4B smoke test)'),
               trailing: const Icon(Icons.play_arrow),
               onTap: () async {
                 try {
                   appLogger.i('🧪 Starting Catalog Persist smoke test...');
-                  
-                  // Phase 4A: Fetch from API
+
                   final catalogRepo = CatalogApiRepository();
                   final catalog = await catalogRepo.fetchLatestCatalog(
                     projectId: 'TMQ',
                   );
-                  
-                  appLogger.i('📦 Fetched catalog v${catalog.versionNumber}, saving to DB...');
-                  
-                  // Phase 4B: Save to Drift DB
+
+                  appLogger.i(
+                      '📦 Fetched catalog v${catalog.versionNumber}, saving to DB...');
+
                   final localRepo = CatalogLocalRepository();
-                  await localRepo.saveCatalogPackage(catalog, projectId: 'TMQ');
-                  
-                  // Verify save
-                  final currentVersion = await localRepo.getCurrentCatalogVersion(projectId: 'TMQ');
-                  final activityTypes = await localRepo.getActivityTypes(projectId: 'TMQ');
-                  
+                  await localRepo.saveCatalogPackage(catalog,
+                      projectId: 'TMQ');
+
+                  final currentVersion =
+                      await localRepo.getCurrentCatalogVersion(
+                          projectId: 'TMQ');
+                  final activityTypes =
+                      await localRepo.getActivityTypes(projectId: 'TMQ');
+
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          '✅ Catalog Persist Success!\n'
-                          'Saved version: ${currentVersion?.versionNumber}\n'
-                          'Activity Types in DB: ${activityTypes.length}\n'
-                          'Hash: ${currentVersion?.checksum?.substring(0, 8) ?? "n/a"}...',
-                        ),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Catalog Persist Success!\n'
+                            'Saved version: ${currentVersion?.versionNumber}\n'
+                            'Activity Types in DB: ${activityTypes.length}\n'
+                            'Hash: ${currentVersion?.checksum?.substring(0, 8) ?? "n/a"}...',
                         backgroundColor: SaoColors.success,
                         duration: const Duration(seconds: 6),
                       ),
@@ -480,9 +530,10 @@ class SettingsPage extends ConsumerWidget {
                 } catch (e) {
                   appLogger.e('❌ Catalog Persist smoke test failed: $e');
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('❌ Catalog Persist Failed:\n$e'),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Catalog Persist Failed:\n$e',
                         backgroundColor: SaoColors.error,
                         duration: const Duration(seconds: 5),
                       ),
@@ -495,42 +546,54 @@ class SettingsPage extends ConsumerWidget {
               leading: const Icon(Icons.sync, color: SaoColors.primary),
               title: const Text(
                 '🧪 DEBUG: Descargar Catálogo',
-                style: TextStyle(color: SaoColors.primary, fontWeight: FontWeight.bold),
+                style: TextStyle(
+                    color: SaoColors.primary, fontWeight: FontWeight.bold),
               ),
-              subtitle: const Text('Smart sync: check updates + fetch + persist (Phase 4C)'),
+              subtitle: const Text(
+                  'Smart sync: check updates + fetch + persist (Phase 4C)'),
               trailing: const Icon(Icons.download),
               onTap: () async {
                 try {
-                  appLogger.i('🔄 Starting Catalog Sync (Phase 4C)...');
-                  
-                  final syncService = CatalogSyncService();
-                  final result = await syncService.syncCatalog('TMQ');
-                  
+                  appLogger.i('🔄 Starting Catalog Sync (effective flow)...');
+
+                  final selectedProject =
+                      (await ref.read(kvStoreProvider).getString(
+                                  'selected_project'))
+                              ?.trim()
+                              .toUpperCase();
+                  final projectId =
+                      (selectedProject != null && selectedProject.isNotEmpty)
+                          ? selectedProject
+                          : 'TMQ';
+                  final versionKey = 'catalog_version:$projectId';
+                  final kv = ref.read(kvStoreProvider);
+                  final previousVersion = await kv.getString(versionKey);
+
+                  final syncService = ref.read(catalogSyncServiceProvider);
+                  await syncService.ensureCatalogUpToDate(projectId);
+                  final currentVersion = await kv.getString(versionKey);
+
                   if (context.mounted) {
-                    if (result.isSuccess) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            result.hasChanges
-                                ? '✅ Catálogo Actualizado!\n'
-                                    'Versión: ${result.localVersion ?? "?"}  ${result.newVersion ?? "?"}\n'
-                                    'Tipos de Actividad: ${result.activityTypeCount}\n'
-                                    'Campos: ${result.formFieldCount}\n'
-                                    'Hash: ${result.newHash?.substring(0, 8) ?? "n/a"}...\n'
-                                    'Duración: ${result.durationMs}ms'
-                                : '✅ ${result.message}\n'
-                                    'Versión actual: ${result.localVersion}',
-                          ),
-                          backgroundColor: result.hasChanges ? SaoColors.success : SaoColors.info,
-                          duration: Duration(seconds: result.hasChanges ? 7 : 4),
+                    if (currentVersion != null &&
+                        currentVersion != previousVersion) {
+                      showTransientSnackBar(
+                        context,
+                        appSnackBar(
+                          message: 'Catalogo actualizado para $projectId.\n'
+                              'Version: $currentVersion',
+                          backgroundColor: SaoColors.success,
+                          duration: const Duration(seconds: 5),
                         ),
                       );
                     } else {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('❌ Error de Sincronización:\n${result.message}'),
-                          backgroundColor: SaoColors.error,
-                          duration: const Duration(seconds: 5),
+                      showTransientSnackBar(
+                        context,
+                        appSnackBar(
+                          message:
+                              'No hay cambios de catalogo para $projectId.\n'
+                              'Version actual: ${currentVersion ?? previousVersion ?? 'sin catalogo local'}',
+                          backgroundColor: SaoColors.info,
+                          duration: const Duration(seconds: 4),
                         ),
                       );
                     }
@@ -538,9 +601,10 @@ class SettingsPage extends ConsumerWidget {
                 } catch (e) {
                   appLogger.e('❌ Catalog sync failed: $e');
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('❌ Sync Failed:\n$e'),
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Sync Failed:\n$e',
                         backgroundColor: SaoColors.error,
                         duration: const Duration(seconds: 5),
                       ),
@@ -599,6 +663,298 @@ class SettingsPage extends ConsumerWidget {
           const SizedBox(height: 16),
         ],
       ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Widget: tile de biometría reactivo
+// ---------------------------------------------------------------------------
+
+class _BiometricTile extends ConsumerWidget {
+  const _BiometricTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final bioAsync = ref.watch(_biometricStateProvider);
+    return bioAsync.when(
+      loading: () => const ListTile(
+        leading: Icon(Icons.fingerprint),
+        title: Text('Inicio rápido con biometría'),
+        subtitle: Text('Cargando configuración...'),
+        trailing: SizedBox(
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+      ),
+      error: (_, __) => ListTile(
+        leading: const Icon(Icons.fingerprint, color: SaoColors.warning),
+        title: const Text('Inicio rápido con biometría'),
+        subtitle: const Text('No se pudo cargar el estado de biometría'),
+        trailing: TextButton(
+          onPressed: () => ref.invalidate(_biometricStateProvider),
+          child: const Text('Reintentar'),
+        ),
+      ),
+      data: (bio) {
+        if (!bio.canUse) {
+          return const ListTile(
+            leading: Icon(Icons.fingerprint, color: SaoColors.gray400),
+            title: Text('Inicio rápido con biometría'),
+            subtitle: Text('No disponible en este dispositivo'),
+          );
+        }
+        return SwitchListTile(
+          secondary: const Icon(Icons.fingerprint),
+          title: const Text('Inicio rápido con biometría'),
+          subtitle: const Text('Usa huella o Face ID para entrar'),
+          value: bio.enabled,
+          onChanged: (value) async {
+            try {
+              await ref
+                  .read(authControllerProvider.notifier)
+                  .setBiometricEnabled(value);
+            } catch (e) {
+              if (context.mounted) {
+                final message = e
+                    .toString()
+                    .replaceFirst(RegExp(r'^[A-Za-z]+Exception:\s*'), '');
+                showTransientSnackBar(
+                  context,
+                  appSnackBar(
+                    message: message,
+                    backgroundColor: SaoColors.error,
+                  ),
+                );
+              }
+            } finally {
+              ref.invalidate(_biometricStateProvider);
+            }
+          },
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Widget: tile de versión de catálogo con acción de sync
+// ---------------------------------------------------------------------------
+
+class _CatalogVersionTile extends ConsumerWidget {
+  const _CatalogVersionTile();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final projectAsync = ref.watch(selectedProjectIdProvider);
+
+    return projectAsync.when(
+      loading: () => const ListTile(
+        leading: Icon(Icons.menu_book_outlined),
+        title: Text('Catálogo'),
+        subtitle: Text('Cargando...'),
+      ),
+      error: (_, __) => ListTile(
+        leading: const Icon(Icons.menu_book_outlined, color: SaoColors.warning),
+        title: const Text('Catálogo'),
+        subtitle: const Text('No se pudo cargar el proyecto seleccionado'),
+        trailing: TextButton(
+          onPressed: () => ref.invalidate(selectedProjectIdProvider),
+          child: const Text('Reintentar'),
+        ),
+      ),
+      data: (projectId) {
+        if (projectId == null || projectId.isEmpty) {
+          return const ListTile(
+            leading: Icon(Icons.menu_book_outlined),
+            title: Text('Catálogo'),
+            subtitle: Text('Sin proyecto seleccionado'),
+          );
+        }
+        final versionAsync =
+            ref.watch(catalogActiveVersionProvider(projectId));
+        return versionAsync.when(
+          loading: () => const ListTile(
+            leading: Icon(Icons.menu_book_outlined),
+            title: Text('Catálogo'),
+            subtitle: Text('Cargando versión...'),
+          ),
+          error: (_, __) => ListTile(
+            leading: const Icon(Icons.menu_book_outlined, color: SaoColors.warning),
+            title: Text('Catálogo · $projectId'),
+            subtitle: const Text('No se pudo cargar la versión local'),
+            trailing: TextButton(
+              onPressed: () => ref.invalidate(catalogActiveVersionProvider(projectId)),
+              child: const Text('Reintentar'),
+            ),
+          ),
+          data: (versionId) {
+            final hasVersion = versionId != null && versionId.isNotEmpty;
+            final label = hasVersion
+                ? versionId.length > 16
+                    ? '${versionId.substring(0, 8)}…'
+                    : versionId
+                : 'Sin catálogo local';
+            final statusColor =
+                hasVersion ? SaoColors.success : SaoColors.warning;
+            final statusText = hasVersion ? 'actualizado' : 'pendiente';
+
+            return ListTile(
+              leading: const Icon(Icons.menu_book_outlined),
+              title: Text('Catálogo · $projectId'),
+              subtitle: Row(
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: statusColor,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text('$label · $statusText'),
+                ],
+              ),
+              trailing: const Icon(Icons.refresh),
+              onTap: () async {
+                try {
+                  await ref
+                      .read(catalogSyncServiceProvider)
+                      .ensureCatalogUpToDate(projectId);
+                  ref.invalidate(catalogActiveVersionProvider(projectId));
+                  if (context.mounted) {
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Catálogo sincronizado',
+                        backgroundColor: SaoColors.success,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  if (context.mounted) {
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Error al sincronizar catálogo',
+                        backgroundColor: SaoColors.error,
+                      ),
+                    );
+                  }
+                }
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Widget: diálogo de cambio de contraseña (stateful para visibilidad)
+// ---------------------------------------------------------------------------
+
+class _ChangePasswordDialog extends StatefulWidget {
+  const _ChangePasswordDialog({
+    required this.formKey,
+    required this.currentCtrl,
+    required this.newCtrl,
+    required this.confirmCtrl,
+  });
+
+  final GlobalKey<FormState> formKey;
+  final TextEditingController currentCtrl;
+  final TextEditingController newCtrl;
+  final TextEditingController confirmCtrl;
+
+  @override
+  State<_ChangePasswordDialog> createState() => _ChangePasswordDialogState();
+}
+
+class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
+  bool _showCurrent = false;
+  bool _showNew = false;
+  bool _showConfirm = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Cambiar contraseña'),
+      content: Form(
+        key: widget.formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              controller: widget.currentCtrl,
+              obscureText: !_showCurrent,
+              decoration: InputDecoration(
+                labelText: 'Contraseña actual',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                      _showCurrent ? Icons.visibility_off : Icons.visibility),
+                  onPressed: () =>
+                      setState(() => _showCurrent = !_showCurrent),
+                ),
+              ),
+              validator: (v) =>
+                  (v == null || v.isEmpty) ? 'Requerido' : null,
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: widget.newCtrl,
+              obscureText: !_showNew,
+              decoration: InputDecoration(
+                labelText: 'Nueva contraseña',
+                suffixIcon: IconButton(
+                  icon: Icon(
+                      _showNew ? Icons.visibility_off : Icons.visibility),
+                  onPressed: () => setState(() => _showNew = !_showNew),
+                ),
+              ),
+              validator: (v) {
+                if (v == null || v.isEmpty) return 'Requerido';
+                if (v.length < 8) return 'Mínimo 8 caracteres';
+                return null;
+              },
+            ),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: widget.confirmCtrl,
+              obscureText: !_showConfirm,
+              decoration: InputDecoration(
+                labelText: 'Confirmar contraseña',
+                suffixIcon: IconButton(
+                  icon: Icon(_showConfirm
+                      ? Icons.visibility_off
+                      : Icons.visibility),
+                  onPressed: () =>
+                      setState(() => _showConfirm = !_showConfirm),
+                ),
+              ),
+              validator: (v) => v != widget.newCtrl.text
+                  ? 'Las contraseñas no coinciden'
+                  : null,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: () {
+            if (widget.formKey.currentState?.validate() != true) return;
+            Navigator.of(context).pop(true);
+          },
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

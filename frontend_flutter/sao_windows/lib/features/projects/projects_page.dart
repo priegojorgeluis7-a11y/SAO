@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/constants.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/network/api_client.dart';
 import '../../ui/theme/sao_colors.dart';
@@ -40,11 +41,17 @@ class ProjectsPage extends StatefulWidget {
 }
 
 class _ProjectsPageState extends State<ProjectsPage> {
+  static const _hiddenTemplateProjectCodes = {'PROJECT_0', 'P0'};
+
+  static const _allProjectsItem = ProjectItem(
+    code: kAllProjects,
+    name: 'Todos los proyectos',
+    isActive: true,
+  );
+
   static const _fallbackProjects = <ProjectItem>[
     ProjectItem(code: 'TMQ', name: 'Tren México–Querétaro', isActive: true),
     ProjectItem(code: 'TAP', name: 'Tren AIFA–Pachuca', isActive: true),
-    ProjectItem(code: 'QIR', name: 'Tren Querétaro–Irapuato', isActive: true),
-    ProjectItem(code: 'SNL', name: 'Tren Saltillo–Nuevo Laredo', isActive: true),
   ];
 
   final ApiClient _apiClient = getIt<ApiClient>();
@@ -68,9 +75,13 @@ class _ProjectsPageState extends State<ProjectsPage> {
 
     try {
       final scopedProjects = await _fetchMyProjects();
+      if (scopedProjects.isEmpty) {
+        throw StateError('Lista vacia en /me/projects, intentando /projects');
+      }
       if (!mounted) return;
       setState(() {
         _projects = scopedProjects
+            .where((item) => !_isHiddenTemplateProject(item.projectId))
             .map(
               (item) => ProjectItem(
                 code: item.projectId,
@@ -100,6 +111,7 @@ class _ProjectsPageState extends State<ProjectsPage> {
             final map = Map<String, dynamic>.from(raw);
             final code = (map['id'] ?? '').toString().trim().toUpperCase();
             if (code.isEmpty) return null;
+            if (_isHiddenTemplateProject(code)) return null;
             final name = (map['name'] ?? code).toString().trim();
             final status = (map['status'] ?? '').toString().toLowerCase();
             return ProjectItem(
@@ -140,6 +152,7 @@ class _ProjectsPageState extends State<ProjectsPage> {
           final map = Map<String, dynamic>.from(raw);
           final projectId = (map['project_id'] ?? '').toString().trim().toUpperCase();
           if (projectId.isEmpty) return null;
+          if (_isHiddenTemplateProject(projectId)) return null;
           final projectName = (map['project_name'] ?? projectId).toString().trim();
           final roleNames = (map['role_names'] is List)
               ? (map['role_names'] as List<dynamic>)
@@ -157,10 +170,16 @@ class _ProjectsPageState extends State<ProjectsPage> {
         .toList(growable: false);
   }
 
+  bool _isHiddenTemplateProject(String? projectId) {
+    final normalized = (projectId ?? '').trim().toUpperCase();
+    return _hiddenTemplateProjectCodes.contains(normalized);
+  }
+
   List<ProjectItem> get _filtered {
     final q = _query.trim().toLowerCase();
-    if (q.isEmpty) return _projects;
-    return _projects.where((p) {
+    final base = <ProjectItem>[_allProjectsItem, ..._projects];
+    if (q.isEmpty) return base;
+    return base.where((p) {
       return p.code.toLowerCase().contains(q) || p.name.toLowerCase().contains(q);
     }).toList();
   }

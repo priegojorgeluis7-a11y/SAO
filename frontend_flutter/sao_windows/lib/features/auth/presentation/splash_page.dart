@@ -113,7 +113,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
                       shape: BoxShape.circle,
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withValues(alpha: 0.2),
                           blurRadius: 30,
                           offset: const Offset(0, 15),
                         ),
@@ -142,7 +142,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
                     AppConfig.appFullName,
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.white.withOpacity(0.9),
+                      color: Colors.white.withValues(alpha: 0.9),
                       letterSpacing: 0.8,
                     ),
                     textAlign: TextAlign.center,
@@ -155,7 +155,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
                     child: CircularProgressIndicator(
                       strokeWidth: 3,
                       valueColor: AlwaysStoppedAnimation<Color>(
-                        Colors.white.withOpacity(0.8),
+                        Colors.white.withValues(alpha: 0.8),
                       ),
                     ),
                   ),
@@ -164,7 +164,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
                     'Validando sesión...',
                     style: TextStyle(
                       fontSize: 14,
-                      color: Colors.white.withOpacity(0.8),
+                      color: Colors.white.withValues(alpha: 0.8),
                     ),
                   ),
                 ],

@@ -24,6 +24,7 @@ LazyDatabase _openConnection() {
     CatalogVersions, CatalogActivityTypes, CatalogFields,
     CatActivities, CatSubcategories, CatPurposes, CatTopics,
     CatRelActivityTopics, CatResults, CatAttendees,
+    CatalogIndex, CatalogBundleCache,
     Activities, ActivityFields, ActivityLog,
     Evidences,
     PendingUploads,
@@ -36,7 +37,7 @@ class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 6;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -44,6 +45,7 @@ class AppDb extends _$AppDb {
           await m.createAll();
           await _createIndexes();
           await _seedInitialData();
+          await _createColoniasTable();
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -70,6 +72,20 @@ class AppDb extends _$AppDb {
           if (from < 6) {
             await m.createTable(agendaAssignments);
             await _createAgendaAssignmentsIndexes();
+          }
+          if (from < 7) {
+            // Add catalog_version_id to activities (congela el catálogo offline por actividad)
+            await m.addColumn(activities, activities.catalogVersionId);
+          }
+          if (from < 8) {
+            // Nuevas tablas de catálogo offline versionado
+            await m.createTable(catalogIndex);
+            await m.createTable(catalogBundleCache);
+            await _createCatalogOfflineIndexes();
+          }
+          if (from < 9) {
+            // Catálogo local de colonias por municipio
+            await _createColoniasTable();
           }
         },
         beforeOpen: (details) async {
@@ -245,6 +261,35 @@ class AppDb extends _$AppDb {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_agenda_assignments_sync_status '
       'ON agenda_assignments(sync_status);',
+    );
+  }
+
+  Future<void> _createColoniasTable() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_colonias (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        municipio TEXT NOT NULL,
+        estado TEXT,
+        colonia TEXT NOT NULL,
+        usage_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        UNIQUE(municipio, colonia)
+      )
+    ''');
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_colonias_municipio '
+      'ON local_colonias(municipio);',
+    );
+  }
+
+  Future<void> _createCatalogOfflineIndexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_catalog_bundles_project '
+      'ON catalog_bundle_cache(project_id);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_activities_catalog_version '
+      'ON activities(catalog_version_id);',
     );
   }
 }

@@ -59,6 +59,11 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   String? _frontsError;
   String _frontFreeText = '';
 
+  List<ProjectOption> _projectOptions = const [];
+  ProjectOption? _selectedProject;
+  bool _loadingProjects = true;
+  String? _projectsError;
+
   final _pkController = TextEditingController();
   final _frontController = TextEditingController();
 
@@ -66,7 +71,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   void initState() {
     super.initState();
     _loadWizardCatalogOptions();
-    _loadProjectFronts();
+    _loadProjectsAndFronts();
   }
 
   @override
@@ -106,12 +111,68 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     }
   }
 
+  Future<void> _loadProjectsAndFronts() async {
+    setState(() {
+      _loadingProjects = true;
+      _projectsError = null;
+    });
+
+    try {
+      final rows = await _activityDao.listActiveProjects();
+      final projects = rows
+          .map((project) => ProjectOption(id: project.id, code: project.code, name: project.name))
+          .toList()
+        ..sort((a, b) => a.code.toLowerCase().compareTo(b.code.toLowerCase()));
+
+      ProjectOption? selected;
+      final incomingProject = widget.projectId?.trim();
+      if (incomingProject != null && incomingProject.isNotEmpty) {
+        for (final item in projects) {
+          if (item.id == incomingProject || item.code == incomingProject) {
+            selected = item;
+            break;
+          }
+        }
+      }
+      selected ??= projects.isNotEmpty
+          ? projects.first
+          : (incomingProject != null && incomingProject.isNotEmpty
+              ? ProjectOption(id: incomingProject, code: incomingProject, name: incomingProject)
+              : null);
+
+      if (!mounted) return;
+      setState(() {
+        _projectOptions = projects;
+        _selectedProject = selected;
+        _loadingProjects = false;
+      });
+    } catch (_) {
+      final incomingProject = widget.projectId?.trim();
+      if (!mounted) return;
+      setState(() {
+        _loadingProjects = false;
+        _projectsError = 'No se pudieron cargar los proyectos activos.';
+        if (incomingProject != null && incomingProject.isNotEmpty) {
+          _selectedProject = ProjectOption(
+            id: incomingProject,
+            code: incomingProject,
+            name: incomingProject,
+          );
+        }
+      });
+    }
+
+    await _loadProjectFronts();
+  }
+
   Future<void> _loadProjectFronts() async {
-    final projectId = widget.projectId?.trim();
+    final projectId = _selectedProject?.id.trim();
     if (projectId == null || projectId.isEmpty) {
       setState(() {
         _loadingFronts = false;
         _frontsError = 'No hay proyecto seleccionado para cargar frentes.';
+        _frontOptions = const [];
+        _selectedFront = null;
       });
       return;
     }
@@ -132,12 +193,16 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       setState(() {
         _frontOptions = fronts;
         _selectedFront = fronts.isNotEmpty ? fronts.first : null;
+        _frontFreeText = '';
+        _frontController.text = '';
         _loadingFronts = false;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
         _frontsError = 'No se pudieron cargar los frentes del proyecto.';
+        _frontOptions = const [];
+        _selectedFront = null;
         _loadingFronts = false;
       });
     }
@@ -386,6 +451,57 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             },
           ),
         const SizedBox(height: 12),
+        if (_loadingProjects)
+          const LinearProgressIndicator(minHeight: 2)
+        else if (_projectsError != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.25)),
+            ),
+            child: Text(
+              _projectsError!,
+              style: const TextStyle(
+                color: SaoColors.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else
+          DropdownButtonFormField<ProjectOption>(
+            initialValue: _selectedProject,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Proyecto',
+              border: OutlineInputBorder(),
+            ),
+            items: _projectOptions
+                .map(
+                  (project) => DropdownMenuItem<ProjectOption>(
+                    value: project,
+                    child: Text(
+                      '${project.code} - ${project.name}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) async {
+              if (value == null) return;
+              setState(() {
+                _selectedProject = value;
+                _loadingFronts = true;
+                _frontsError = null;
+                _frontOptions = const [];
+                _selectedFront = null;
+              });
+              await _loadProjectFronts();
+            },
+          ),
+        const SizedBox(height: 12),
         if (_loadingFronts)
           const LinearProgressIndicator(minHeight: 2)
         else if (_frontsError != null)
@@ -490,16 +606,21 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             children: _riskOptions.map((label) {
               final parsed = _riskFromCatalogText(label);
               final selected = parsed != null && _selectedRisk == parsed;
-              return ChoiceChip(
-                label: Text(label),
+              if (parsed == null) {
+                return Chip(
+                  label: Text(label),
+                  backgroundColor: SaoColors.gray100,
+                );
+              }
+              return _riskChip(
+                label: label,
+                color: _riskColor(parsed),
                 selected: selected,
-                onSelected: parsed == null
-                    ? null
-                    : (_) {
-                        setState(() {
-                          _selectedRisk = parsed;
-                        });
-                      },
+                onTap: () {
+                  setState(() {
+                    _selectedRisk = parsed;
+                  });
+                },
               );
             }).toList(),
           ),
@@ -639,10 +760,12 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       case 0:
         return _selectedResourceId != null;
       case 1:
+        final hasProject = _selectedProject != null;
         final hasFront = _frontOptions.isEmpty
             ? _frontFreeText.trim().isNotEmpty
             : _selectedFront != null;
-        return _selectedActivity != null &&
+        return hasProject &&
+          _selectedActivity != null &&
           _selectedRisk != null &&
           _pk.isNotEmpty &&
           hasFront;
@@ -769,13 +892,13 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     }
 
     final effectiveVersionId = await _versionResolver.resolve(
-      projectId: widget.projectId,
+      projectId: _selectedProject?.id,
       fallbackVersionId: null,
     );
 
     final selectedActivity = _selectedActivity;
     if (selectedActivity == null) return;
-    final projectCode = widget.projectId?.trim() ?? '';
+    final projectCode = (_selectedProject?.id ?? widget.projectId ?? '').trim();
     final frontName = (_selectedFront?.name ?? _frontFreeText).trim();
 
     final item = _assignmentFactory.build(
@@ -811,6 +934,66 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     if (normalized.contains('medio') || normalized.contains('med')) return RiskLevel.medio;
     if (normalized.contains('bajo') || normalized.contains('low')) return RiskLevel.bajo;
     return null;
+  }
+
+  Color _riskColor(RiskLevel level) {
+    switch (level) {
+      case RiskLevel.bajo:
+        return SaoColors.riskLow;
+      case RiskLevel.medio:
+        return SaoColors.riskMedium;
+      case RiskLevel.alto:
+        return SaoColors.riskHigh;
+      case RiskLevel.prioritario:
+        return SaoColors.riskPriority;
+    }
+  }
+
+  Widget _riskChip({
+    required String label,
+    required Color color,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.15) : SaoColors.gray50,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: selected ? color : SaoColors.gray300,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 12,
+              height: 12,
+              decoration: BoxDecoration(
+                color: color,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: SaoTypography.caption.copyWith(
+                fontWeight: selected ? FontWeight.w900 : FontWeight.w600,
+                color: selected ? color : SaoColors.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -916,6 +1099,18 @@ class FrontOption {
 
   const FrontOption({
     required this.id,
+    required this.name,
+  });
+}
+
+class ProjectOption {
+  final String id;
+  final String code;
+  final String name;
+
+  const ProjectOption({
+    required this.id,
+    required this.code,
     required this.name,
   });
 }

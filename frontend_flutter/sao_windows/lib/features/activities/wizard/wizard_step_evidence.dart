@@ -1,9 +1,15 @@
 // lib/features/activities/wizard/wizard_step_evidence.dart
 import 'dart:io';
+import 'dart:async';
+import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
+import 'package:get_it/get_it.dart';
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
+import '../../../core/services/connectivity_service.dart';
+import '../../evidence/services/camera_capture_service.dart';
+import 'models/evidence_draft.dart';
 import 'wizard_controller.dart';
 
 class WizardStepEvidence extends StatefulWidget {
@@ -23,34 +29,70 @@ class WizardStepEvidence extends StatefulWidget {
 }
 
 class _WizardStepEvidenceState extends State<WizardStepEvidence> {
-  final ImagePicker _picker = ImagePicker();
-  final bool _isOffline = false; // TODO: Connect to connectivity service
+  final CameraCaptureService _cameraService = CameraCaptureService();
+  final ConnectivityService _connectivity = GetIt.I<ConnectivityService>();
+  StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
+  bool _isOffline = false;
   
   // Controllers por evidencia
-  final Map<int, TextEditingController> _controllers = {};
-  final Map<int, GlobalKey> _descriptionKeys = {};
+  final Map<String, TextEditingController> _controllers = {};
+  final Map<String, GlobalKey> _descriptionKeys = {};
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
     _initializeControllers();
+    _initConnectivity();
   }
 
   @override
   void dispose() {
     widget.controller.removeListener(_onControllerChanged);
+    _connectivitySub?.cancel();
     _disposeControllers();
     super.dispose();
   }
 
+  Future<void> _initConnectivity() async {
+    _isOffline = await _connectivity.isOffline();
+    if (mounted) {
+      setState(() {});
+    }
+    _connectivitySub = _connectivity.onConnectivityChanged.listen((_) async {
+      final offline = await _connectivity.isOffline();
+      if (!mounted || offline == _isOffline) return;
+      setState(() => _isOffline = offline);
+    });
+  }
+
+  String _evidenceKey(EvidenceDraft evidence) {
+    return '${evidence.localPath}|${evidence.createdAt.millisecondsSinceEpoch}';
+  }
+
   void _initializeControllers() {
     final evidencias = widget.controller.evidencias;
+    final activeKeys = <String>{};
+
     for (int i = 0; i < evidencias.length; i++) {
-      if (!_controllers.containsKey(i)) {
-        _controllers[i] = TextEditingController(text: evidencias[i].descripcion);
-        _descriptionKeys[i] = GlobalKey();
+      final key = _evidenceKey(evidencias[i]);
+      activeKeys.add(key);
+      if (!_controllers.containsKey(key)) {
+        _controllers[key] = TextEditingController(text: evidencias[i].descripcion);
+        _descriptionKeys[key] = GlobalKey();
+      } else {
+        final current = _controllers[key]!;
+        if (current.text != evidencias[i].descripcion) {
+          current.text = evidencias[i].descripcion;
+        }
       }
+    }
+
+    final toRemove = _controllers.keys.where((k) => !activeKeys.contains(k)).toList();
+    for (final key in toRemove) {
+      _controllers[key]?.dispose();
+      _controllers.remove(key);
+      _descriptionKeys.remove(key);
     }
   }
 
@@ -71,20 +113,23 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
 
   Future<void> _takePhoto() async {
     try {
-      final XFile? photo = await _picker.pickImage(
-        source: ImageSource.camera,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+      final evidence = await _cameraService.capturePhoto(
+        includeGps: true,
+        autoCompress: true,
       );
-      
-      if (photo != null) {
-        widget.controller.addPhoto(photo.path);
+
+      if (evidence != null) {
+        widget.controller.addPhotoWithMetadata(
+          evidence.localPath,
+          lat: evidence.gpsLocation?.latitude,
+          lng: evidence.gpsLocation?.longitude,
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al tomar foto: $e')),
+        showTransientSnackBar(
+          context,
+          appSnackBar(message: 'Error al tomar foto: $e', backgroundColor: SaoColors.error),
         );
       }
     }
@@ -92,26 +137,52 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
 
   Future<void> _pickFromGallery() async {
     try {
-      final XFile? image = await _picker.pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 1920,
-        maxHeight: 1080,
-        imageQuality: 85,
+      final evidence = await _cameraService.pickImageFromGallery(
+        autoCompress: true,
       );
-      
-      if (image != null) {
-        widget.controller.addPhoto(image.path);
+
+      if (evidence != null) {
+        widget.controller.addPhotoWithMetadata(
+          evidence.localPath,
+          lat: evidence.gpsLocation?.latitude,
+          lng: evidence.gpsLocation?.longitude,
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error al seleccionar foto: $e')),
+        showTransientSnackBar(
+          context,
+          appSnackBar(message: 'Error al seleccionar foto: $e', backgroundColor: SaoColors.error),
         );
       }
     }
   }
 
   void _handleNext() {
+    final emptyDescIndex = widget.controller.evidencias.indexWhere(
+      (e) => e.descripcion.trim().isEmpty,
+    );
+    if (emptyDescIndex != -1) {
+      final key = _evidenceKey(widget.controller.evidencias[emptyDescIndex]);
+      final target = _descriptionKeys[key]?.currentContext;
+      if (target != null) {
+        Scrollable.ensureVisible(
+          target,
+          duration: const Duration(milliseconds: 350),
+          curve: Curves.easeInOut,
+          alignment: 0.2,
+        );
+      }
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Falta la descripción de la foto ${emptyDescIndex + 1}',
+          backgroundColor: SaoColors.warning,
+        ),
+      );
+      return;
+    }
+
     // La evidencia es opcional según el diseño
     // Solo dar feedback si no hay evidencia
     if (!widget.controller.hasEvidence) {
@@ -121,7 +192,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
           title: const Text('Continuar sin evidencia'),
           content: const Text(
             '¿Deseas continuar sin agregar evidencia?\n\n'
-            'La actividad quedará marcada como "terminada sin evidencia enviada".',
+            'La actividad quedará en pendiente para completar evidencia después.',
           ),
           actions: [
             TextButton(
@@ -195,9 +266,14 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
               ],
             ),
             const SizedBox(height: 10),
-            const Text(
-              'Mínimo 1 foto con descripción obligatoria.',
+            Text(
+              'Mínimo ${widget.controller.minimumEvidencePhotosRequired} foto(s) con descripción obligatoria.',
               style: SaoTypography.caption,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Si no puedes cargar evidencia ahora, puedes dejar la actividad en pendiente y completarla después.',
+              style: SaoTypography.caption.copyWith(color: SaoColors.gray500),
             ),
             const SizedBox(height: 16),
 
@@ -235,25 +311,6 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                     ],
                   ),
                 ),
-                OutlinedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Función de PDF pendiente de implementación')),
-                    );
-                  },
-                  child: const Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.picture_as_pdf),
-                      SizedBox(height: 4),
-                      Text('PDF'),
-                      Text(
-                        'Documentos',
-                        style: SaoTypography.monoSmall,
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
 
@@ -277,9 +334,10 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
             ...List.generate(evidencias.length, (i) {
               final evidencia = evidencias[i];
               final hasError = evidencia.descripcion.trim().isEmpty;
+              final evidenceKey = _evidenceKey(evidencia);
 
               return Container(
-                key: _descriptionKeys[i],
+                key: _descriptionKeys[evidenceKey],
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
@@ -324,7 +382,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                           ),
                           const SizedBox(height: 4),
                           TextField(
-                            controller: _controllers[i],
+                            controller: _controllers[evidenceKey],
                             minLines: 2,
                             maxLines: 3,
                             decoration: InputDecoration(

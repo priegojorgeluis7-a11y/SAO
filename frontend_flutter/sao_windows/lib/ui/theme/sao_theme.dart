@@ -133,7 +133,7 @@ class SaoTheme {
       // ============================================================
       chipTheme: ChipThemeData(
         backgroundColor: SaoColors.gray50,
-        selectedColor: SaoColors.primary.withOpacity(0.12),
+        selectedColor: SaoColors.primary.withValues(alpha: 0.12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(SaoRadii.sm),
           side: const BorderSide(color: SaoColors.border),

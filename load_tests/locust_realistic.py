@@ -7,9 +7,15 @@ Run: locust -f load_tests/locust_realistic.py --host=http://localhost:8000 --use
 
 from locust import HttpUser, task, between, events
 import random
+import os
 
-TEST_EMAIL = "testuser@test.com"
-TEST_PASSWORD = "password123"
+TEST_EMAIL = os.getenv("SAO_LOADTEST_EMAIL", "testuser@test.com")
+TEST_PASSWORD = os.getenv("SAO_LOADTEST_PASSWORD")
+
+if not TEST_PASSWORD:
+    raise RuntimeError(
+        "Missing SAO_LOADTEST_PASSWORD environment variable for load tests"
+    )
 
 class RealisticSaoUser(HttpUser):
     """Realistic traffic: 70% read, 20% moderate write, 10% heavy operations"""

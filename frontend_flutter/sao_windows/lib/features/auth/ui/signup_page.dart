@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_typography.dart';
@@ -81,7 +82,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     if (value == null || value.trim().isEmpty) {
       return 'Ingresa tu correo electrónico';
     }
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}4');
+    final emailRegex = RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$');
     if (!emailRegex.hasMatch(value.trim())) {
       return 'Formato de correo inválido';
     }
@@ -125,11 +126,9 @@ class _SignupPageState extends ConsumerState<SignupPage> {
   Future<void> _handleSignup() async {
     if (!_formKey.currentState!.validate()) return;
     if (_selectedRole == null || _selectedRole!.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Selecciona un rol'),
-          backgroundColor: SaoColors.error,
-        ),
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Selecciona un rol', backgroundColor: SaoColors.error),
       );
       return;
     }
@@ -146,20 +145,16 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     if (!mounted) return;
 
     if (ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Cuenta creada'),
-          backgroundColor: SaoColors.success,
-        ),
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Cuenta creada', backgroundColor: SaoColors.success),
       );
-      context.go('/login');
+      context.go('/auth/login');
     } else {
       final error = ref.read(signupControllerProvider).error ?? 'No se pudo crear la cuenta';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(error),
-          backgroundColor: SaoColors.error,
-        ),
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: error, backgroundColor: SaoColors.error),
       );
     }
   }
@@ -276,9 +271,23 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                     if (_rolesError != null)
                       Padding(
                         padding: const EdgeInsets.only(top: SaoSpacing.sm),
-                        child: Text(
-                          _rolesError!,
-                          style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.error),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _rolesError!,
+                              style: SaoTypography.bodyTextSmall
+                                  .copyWith(color: SaoColors.error),
+                            ),
+                            const SizedBox(height: SaoSpacing.xs),
+                            TextButton.icon(
+                              onPressed: state.isLoading || _loadingRoles
+                                  ? null
+                                  : _loadRoles,
+                              icon: const Icon(Icons.refresh, size: 18),
+                              label: const Text('Reintentar cargar roles'),
+                            ),
+                          ],
                         ),
                       ),
                     const SizedBox(height: SaoSpacing.sm),
@@ -316,7 +325,8 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                     ),
                     const SizedBox(height: SaoSpacing.md),
                     TextButton(
-                      onPressed: state.isLoading ? null : () => context.go('/login'),
+                      onPressed:
+                          state.isLoading ? null : () => context.go('/auth/login'),
                       child: const Text('Ya tengo cuenta'),
                     ),
                   ],

@@ -125,10 +125,28 @@ class EventsLocalRepository {
   }
 
   /// Soft-deletes an event locally and enqueues a DELETE sync action.
+  /// If the event has a pending UPSERT (never reached the server), the local
+  /// record and queue item are dropped entirely — no DELETE is sent upstream.
   Future<void> deleteEvent(String uuid) async {
     final now = DateTime.now().toUtc();
 
     await _db.transaction(() async {
+      final existing = await (_db.select(_db.syncQueue)
+            ..where((q) => q.id.equals(uuid)))
+          .getSingleOrNull();
+
+      if (existing != null && existing.action.toUpperCase() == 'UPSERT') {
+        // Event was never synced — remove it completely.
+        await (_db.delete(_db.localEvents)
+              ..where((e) => e.id.equals(uuid)))
+            .go();
+        await (_db.delete(_db.syncQueue)
+              ..where((q) => q.id.equals(uuid)))
+            .go();
+        appLogger.i('🗑️ Event dropped (never synced): $uuid');
+        return;
+      }
+
       await (_db.update(_db.localEvents)..where((e) => e.id.equals(uuid))).write(
         LocalEventsCompanion(
           deletedAt: Value(now),

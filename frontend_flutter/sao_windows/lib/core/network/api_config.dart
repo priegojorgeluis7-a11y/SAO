@@ -1,8 +1,10 @@
 /// API networking configuration
 /// Defines base URLs, timeouts, and other HTTP settings
 class ApiConfig {
-  static const String defaultBaseUrl =
-      'https://sao-api-fjzra25vya-uc.a.run.app/api/v1';
+  static const String defaultBaseUrl = String.fromEnvironment(
+    'SAO_API_BASE',
+    defaultValue: 'https://sao-api-fjzra25vya-uc.a.run.app/api/v1',
+  );
 
   // Singleton instance
   static final ApiConfig _instance = ApiConfig._internal();

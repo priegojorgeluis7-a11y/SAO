@@ -352,7 +352,7 @@ class StatusCatalog {
       decoration: BoxDecoration(
         color: status.backgroundColor,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: status.color.withOpacity(0.3)),
+        border: Border.all(color: status.color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/exceptions.dart';
 import '../../../core/auth/token_storage.dart';
@@ -26,20 +27,25 @@ enum BootstrapResult {
 /// Repository for authentication operations
 /// Uses ApiClient from Phase 3A with automatic JWT refresh
 class AuthRepository {
+  static const String _biometricEnabledKey = 'biometric_enabled';
+
   final ApiClient _apiClient;
   final TokenStorage _tokenStorage;
   final KvStore _kvStore;
   final PinStorage? _pinStorage;
+  final SharedPreferences? _prefs;
 
   AuthRepository({
     required ApiClient apiClient,
     required TokenStorage tokenStorage,
     required KvStore kvStore,
     PinStorage? pinStorage,
+    SharedPreferences? prefs,
   })  : _apiClient = apiClient,
         _tokenStorage = tokenStorage,
         _kvStore = kvStore,
-        _pinStorage = pinStorage;
+        _pinStorage = pinStorage,
+        _prefs = prefs;
 
   /// Login with email and password
   /// Returns TokenResponse on success
@@ -320,5 +326,35 @@ class AuthRepository {
   /// Returns cached user profile for offline PIN sessions.
   Future<Map<String, dynamic>?> getCachedUserJson() async {
     return _pinStorage?.getCachedUser();
+  }
+
+  /// Changes the authenticated user's password.
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    try {
+      await _apiClient.put<dynamic>(
+        '/auth/me/password',
+        data: {
+          'current_password': currentPassword,
+          'new_password': newPassword,
+        },
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 400) {
+        throw AuthException('La contraseña actual es incorrecta', e.stackTrace);
+      }
+      throw AuthException('Error al cambiar contraseña: ${e.message}', e.stackTrace);
+    } catch (e, stackTrace) {
+      throw AuthException('Error inesperado al cambiar contraseña: $e', stackTrace);
+    }
+  }
+
+  /// Returns whether biometric quick login is enabled for this device.
+  Future<bool> isBiometricEnabled() async {
+    return _prefs?.getBool(_biometricEnabledKey) ?? false;
+  }
+
+  /// Persists biometric quick login preference for this device.
+  Future<void> setBiometricEnabled(bool enabled) async {
+    await _prefs?.setBool(_biometricEnabledKey, enabled);
   }
 }

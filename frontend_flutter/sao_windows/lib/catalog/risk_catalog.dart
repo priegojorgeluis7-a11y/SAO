@@ -215,7 +215,7 @@ class RiskCatalog {
       decoration: BoxDecoration(
         color: risk.backgroundColor,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: risk.color.withOpacity(0.3)),
+        border: Border.all(color: risk.color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

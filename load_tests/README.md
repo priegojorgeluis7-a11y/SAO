@@ -53,6 +53,13 @@ curl http://localhost:8000/health
 
 ### 3. Run Quick Test (5 minutes)
 
+Set test credentials via environment variables before running scripts:
+
+```powershell
+$env:SAO_LOADTEST_EMAIL = "testuser@test.com"
+$env:SAO_LOADTEST_PASSWORD = "<your_test_password>"
+```
+
 ```powershell
 # Terminal 1: Run light load test
 cd load_tests

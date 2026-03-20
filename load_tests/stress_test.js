@@ -2,6 +2,8 @@ import http from 'k6/http';
 import { check, sleep } from 'k6';
 
 const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
+const TEST_EMAIL = __ENV.SAO_LOADTEST_EMAIL || 'testuser@test.com';
+const TEST_PASSWORD = __ENV.SAO_LOADTEST_PASSWORD || '';
 let accessToken = '';
 
 export const options = {
@@ -19,10 +21,14 @@ export const options = {
 };
 
 export function setup() {
+  if (!TEST_PASSWORD) {
+    throw new Error('Missing SAO_LOADTEST_PASSWORD environment variable for load tests');
+  }
+
   // Login once per test
   let response = http.post(`${BASE_URL}/auth/login`, {
-    email: 'testuser@test.com',
-    password: 'password123',
+    email: TEST_EMAIL,
+    password: TEST_PASSWORD,
   });
   
   if (response.status !== 200) {

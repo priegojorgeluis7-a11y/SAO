@@ -74,15 +74,15 @@ class SaoActivityCard extends StatelessWidget {
                   color: isHover && !isSelected 
                       ? SaoColors.gray50 
                       : isSelected 
-                          ? SaoColors.primary.withOpacity(0.06) 
+                          ? SaoColors.primary.withValues(alpha: 0.06) 
                           : SaoColors.surface,
                   boxShadow: [
                     BoxShadow(
                       blurRadius: isHover ? 14 : 10,
                       offset: const Offset(0, 4),
                       color: needsAttention
-                          ? SaoColors.warning.withOpacity(0.1)
-                          : SaoColors.gray900.withOpacity(isHover ? 0.06 : 0.04),
+                          ? SaoColors.warning.withValues(alpha: 0.1)
+                          : SaoColors.gray900.withValues(alpha: isHover ? 0.06 : 0.04),
                     ),
                   ],
                 ),

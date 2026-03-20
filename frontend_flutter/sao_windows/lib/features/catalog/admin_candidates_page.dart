@@ -1,5 +1,6 @@
 // lib/features/catalog/admin_candidates_page.dart
 import 'package:flutter/material.dart';
+import '../../core/utils/snackbar.dart';
 import '../../ui/theme/sao_colors.dart';
 import 'catalog_repository.dart';
 
@@ -165,7 +166,7 @@ class _AdminCandidatesPageState extends State<AdminCandidatesPage> {
                     label: const Text('Rechazar'),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: SaoColors.error,
-                      side: BorderSide(color: SaoColors.error.withOpacity(0.5)),
+                      side: BorderSide(color: SaoColors.error.withValues(alpha: 0.5)),
                     ),
                   ),
                 ),
@@ -258,9 +259,10 @@ class _AdminCandidatesPageState extends State<AdminCandidatesPage> {
       try {
         await widget.catalogRepo.approveCandidate(candidate.id);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ "${candidate.name}" aprobado y agregado al catálogo'),
+          showTransientSnackBar(
+            context,
+            appSnackBar(
+              message: '"${candidate.name}" aprobado y agregado al catálogo',
               backgroundColor: SaoColors.success,
             ),
           );
@@ -269,11 +271,9 @@ class _AdminCandidatesPageState extends State<AdminCandidatesPage> {
       } catch (e) {
         if (mounted) {
           setState(() => _loading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ Error: $e'),
-              backgroundColor: SaoColors.error,
-            ),
+          showTransientSnackBar(
+            context,
+            appSnackBar(message: 'Error al aprobar: $e', backgroundColor: SaoColors.error),
           );
         }
       }
@@ -282,7 +282,7 @@ class _AdminCandidatesPageState extends State<AdminCandidatesPage> {
 
   Future<void> _handleReject(CandidateItem candidate) async {
     final textController = TextEditingController();
-    
+
     final reason = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -326,21 +326,18 @@ class _AdminCandidatesPageState extends State<AdminCandidatesPage> {
           reason: reason.isNotEmpty ? reason : null,
         );
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('❌ Candidato rechazado'),
-            ),
+          showTransientSnackBar(
+            context,
+            appSnackBar(message: 'Candidato rechazado', backgroundColor: SaoColors.gray500),
           );
           setState(() => _loading = false);
         }
       } catch (e) {
         if (mounted) {
           setState(() => _loading = false);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('❌ Error: $e'),
-              backgroundColor: SaoColors.error,
-            ),
+          showTransientSnackBar(
+            context,
+            appSnackBar(message: 'Error al rechazar: $e', backgroundColor: SaoColors.error),
           );
         }
       }

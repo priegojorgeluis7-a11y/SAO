@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../core/utils/logger.dart';
@@ -184,26 +185,24 @@ class _EvidenceCapturePageState extends State<EvidenceCapturePage> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '✅ Evidence uploaded successfully!\nID: ${initResult.evidenceId.substring(0, 8)}...',
-            ),
-            backgroundColor: Colors.green,
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Evidencia enviada — ID: ${initResult.evidenceId.substring(0, 8)}…',
+            backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 3),
           ),
         );
-
         widget.onEvidenceAdded?.call();
         Navigator.pop(context);
       }
     } on DioException catch (e) {
       // Network errors: queue for offline retry
-      appLogger.w('⚠️ Network error during upload: ${e.message}');
+      appLogger.w('Network error during upload: ${e.message}');
       await _handleNetworkError(e);
     } catch (e) {
-      _showError('Failed to submit evidence: $e');
-      appLogger.e('❌ Upload error', error: e);
+      _showError('No se pudo enviar la evidencia: $e');
+      appLogger.e('Upload error', error: e);
     } finally {
       setState(() => _isLoading = false);
     }
@@ -211,7 +210,7 @@ class _EvidenceCapturePageState extends State<EvidenceCapturePage> {
 
   Future<void> _handleNetworkError(DioException error) async {
     try {
-      appLogger.i('📥 Queuing evidence for offline retry...');
+      appLogger.i('Queuing evidence for offline retry...');
 
       // Queue for offline retry
       final queueId = await _uploadRepository.enqueuePendingUpload(
@@ -223,35 +222,27 @@ class _EvidenceCapturePageState extends State<EvidenceCapturePage> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '⚠️ No connection - evidence queued for upload\nQueue ID: ${queueId.substring(0, 8)}...',
-            ),
-            backgroundColor: Colors.orange,
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Sin conexión — evidencia en cola (ID: ${queueId.substring(0, 8)}…)',
+            backgroundColor: SaoColors.warning,
             duration: const Duration(seconds: 4),
-            action: SnackBarAction(
-              label: 'OK',
-              onPressed: () {},
-            ),
           ),
         );
-
         widget.onEvidenceAdded?.call();
         Navigator.pop(context);
       }
     } catch (e) {
-      _showError('Failed to queue offline: $e');
-      appLogger.e('❌ Offline queue error', error: e);
+      _showError('No se pudo encolar la evidencia: $e');
+      appLogger.e('Offline queue error', error: e);
     }
   }
 
   void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-      ),
+    showTransientSnackBar(
+      context,
+      appSnackBar(message: message, backgroundColor: SaoColors.error),
     );
   }
 

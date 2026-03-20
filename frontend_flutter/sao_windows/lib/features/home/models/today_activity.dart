@@ -11,6 +11,13 @@ enum ExecutionState {
   terminada,   // Guardado en BD (Verde Oscuro/Oculto)
 }
 
+enum ActivitySyncState {
+  pending,
+  synced,
+  error,
+  unknown,
+}
+
 class TodayActivity {
   final String id;
   final String title;
@@ -19,11 +26,16 @@ class TodayActivity {
   final String estado;
   final int? pk; // 142900 => 142+900
   final ActivityStatus status;
+  final DateTime createdAt;
   final ExecutionState executionState;
   final DateTime? horaInicio;
   final DateTime? horaFin;
   final String? gpsLocation;
   final bool isUnplanned; // true when saved with origin==unplanned
+  final bool isRejected;
+  final ActivitySyncState syncState;
+  final String? assignedToUserId;
+  final String? assignedToName;
 
   const TodayActivity({
     required this.id,
@@ -33,11 +45,16 @@ class TodayActivity {
     required this.estado,
     this.pk,
     required this.status,
+    required this.createdAt,
     this.executionState = ExecutionState.pendiente,
     this.horaInicio,
     this.horaFin,
     this.gpsLocation,
     this.isUnplanned = false,
+    this.isRejected = false,
+    this.syncState = ActivitySyncState.unknown,
+    this.assignedToUserId,
+    this.assignedToName,
   });
 
   TodayActivity copyWith({
@@ -46,6 +63,10 @@ class TodayActivity {
     DateTime? horaFin,
     String? gpsLocation,
     bool? isUnplanned,
+    bool? isRejected,
+    ActivitySyncState? syncState,
+    String? assignedToUserId,
+    String? assignedToName,
   }) {
     return TodayActivity(
       id: id,
@@ -55,11 +76,16 @@ class TodayActivity {
       estado: estado,
       pk: pk,
       status: status,
+      createdAt: createdAt,
       executionState: executionState ?? this.executionState,
       horaInicio: horaInicio ?? this.horaInicio,
       horaFin: horaFin ?? this.horaFin,
       gpsLocation: gpsLocation ?? this.gpsLocation,
       isUnplanned: isUnplanned ?? this.isUnplanned,
+      isRejected: isRejected ?? this.isRejected,
+      syncState: syncState ?? this.syncState,
+      assignedToUserId: assignedToUserId ?? this.assignedToUserId,
+      assignedToName: assignedToName ?? this.assignedToName,
     );
   }
 }

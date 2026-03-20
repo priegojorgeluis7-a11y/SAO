@@ -13,6 +13,7 @@ import '../../features/sync/data/sync_api_repository.dart';
 import '../../features/sync/services/sync_service.dart';
 import '../../features/sync/services/auto_sync_service.dart';
 import '../../features/events/data/events_api_repository.dart';
+import '../../features/agenda/data/territory_api_repository.dart';
 import '../../features/events/data/events_local_repository.dart';
 import '../catalog/api/catalog_api.dart';
 import '../catalog/sync/catalog_sync_service.dart';
@@ -39,8 +40,11 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
 
   // API Configuration (singleton)
   final apiConfig = ApiConfig();
+  const defineBaseUrl = String.fromEnvironment('SAO_API_BASE', defaultValue: '');
   final storedBaseUrl = prefs.getString('api_base_url_override');
-  if (storedBaseUrl != null && storedBaseUrl.trim().isNotEmpty) {
+  if (defineBaseUrl.trim().isNotEmpty) {
+    apiConfig.setBaseUrl(defineBaseUrl.trim());
+  } else if (storedBaseUrl != null && storedBaseUrl.trim().isNotEmpty) {
     apiConfig.setBaseUrl(storedBaseUrl.trim());
   }
   getIt.registerLazySingleton<ApiConfig>(() => apiConfig);
@@ -70,6 +74,7 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
       getIt<FlutterSecureStorage>(),
       getIt<SharedPreferences>(),
       getIt<ConnectivityService>(),
+      getIt<ApiConfig>(),
     ),
   );
 
@@ -151,6 +156,11 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
   );
   getIt.registerLazySingleton<EventsLocalRepository>(
     () => EventsLocalRepository(db: getIt<AppDb>()),
+  );
+
+  // Territory module
+  getIt.registerLazySingleton<TerritoryApiRepository>(
+    () => TerritoryApiRepository(apiClient: getIt<ApiClient>()),
   );
 }
 

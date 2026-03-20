@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../features/auth/application/auth_providers.dart';
 import '../data/events_provider.dart';
@@ -120,12 +121,8 @@ class EventsListPage extends ConsumerWidget {
 
       await ref.read(eventsLocalRepositoryProvider).updateEvent(dto);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Evento actualizado. Se sincronizara al tener red.'),
-            backgroundColor: SaoColors.success,
-          ),
-        );
+        showTransientSnackBar(context,
+          appSnackBar(message: 'Evento actualizado. Se sincronizará al tener red.', backgroundColor: SaoColors.success));
       }
     }
 
@@ -162,12 +159,8 @@ class EventsListPage extends ConsumerWidget {
 
     await ref.read(eventsLocalRepositoryProvider).deleteEvent(event.id);
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Evento eliminado. Se sincronizara al tener red.'),
-          backgroundColor: SaoColors.info,
-        ),
-      );
+      showTransientSnackBar(context,
+        appSnackBar(message: 'Evento eliminado. Se sincronizará al tener red.', backgroundColor: SaoColors.info));
     }
   }
 
@@ -285,7 +278,7 @@ class _EventCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 8),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(10),
-        side: BorderSide(color: severityColor.withOpacity(0.3), width: 1),
+        side: BorderSide(color: severityColor.withValues(alpha: 0.3), width: 1),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -431,7 +424,7 @@ class _SeverityChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.15),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(4),
       ),
       child: Text(
@@ -484,7 +477,7 @@ class _EmptyState extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.campaign_outlined,
-              size: 64, color: SaoColors.onSurfaceVariant.withOpacity(0.4)),
+              size: 64, color: SaoColors.onSurfaceVariant.withValues(alpha: 0.4)),
           const SizedBox(height: 16),
           const Text(
             'Sin eventos reportados',

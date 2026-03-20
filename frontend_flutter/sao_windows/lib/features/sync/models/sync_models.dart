@@ -6,7 +6,8 @@ import '../../../ui/theme/sao_colors.dart';
 
 enum SyncHealthStatus {
   allSynced, // 🟢 Todo sincronizado
-  syncing, // 🟠 Sincronizando...
+  hasPending, // 🟡 Hay elementos pendientes de subir
+  syncing, // 🔵 Sincronizando...
   error, // 🔴 Error / Sin conexión
 }
 
@@ -99,7 +100,6 @@ enum UploadItemStatus {
 }
 
 enum DownloadResourceType {
-  planos, // Planos constructivos
   catalogo, // Catálogo de conceptos
 }
 
@@ -122,8 +122,6 @@ class DownloadResource {
 
   IconData get icon {
     switch (type) {
-      case DownloadResourceType.planos:
-        return Icons.architecture_rounded;
       case DownloadResourceType.catalogo:
         return Icons.list_alt_rounded;
     }
@@ -152,13 +150,11 @@ enum DownloadResourceStatus {
 
 class SyncConfig {
   final bool wifiOnly;
-  final bool downloadPlanos;
   final int usedSpaceMb;
   final int availableSpaceMb;
 
   const SyncConfig({
     required this.wifiOnly,
-    required this.downloadPlanos,
     required this.usedSpaceMb,
     required this.availableSpaceMb,
   });

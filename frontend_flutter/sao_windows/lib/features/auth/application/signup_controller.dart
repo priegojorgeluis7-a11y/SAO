@@ -46,16 +46,16 @@ class SignupController extends StateNotifier<SignupState> {
       state = const SignupState(success: true);
       return true;
     } on NetworkException {
-      state = const SignupState(error: 'No internet connection');
+      state = const SignupState(error: 'Sin conexión a internet');
       return false;
     } on ApiTimeoutException {
-      state = const SignupState(error: 'Connection timeout');
+      state = const SignupState(error: 'Tiempo de espera agotado');
       return false;
     } on AuthException catch (e) {
       state = SignupState(error: e.message);
       return false;
     } catch (e) {
-      state = SignupState(error: 'Unexpected error: $e');
+      state = SignupState(error: 'Error inesperado: $e');
       return false;
     }
   }

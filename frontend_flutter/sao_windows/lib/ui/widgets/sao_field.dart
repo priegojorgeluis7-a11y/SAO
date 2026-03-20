@@ -123,7 +123,7 @@ class SaoField extends StatelessWidget {
 
   Color _getFillColor() {
     if (!enabled) return SaoColors.gray100;
-    if (isEdited) return SaoColors.warning.withOpacity(0.08);
+    if (isEdited) return SaoColors.warning.withValues(alpha: 0.08);
     return SaoColors.surface;
   }
 
@@ -137,7 +137,7 @@ class SaoField extends StatelessWidget {
           'Editado',
           style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: SaoColors.warning.withOpacity(0.2),
+        backgroundColor: SaoColors.warning.withValues(alpha: 0.2),
         labelPadding: const EdgeInsets.symmetric(horizontal: 4),
         visualDensity: VisualDensity.compact,
       ),

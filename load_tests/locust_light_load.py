@@ -8,11 +8,17 @@ Run: locust -f load_tests/locust_light_load.py --host=http://localhost:8000 --us
 from locust import HttpUser, task, between, events
 import random
 import json
+import os
 
 # Test data
-TEST_EMAIL = "testuser@test.com"
-TEST_PASSWORD = "password123"
-TEST_ACTIVITY_ID = 1
+TEST_EMAIL = os.getenv("SAO_LOADTEST_EMAIL", "testuser@test.com")
+TEST_PASSWORD = os.getenv("SAO_LOADTEST_PASSWORD")
+TEST_ACTIVITY_ID = int(os.getenv("SAO_LOADTEST_ACTIVITY_ID", "1"))
+
+if not TEST_PASSWORD:
+    raise RuntimeError(
+        "Missing SAO_LOADTEST_PASSWORD environment variable for load tests"
+    )
 
 class SaoLightUser(HttpUser):
     """Simulates typical user: login -> view activities -> logout"""

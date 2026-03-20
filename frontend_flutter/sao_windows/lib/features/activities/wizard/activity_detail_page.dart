@@ -1,7 +1,13 @@
 // lib/features/activities/activity_detail_page.dart
-import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:flutter/material.dart';
+import 'package:get_it/get_it.dart';
+
+import '../../../core/utils/format_utils.dart';
+import '../../../data/local/app_db.dart';
+import '../../../data/local/dao/activity_dao.dart';
 import '../../home/models/today_activity.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
@@ -10,34 +16,10 @@ class ActivityDetailPage extends StatefulWidget {
   final TodayActivity activity;
   final String projectCode;
 
-  /// Estado operativo (opcionales). Si los pasas desde Home, se verán aquí.
-  final bool isOffline;
-  final bool inProgress;
-  final DateTime? startAt;
-  final DateTime? endAt;
-  final String? gps;
-  final String? blockReason;
-  final bool evidenceSent;
-
-  /// Callbacks opcionales para conectar con Home (check-in / finalizar / incidencia)
-  final VoidCallback? onStart;
-  final VoidCallback? onFinish;
-  final VoidCallback? onReportIncident;
-
   const ActivityDetailPage({
     super.key,
     required this.activity,
     required this.projectCode,
-    this.isOffline = true,
-    this.inProgress = false,
-    this.startAt,
-    this.endAt,
-    this.gps,
-    this.blockReason,
-    this.evidenceSent = false,
-    this.onStart,
-    this.onFinish,
-    this.onReportIncident,
   });
 
   @override
@@ -45,524 +27,600 @@ class ActivityDetailPage extends StatefulWidget {
 }
 
 class _ActivityDetailPageState extends State<ActivityDetailPage> {
-  // ====== Estado local de evidencias ======
-  int photos = 0;
-  int pdfs = 0;
-  int audios = 0;
+  late final ActivityDao _dao;
 
-  String _formatPk(int? pk) {
-    if (pk == null) return 'S/PK';
-    final km = pk ~/ 1000;
-    final m = pk % 1000;
-    return "$km+${m.toString().padLeft(3, '0')}";
+  Activity? _dbActivity;
+  Map<String, ActivityField> _fields = {};
+  List<Evidence> _evidences = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _dao = ActivityDao(GetIt.I<AppDb>());
+    _loadData();
   }
 
-  String _formatHm(DateTime? dt) {
-    if (dt == null) return '—';
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
-  }
-
-  Color _baseStatusColor(ActivityStatus s) {
-    switch (s) {
-      case ActivityStatus.vencida:
-        return SaoColors.error;
-      case ActivityStatus.hoy:
-        return SaoColors.warning;
-      case ActivityStatus.programada:
-        return SaoColors.gray600;
+  Future<void> _loadData() async {
+    try {
+      final dbActivity = await _dao.getActivityById(widget.activity.id);
+      final fields = await _dao.getFieldsByKey(widget.activity.id);
+      final evidences = await _dao.getEvidencesForActivity(widget.activity.id);
+      if (!mounted) return;
+      setState(() {
+        _dbActivity = dbActivity;
+        _fields = fields;
+        _evidences = evidences;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _loading = false);
     }
   }
 
-  String _baseStatusText(ActivityStatus s) {
-    switch (s) {
-      case ActivityStatus.vencida:
-        return 'Venció ayer';
-      case ActivityStatus.hoy:
-        return 'Vence hoy';
-      case ActivityStatus.programada:
-        return 'Programada hoy';
+  // ── Helpers ──────────────────────────────────────────────────
+  // _fmt, _fmtDate → format_utils.dart (fmtTime, fmtDate)
+  // _formatPk retiene "S/PK" como fallback específico de esta vista
+  String _formatPk(int? pk) => pk == null ? 'S/PK' : formatPk(pk);
+
+  String _riskLabel(String? raw) {
+    switch (raw?.toLowerCase()) {
+      case 'bajo': return 'Bajo';
+      case 'medio': return 'Medio';
+      case 'alto': return 'Alto';
+      case 'prioritario': return 'Prioritario / Crítico';
+      default: return raw ?? '—';
     }
   }
 
-  Color _baseStatusBg(ActivityStatus s) {
-    switch (s) {
-      case ActivityStatus.vencida:
-        return SaoColors.statusRechazadoBg;
-      case ActivityStatus.hoy:
-        return SaoColors.alertBg;
-      case ActivityStatus.programada:
-        return SaoColors.gray50;
+  Color _riskColor(String? raw) {
+    switch (raw?.toLowerCase()) {
+      case 'bajo': return SaoColors.riskLow;
+      case 'medio': return SaoColors.riskMedium;
+      case 'alto': return SaoColors.riskHigh;
+      case 'prioritario': return SaoColors.riskPriority;
+      default: return SaoColors.gray500;
     }
   }
 
-  /// Color/estado “efectivo” en detalle (prioriza bloqueo / progreso / terminado)
-  Color _effectiveColor() {
-    if ((widget.blockReason ?? '').isNotEmpty) {
-      // cancelada = rojo; otros = naranja
-      return widget.blockReason == 'Cancelada' ? SaoColors.error : SaoColors.riskHigh;
+  ({Color fg, Color bg, String label}) _statusDisplay() {
+    final a = widget.activity;
+    final db = _dbActivity;
+
+    // Terminada: wizard completado (finishedAt requerido para no confundir con actividades SYNCED asignadas)
+    final isTerminada = a.executionState == ExecutionState.terminada ||
+        db?.status == 'READY_TO_SYNC' ||
+        (db?.status == 'SYNCED' && db?.finishedAt != null);
+    if (isTerminada) {
+      final synced = db?.status == 'SYNCED';
+      return (
+        fg: SaoColors.success,
+        bg: SaoColors.statusAprobadoBg,
+        label: synced ? 'Terminada · Sincronizada' : 'Terminada · Pendiente de sincronizar',
+      );
     }
-    if (widget.endAt != null) return SaoColors.success; // terminada
-    if (widget.inProgress) return SaoColors.statusEnCampo; // en progreso
-    return _baseStatusColor(widget.activity.status);
+
+    // Captura incompleta
+    if (a.executionState == ExecutionState.revisionPendiente ||
+        db?.status == 'REVISION_PENDIENTE') {
+      return (
+        fg: SaoColors.warning,
+        bg: SaoColors.alertBg,
+        label: 'Captura incompleta',
+      );
+    }
+
+    // En ejecución
+    if (a.executionState == ExecutionState.enCurso ||
+        (db?.startedAt != null && db?.finishedAt == null)) {
+      return (
+        fg: SaoColors.statusEnCampo,
+        bg: SaoColors.statusEnCampoBg,
+        label: 'En ejecución',
+      );
+    }
+
+    // Asignada: operative aún no ha iniciado
+    return (
+      fg: SaoColors.gray500,
+      bg: SaoColors.gray50,
+      label: 'Asignada · Pendiente de inicio',
+    );
   }
 
-  Color _effectiveBg() {
-    if ((widget.blockReason ?? '').isNotEmpty) {
-      return widget.blockReason == 'Cancelada' ? SaoColors.statusRechazadoBg : SaoColors.riskHighBg;
-    }
-    if (widget.endAt != null) return SaoColors.statusAprobadoBg;
-    if (widget.inProgress) return SaoColors.statusEnCampoBg;
-    return _baseStatusBg(widget.activity.status);
+  List<String> _agreements() {
+    final raw = _fields['report_agreements']?.valueJson;
+    if (raw == null || raw.trim().isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) return decoded.map((e) => e.toString()).toList();
+    } catch (_) {}
+    return [];
   }
 
-  String _effectiveStatusText() {
-    if ((widget.blockReason ?? '').isNotEmpty) return 'Incidencia: ${widget.blockReason}';
-    if (widget.endAt != null) {
-      return widget.evidenceSent ? 'Terminada (evidencia enviada)' : 'Terminada (sin evidencia enviada)';
+  IconData _evidenceIcon(String type) {
+    switch (type.toUpperCase()) {
+      case 'VIDEO': return Icons.videocam_rounded;
+      case 'PDF': return Icons.picture_as_pdf_rounded;
+      case 'AUDIO': return Icons.mic_rounded;
+      default: return Icons.photo_rounded;
     }
-    if (widget.inProgress) {
-      final t = _formatHm(widget.startAt);
-      final g = (widget.gps ?? '').isEmpty ? '' : ' • ${widget.gps}';
-      return 'En progreso • $t$g';
-    }
-    return _baseStatusText(widget.activity.status);
   }
 
-  void _openWizard() {
-    context.push('/activity/${widget.activity.id}/wizard?project=${widget.projectCode}');
+  String _durationLabel(DateTime? start, DateTime? end) {
+    if (start == null || end == null) return '—';
+    var diff = end.difference(start);
+    if (diff.isNegative) {
+      diff += const Duration(days: 1);
+    }
+
+    final totalMinutes = diff.inMinutes;
+    final hours = totalMinutes ~/ 60;
+    final minutes = totalMinutes % 60;
+    if (hours <= 0) return '${minutes}m';
+    return '${hours}h ${minutes}m';
   }
 
-  void _snack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  List<MapEntry<String, String>> _reportPairs(String? rawDescription) {
+    final raw = rawDescription?.trim();
+    if (raw == null || raw.isEmpty) return const [];
+
+    final rows = <MapEntry<String, String>>[];
+    final chunks = raw
+        .split('|')
+        .map((part) => part.trim())
+        .where((part) => part.isNotEmpty);
+
+    for (final chunk in chunks) {
+      final idx = chunk.indexOf(':');
+      if (idx <= 0 || idx >= chunk.length - 1) {
+        rows.add(MapEntry('Detalle', chunk));
+        continue;
+      }
+
+      final key = chunk.substring(0, idx).trim();
+      final value = chunk.substring(idx + 1).trim();
+      final normalized = key.toLowerCase();
+      if (normalized.contains('riesgo')) {
+        continue;
+      }
+
+      if (value.isNotEmpty) {
+        rows.add(MapEntry(key, value));
+      }
+    }
+
+    return rows;
   }
 
   @override
   Widget build(BuildContext context) {
     final a = widget.activity;
-    final c = _effectiveColor();
-    final bg = _effectiveBg();
-
-    final bool canStart = widget.onStart != null && !widget.inProgress && widget.endAt == null && (widget.blockReason ?? '').isEmpty;
-    final bool canFinish = widget.onFinish != null && widget.inProgress && widget.endAt == null && (widget.blockReason ?? '').isEmpty;
-    final bool canReport = widget.onReportIncident != null && widget.endAt == null; // se puede reportar mientras no esté terminada
+    final db = _dbActivity;
+    final status = _statusDisplay();
+    final riskRaw = _fields['risk_level']?.valueText;
+    final reportPairs = _reportPairs(db?.description);
+    final startedAt = db?.startedAt ?? a.horaInicio;
+    final finishedAt = db?.finishedAt ?? a.horaFin;
 
     return Scaffold(
       backgroundColor: SaoColors.gray50,
       appBar: AppBar(
         backgroundColor: SaoColors.surface,
         surfaceTintColor: SaoColors.surface,
-        titleSpacing: 0,
-        title: const Text('Detalle'),
+        title: Text(
+          a.title.isNotEmpty ? a.title : 'Detalle de actividad',
+          overflow: TextOverflow.ellipsis,
+        ),
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-        children: [
-          // ===== Header card =====
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: bg,
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: SaoColors.border),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : ListView(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               children: [
-                // Title + PK
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Text(
-                        a.title,
-                        style: SaoTypography.frontTitle.copyWith(
-                          fontWeight: FontWeight.w900,
-                          color: SaoColors.primary,
-                        ),
-                      ),
-                    ),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: SaoColors.surface,
-                        borderRadius: BorderRadius.circular(999),
-                        border: Border.all(color: SaoColors.border),
-                      ),
-                      child: Text(
-                        'PK ${_formatPk(a.pk)}',
-                        style: SaoTypography.pkLabel,
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-
-                // Meta: proyecto / frente
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _chip(widget.projectCode, icon: Icons.train),
-                    _chip(a.frente, icon: Icons.flag_outlined),
-                    _chip(widget.isOffline ? 'Offline' : 'Online', icon: widget.isOffline ? Icons.cloud_off_rounded : Icons.cloud_done_rounded),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-
-                // Location
-                Row(
-                  children: [
-                    const Icon(Icons.place_outlined, size: 18, color: SaoColors.gray600),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        '${a.municipio}, ${a.estado}',
-                        style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
-                      ),
-                    ),
-                  ],
-                ),
-
-                const SizedBox(height: 10),
-
-                // Status
-                Row(
-                  children: [
-                    Container(
-                      width: 10,
-                      height: 10,
-                      decoration: BoxDecoration(
-                        color: c,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        _effectiveStatusText(),
-                        style: SaoTypography.bodyTextSmall.copyWith(
-                          fontWeight: FontWeight.w800,
-                          color: c,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Tiempos (si aplica)
-                if (widget.startAt != null || widget.endAt != null) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: SaoColors.surface,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: SaoColors.border),
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(child: _kvMini('Inicio', _formatHm(widget.startAt))),
-                        const SizedBox(width: 10),
-                        Expanded(child: _kvMini('Término', _formatHm(widget.endAt))),
-                      ],
-                    ),
+                // ── Status banner ──────────────────────────────
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: status.bg,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: status.fg.withValues(alpha: 0.3)),
                   ),
-                ],
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 10,
+                        height: 10,
+                        decoration: BoxDecoration(color: status.fg, shape: BoxShape.circle),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          status.label,
+                          style: SaoTypography.bodyTextSmall.copyWith(
+                            color: status.fg,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                _detailCard(
+                  title: 'Ubicación y asignación',
+                  child: Column(
+                    children: [
+                      _kvRow('Proyecto', widget.projectCode, icon: Icons.business_center_outlined),
+                      _kvRow('Frente', a.frente.isNotEmpty ? a.frente : '—', icon: Icons.alt_route_rounded),
+                      _kvRow('PK', _formatPk(db?.pk ?? a.pk), icon: Icons.add_road_rounded),
+                      if ((a.municipio).isNotEmpty)
+                        _kvRow('Municipio', a.municipio, icon: Icons.location_on_outlined),
+                      if ((a.estado).isNotEmpty)
+                        _kvRow('Estado', a.estado, icon: Icons.place_outlined),
+                      if (a.assignedToName != null && a.assignedToName!.trim().isNotEmpty)
+                        _kvRow('Asignado a', a.assignedToName!, icon: Icons.person_outline_rounded),
+                      _kvRow('Creada', fmtDate(db?.createdAt ?? a.createdAt), icon: Icons.event_outlined),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                _detailCard(
+                  title: 'Detalles de la actividad',
+                  trailing: riskRaw == null
+                      ? null
+                      : _riskBadge(
+                          _riskLabel(riskRaw),
+                          _riskColor(riskRaw),
+                        ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _subsection('Ejecución'),
+                      _kvRow('Inicio', fmtTime(startedAt), icon: Icons.play_circle_outline_rounded),
+                      _kvRow('Término', fmtTime(finishedAt), icon: Icons.stop_circle_outlined),
+                      _kvRow(
+                        'Duración',
+                        _durationLabel(startedAt, finishedAt),
+                        icon: Icons.schedule_rounded,
+                        secondaryValue: true,
+                      ),
+                      if (db?.geoLat != null && db?.geoLon != null)
+                        _kvRow(
+                          'GPS',
+                          '${db!.geoLat!.toStringAsFixed(5)}, ${db.geoLon!.toStringAsFixed(5)}',
+                          icon: Icons.gps_fixed_rounded,
+                        ),
+                      const SizedBox(height: 12),
+                      _subsection('Reporte capturado'),
+                      if (reportPairs.isNotEmpty)
+                        _reportGrid(reportPairs)
+                      else
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: Text(
+                            'Sin datos de reporte registrados.',
+                            style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray500),
+                          ),
+                        ),
+                      if (_fields.containsKey('report_notes') &&
+                          (_fields['report_notes']?.valueText ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Notas / Minuta',
+                          style: SaoTypography.caption.copyWith(
+                            color: SaoColors.gray500,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: SaoColors.surface,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: SaoColors.border),
+                          ),
+                          child: Text(
+                            _fields['report_notes']!.valueText!,
+                            style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
+                          ),
+                        ),
+                      ],
+                      if (_agreements().isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        Text(
+                          'Acuerdos',
+                          style: SaoTypography.caption.copyWith(
+                            color: SaoColors.gray500,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        ..._agreements().asMap().entries.map(
+                              (e) => Padding(
+                                padding: const EdgeInsets.only(bottom: 4),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      '${e.key + 1}. ',
+                                      style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray500),
+                                    ),
+                                    Expanded(
+                                      child: Text(
+                                        e.value,
+                                        style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                      ],
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                _detailCard(
+                  title: 'Evidencias',
+                  child: Column(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: _evidences.isEmpty ? SaoColors.gray50 : SaoColors.statusAprobadoBg,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _evidences.isEmpty
+                                ? SaoColors.border
+                                : SaoColors.success.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _evidences.isEmpty
+                                  ? Icons.photo_library_outlined
+                                  : Icons.photo_library_rounded,
+                              size: 20,
+                              color: _evidences.isEmpty ? SaoColors.gray400 : SaoColors.success,
+                            ),
+                            const SizedBox(width: 10),
+                            Text(
+                              _evidences.isEmpty
+                                  ? '0 evidencias registradas'
+                                  : '${_evidences.length} evidencia(s) registrada(s)',
+                              style: SaoTypography.bodyTextSmall.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: _evidences.isEmpty ? SaoColors.gray500 : SaoColors.success,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (_evidences.isNotEmpty)
+                        ..._evidences.map((ev) => _evidenceTile(ev)),
+                    ],
+                  ),
+                ),
               ],
             ),
-          ),
-
-          const SizedBox(height: 16),
-
-          // ===== Acciones rápidas =====
-          _sectionTitle('Acciones'),
-          const SizedBox(height: 8),
-
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: canStart
-                      ? () {
-                          widget.onStart?.call();
-                          _snack('✅ Check-in (En progreso)');
-                        }
-                      : null,
-                  icon: const Icon(Icons.play_arrow),
-                  label: const Text('Iniciar'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _openWizard,
-                  icon: const Icon(Icons.edit_note),
-                  label: const Text('Registrar'),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 10),
-
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: canFinish
-                      ? () {
-                          widget.onFinish?.call();
-                          _snack('🏁 Terminada (sin evidencia enviada)');
-                        }
-                      : null,
-                  icon: const Icon(Icons.check_circle_outline),
-                  label: const Text('Finalizar'),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: canReport
-                      ? () {
-                          widget.onReportIncident?.call();
-                        }
-                      : null,
-                  icon: const Icon(Icons.report_problem_outlined),
-                  label: const Text('Incidencia'),
-                ),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 18),
-
-          // ===== Evidencias =====
-          _sectionTitle('Evidencias'),
-          const SizedBox(height: 8),
-          _kvRow('Fotos', '$photos'),
-          _kvRow('PDF', '$pdfs'),
-          _kvRow('Audio', '$audios'),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: [
-              _evidenceButton(
-                Icons.photo_camera,
-                'Foto',
-                onTap: () => setState(() => photos++),
-              ),
-              _evidenceButton(
-                Icons.picture_as_pdf,
-                'PDF',
-                onTap: () => setState(() => pdfs++),
-              ),
-              _evidenceButton(
-                Icons.mic_none,
-                'Audio',
-                onTap: () => setState(() => audios++),
-              ),
-              _evidenceButton(
-                Icons.my_location,
-                'Ubicación',
-                onTap: () => _snack("📍 Ubicación: ${widget.gps ?? "sin GPS"}"),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 18),
-
-          // ===== Historial =====
-          _sectionTitle('Historial'),
-          const SizedBox(height: 8),
-          _timelineTile(
-            icon: Icons.create_outlined,
-            title: 'Creada',
-            subtitle: '12/02/2026 09:14 · Luis',
-          ),
-          if (widget.startAt != null)
-            _timelineTile(
-              icon: Icons.play_circle_outline,
-              title: 'Check-in',
-              subtitle: "${_formatHm(widget.startAt)} · ${widget.gps ?? "GPS"}",
-            ),
-          if (widget.endAt != null)
-            _timelineTile(
-              icon: Icons.flag_outlined,
-              title: 'Terminada',
-              subtitle: "${_formatHm(widget.endAt)} · ${widget.evidenceSent ? "Evidencia enviada" : "Sin evidencia enviada"}",
-            ),
-          if ((widget.blockReason ?? '').isNotEmpty)
-            _timelineTile(
-              icon: Icons.report_problem_outlined,
-              title: 'Incidencia',
-              subtitle: widget.blockReason!,
-            ),
-          _timelineTile(
-            icon: widget.isOffline ? Icons.cloud_off_outlined : Icons.cloud_done_outlined,
-            title: widget.isOffline ? 'Pendiente de sincronizar' : 'Sincronizada',
-            subtitle: widget.isOffline ? 'Offline · Se enviará al tener señal' : 'Online · Enviada',
-          ),
-
-          const SizedBox(height: 24),
-
-          // ===== CTA inferior =====
-          FilledButton(
-            onPressed: _openWizard,
-            child: const Text('Abrir Wizard de Registro'),
-          ),
-        ],
-      ),
     );
   }
 
-  // =========================
-  // Widgets
-  // =========================
-  static Widget _sectionTitle(String t) => Text(
-        t,
-      style: SaoTypography.sectionTitle,
-      );
+  // ── Widget helpers ────────────────────────────────────────────
 
-  static Widget _chip(String t, {required IconData icon}) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+  static Widget _detailCard({
+    required String title,
+    Widget? trailing,
+    required Widget child,
+  }) => Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           color: SaoColors.surface,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: SaoColors.border),
         ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Icon(icon, size: 16, color: SaoColors.gray600),
-            const SizedBox(width: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(title, style: SaoTypography.sectionTitle),
+                ),
+                if (trailing != null) trailing,
+              ],
+            ),
+            const SizedBox(height: 8),
+            child,
+          ],
+        ),
+      );
+
+  static Widget _subsection(String title) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(
+          title,
+          style: SaoTypography.caption.copyWith(
+            color: SaoColors.gray500,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      );
+
+  static Widget _riskBadge(String label, Color color) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Text(
+          label,
+          style: SaoTypography.caption.copyWith(
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+      );
+
+  static Widget _reportGrid(List<MapEntry<String, String>> pairs) => LayoutBuilder(
+        builder: (context, constraints) {
+          const spacing = 8.0;
+          final twoColumns = constraints.maxWidth >= 520;
+          final tileWidth = twoColumns
+              ? (constraints.maxWidth - spacing) / 2
+              : constraints.maxWidth;
+
+          return Wrap(
+            spacing: spacing,
+            runSpacing: spacing,
+            children: pairs
+                .map((pair) => SizedBox(
+                      width: tileWidth,
+                      child: _reportFieldTile(pair.key, pair.value),
+                    ))
+                .toList(),
+          );
+        },
+      );
+
+  static Widget _reportFieldTile(String key, String value) => Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: SaoColors.gray50,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: SaoColors.border),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
             Text(
-              t,
+              key,
               style: SaoTypography.caption.copyWith(
+                color: SaoColors.gray500,
                 fontWeight: FontWeight.w800,
-                color: SaoColors.gray900,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              value,
+              style: SaoTypography.bodyTextSmall.copyWith(
+                color: SaoColors.primary,
+                fontWeight: FontWeight.w700,
               ),
             ),
           ],
         ),
       );
 
-  static Widget _kvRow(String k, String v) => Container(
+  static Widget _kvRow(
+    String k,
+    String v, {
+    IconData? icon,
+    bool secondaryValue = false,
+  }) => Container(
         padding: const EdgeInsets.symmetric(vertical: 8),
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           border: Border(bottom: BorderSide(color: SaoColors.border)),
         ),
         child: Row(
           children: [
             Expanded(
-              child: Text(
-                k,
-                style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray600),
-              ),
-            ),
-            Text(
-              v,
-              style: SaoTypography.bodyTextSmall.copyWith(
-                fontWeight: FontWeight.w900,
-                color: SaoColors.primary,
-              ),
-            ),
-          ],
-        ),
-      );
-
-  static Widget _kvMini(String k, String v) => Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            k,
-            style: SaoTypography.caption.copyWith(
-              color: SaoColors.gray500,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            v,
-            style: SaoTypography.bodyTextBold.copyWith(
-              fontWeight: FontWeight.w900,
-              color: SaoColors.primary,
-            ),
-          ),
-        ],
-      );
-
-  static Widget _evidenceButton(
-    IconData icon,
-    String label, {
-    required VoidCallback onTap,
-  }) =>
-      OutlinedButton(
-        onPressed: onTap,
-        style: OutlinedButton.styleFrom(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 18),
-            const SizedBox(width: 8),
-            Text(label),
-          ],
-        ),
-      );
-
-  static Widget _timelineTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) =>
-      Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: SaoColors.gray50,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: SaoColors.border),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: SaoColors.surface,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: SaoColors.border),
-              ),
-              child: Icon(icon, size: 18),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Row(
                 children: [
-                  Text(
-                    title,
-                    style: SaoTypography.bodyTextSmall.copyWith(
-                      fontWeight: FontWeight.w900,
-                      color: SaoColors.primary,
+                  if (icon != null) ...[
+                    Icon(icon, size: 16, color: SaoColors.gray500),
+                    const SizedBox(width: 8),
+                  ],
+                  Flexible(
+                    child: Text(
+                      k,
+                      style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray600),
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
                   ),
                 ],
               ),
             ),
+            Flexible(
+              child: Text(
+                v,
+                textAlign: TextAlign.end,
+                style: SaoTypography.bodyTextSmall.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: secondaryValue ? SaoColors.gray500 : SaoColors.primary,
+                ),
+              ),
+            ),
           ],
         ),
       );
+
+  Widget _evidenceTile(Evidence ev) {
+    final file = File(ev.filePathLocal);
+    final isPhoto = ev.type.toUpperCase() == 'PHOTO';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: SaoColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: SaoColors.border),
+      ),
+      child: Row(
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: (isPhoto && file.existsSync())
+                ? Image.file(file, width: 56, height: 56, fit: BoxFit.cover)
+                : Container(
+                    width: 56,
+                    height: 56,
+                    color: SaoColors.gray100,
+                    child: Icon(_evidenceIcon(ev.type), size: 28, color: SaoColors.gray500),
+                  ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ev.type.toUpperCase(),
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.gray400,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if ((ev.caption ?? '').trim().isNotEmpty)
+                  Text(
+                    ev.caption!.trim(),
+                    style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  )
+                else
+                  Text(
+                    'Sin descripción',
+                    style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray400),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

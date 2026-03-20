@@ -5,16 +5,47 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/catalog/state/catalog_providers.dart';
 import '../../core/connectivity/offline_mode_controller.dart';
+import '../../core/constants.dart';
+import '../../core/network/api_client.dart';
 import '../../core/sync/sync_orchestrator.dart';
 import '../../data/local/app_db.dart';
 import '../../data/local/dao/activity_dao.dart';
+import '../auth/application/auth_providers.dart';
+import '../agenda/data/assignments_dao.dart';
+import '../agenda/data/assignments_repository.dart';
+import '../agenda/data/users_dao.dart';
+import '../agenda/data/users_repository.dart';
+import '../agenda/models/resource.dart';
+import '../sync/data/sync_provider.dart';
+import '../../core/utils/logger.dart';
 import '../../ui/theme/sao_colors.dart';
+import '../../core/utils/snackbar.dart';
 import 'models/today_activity.dart';
 
 enum FilterMode {
   totales,
   vencidas,
+  completadas,
+}
+
+class _HomeNotification {
+  final TodayActivity activity;
+  final String title;
+  final String message;
+  final IconData icon;
+  final Color color;
+  final int priority;
+
+  const _HomeNotification({
+    required this.activity,
+    required this.title,
+    required this.message,
+    required this.icon,
+    required this.color,
+    required this.priority,
+  });
 }
 
 class HomePage extends ConsumerStatefulWidget {
@@ -37,28 +68,265 @@ class _HomePageState extends ConsumerState<HomePage> {
   bool _loadingActivities = true;
 
   // ====== UI State ======
-  int _urgentCount = 0;
   String _query = '';
   final TextEditingController _searchCtrl = TextEditingController();
   final Map<String, bool> _expandedByFrente = {};
-  
+
   // Filtros interactivos
   FilterMode _filterMode = FilterMode.totales;
 
+  static const _filterModeKey = 'home_filter_mode';
+
   // ====== Estado de ejecución usando ExecutionState ======
-  final Map<String, TodayActivity> _activityStates = {};
+  bool _isAdminViewer = false;
+  // Default: filterrar por asignado al usuario (seguro por defecto) hasta que se resuelva el rol.
+  bool _isOperativeViewer = true;
+
+  // DAO único — evita instanciar en cada método
+  late final ActivityDao _dao;
+  late final AgendaUsersRepository _agendaUsersRepository;
+  late final AssignmentsRepository _assignmentsRepository;
+  final Set<String> _transferringActivityIds = <String>{};
 
   @override
   void initState() {
     super.initState();
+    final db = GetIt.I<AppDb>();
+    _dao = ActivityDao(db);
+    _agendaUsersRepository = AgendaUsersRepository(
+      apiClient: GetIt.I<ApiClient>(),
+      usersDao: UsersDao(db),
+    );
+    _assignmentsRepository = AssignmentsRepository(
+      apiClient: GetIt.I<ApiClient>(),
+      localStore: AssignmentsDao(db),
+      database: db,
+    );
+    // Persist active project so sync pull can use it from the sync center.
+    if (widget.selectedProject.trim().toUpperCase() != kAllProjects) {
+      // ignore: unawaited_futures
+      ref.read(kvStoreProvider).setString('selected_project', widget.selectedProject);
+    }
     // ignore: unawaited_futures
     ref.read(offlineModeProvider.notifier).load();
     // ignore: unawaited_futures
+    _loadFilterMode();
+    // ignore: unawaited_futures
     _loadHomeActivities();
 
-    // ✅ Si tu CatalogRepository necesita cargar JSON / drift, hazlo aquí.
     // ignore: unawaited_futures
-    _safeInitCatalogs();
+    _resolveViewerRole();
+  }
+
+  Future<void> _loadFilterMode() async {
+    final stored = await ref.read(kvStoreProvider).getString(_filterModeKey);
+    if (!mounted || stored == null) return;
+    final mode = FilterMode.values.firstWhere(
+      (m) => m.name == stored,
+      orElse: () => FilterMode.totales,
+    );
+    if (mode != _filterMode) setState(() => _filterMode = mode);
+  }
+
+  Future<void> _setFilterMode(FilterMode mode) {
+    setState(() => _filterMode = mode);
+    return ref.read(kvStoreProvider).setString(_filterModeKey, mode.name);
+  }
+
+  Future<void> _resolveViewerRole() async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _isAdminViewer = false;
+        _isOperativeViewer = false;
+      });
+      // initState already triggers _loadHomeActivities — no need to repeat here.
+      return;
+    }
+
+    final db = GetIt.I<AppDb>();
+    final localUser = await (db.select(db.users)..where((t) => t.id.equals(user.id))).getSingleOrNull();
+    final role = localUser == null
+        ? null
+        : await (db.select(db.roles)..where((t) => t.id.equals(localUser.roleId))).getSingleOrNull();
+    final isAdminByRole = localUser?.roleId == 1;
+    final hasKnownRole = localUser != null;
+    final isOperativeByRole = localUser?.roleId == 4 ||
+      role?.name.trim().toUpperCase() == 'OPERATIVO';
+    final email = user.email.trim().toLowerCase();
+    final isAdminByEmail = email == 'admin@sao.mx' || email.startsWith('admin.');
+
+    if (!mounted) return;
+    final nextIsAdmin = isAdminByRole || isAdminByEmail;
+    // Least-privilege fallback: if role cannot be resolved locally and user is not admin,
+    // keep strict assignee filtering to avoid exposing activities from other operatives.
+    final nextIsOperative = hasKnownRole ? isOperativeByRole : !nextIsAdmin;
+    final changed =
+        nextIsAdmin != _isAdminViewer || nextIsOperative != _isOperativeViewer;
+    setState(() {
+      _isAdminViewer = nextIsAdmin;
+      _isOperativeViewer = nextIsOperative;
+    });
+
+    if (changed) {
+      await _loadHomeActivities();
+    }
+  }
+
+  /// Devuelve el estado actual de una actividad desde _items (puede ser optimista).
+  TodayActivity? _findById(String id) {
+    for (final item in _items) {
+      if (item.id == id) return item;
+    }
+    return null;
+  }
+
+  /// Actualiza una actividad en _items in-place (actualización optimista).
+  void _updateItem(String id, TodayActivity updated) {
+    final idx = _items.indexWhere((i) => i.id == id);
+    if (idx != -1) _items[idx] = updated;
+  }
+
+  /// Número de actividades vencidas — derivado de _items, siempre consistente.
+  int get _urgentCount => _items.where((a) => a.status == ActivityStatus.vencida).length;
+
+  List<_HomeNotification> _buildNotifications() {
+    final notifications = <_HomeNotification>[];
+
+    for (final activity in _items) {
+      if (activity.isRejected) {
+        notifications.add(
+          _HomeNotification(
+            activity: activity,
+            title: 'Actividad rechazada',
+            message: '${activity.title} • Requiere correccion',
+            icon: Icons.cancel_rounded,
+            color: SaoColors.riskHigh,
+            priority: 1,
+          ),
+        );
+      }
+
+      if (activity.status == ActivityStatus.vencida) {
+        notifications.add(
+          _HomeNotification(
+            activity: activity,
+            title: 'Actividad vencida',
+            message: '${activity.title} • ${activity.frente}',
+            icon: Icons.warning_amber_rounded,
+            color: SaoColors.error,
+            priority: 0,
+          ),
+        );
+      }
+
+      if (!activity.isRejected &&
+          activity.executionState == ExecutionState.revisionPendiente) {
+        notifications.add(
+          _HomeNotification(
+            activity: activity,
+            title: 'Captura incompleta',
+            message: '${activity.title} • Requiere completar formulario',
+            icon: Icons.edit_note_rounded,
+            color: SaoColors.warning,
+            priority: 1,
+          ),
+        );
+      }
+
+      if (activity.syncState == ActivitySyncState.error) {
+        notifications.add(
+          _HomeNotification(
+            activity: activity,
+            title: 'Error de sincronizacion',
+            message: '${activity.title} • Reintentar sync',
+            icon: Icons.cloud_off_rounded,
+            color: SaoColors.riskHigh,
+            priority: 2,
+          ),
+        );
+      }
+    }
+
+    notifications.sort((a, b) {
+      final priorityCompare = a.priority.compareTo(b.priority);
+      if (priorityCompare != 0) return priorityCompare;
+      return b.activity.createdAt.compareTo(a.activity.createdAt);
+    });
+
+    return notifications;
+  }
+
+  int get _notificationCount => _buildNotifications().length;
+
+  Future<void> _openNotificationsCenter() async {
+    final notifications = _buildNotifications();
+
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.notifications_active_rounded, color: SaoColors.primary),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Notificaciones (${notifications.length})',
+                      style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (notifications.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 14),
+                    child: Text('Sin alertas por ahora. Todo en orden.'),
+                  )
+                else
+                  Flexible(
+                    child: ListView.separated(
+                      shrinkWrap: true,
+                      itemCount: notifications.length,
+                      separatorBuilder: (_, __) => const Divider(height: 1),
+                      itemBuilder: (context, index) {
+                        final item = notifications[index];
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(item.icon, color: item.color),
+                          title: Text(item.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+                          subtitle: Text(item.message),
+                          trailing: const Icon(Icons.chevron_right_rounded),
+                          onTap: () async {
+                            Navigator.pop(ctx);
+                            if (!mounted) return;
+
+                            if (_isAdminViewer) {
+                              await context.push(
+                                '/activity/${item.activity.id}?project=${widget.selectedProject}',
+                                extra: item.activity,
+                              );
+                            } else {
+                              await _openRegisterWizard(item.activity);
+                            }
+                          },
+                        );
+                      },
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<void> _loadHomeActivities() async {
@@ -67,17 +335,24 @@ class _HomePageState extends ConsumerState<HomePage> {
     });
 
     try {
-      final dao = ActivityDao(GetIt.I<AppDb>());
-      final rows = await dao.listHomeActivitiesByProject(widget.selectedProject);
-      final items = rows.map(_toTodayActivity).toList();
+      final effectiveProject = _isAdminViewer ? kAllProjects : widget.selectedProject;
+      final rows = await _dao.listHomeActivitiesByProject(effectiveProject);
+      final currentUserId = ref.read(currentUserProvider)?.id.trim().toLowerCase();
+        final filteredRows = _isOperativeViewer
+          ? ((currentUserId?.isNotEmpty ?? false)
+            ? rows.where((row) {
+              final assignedTo = row.assignedToUserId?.trim().toLowerCase();
+              return assignedTo != null &&
+                assignedTo.isNotEmpty &&
+                assignedTo == currentUserId;
+            }).toList()
+            : <HomeActivityRecord>[])
+          : rows;
+      final items = filteredRows.map(_toTodayActivity).toList();
 
       if (!mounted) return;
       setState(() {
         _items = items;
-        _urgentCount = _items.where((a) => a.status == ActivityStatus.vencida).length;
-        _activityStates
-          ..clear()
-          ..addEntries(_items.map((item) => MapEntry(item.id, item)));
         _loadingActivities = false;
       });
     } catch (_) {
@@ -88,48 +363,303 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
   }
 
+  bool _canTransferResponsibility(TodayActivity activity) {
+    if (!_isOperativeViewer || _isAdminViewer) {
+      return false;
+    }
+    if (ref.read(offlineModeProvider)) {
+      return false;
+    }
+    if (activity.executionState == ExecutionState.terminada) {
+      return false;
+    }
+
+    final currentUserId = ref.read(currentUserProvider)?.id.trim().toLowerCase();
+    final assignedTo = activity.assignedToUserId?.trim().toLowerCase();
+    if (currentUserId == null || currentUserId.isEmpty || assignedTo == null || assignedTo.isEmpty) {
+      return false;
+    }
+    return currentUserId == assignedTo;
+  }
+
+  Future<void> _openTransferResponsibilitySheet(TodayActivity activity) async {
+    if (!_canTransferResponsibility(activity)) {
+      return;
+    }
+
+    final projectId = widget.selectedProject.trim();
+    if (projectId.isEmpty || projectId.toUpperCase() == kAllProjects) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Selecciona un proyecto para transferir la responsabilidad.'),
+      );
+      return;
+    }
+
+    List<Resource> resources;
+    try {
+      resources = await _agendaUsersRepository.getOperationalUsers(
+        projectId: projectId,
+        isOffline: false,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'No se pudo cargar el equipo operativo para transferir.'),
+      );
+      return;
+    }
+
+    final candidates = resources
+        .where((resource) => resource.isActive && resource.id != activity.assignedToUserId)
+        .toList()
+      ..sort((left, right) => left.name.toLowerCase().compareTo(right.name.toLowerCase()));
+
+    if (candidates.isEmpty) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'No hay otro operativo disponible para recibir la actividad.'),
+      );
+      return;
+    }
+
+    final selection = await showModalBottomSheet<_TransferSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _TransferResponsibilitySheet(
+        activity: activity,
+        candidates: candidates,
+      ),
+    );
+
+    if (selection == null) {
+      return;
+    }
+
+    await _transferResponsibility(activity, selection.resource, selection.reason);
+  }
+
+  Future<void> _transferResponsibility(
+    TodayActivity activity,
+    Resource target,
+    String? reason,
+  ) async {
+    setState(() {
+      _transferringActivityIds.add(activity.id);
+    });
+
+    try {
+      await _assignmentsRepository.transferAssignment(
+        assignmentId: activity.id,
+        projectId: widget.selectedProject.trim(),
+        assigneeUserId: target.id,
+        assigneeName: target.name,
+        reason: reason,
+      );
+      await _loadHomeActivities();
+
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Responsabilidad transferida a ${target.name}',
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    } catch (e, st) {
+      appLogger.w('No se pudo transferir la actividad ${activity.id}: $e\n$st');
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo transferir la actividad. Intenta de nuevo.',
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    } finally {
+      if (!mounted) return;
+      setState(() {
+        _transferringActivityIds.remove(activity.id);
+      });
+    }
+  }
+
   TodayActivity _toTodayActivity(HomeActivityRecord row) {
     final activity = row.activity;
     final executionState = _executionStateFromRow(activity);
+    final hasAssignee = (row.assignedToUserId?.trim().isNotEmpty ?? false);
+    final activityName = row.activityTypeName?.trim();
+    final legacyTitle = _stripLegacyTitlePrefixes(activity.title);
+    final preferredTitle = (activityName?.isNotEmpty ?? false)
+      ? activityName!
+      : legacyTitle;
+    final title = _isLikelyActivityCode(preferredTitle)
+      ? _humanizeActivityCode(preferredTitle)
+      : preferredTitle;
+
+    final normalizedSegment = _normalizeDisplayValue(row.segmentName);
+    final normalizedFront = _normalizeDisplayValue(row.frontName);
+    final legacyMunicipio = _normalizeDisplayValue(
+      _extractLegacyTaggedValue(activity.title, 'Municipio'),
+    );
+    final legacyEstado = _normalizeDisplayValue(
+      _extractLegacyTaggedValue(activity.title, 'Estado'),
+    );
+    final normalizedMunicipio =
+      _normalizeDisplayValue(row.municipio) ?? legacyMunicipio;
+    final normalizedEstado =
+      _normalizeDisplayValue(row.estado) ?? legacyEstado;
 
     return TodayActivity(
       id: activity.id,
-      title: activity.title.trim().isNotEmpty
-          ? activity.title
-          : (row.activityTypeName ?? 'Actividad'),
-      frente: (row.segmentName?.trim().isNotEmpty ?? false)
-          ? row.segmentName!.trim()
-          : (row.frontName?.trim().isNotEmpty ?? false)
-              ? row.frontName!.trim()
-              : 'Sin frente',
-      municipio: 'Municipio',
-      estado: 'Estado',
+      title: title,
+      frente: normalizedSegment ?? normalizedFront ?? 'Sin frente',
+      municipio: normalizedMunicipio ?? '',
+      estado: normalizedEstado ?? '',
       pk: activity.pk,
-      status: _statusFromRow(activity, executionState),
+      status: _statusFromRow(
+        activity,
+        executionState,
+        isAssigned: hasAssignee,
+      ),
+      createdAt: activity.createdAt,
       executionState: executionState,
       horaInicio: activity.startedAt,
       horaFin: activity.finishedAt,
       isUnplanned: row.isUnplanned,
+      isRejected: activity.status == 'RECHAZADA',
+      syncState: _syncStateFromRow(activity),
+      assignedToUserId: row.assignedToUserId,
+      assignedToName: row.assignedToName,
     );
   }
 
+  String _stripLegacyTitlePrefixes(String rawTitle) {
+    final trimmed = rawTitle.trim();
+    if (trimmed.isEmpty) return 'Actividad';
+
+    final lowered = trimmed.toLowerCase();
+    if (lowered.startsWith('frente:') ||
+        lowered.startsWith('estado:') ||
+        lowered.startsWith('municipio:')) {
+      return 'Actividad';
+    }
+    return trimmed;
+  }
+
+  String? _normalizeDisplayValue(String? rawValue) {
+    final value = rawValue?.trim() ?? '';
+    if (value.isEmpty) return null;
+    final normalized = value.toLowerCase();
+    if (normalized == 'sin frente' ||
+        normalized == 'sin ubicación' ||
+        normalized == 'sin ubicacion' ||
+        normalized == 'sin municipio' ||
+        normalized == 'sin estado') {
+      return null;
+    }
+    return value;
+  }
+
+  bool _isLikelyActivityCode(String value) {
+    final compact = value.trim();
+    if (compact.isEmpty) return false;
+    return RegExp(r'^[A-Z]{2,6}$').hasMatch(compact);
+  }
+
+  String _humanizeActivityCode(String rawCode) {
+    final code = rawCode.trim().toUpperCase();
+    const known = <String, String>{
+      'REU': 'Reunion',
+      'CAM': 'Caminamiento',
+      'INS': 'Inspeccion',
+      'SUP': 'Supervision',
+    };
+    return known[code] ?? 'Actividad';
+  }
+
+  String? _extractLegacyTaggedValue(String rawTitle, String key) {
+    final source = rawTitle.replaceAll('•', ' ').trim();
+    final lower = source.toLowerCase();
+    final keyPrefix = '${key.toLowerCase()}:';
+    final start = lower.indexOf(keyPrefix);
+    if (start == -1) return null;
+
+    final contentStart = start + keyPrefix.length;
+    var end = source.length;
+    const markers = <String>['frente:', 'estado:', 'municipio:'];
+    for (final marker in markers) {
+      if (marker == keyPrefix) continue;
+      final idx = lower.indexOf(marker, contentStart);
+      if (idx != -1 && idx < end) {
+        end = idx;
+      }
+    }
+
+    final value = source.substring(contentStart, end).trim();
+    return value.isEmpty ? null : value;
+  }
+
+  ActivitySyncState _syncStateFromRow(Activity activity) {
+    switch (activity.status) {
+      case 'SYNCED':
+        return ActivitySyncState.synced;
+      case 'READY_TO_SYNC':
+      case 'DRAFT':
+        return ActivitySyncState.pending;
+      case 'ERROR':
+        return ActivitySyncState.error;
+      default:
+        return ActivitySyncState.unknown;
+    }
+  }
+
   ExecutionState _executionStateFromRow(Activity activity) {
+    // Si está cancelada, no mostrar (puedes filtrar en el DAO si lo prefieres)
+    if (activity.status == 'CANCELED') {
+      return ExecutionState.pendiente; // O filtrar en el DAO
+    }
     if (activity.status == 'REVISION_PENDIENTE') {
       return ExecutionState.revisionPendiente;
     }
-    if (activity.startedAt != null && activity.finishedAt == null) {
-      return ExecutionState.enCurso;
+    if (activity.status == 'RECHAZADA') {
+      return ExecutionState.revisionPendiente;
     }
-    if (activity.finishedAt != null ||
-        activity.status == 'DRAFT' ||
-        activity.status == 'READY_TO_SYNC' ||
-        activity.status == 'SYNCED') {
+    if (activity.finishedAt != null) {
       return ExecutionState.terminada;
     }
+    if (activity.startedAt != null) {
+      return ExecutionState.enCurso;
+    }
+
+    if (activity.status == 'DRAFT') {
+      return ExecutionState.pendiente;
+    }
+
     return ExecutionState.pendiente;
   }
 
-  ActivityStatus _statusFromRow(Activity activity, ExecutionState executionState) {
+  ActivityStatus _statusFromRow(
+    Activity activity,
+    ExecutionState executionState, {
+    required bool isAssigned,
+  }) {
+    if (isAssigned && executionState == ExecutionState.pendiente) {
+      // Admin view should start as "Asignada" until operativo advances it.
+      return ActivityStatus.programada;
+    }
+    // Una actividad terminada NO debe mostrarse como vencida aunque su createdAt
+    // sea anterior a hoy — ya está completada.
+    if (executionState == ExecutionState.terminada) {
+      return ActivityStatus.programada;
+    }
+    if (activity.status == 'RECHAZADA') {
+      return ActivityStatus.vencida;
+    }
     if (executionState == ExecutionState.revisionPendiente) {
       return ActivityStatus.vencida;
     }
@@ -144,14 +674,6 @@ class _HomePageState extends ConsumerState<HomePage> {
       return ActivityStatus.hoy;
     }
     return ActivityStatus.programada;
-  }
-
-  Future<void> _safeInitCatalogs() async {
-    try {
-      // Ej: await _catalogRepo.init();
-      // Ej: await _catalogRepo.loadFromAssets();
-      // Ej: await _catalogRepo.refreshIfOnline();
-    } catch (_) {}
   }
 
   @override
@@ -190,7 +712,45 @@ class _HomePageState extends ConsumerState<HomePage> {
       case ActivityStatus.hoy:
         return 'Vence hoy';
       case ActivityStatus.programada:
-        return 'Programada hoy';
+        return 'Asignada';
+    }
+  }
+
+  String _effectiveFooterText(String activityId, ActivityStatus originalStatus) {
+    final activity = _findById(activityId);
+    if (activity == null) return _statusText(originalStatus);
+    switch (activity.executionState) {
+      case ExecutionState.pendiente:
+        return _statusText(originalStatus);
+      case ExecutionState.enCurso:
+        if (activity.horaInicio != null) {
+          final t = _fmtTime(activity.horaInicio!);
+          return 'En curso • Iniciada $t';
+        }
+        return 'En curso';
+      case ExecutionState.revisionPendiente:
+        if (activity.isRejected) {
+          return 'Rechazada • Requiere correccion';
+        }
+        if (activity.horaInicio != null && activity.horaFin != null) {
+          final start = _fmtTime(activity.horaInicio!);
+          final end = _fmtTime(activity.horaFin!);
+          return '⚠️ Captura Incompleta • $start–$end';
+        }
+        return '⚠️ Captura Incompleta';
+      case ExecutionState.terminada:
+        final syncLabel = switch (activity.syncState) {
+          ActivitySyncState.synced => 'Sincronizada',
+          ActivitySyncState.pending => 'Pendiente de sincronizar',
+          ActivitySyncState.error => 'Error de sincronizacion',
+          ActivitySyncState.unknown => 'Sin estado de sync',
+        };
+        if (activity.horaInicio != null && activity.horaFin != null) {
+          final start = _fmtTime(activity.horaInicio!);
+          final end = _fmtTime(activity.horaFin!);
+          return 'Terminada • $start-$end • $syncLabel';
+        }
+        return 'Terminada • $syncLabel';
     }
   }
 
@@ -220,9 +780,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<bool?> _openRegisterWizard(TodayActivity a) async {
     final isTutorialGuest = GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
     if (isTutorialGuest) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Modo tutorial: en operación real aquí se abre el wizard para capturar y guardar.'),
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Modo tutorial: en operación real aqui se abre el wizard para capturar y guardar.',
           backgroundColor: SaoColors.info,
         ),
       );
@@ -230,7 +791,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     }
 
     // Pasar la actividad con las horas ya registradas
-    final currentActivity = _activityStates[a.id] ?? a;
+    final currentActivity = _findById(a.id) ?? a;
     final result = await context.push(
       '/activity/${a.id}/wizard?project=${widget.selectedProject}',
       extra: currentActivity,
@@ -243,28 +804,38 @@ class _HomePageState extends ConsumerState<HomePage> {
     return saved; // true si guardó, false/null si canceló
   }
 
-  // ====== NUEVO FLUJO: swipe derecha con 3 estados ======
-  // PENDIENTE → Verde "Iniciar"
-  // EN_CURSO → Rojo "Terminar" (abre wizard)
-  // REVISION_PENDIENTE → Azul "Capturar" (re-abre wizard)
+  // ====== Flujo swipe derecha ======
+  // 1) PENDIENTE: marcar iniciada
+  // 2) EN_CURSO: abrir wizard
+  // 3) REVISION_PENDIENTE: reabrir wizard para completar captura
   void _onSwipeRight(TodayActivity a) async {
-    final currentActivity = _activityStates[a.id] ?? a;
+    final currentActivity = _findById(a.id) ?? a;
     
     HapticFeedback.mediumImpact();
     
     if (currentActivity.executionState == ExecutionState.pendiente) {
-      // PASO 1: INICIAR
-      _iniciarActividad(a);
+      // Primer swipe: solo iniciar.
+      await _iniciarActividad(a);
     } else if (currentActivity.executionState == ExecutionState.enCurso) {
-      // PASO 2: TERMINAR Y ABRIR FORMULARIO
-      await _terminarYAbrirWizard(a);
+      // Segundo swipe: abrir wizard.
+      await _abrirWizardDesdeEnCurso(a);
     } else if (currentActivity.executionState == ExecutionState.revisionPendiente) {
-      // PASO 3: RE-INTENTAR CAPTURA
+      if (currentActivity.isRejected) {
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Esta actividad fue rechazada. Revisa observaciones y corrige antes de reenviar.',
+            backgroundColor: SaoColors.riskHigh,
+          ),
+        );
+        return;
+      }
+      // Tercer swipe (si quedo pendiente): reintentar captura.
       await _reintentarCaptura(a);
     }
   }
 
-  void _iniciarActividad(TodayActivity a) {
+  Future<void> _iniciarActividad(TodayActivity a) async {
     final now = DateTime.now();
     final gps = a.gpsLocation;
     
@@ -275,74 +846,115 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
     
     setState(() {
-      _activityStates[a.id] = updated;
+      _updateItem(a.id, updated);
     });
 
+    try {
+      await _dao.markActivityStarted(activityId: a.id, startedAt: now);
+    } catch (_) {
+      // Keep UI responsive even if local persistence fails.
+    }
+
+    if (!mounted) return;
+
     final t = _fmtTime(now);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('✅ Actividad iniciada a las $t: ${a.title}'),
+    showTransientSnackBar(
+      context,
+      appSnackBar(
+        message: 'Actividad iniciada a las $t: ${a.title}',
         backgroundColor: SaoColors.success,
       ),
     );
   }
 
-  Future<void> _terminarYAbrirWizard(TodayActivity a) async {
-    final now = DateTime.now();
-    
-    // Cambiar a estado intermedio (limbo)
-    final updated = a.copyWith(
-      executionState: ExecutionState.revisionPendiente,
-      horaFin: now,
-    );
-    
-    setState(() {
-      _activityStates[a.id] = updated;
-    });
+  Future<void> _abrirWizardDesdeEnCurso(TodayActivity a) async {
+    final currentActivity = _findById(a.id) ?? a;
 
-    final currentActivity = _activityStates[a.id]!;
-    final startTxt = currentActivity.horaInicio != null ? _fmtTime(currentActivity.horaInicio!) : '?';
-    final endTxt = _fmtTime(now);
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('✅ Terminada ($startTxt–$endTxt). Abriendo formulario…'),
-        backgroundColor: SaoColors.warning,
+    showTransientSnackBar(
+      context,
+      appSnackBar(
+        message: 'Abriendo formulario de captura...',
+        backgroundColor: SaoColors.info,
       ),
     );
 
-    // Abrir wizard y esperar resultado
-    final guardadoExitoso = await _openRegisterWizard(a);
-    
+    final guardadoExitoso = await _openRegisterWizard(currentActivity);
+    if (!mounted) return;
+
     if (guardadoExitoso == true) {
-      // Formulario guardado exitosamente
-      final completedActivity = updated.copyWith(
+      DateTime finishedAt = DateTime.now();
+      try {
+        final existing = await _dao.getActivityById(a.id);
+        if (existing?.finishedAt != null) {
+          finishedAt = existing!.finishedAt!;
+        } else {
+          await _dao.markActivityFinished(activityId: a.id, finishedAt: finishedAt);
+        }
+      } catch (_) {
+        // Fallback to in-memory finished timestamp.
+      }
+
+      final completedActivity = currentActivity.copyWith(
         executionState: ExecutionState.terminada,
+        horaFin: finishedAt,
       );
       setState(() {
-        _activityStates[a.id] = completedActivity;
+        _updateItem(a.id, completedActivity);
       });
+
+      await _loadHomeActivities();
+      return;
     }
-    // Si guardadoExitoso es false o null, se queda en REVISION_PENDIENTE
+
+    // Si no completa wizard, pasa a pendiente de completar para el siguiente swipe.
+    final now = DateTime.now();
+    final pendingCapture = currentActivity.copyWith(
+      executionState: ExecutionState.revisionPendiente,
+      horaFin: now,
+    );
+    setState(() {
+      _updateItem(a.id, pendingCapture);
+    });
+
+    // Persistir estado en DB para que sobreviva recargas
+    try {
+      await _dao.markActivityRevisionPendiente(activityId: a.id, finishedAt: now);
+    } catch (e, st) {
+      appLogger.w(
+        'No se pudo persistir REVISION_PENDIENTE para activity=${a.id}: $e\n$st',
+      );
+    }
+
+    final startTxt = pendingCapture.horaInicio != null ? _fmtTime(pendingCapture.horaInicio!) : '?';
+    final endTxt = _fmtTime(now);
+    showTransientSnackBar(
+      context,
+      appSnackBar(
+        message: 'Pendiente de completar captura ($startTxt-$endTxt).',
+        backgroundColor: SaoColors.warning,
+      ),
+    );
   }
 
   Future<void> _reintentarCaptura(TodayActivity a) async {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('📝 Re-abriendo formulario para completar captura...'),
+    showTransientSnackBar(
+      context,
+      appSnackBar(
+        message: 'Re-abriendo formulario para completar captura...',
         backgroundColor: SaoColors.info,
       ),
     );
     
     final guardadoExitoso = await _openRegisterWizard(a);
+    if (!mounted) return;
     
     if (guardadoExitoso == true) {
-      final currentActivity = _activityStates[a.id]!;
+      final currentActivity = _findById(a.id) ?? a;
       final completedActivity = currentActivity.copyWith(
         executionState: ExecutionState.terminada,
       );
       setState(() {
-        _activityStates[a.id] = completedActivity;
+        _updateItem(a.id, completedActivity);
       });
     }
   }
@@ -381,9 +993,10 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
 
     if (reason == null) return;
+    if (!mounted) return;
 
     // ✅ Obtener la actividad actualizada del estado (con horaInicio/horaFin preservados)
-    final currentActivity = _activityStates[a.id] ?? a;
+    final currentActivity = _findById(a.id) ?? a;
     
     // Marcar como incidencia - resetea el estado a pendiente pero conserva tiempos
     final updated = currentActivity.copyWith(
@@ -391,12 +1004,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     );
     
     setState(() {
-      _activityStates[a.id] = updated;
+      _updateItem(a.id, updated);
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('⚠️ Incidencia registrada: $reason'),
+    showTransientSnackBar(
+      context,
+      appSnackBar(
+        message: 'Incidencia registrada: $reason',
         backgroundColor: SaoColors.riskHigh,
       ),
     );
@@ -404,7 +1018,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   // ====== Colores / iconos / textos efectivos basados en ExecutionState ======
   Color _effectiveBarColor(String activityId, ActivityStatus originalStatus) {
-    final activity = _activityStates[activityId];
+    final activity = _findById(activityId);
     if (activity == null) return _statusColor(originalStatus);
     
     switch (activity.executionState) {
@@ -413,6 +1027,7 @@ class _HomePageState extends ConsumerState<HomePage> {
       case ExecutionState.enCurso:
         return SaoColors.success; // Verde - En curso
       case ExecutionState.revisionPendiente:
+        if (activity.isRejected) return SaoColors.riskHigh;
         return SaoColors.warning; // Ámbar - Necesita captura
       case ExecutionState.terminada:
         return SaoColors.success; // Verde oscuro - Completada
@@ -420,7 +1035,7 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   IconData _effectiveIcon(String activityId, ActivityStatus originalStatus) {
-    final activity = _activityStates[activityId];
+    final activity = _findById(activityId);
     if (activity == null) return _statusIcon(originalStatus);
     
     switch (activity.executionState) {
@@ -429,45 +1044,33 @@ class _HomePageState extends ConsumerState<HomePage> {
       case ExecutionState.enCurso:
         return Icons.play_circle_fill_rounded;
       case ExecutionState.revisionPendiente:
+        if (activity.isRejected) return Icons.cancel_rounded;
         return Icons.edit_note_rounded;
       case ExecutionState.terminada:
         return Icons.verified_rounded;
     }
   }
 
-  String _effectiveFooterText(String activityId, ActivityStatus originalStatus) {
-    final activity = _activityStates[activityId];
-    if (activity == null) return _statusText(originalStatus);
-    
-    switch (activity.executionState) {
-      case ExecutionState.pendiente:
-        return _statusText(originalStatus);
-      case ExecutionState.enCurso:
-        if (activity.horaInicio != null) {
-          final t = _fmtTime(activity.horaInicio!);
-          return 'En curso • Iniciada $t';
-        }
-        return 'En curso';
-      case ExecutionState.revisionPendiente:
-        if (activity.horaInicio != null && activity.horaFin != null) {
-          final start = _fmtTime(activity.horaInicio!);
-          final end = _fmtTime(activity.horaFin!);
-          return '⚠️ Captura Incompleta • $start–$end';
-        }
-        return '⚠️ Captura Incompleta';
-      case ExecutionState.terminada:
-        if (activity.horaInicio != null && activity.horaFin != null) {
-          final start = _fmtTime(activity.horaInicio!);
-          final end = _fmtTime(activity.horaFin!);
-          return 'Terminada • $start–$end • Guardada';
-        }
-        return 'Terminada • Guardada';
-    }
+  Future<void> _syncCompletedActivity(TodayActivity activity) async {
+    final isOffline = ref.read(offlineModeProvider);
+    final syncState = ref.read(syncOrchestratorProvider);
+
+    await _handleCloudAction(isOffline: isOffline, isSyncing: syncState.isSyncing);
+    await _loadHomeActivities();
+
+    if (!mounted) return;
+    showTransientSnackBar(
+      context,
+      appSnackBar(message: 'Sincronizacion ejecutada para ${activity.title}'),
+    );
   }
 
   // ====== Utils ======
   String _fmtTime(DateTime dt) =>
       "${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}";
+
+  String _fmtDateTime(DateTime dt) =>
+      "${dt.year.toString().padLeft(4, '0')}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')} ${_fmtTime(dt)}";
 
   void _clearSearch() {
     setState(() {
@@ -480,10 +1083,20 @@ class _HomePageState extends ConsumerState<HomePage> {
     required bool isOffline,
     required bool isSyncing,
   }) async {
+    if (widget.selectedProject.trim().toUpperCase() == kAllProjects) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Selecciona un proyecto especifico para sincronizar.'),
+      );
+      return;
+    }
+
     if (isSyncing) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Sincronización en progreso...')),
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Sincronizacion en progreso...'),
       );
       return;
     }
@@ -492,9 +1105,30 @@ class _HomePageState extends ConsumerState<HomePage> {
       await ref.read(offlineModeProvider.notifier).setOffline(false);
     }
 
-    await ref.read(syncOrchestratorProvider.notifier).syncAll(
-          projectId: widget.selectedProject,
-        );
+    try {
+      await ref.read(syncOrchestratorProvider.notifier).syncAll(
+            projectId: widget.selectedProject,
+          );
+      await _loadHomeActivities();
+    } catch (_) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Error al sincronizar con backend'),
+      );
+    }
+  }
+
+  void _openPendingEvidenceCenter() {
+    final project = widget.selectedProject.trim().toUpperCase();
+    if (project == kAllProjects) {
+      context.push('/sync');
+      return;
+    }
+    final encodedProject = Uri.encodeQueryComponent(project);
+    context.push(
+      '/sync?project=$encodedProject&pending_project=$encodedProject',
+    );
   }
 
   void _showSyncStatusSheet(SyncOrchestratorState state) {
@@ -508,13 +1142,7 @@ class _HomePageState extends ConsumerState<HomePage> {
           SyncOrchestratorStatus.syncing => 'Sincronizando',
           SyncOrchestratorStatus.idle => 'Idle',
         };
-        final timestamp = state.updatedAt == null
-            ? 'N/A'
-            : '${state.updatedAt!.year.toString().padLeft(4, '0')}-'
-                '${state.updatedAt!.month.toString().padLeft(2, '0')}-'
-                '${state.updatedAt!.day.toString().padLeft(2, '0')} '
-                '${state.updatedAt!.hour.toString().padLeft(2, '0')}:'
-                '${state.updatedAt!.minute.toString().padLeft(2, '0')}';
+        final timestamp = state.updatedAt == null ? 'N/A' : _fmtDateTime(state.updatedAt!);
 
         return SafeArea(
           child: Padding(
@@ -552,6 +1180,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   Widget build(BuildContext context) {
     final isOffline = ref.watch(offlineModeProvider);
     final syncState = ref.watch(syncOrchestratorProvider);
+    final pendingEvidenceAsync = ref.watch(pendingEvidenceActivitiesProvider);
+    final pendingEvidenceCount = pendingEvidenceAsync.valueOrNull?.length ?? 0;
     final isSyncing = syncState.status == SyncOrchestratorStatus.syncing;
     final hasSyncError = syncState.status == SyncOrchestratorStatus.error;
 
@@ -559,14 +1189,20 @@ class _HomePageState extends ConsumerState<HomePage> {
       if (!mounted) return;
       final wasSyncing = previous?.status == SyncOrchestratorStatus.syncing;
       if (wasSyncing && next.status == SyncOrchestratorStatus.success) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sincronización completada')),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Sincronizacion completada',
+            duration: const Duration(seconds: 3),
+          ),
         );
       }
       if (wasSyncing && next.status == SyncOrchestratorStatus.error) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Error al sincronizar'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Error al sincronizar',
+            duration: const Duration(seconds: 5),
             action: SnackBarAction(
               label: 'Detalles',
               onPressed: () => _showSyncStatusSheet(next),
@@ -596,13 +1232,36 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ? SaoColors.gray400
                 : SaoColors.success;
     final isTutorialGuest = GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
+    final currentUser = ref.watch(currentUserProvider);
+    final userInitial = currentUser?.fullName.trim().isNotEmpty == true
+        ? currentUser!.fullName.trim()[0].toUpperCase()
+        : '?';
+
+    final today = DateTime.now();
+    final todayDate = DateTime(today.year, today.month, today.day);
+    final sevenDaysAgo = todayDate.subtract(const Duration(days: 7));
+    final baseItems = _isAdminViewer
+        ? _items.where((a) {
+            final assigned =
+                a.assignedToUserId != null && a.assignedToUserId!.trim().isNotEmpty;
+            if (!assigned) return false;
+            final created = DateTime(a.createdAt.year, a.createdAt.month, a.createdAt.day);
+            // Show today's activities + terminated activities from last 7 days
+            if (created == todayDate) return true;
+            if (a.executionState == ExecutionState.terminada &&
+                !created.isBefore(sevenDaysAgo)) return true;
+            return false;
+          }).toList()
+        : _items;
 
     // ====== Filtrado por búsqueda ======
-    var filtered = _items.where((a) => _matchesQuery(a, _query)).toList();
+    var filtered = baseItems.where((a) => _matchesQuery(a, _query)).toList();
     
     // ====== Filtrado por modo (Totales / Vencidas) ======
     if (_filterMode == FilterMode.vencidas) {
       filtered = filtered.where((a) => a.status == ActivityStatus.vencida).toList();
+    } else if (_filterMode == FilterMode.completadas) {
+      filtered = filtered.where((a) => a.executionState == ExecutionState.terminada).toList();
     }
 
     // ====== Agrupado ======
@@ -617,8 +1276,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     // Regla anti doble cabecera:
     final showFrenteInsideCard = _query.trim().isNotEmpty;
 
-    final totalCount = _items.where((a) => _matchesQuery(a, _query)).length;
-    final vencidasCount = _items.where((a) => _matchesQuery(a, _query) && a.status == ActivityStatus.vencida).length;
+    final totalCount = baseItems.where((a) => _matchesQuery(a, _query)).length;
+    final vencidasCount = baseItems
+      .where((a) => _matchesQuery(a, _query) && a.status == ActivityStatus.vencida)
+      .length;
+    final completadasCount = baseItems
+      .where((a) => _matchesQuery(a, _query) && a.executionState == ExecutionState.terminada)
+      .length;
 
     return Scaffold(
       backgroundColor: SaoColors.gray50,
@@ -656,12 +1320,15 @@ class _HomePageState extends ConsumerState<HomePage> {
             titleSpacing: 12,
             title: Row(
               children: [
-                const CircleAvatar(
-                  radius: 16,
-                  backgroundColor: SaoColors.gray100,
-                  child: Text(
-                    'L',
-                    style: TextStyle(fontWeight: FontWeight.w900, color: SaoColors.primary),
+                GestureDetector(
+                  onTap: () => context.push('/profile'),
+                  child: CircleAvatar(
+                    radius: 16,
+                    backgroundColor: SaoColors.gray100,
+                    child: Text(
+                      userInitial,
+                      style: const TextStyle(fontWeight: FontWeight.w900, color: SaoColors.primary),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -704,13 +1371,52 @@ class _HomePageState extends ConsumerState<HomePage> {
                   clipBehavior: Clip.none,
                   children: [
                     IconButton(
-                      tooltip: 'Urgentes',
-                      onPressed: () => ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Abrir urgentes (pendiente)')),
+                      tooltip: 'Pendientes por completar',
+                      onPressed: _openPendingEvidenceCenter,
+                      icon: const Icon(
+                        Icons.assignment_late_outlined,
+                        color: SaoColors.warning,
                       ),
+                    ),
+                    if (pendingEvidenceCount > 0)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 5,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: SaoColors.error,
+                            borderRadius: BorderRadius.circular(999),
+                            border: Border.all(color: SaoColors.surface, width: 1.5),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 18),
+                          child: Text(
+                            pendingEvidenceCount > 99
+                                ? '99+'
+                                : '$pendingEvidenceCount',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton(
+                      tooltip: 'Notificaciones',
+                      onPressed: _openNotificationsCenter,
                       icon: const Icon(Icons.notifications_none_rounded, color: SaoColors.primary),
                     ),
-                    if (_urgentCount > 0)
+                    if (_notificationCount > 0)
                       Positioned(
                         right: 10,
                         top: 10,
@@ -777,7 +1483,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                           count: totalCount,
                           color: SaoColors.gray500,
                           isSelected: _filterMode == FilterMode.totales,
-                          onTap: () => setState(() => _filterMode = FilterMode.totales),
+                          onTap: () => _setFilterMode(FilterMode.totales),
                         ),
                         const SizedBox(width: 10),
                         _MetricBadge(
@@ -785,9 +1491,29 @@ class _HomePageState extends ConsumerState<HomePage> {
                           count: vencidasCount,
                           color: SaoColors.error,
                           isSelected: _filterMode == FilterMode.vencidas,
-                          onTap: () => setState(() => _filterMode = FilterMode.vencidas),
+                          onTap: () => _setFilterMode(FilterMode.vencidas),
+                        ),
+                        const SizedBox(width: 10),
+                        _MetricBadge(
+                          label: 'Completadas',
+                          count: completadasCount,
+                          color: SaoColors.success,
+                          isSelected: _filterMode == FilterMode.completadas,
+                          onTap: () => _setFilterMode(FilterMode.completadas),
                         ),
                         const Spacer(),
+                        IconButton(
+                          tooltip: 'Ver completadas sincronizadas',
+                          onPressed: () {
+                            context.push(
+                              '/home/completed?project=${Uri.encodeQueryComponent(widget.selectedProject)}',
+                            );
+                          },
+                          icon: const Icon(
+                            Icons.fact_check_rounded,
+                            color: SaoColors.success,
+                          ),
+                        ),
                       ],
                     ),
                   ],
@@ -831,6 +1557,76 @@ class _HomePageState extends ConsumerState<HomePage> {
               ),
             ),
 
+          if (_isAdminViewer)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => context.push('/admin/history'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: SaoColors.primary,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.history_rounded, color: SaoColors.onPrimary, size: 20),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Historial',
+                                  style: TextStyle(
+                                    color: SaoColors.onPrimary,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded, color: SaoColors.onPrimary, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: GestureDetector(
+                        onTap: () => context.push('/admin/stats'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: SaoColors.actionPrimary,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.bar_chart_rounded, color: SaoColors.onPrimary, size: 20),
+                              SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Estadísticas',
+                                  style: TextStyle(
+                                    color: SaoColors.onPrimary,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              Icon(Icons.chevron_right_rounded, color: SaoColors.onPrimary, size: 18),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
           // Lista / Empty State
           if (_loadingActivities)
             const SliverFillRemaining(
@@ -865,7 +1661,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       onToggle: () => setState(() => _expandedByFrente[frente] = !expanded),
                       children: expanded
                           ? items.map((a) {
-                              final currentActivity = _activityStates[a.id] ?? a;
+                              final currentActivity = _findById(a.id) ?? a;
                               final barColor = _effectiveBarColor(a.id, a.status);
                               final icon = _effectiveIcon(a.id, a.status);
                               final footer = _effectiveFooterText(a.id, a.status);
@@ -873,15 +1669,32 @@ class _HomePageState extends ConsumerState<HomePage> {
                               return _SwipeActivityTile(
                                 key: ValueKey(a.id),
                                 a: a,
+                                isRejected: currentActivity.isRejected,
                                 executionState: currentActivity.executionState,
+                                syncState: currentActivity.syncState,
                                 barColor: barColor,
                                 footerIcon: icon,
                                 footerText: footer,
                                 pkText: _formatPk(a.pk),
                                 showFrenteInsideCard: showFrenteInsideCard,
-                                onTapOpenWizard: () => _openRegisterWizard(a),
+                                onTapOpenWizard: _isAdminViewer
+                                    ? () => context.push(
+                                          '/activity/${a.id}?project=${widget.selectedProject}',
+                                          extra: currentActivity,
+                                        )
+                                    : () => _openRegisterWizard(a),
                                 onSwipeRight: () => _onSwipeRight(a),
                                 onSwipeLeftIncident: () => _reportIncident(a),
+                                assigneeLabel: _assigneeLabelFor(currentActivity),
+                                onTransferResponsibility: _canTransferResponsibility(currentActivity)
+                                    ? () => _openTransferResponsibilitySheet(currentActivity)
+                                    : null,
+                                transferInProgress: _transferringActivityIds.contains(a.id),
+                                // Solo mostrar botón de sync si: está terminada Y aún no fue sincronizada.
+                                onSyncCompleted: (currentActivity.executionState == ExecutionState.terminada &&
+                                    currentActivity.syncState != ActivitySyncState.synced)
+                                    ? () => _syncCompletedActivity(currentActivity)
+                                    : null,
                               );
                             }).toList()
                           : const [],
@@ -891,6 +1704,165 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  String? _assigneeLabelFor(TodayActivity activity) {
+    final name = activity.assignedToName?.trim();
+    if (name != null && name.isNotEmpty && !name.startsWith('Usuario ')) {
+      return name;
+    }
+    final currentUserId = ref.read(currentUserProvider)?.id.trim().toLowerCase();
+    final assignedTo = activity.assignedToUserId?.trim().toLowerCase();
+    if (currentUserId != null && currentUserId.isNotEmpty && assignedTo == currentUserId) {
+      return 'Tú';
+    }
+    return name?.isNotEmpty == true ? name : null;
+  }
+}
+
+class _TransferSelection {
+  final Resource resource;
+  final String? reason;
+
+  const _TransferSelection({
+    required this.resource,
+    this.reason,
+  });
+}
+
+class _TransferResponsibilitySheet extends StatefulWidget {
+  final TodayActivity activity;
+  final List<Resource> candidates;
+
+  const _TransferResponsibilitySheet({
+    required this.activity,
+    required this.candidates,
+  });
+
+  @override
+  State<_TransferResponsibilitySheet> createState() => _TransferResponsibilitySheetState();
+}
+
+class _TransferResponsibilitySheetState extends State<_TransferResponsibilitySheet> {
+  late String _selectedResourceId;
+  final TextEditingController _reasonController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedResourceId = widget.candidates.first.id;
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Transferir responsabilidad',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            widget.activity.title,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: SaoColors.gray700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Selecciona a quién transferir esta actividad.',
+            style: TextStyle(fontSize: 13, color: SaoColors.gray600),
+          ),
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: widget.candidates.length,
+              itemBuilder: (context, index) {
+                final candidate = widget.candidates[index];
+                return RadioListTile<String>(
+                  contentPadding: EdgeInsets.zero,
+                  value: candidate.id,
+                  groupValue: _selectedResourceId,
+                  activeColor: SaoColors.primary,
+                  title: Text(
+                    candidate.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  subtitle: Text(candidate.roleLabel),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setState(() {
+                      _selectedResourceId = value;
+                    });
+                  },
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _reasonController,
+            minLines: 2,
+            maxLines: 3,
+            decoration: const InputDecoration(
+              labelText: 'Motivo de transferencia (opcional)',
+              hintText: 'Ej. cobertura de turno, apoyo en frente, cambio de ruta',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancelar'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    final target = widget.candidates.firstWhere(
+                      (candidate) => candidate.id == _selectedResourceId,
+                    );
+                    Navigator.of(context).pop(
+                      _TransferSelection(
+                        resource: target,
+                        reason: _reasonController.text.trim().isEmpty
+                            ? null
+                            : _reasonController.text.trim(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Transferir'),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );
@@ -924,15 +1896,15 @@ class _MetricBadge extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: color.withOpacity(isSelected ? 0.18 : 0.10),
+          color: color.withValues(alpha: isSelected ? 0.18 : 0.10),
           borderRadius: BorderRadius.circular(999),
           border: Border.all(
-            color: color.withOpacity(isSelected ? 0.4 : 0.18),
+            color: color.withValues(alpha: isSelected ? 0.4 : 0.18),
             width: isSelected ? 2 : 1,
           ),
           boxShadow: isSelected ? [
             BoxShadow(
-              color: color.withOpacity(0.2),
+              color: color.withValues(alpha: 0.2),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),
@@ -1022,33 +1994,48 @@ class _FrenteSection extends StatelessWidget {
 
 class _SwipeActivityTile extends StatelessWidget {
   final TodayActivity a;
+  final bool isRejected;
   final ExecutionState executionState;
   final Color barColor;
+  final ActivitySyncState syncState;
   final IconData footerIcon;
   final String footerText;
   final String pkText;
   final bool showFrenteInsideCard;
+  final String? assigneeLabel;
+  final VoidCallback? onTransferResponsibility;
+  final bool transferInProgress;
 
   final VoidCallback onTapOpenWizard;
   final VoidCallback onSwipeRight;
   final VoidCallback onSwipeLeftIncident;
+  final VoidCallback? onSyncCompleted;
 
   const _SwipeActivityTile({
     super.key,
     required this.a,
+    this.isRejected = false,
     required this.executionState,
+    required this.syncState,
     required this.barColor,
     required this.footerIcon,
     required this.footerText,
     required this.pkText,
     required this.showFrenteInsideCard,
+    this.assigneeLabel,
+    this.onTransferResponsibility,
+    this.transferInProgress = false,
     required this.onTapOpenWizard,
     required this.onSwipeRight,
     required this.onSwipeLeftIncident,
+    this.onSyncCompleted,
   });
 
   // Colores dinámicos según el estado
   Color _getSwipeColor() {
+    if (isRejected) {
+      return SaoColors.riskHigh;
+    }
     switch (executionState) {
       case ExecutionState.pendiente:
         return SaoColors.success; // Verde - Iniciar
@@ -1062,6 +2049,9 @@ class _SwipeActivityTile extends StatelessWidget {
   }
 
   IconData _getSwipeIcon() {
+    if (isRejected) {
+      return Icons.cancel_rounded;
+    }
     switch (executionState) {
       case ExecutionState.pendiente:
         return Icons.play_circle_fill_rounded;
@@ -1075,6 +2065,9 @@ class _SwipeActivityTile extends StatelessWidget {
   }
 
   String _getSwipeLabel() {
+    if (isRejected) {
+      return 'Rechazada';
+    }
     switch (executionState) {
       case ExecutionState.pendiente:
         return 'Iniciar';
@@ -1095,10 +2088,13 @@ class _SwipeActivityTile extends StatelessWidget {
 
     return Dismissible(
       key: key!,
-      direction: DismissDirection.horizontal,
+      direction: isRejected ? DismissDirection.none : DismissDirection.horizontal,
 
       // ✅ NO desaparece el item: usamos confirmDismiss y devolvemos false
       confirmDismiss: (dir) async {
+        if (isRejected) {
+          return false;
+        }
         if (dir == DismissDirection.startToEnd) {
           onSwipeRight();
           return false;
@@ -1115,7 +2111,7 @@ class _SwipeActivityTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: swipeColor.withOpacity(0.14),
+          color: swipeColor.withValues(alpha: 0.14),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Row(
@@ -1129,7 +2125,7 @@ class _SwipeActivityTile extends StatelessWidget {
               swipeLabel,
               style: TextStyle(
                 fontWeight: FontWeight.w900,
-                color: swipeColor.withOpacity(0.8),
+                color: swipeColor.withValues(alpha: 0.8),
               ),
             ),
           ],
@@ -1141,7 +2137,7 @@ class _SwipeActivityTile extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 16),
         alignment: Alignment.centerRight,
         decoration: BoxDecoration(
-          color: SaoColors.riskHigh.withOpacity(0.18),
+          color: SaoColors.riskHigh.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(14),
         ),
         child: const Row(
@@ -1156,13 +2152,19 @@ class _SwipeActivityTile extends StatelessWidget {
 
       child: _ActivityTile(
         a: a,
+        isRejected: isRejected,
         barColor: barColor,
         footerIcon: footerIcon,
         footerText: footerText,
         pkText: pkText,
         showFrenteInsideCard: showFrenteInsideCard,
         executionState: executionState,
+        syncState: syncState,
+        assigneeLabel: assigneeLabel,
+        onTransferResponsibility: onTransferResponsibility,
+        transferInProgress: transferInProgress,
         onTap: onTapOpenWizard,
+        onSyncCompleted: onSyncCompleted,
       ),
     );
   }
@@ -1170,30 +2172,58 @@ class _SwipeActivityTile extends StatelessWidget {
 
 class _ActivityTile extends StatelessWidget {
   final TodayActivity a;
+  final bool isRejected;
   final Color barColor;
   final IconData footerIcon;
   final String footerText;
   final String pkText;
   final bool showFrenteInsideCard;
+  final String? assigneeLabel;
+  final VoidCallback? onTransferResponsibility;
+  final bool transferInProgress;
   final ExecutionState executionState;
+  final ActivitySyncState syncState;
   final VoidCallback onTap;
+  final VoidCallback? onSyncCompleted;
 
   const _ActivityTile({
     required this.a,
+    this.isRejected = false,
     required this.barColor,
     required this.footerIcon,
     required this.footerText,
     required this.pkText,
     required this.showFrenteInsideCard,
+    this.assigneeLabel,
+    this.onTransferResponsibility,
+    this.transferInProgress = false,
     required this.executionState,
+    required this.syncState,
     required this.onTap,
+    this.onSyncCompleted,
   });
+
+  (String, Color, IconData) _syncBadgeMeta() {
+    switch (syncState) {
+      case ActivitySyncState.synced:
+        return ('Sincronizada', SaoColors.success, Icons.cloud_done_rounded);
+      case ActivitySyncState.pending:
+        return ('Pendiente', SaoColors.warning, Icons.cloud_upload_rounded);
+      case ActivitySyncState.error:
+        return ('Error', SaoColors.error, Icons.cloud_off_rounded);
+      case ActivitySyncState.unknown:
+        return ('Sin estado', SaoColors.gray500, Icons.cloud_queue_rounded);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final hasPk = a.pk != null;
-    final needsAttention = executionState == ExecutionState.revisionPendiente;
+    final needsAttention = executionState == ExecutionState.revisionPendiente && !isRejected;
     final isActive = executionState == ExecutionState.enCurso;
+    final isCompleted = executionState == ExecutionState.terminada;
+    final hasAssignee = assigneeLabel != null && assigneeLabel!.trim().isNotEmpty;
+    final syncMeta = _syncBadgeMeta();
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1207,14 +2237,22 @@ class _ActivityTile extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: needsAttention ? SaoColors.riskMedium : SaoColors.gray200,
+                color: isRejected
+                    ? SaoColors.riskHigh
+                    : needsAttention
+                        ? SaoColors.riskMedium
+                        : SaoColors.gray200,
                 width: needsAttention ? 2 : 1,
               ),
               boxShadow: [
                 BoxShadow(
                   blurRadius: 10,
                   offset: const Offset(0, 4),
-                  color: needsAttention ? SaoColors.riskMedium.withOpacity(0.1) : SaoColors.gray900.withOpacity(0.04),
+                  color: isRejected
+                      ? SaoColors.riskHigh.withValues(alpha: 0.1)
+                      : needsAttention
+                          ? SaoColors.riskMedium.withValues(alpha: 0.1)
+                          : SaoColors.gray900.withValues(alpha: 0.04),
                 ),
               ],
             ),
@@ -1271,23 +2309,33 @@ class _ActivityTile extends StatelessWidget {
                                   ],
                                 ),
                               ),
-                            if (needsAttention)
+                            if (needsAttention || isRejected)
                               Container(
                                 margin: const EdgeInsets.only(right: 6),
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: SaoColors.riskMedium.withOpacity(0.12),
+                                  color: isRejected
+                                      ? SaoColors.riskHigh.withValues(alpha: 0.12)
+                                      : SaoColors.riskMedium.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: SaoColors.riskMedium),
+                                  border: Border.all(
+                                    color: isRejected ? SaoColors.riskHigh : SaoColors.riskMedium,
+                                  ),
                                 ),
-                                child: const Row(
+                                child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.edit_note_rounded, size: 12, color: SaoColors.riskHigh),
-                                    SizedBox(width: 2),
+                                    Icon(
+                                      isRejected
+                                          ? Icons.cancel_rounded
+                                          : Icons.edit_note_rounded,
+                                      size: 12,
+                                      color: SaoColors.riskHigh,
+                                    ),
+                                    const SizedBox(width: 2),
                                     Text(
-                                      'Pendiente',
-                                      style: TextStyle(
+                                      isRejected ? 'Rechazada' : 'Pendiente',
+                                      style: const TextStyle(
                                         fontSize: 10,
                                         fontWeight: FontWeight.w900,
                                         color: SaoColors.riskHigh,
@@ -1314,8 +2362,65 @@ class _ActivityTile extends StatelessWidget {
                                   ),
                                 ),
                               ),
+                            if (transferInProgress)
+                              const Padding(
+                                padding: EdgeInsets.only(left: 6, top: 4),
+                                child: SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              )
+                            else if (onTransferResponsibility != null)
+                              IconButton(
+                                tooltip: 'Transferir responsabilidad',
+                                splashRadius: 18,
+                                onPressed: onTransferResponsibility,
+                                icon: const Icon(
+                                  Icons.swap_horiz_rounded,
+                                  size: 18,
+                                  color: SaoColors.gray600,
+                                ),
+                              ),
                           ],
                         ),
+                        if (isCompleted) ...[
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: syncMeta.$2.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                    border:
+                                      Border.all(color: syncMeta.$2.withValues(alpha: 0.35)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(syncMeta.$3, size: 12, color: syncMeta.$2),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      syncMeta.$1,
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: syncMeta.$2,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Spacer(),
+                              TextButton.icon(
+                                onPressed: onSyncCompleted,
+                                icon: const Icon(Icons.sync_rounded, size: 16),
+                                label: const Text('Sincronizar'),
+                              ),
+                            ],
+                          ),
+                        ],
                         const SizedBox(height: 6),
                         if (showFrenteInsideCard) ...[
                           Text(
@@ -1328,10 +2433,36 @@ class _ActivityTile extends StatelessWidget {
                           ),
                           const SizedBox(height: 2),
                         ],
-                        Text(
-                          '${a.municipio}, ${a.estado}',
-                          style: const TextStyle(fontSize: 13, color: SaoColors.gray600),
-                        ),
+                        if (hasAssignee) ...[
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.person_pin_circle_rounded,
+                                size: 14,
+                                color: SaoColors.info,
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  'Asignada a: ${assigneeLabel!}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: SaoColors.info,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                        ],
+                        if (a.municipio.isNotEmpty || a.estado.isNotEmpty)
+                          Text(
+                            [a.municipio, a.estado].where((s) => s.isNotEmpty).join(', '),
+                            style: const TextStyle(fontSize: 13, color: SaoColors.gray600),
+                          ),
                         const SizedBox(height: 10),
                         Row(
                           children: [

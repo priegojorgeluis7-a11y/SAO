@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/exceptions.dart';
 import '../../../core/auth/pin_storage.dart';
+import '../../../core/services/biometric_service.dart';
 import '../../../core/utils/logger.dart';
 import '../data/auth_repository.dart';
 import '../data/models/login_request.dart';
@@ -142,9 +143,14 @@ class AuthState {
 class AuthController extends StateNotifier<AuthState> {
   final AuthRepository _repository;
   final PinStorage? _pinStorage;
+  final BiometricService _biometricService;
 
-  AuthController(this._repository, {PinStorage? pinStorage})
-      : _pinStorage = pinStorage,
+  AuthController(
+    this._repository, {
+    required BiometricService biometricService,
+    PinStorage? pinStorage,
+  })  : _biometricService = biometricService,
+        _pinStorage = pinStorage,
         super(const AuthState.initial()) {
     bootstrap();
   }
@@ -328,6 +334,49 @@ class AuthController extends StateNotifier<AuthState> {
       appLogger.e('Error refreshing user: $e');
       // Keep current state if refresh fails
     }
+  }
+
+  /// Changes authenticated user password.
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    try {
+      await _repository.changePassword(currentPassword, newPassword);
+    } on AuthException {
+      rethrow;
+    } catch (e, stackTrace) {
+      throw AuthException('No se pudo cambiar la contraseña: $e', stackTrace);
+    }
+  }
+
+  /// Returns whether biometrics are available on this device.
+  Future<bool> canUseBiometrics() {
+    return _biometricService.hasBiometricCredentials();
+  }
+
+  /// Returns persisted biometric quick-login preference.
+  Future<bool> isBiometricEnabled() {
+    return _repository.isBiometricEnabled();
+  }
+
+  /// Enables/disables biometric quick login with confirmation when enabling.
+  Future<void> setBiometricEnabled(bool enabled) async {
+    if (enabled) {
+      final canUse = await canUseBiometrics();
+      if (!canUse) {
+        throw AuthException(
+          'Tu dispositivo no tiene biometría configurada',
+          StackTrace.current,
+        );
+      }
+
+      final authenticated = await _biometricService.authenticate(
+        localizedReason: 'Confirma para habilitar inicio rápido',
+      );
+      if (!authenticated) {
+        throw AuthException('Autenticación cancelada', StackTrace.current);
+      }
+    }
+
+    await _repository.setBiometricEnabled(enabled);
   }
 
   /// Clear error state

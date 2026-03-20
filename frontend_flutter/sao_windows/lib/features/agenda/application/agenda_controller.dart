@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/service_locator.dart';
 import '../../../core/network/api_client.dart';
+import '../../../core/utils/logger.dart';
 import '../../../data/local/app_db.dart';
 import '../data/assignments_dao.dart';
 import '../data/assignments_repository.dart';
@@ -17,6 +18,12 @@ class AgendaState {
   final List<Resource> resources;
   final List<AgendaItem> items;
   final bool loadingUsers;
+  /// true mientras se cargan asignaciones de la semana (red o local).
+  final bool loadingAssignments;
+  /// true mientras syncNow está en curso (usado para el ícono de cloud en AppBar).
+  final bool isSyncing;
+  /// true si el último syncNow terminó con error.
+  final bool hasSyncError;
   final String? usersError;
 
   const AgendaState({
@@ -26,6 +33,9 @@ class AgendaState {
     required this.resources,
     required this.items,
     required this.loadingUsers,
+    this.loadingAssignments = false,
+    this.isSyncing = false,
+    this.hasSyncError = false,
     this.usersError,
   });
 
@@ -36,6 +46,9 @@ class AgendaState {
         resources: const [],
         items: const [],
         loadingUsers: false,
+        loadingAssignments: false,
+        isSyncing: false,
+        hasSyncError: false,
       );
 
   AgendaState copyWith({
@@ -45,6 +58,9 @@ class AgendaState {
     List<Resource>? resources,
     List<AgendaItem>? items,
     bool? loadingUsers,
+    bool? loadingAssignments,
+    bool? isSyncing,
+    bool? hasSyncError,
     String? usersError,
   }) {
     return AgendaState(
@@ -54,6 +70,9 @@ class AgendaState {
       resources: resources ?? this.resources,
       items: items ?? this.items,
       loadingUsers: loadingUsers ?? this.loadingUsers,
+      loadingAssignments: loadingAssignments ?? this.loadingAssignments,
+      isSyncing: isSyncing ?? this.isSyncing,
+      hasSyncError: hasSyncError ?? this.hasSyncError,
       usersError: usersError,
     );
   }
@@ -85,12 +104,17 @@ class AgendaController extends StateNotifier<AgendaState> {
         projectId: projectId,
         isOffline: isOffline,
       );
+      appLogger.i(
+        'AgendaController.initialize resources=${resources.length} '
+        'project=$projectId offline=$isOffline',
+      );
       state = state.copyWith(
         resources: resources,
         loadingUsers: false,
         usersError: null,
       );
     } catch (e) {
+      appLogger.e('AgendaController.initialize users load error: $e');
       state = state.copyWith(
         loadingUsers: false,
         usersError: 'No se pudieron cargar los recursos operativos.',
@@ -102,9 +126,11 @@ class AgendaController extends StateNotifier<AgendaState> {
 
   Future<void> _loadCurrentWeekAssignments() async {
     if (_projectId == null || _projectId!.trim().isEmpty) {
-      state = state.copyWith(items: const []);
+      state = state.copyWith(items: const [], loadingAssignments: false);
       return;
     }
+
+    state = state.copyWith(loadingAssignments: true);
 
     final now = DateTime.now();
     final base = DateTime(now.year, now.month, now.day)
@@ -120,17 +146,30 @@ class AgendaController extends StateNotifier<AgendaState> {
       isOffline: _isOffline,
     );
 
-    state = state.copyWith(items: items);
+    state = state.copyWith(items: items, loadingAssignments: false);
   }
 
-  void changeWeek(int delta) {
-    state = state.copyWith(weekOffset: state.weekOffset + delta);
-    _loadCurrentWeekAssignments();
+  /// Avanza o retrocede [delta] semanas.
+  /// Actualiza [selectedDay] al día equivalente en la nueva semana para que
+  /// el strip siempre tenga un día seleccionado válido.
+  /// Se hace await explícito para evitar condiciones de carrera si el usuario
+  /// cambia semana varias veces rápido.
+  Future<void> changeWeek(int delta) async {
+    final newOffset = state.weekOffset + delta;
+    // Desplazar el día seleccionado la misma cantidad de semanas
+    final newSelectedDay =
+        state.selectedDay.add(Duration(days: delta * 7));
+    state = state.copyWith(
+      weekOffset: newOffset,
+      selectedDay: newSelectedDay,
+    );
+    await _loadCurrentWeekAssignments();
   }
 
+  /// Cambia el día seleccionado dentro de la semana actual.
+  /// No recarga asignaciones: ya están en memoria para toda la semana.
   void selectDay(DateTime day) {
     state = state.copyWith(selectedDay: day);
-    _loadCurrentWeekAssignments();
   }
 
   void changeFilter(String filterId) {
@@ -151,6 +190,58 @@ class AgendaController extends StateNotifier<AgendaState> {
 
     await _loadCurrentWeekAssignments();
   }
+
+  /// Vuelve a la semana actual y selecciona hoy.
+  Future<void> goToToday() async {
+    state = state.copyWith(
+      weekOffset: 0,
+      selectedDay: DateTime.now(),
+    );
+    await _loadCurrentWeekAssignments();
+  }
+
+  /// Cancela una asignación localmente.
+  /// - Si está pendiente/en error: la elimina sin necesitar red.
+  /// - Si ya fue sincronizada: la elimina del caché local; el próximo sync
+  ///   la restaurará desde el servidor (la cancelación en servidor debe
+  ///   gestionarse con el despachador).
+  Future<void> cancelAssignment(AgendaItem item) async {
+    // Eliminar optimistamente de la UI
+    state = state.copyWith(
+      items: state.items.where((i) => i.id != item.id).toList(),
+    );
+    await _assignmentsRepository.deleteLocal(item.id);
+    appLogger.i(
+      'AgendaController.cancelAssignment id=${item.id} '
+      'syncStatus=${item.syncStatus}',
+    );
+  }
+
+  /// Verifica que los recursos estén cargados; si no, los carga ahora.
+  /// Guard antes de abrir el dispatcher para evitar retry manual en la UI.
+  Future<void> ensureResourcesReady({required String? projectId}) async {
+    if (state.resources.isNotEmpty || state.loadingUsers) return;
+    if (projectId == null || projectId.trim().isEmpty) return;
+    appLogger.i('AgendaController.ensureResourcesReady retry project=$projectId');
+    await initialize(projectId: projectId, isOffline: false);
+  }
+
+  Future<void> syncNow() async {
+    if (_projectId == null || _projectId!.trim().isEmpty) return;
+
+    state = state.copyWith(isSyncing: true, hasSyncError: false);
+    try {
+      if (!_isOffline) {
+        await _assignmentsRepository.syncPending(projectId: _projectId);
+      }
+      await _loadCurrentWeekAssignments();
+      state = state.copyWith(isSyncing: false, hasSyncError: false);
+    } catch (e) {
+      appLogger.e('AgendaController.syncNow error: $e');
+      state = state.copyWith(isSyncing: false, hasSyncError: true);
+      rethrow;
+    }
+  }
 }
 
 final agendaUsersRepositoryProvider = Provider<AgendaUsersRepository>((ref) {
@@ -164,6 +255,7 @@ final assignmentsRepositoryProvider = Provider<AssignmentsRepository>((ref) {
   return AssignmentsRepository(
     apiClient: getIt<ApiClient>(),
     localStore: AssignmentsDao(getIt<AppDb>()),
+    database: getIt<AppDb>(),
   );
 });
 

@@ -1,6 +1,7 @@
 // lib/features/activities/wizard/wizard_step_fields.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../catalog/catalog_repository.dart';
@@ -160,9 +161,10 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       
       // Mostrar snackbar
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('⚠️ ${validation.firstError?.message ?? "Completa los datos obligatorios"}'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: validation.firstError?.message ?? 'Completa los datos obligatorios',
             backgroundColor: SaoColors.warning,
             duration: const Duration(seconds: 3),
           ),
@@ -615,9 +617,11 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       c.setOtherSubcategoryText(result);
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Subcategoría "$result" enviada para aprobación'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Subcategoría "$result" enviada para aprobación',
+            backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 3),
           ),
         );
@@ -689,9 +693,11 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       c.setOtherTopicText(result);
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Tema "$result" enviado para aprobación'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Tema "$result" enviado para aprobación',
+            backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 3),
           ),
         );
@@ -753,9 +759,11 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       c.setActivity(newItem);
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Actividad "$result" agregada al catálogo'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Actividad "$result" agregada al catálogo',
+            backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -770,10 +778,12 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
     // Verificar que hay una subcategoría seleccionada
     if (c.selectedSubcategory == null) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('⚠️ Primero selecciona una subcategoría'),
-            duration: Duration(seconds: 2),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Primero selecciona una subcategoría',
+            backgroundColor: SaoColors.warning,
+            duration: const Duration(seconds: 2),
           ),
         );
       }
@@ -833,9 +843,11 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       c.setPurpose(newItem);
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Propósito "$result" agregado al catálogo'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Propósito "$result" agregado al catálogo',
+            backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 2),
           ),
         );
@@ -904,9 +916,11 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       c.toggleAttendee(newItem.id);
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Asistente "$result" agregado al catálogo'),
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Asistente "$result" agregado al catálogo',
+            backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 2),
           ),
         );

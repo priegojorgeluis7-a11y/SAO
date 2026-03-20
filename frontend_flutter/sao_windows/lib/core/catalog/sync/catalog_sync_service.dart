@@ -1,4 +1,5 @@
 import 'package:drift/drift.dart';
+import 'package:dio/dio.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/catalog_dao.dart';
 import '../../storage/kv_store.dart';
@@ -17,10 +18,56 @@ class CatalogSyncService {
   final CatalogApi api;
   final KvStore kv;
 
+  /// Check ligero multiproyecto: verifica en una sola llamada qué proyectos
+  /// tienen versión nueva y solo descarga los catálogos desactualizados.
+  ///
+  /// Ventaja vs [ensureCatalogUpToDate] llamado N veces:
+  ///   - 1 request HTTP en lugar de N para el check de versiones.
+  ///   - Descarga bundle solo cuando hay cambio real.
+  Future<void> syncAllIfNeeded(List<String> projectIds) async {
+    if (projectIds.isEmpty) return;
+
+    final digests = await api.getVersionsMultiProject(projectIds);
+
+    for (final projectId in projectIds) {
+      final digest = digests[projectId];
+      final remoteVersion = digest?['version_id'] as String?;
+      if (remoteVersion == null) continue; // proyecto sin catálogo publicado
+
+      final key = 'catalog_version:$projectId';
+      final localVersion = await kv.getString(key);
+      if (localVersion == remoteVersion) continue; // ya al día
+
+      // Versión distinta → descarga completa o diff
+      await ensureCatalogUpToDate(projectId);
+    }
+  }
+
   Future<void> ensureCatalogUpToDate(String projectId) async {
     final key = 'catalog_version:$projectId';
     final localVersion = await kv.getString(key);
-    final currentVersion = await api.getCurrentVersion(projectId: projectId);
+    final currentVersion = await (() async {
+      try {
+        return await api.getCurrentVersion(projectId: projectId);
+      } on DioException catch (e) {
+        final statusCode = e.response?.statusCode;
+        if (statusCode == 404) {
+          // No published catalog yet for this project in backend.
+          // Keep local snapshot and avoid failing higher-level sync flows.
+          return null;
+        }
+        if (statusCode == 403) {
+          // Some profiles can sync activities but are not allowed to read catalog metadata.
+          // Keep existing local catalog and do not block the rest of sync orchestration.
+          return null;
+        }
+        rethrow;
+      }
+    })();
+
+    if (currentVersion == null || currentVersion.trim().isEmpty) {
+      return;
+    }
 
     if (localVersion == null) {
       final effective = await api.getEffective(projectId: projectId, versionId: currentVersion);

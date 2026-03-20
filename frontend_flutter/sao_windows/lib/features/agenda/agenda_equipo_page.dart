@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/connectivity/offline_mode_controller.dart';
+import '../../core/utils/logger.dart';
+import '../../core/utils/snackbar.dart';
 import '../../ui/theme/sao_colors.dart';
 import 'application/agenda_controller.dart';
 import 'models/resource.dart';
@@ -23,7 +25,6 @@ class AgendaEquipoPage extends ConsumerStatefulWidget {
 }
 
 class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
-
   @override
   void initState() {
     super.initState();
@@ -42,7 +43,29 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
   Widget build(BuildContext context) {
     final state = ref.watch(agendaControllerProvider);
     final controller = ref.read(agendaControllerProvider.notifier);
-    final isTutorialGuest = GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
+    final isOffline = ref.watch(offlineModeProvider);
+    // Estado del ícono cloud derivado únicamente del controller (sin setState local)
+    final cloudIcon = state.isSyncing
+        ? Icons.cloud_upload_rounded
+        : (state.hasSyncError || isOffline)
+            ? Icons.cloud_off_rounded
+            : Icons.cloud_done_rounded;
+    final cloudTooltip = state.isSyncing
+        ? 'Sincronizando...'
+        : state.hasSyncError
+            ? 'Error de sync'
+            : isOffline
+                ? 'Offline'
+                : 'Online';
+    final cloudColor = state.isSyncing
+        ? SaoColors.info
+        : state.hasSyncError
+            ? SaoColors.error
+            : isOffline
+                ? SaoColors.gray400
+                : SaoColors.success;
+    final isTutorialGuest =
+        GoRouterState.of(context).uri.queryParameters['tutorial'] == '1';
     final filtered = _filterItems(state);
 
     return Scaffold(
@@ -57,18 +80,37 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
         ),
         actions: [
           IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sincronizando agenda...')),
-              );
-            },
-            icon: const Icon(Icons.cloud_sync_rounded),
-            tooltip: 'Sincronizar',
+            onPressed: state.isSyncing
+                ? null
+                : () async {
+                    final currentlyOffline = ref.read(offlineModeProvider);
+                    if (currentlyOffline) {
+                      await ref.read(offlineModeProvider.notifier).setOffline(false);
+                    }
+                    try {
+                      await controller.syncNow();
+                      if (context.mounted) {
+                        showTransientSnackBar(
+                          context,
+                          appSnackBar(message: 'Agenda sincronizada'),
+                        );
+                      }
+                    } catch (_) {
+                      if (context.mounted) {
+                        showTransientSnackBar(
+                          context,
+                          appSnackBar(message: 'Error al sincronizar agenda con backend'),
+                        );
+                      }
+                    }
+                  },
+            icon: Icon(cloudIcon, color: cloudColor),
+            tooltip: cloudTooltip,
           ),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _openDispatcher(context),
+        onPressed: () async => _openDispatcher(context),
         backgroundColor: SaoColors.brandPrimary,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.add_rounded),
@@ -114,6 +156,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
             weekOffset: state.weekOffset,
             onChangeWeek: controller.changeWeek,
             onSelectDay: controller.selectDay,
+            onGoToToday: controller.goToToday,
           ),
           FilterChipsRow(
             resources: state.resources,
@@ -134,15 +177,32 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
                 ),
                 child: Text(
                   state.usersError!,
-                  style: const TextStyle(color: SaoColors.errorText, fontWeight: FontWeight.w600),
+                  style: const TextStyle(
+                      color: SaoColors.errorText,
+                      fontWeight: FontWeight.w600),
                 ),
               ),
             ),
           const SizedBox(height: 8),
+          // Barra de progreso fina mientras se cargan las asignaciones
+          if (state.loadingAssignments)
+            const LinearProgressIndicator(minHeight: 2),
           Expanded(
             child: TimelineList(
               resources: state.resources,
               items: filtered,
+              onCancelItem: (item) async {
+                await controller.cancelAssignment(item);
+                if (context.mounted) {
+                  showTransientSnackBar(
+                    context,
+                    appSnackBar(
+                      message: 'Asignación cancelada',
+                      backgroundColor: SaoColors.success,
+                    ),
+                  );
+                }
+              },
             ),
           ),
         ],
@@ -171,11 +231,32 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     return byDay;
   }
 
-  void _openDispatcher(BuildContext context) {
+  Future<void> _openDispatcher(BuildContext context) async {
     HapticFeedback.mediumImpact();
-    final state = ref.read(agendaControllerProvider);
     final controller = ref.read(agendaControllerProvider.notifier);
     final projectId = GoRouterState.of(context).uri.queryParameters['project'];
+
+    await controller.ensureResourcesReady(projectId: projectId);
+    if (!context.mounted) return;
+
+    final state = ref.read(agendaControllerProvider);
+    appLogger.i(
+      'Agenda dispatcher open resources=${state.resources.length} '
+      'loadingUsers=${state.loadingUsers} usersError=${state.usersError}',
+    );
+
+    if (state.resources.isEmpty) {
+      if (!context.mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: state.usersError?.isNotEmpty == true
+              ? state.usersError!
+              : 'No hay recursos operativos disponibles para asignación.',
+        ),
+      );
+      return;
+    }
 
     showModalBottomSheet<AgendaItem>(
       context: context,
@@ -188,9 +269,11 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
         existingItems: state.items,
         onCreate: (newItem) {
           controller.createAssignmentFromDispatcher(newItem);
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('✅ Actividad asignada a ${_getResourceName(newItem.resourceId, state.resources)}'),
+          showTransientSnackBar(
+            context,
+            appSnackBar(
+              message:
+                  'Actividad asignada a ${_getResourceName(newItem.resourceId, state.resources)}',
               backgroundColor: SaoColors.success,
             ),
           );

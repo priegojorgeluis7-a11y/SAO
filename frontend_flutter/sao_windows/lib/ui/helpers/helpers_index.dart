@@ -16,3 +16,4 @@ library;
 export 'sao_format.dart';
 export 'sao_validators.dart';
 export 'sao_platform.dart';
+export 'sao_contrast.dart';

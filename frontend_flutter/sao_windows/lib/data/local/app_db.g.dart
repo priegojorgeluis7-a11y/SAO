@@ -6459,6 +6459,651 @@ class CatAttendeesCompanion extends UpdateCompanion<CatAttendee> {
   }
 }
 
+class $CatalogIndexTable extends CatalogIndex
+    with TableInfo<$CatalogIndexTable, CatalogIndexData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CatalogIndexTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _activeVersionIdMeta = const VerificationMeta(
+    'activeVersionId',
+  );
+  @override
+  late final GeneratedColumn<String> activeVersionId = GeneratedColumn<String>(
+    'active_version_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _hashMeta = const VerificationMeta('hash');
+  @override
+  late final GeneratedColumn<String> hash = GeneratedColumn<String>(
+    'hash',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    projectId,
+    activeVersionId,
+    hash,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'catalog_index';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CatalogIndexData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('active_version_id')) {
+      context.handle(
+        _activeVersionIdMeta,
+        activeVersionId.isAcceptableOrUnknown(
+          data['active_version_id']!,
+          _activeVersionIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_activeVersionIdMeta);
+    }
+    if (data.containsKey('hash')) {
+      context.handle(
+        _hashMeta,
+        hash.isAcceptableOrUnknown(data['hash']!, _hashMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {projectId};
+  @override
+  CatalogIndexData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CatalogIndexData(
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      activeVersionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}active_version_id'],
+      )!,
+      hash: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}hash'],
+      ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CatalogIndexTable createAlias(String alias) {
+    return $CatalogIndexTable(attachedDatabase, alias);
+  }
+}
+
+class CatalogIndexData extends DataClass
+    implements Insertable<CatalogIndexData> {
+  final String projectId;
+  final String activeVersionId;
+  final String? hash;
+  final DateTime updatedAt;
+  const CatalogIndexData({
+    required this.projectId,
+    required this.activeVersionId,
+    this.hash,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['project_id'] = Variable<String>(projectId);
+    map['active_version_id'] = Variable<String>(activeVersionId);
+    if (!nullToAbsent || hash != null) {
+      map['hash'] = Variable<String>(hash);
+    }
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    return map;
+  }
+
+  CatalogIndexCompanion toCompanion(bool nullToAbsent) {
+    return CatalogIndexCompanion(
+      projectId: Value(projectId),
+      activeVersionId: Value(activeVersionId),
+      hash: hash == null && nullToAbsent ? const Value.absent() : Value(hash),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory CatalogIndexData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CatalogIndexData(
+      projectId: serializer.fromJson<String>(json['projectId']),
+      activeVersionId: serializer.fromJson<String>(json['activeVersionId']),
+      hash: serializer.fromJson<String?>(json['hash']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'projectId': serializer.toJson<String>(projectId),
+      'activeVersionId': serializer.toJson<String>(activeVersionId),
+      'hash': serializer.toJson<String?>(hash),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+    };
+  }
+
+  CatalogIndexData copyWith({
+    String? projectId,
+    String? activeVersionId,
+    Value<String?> hash = const Value.absent(),
+    DateTime? updatedAt,
+  }) => CatalogIndexData(
+    projectId: projectId ?? this.projectId,
+    activeVersionId: activeVersionId ?? this.activeVersionId,
+    hash: hash.present ? hash.value : this.hash,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  CatalogIndexData copyWithCompanion(CatalogIndexCompanion data) {
+    return CatalogIndexData(
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      activeVersionId: data.activeVersionId.present
+          ? data.activeVersionId.value
+          : this.activeVersionId,
+      hash: data.hash.present ? data.hash.value : this.hash,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CatalogIndexData(')
+          ..write('projectId: $projectId, ')
+          ..write('activeVersionId: $activeVersionId, ')
+          ..write('hash: $hash, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(projectId, activeVersionId, hash, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CatalogIndexData &&
+          other.projectId == this.projectId &&
+          other.activeVersionId == this.activeVersionId &&
+          other.hash == this.hash &&
+          other.updatedAt == this.updatedAt);
+}
+
+class CatalogIndexCompanion extends UpdateCompanion<CatalogIndexData> {
+  final Value<String> projectId;
+  final Value<String> activeVersionId;
+  final Value<String?> hash;
+  final Value<DateTime> updatedAt;
+  final Value<int> rowid;
+  const CatalogIndexCompanion({
+    this.projectId = const Value.absent(),
+    this.activeVersionId = const Value.absent(),
+    this.hash = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CatalogIndexCompanion.insert({
+    required String projectId,
+    required String activeVersionId,
+    this.hash = const Value.absent(),
+    required DateTime updatedAt,
+    this.rowid = const Value.absent(),
+  }) : projectId = Value(projectId),
+       activeVersionId = Value(activeVersionId),
+       updatedAt = Value(updatedAt);
+  static Insertable<CatalogIndexData> custom({
+    Expression<String>? projectId,
+    Expression<String>? activeVersionId,
+    Expression<String>? hash,
+    Expression<DateTime>? updatedAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (projectId != null) 'project_id': projectId,
+      if (activeVersionId != null) 'active_version_id': activeVersionId,
+      if (hash != null) 'hash': hash,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CatalogIndexCompanion copyWith({
+    Value<String>? projectId,
+    Value<String>? activeVersionId,
+    Value<String?>? hash,
+    Value<DateTime>? updatedAt,
+    Value<int>? rowid,
+  }) {
+    return CatalogIndexCompanion(
+      projectId: projectId ?? this.projectId,
+      activeVersionId: activeVersionId ?? this.activeVersionId,
+      hash: hash ?? this.hash,
+      updatedAt: updatedAt ?? this.updatedAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (activeVersionId.present) {
+      map['active_version_id'] = Variable<String>(activeVersionId.value);
+    }
+    if (hash.present) {
+      map['hash'] = Variable<String>(hash.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CatalogIndexCompanion(')
+          ..write('projectId: $projectId, ')
+          ..write('activeVersionId: $activeVersionId, ')
+          ..write('hash: $hash, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $CatalogBundleCacheTable extends CatalogBundleCache
+    with TableInfo<$CatalogBundleCacheTable, CatalogBundleCacheData> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $CatalogBundleCacheTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _versionIdMeta = const VerificationMeta(
+    'versionId',
+  );
+  @override
+  late final GeneratedColumn<String> versionId = GeneratedColumn<String>(
+    'version_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _jsonBlobMeta = const VerificationMeta(
+    'jsonBlob',
+  );
+  @override
+  late final GeneratedColumn<String> jsonBlob = GeneratedColumn<String>(
+    'json_blob',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    projectId,
+    versionId,
+    jsonBlob,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'catalog_bundle_cache';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<CatalogBundleCacheData> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('version_id')) {
+      context.handle(
+        _versionIdMeta,
+        versionId.isAcceptableOrUnknown(data['version_id']!, _versionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_versionIdMeta);
+    }
+    if (data.containsKey('json_blob')) {
+      context.handle(
+        _jsonBlobMeta,
+        jsonBlob.isAcceptableOrUnknown(data['json_blob']!, _jsonBlobMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_jsonBlobMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {projectId, versionId};
+  @override
+  CatalogBundleCacheData map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return CatalogBundleCacheData(
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      versionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}version_id'],
+      )!,
+      jsonBlob: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}json_blob'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $CatalogBundleCacheTable createAlias(String alias) {
+    return $CatalogBundleCacheTable(attachedDatabase, alias);
+  }
+}
+
+class CatalogBundleCacheData extends DataClass
+    implements Insertable<CatalogBundleCacheData> {
+  final String projectId;
+  final String versionId;
+  final String jsonBlob;
+  final DateTime createdAt;
+  const CatalogBundleCacheData({
+    required this.projectId,
+    required this.versionId,
+    required this.jsonBlob,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['project_id'] = Variable<String>(projectId);
+    map['version_id'] = Variable<String>(versionId);
+    map['json_blob'] = Variable<String>(jsonBlob);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    return map;
+  }
+
+  CatalogBundleCacheCompanion toCompanion(bool nullToAbsent) {
+    return CatalogBundleCacheCompanion(
+      projectId: Value(projectId),
+      versionId: Value(versionId),
+      jsonBlob: Value(jsonBlob),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory CatalogBundleCacheData.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return CatalogBundleCacheData(
+      projectId: serializer.fromJson<String>(json['projectId']),
+      versionId: serializer.fromJson<String>(json['versionId']),
+      jsonBlob: serializer.fromJson<String>(json['jsonBlob']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'projectId': serializer.toJson<String>(projectId),
+      'versionId': serializer.toJson<String>(versionId),
+      'jsonBlob': serializer.toJson<String>(jsonBlob),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+    };
+  }
+
+  CatalogBundleCacheData copyWith({
+    String? projectId,
+    String? versionId,
+    String? jsonBlob,
+    DateTime? createdAt,
+  }) => CatalogBundleCacheData(
+    projectId: projectId ?? this.projectId,
+    versionId: versionId ?? this.versionId,
+    jsonBlob: jsonBlob ?? this.jsonBlob,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  CatalogBundleCacheData copyWithCompanion(CatalogBundleCacheCompanion data) {
+    return CatalogBundleCacheData(
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      versionId: data.versionId.present ? data.versionId.value : this.versionId,
+      jsonBlob: data.jsonBlob.present ? data.jsonBlob.value : this.jsonBlob,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CatalogBundleCacheData(')
+          ..write('projectId: $projectId, ')
+          ..write('versionId: $versionId, ')
+          ..write('jsonBlob: $jsonBlob, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(projectId, versionId, jsonBlob, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is CatalogBundleCacheData &&
+          other.projectId == this.projectId &&
+          other.versionId == this.versionId &&
+          other.jsonBlob == this.jsonBlob &&
+          other.createdAt == this.createdAt);
+}
+
+class CatalogBundleCacheCompanion
+    extends UpdateCompanion<CatalogBundleCacheData> {
+  final Value<String> projectId;
+  final Value<String> versionId;
+  final Value<String> jsonBlob;
+  final Value<DateTime> createdAt;
+  final Value<int> rowid;
+  const CatalogBundleCacheCompanion({
+    this.projectId = const Value.absent(),
+    this.versionId = const Value.absent(),
+    this.jsonBlob = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  CatalogBundleCacheCompanion.insert({
+    required String projectId,
+    required String versionId,
+    required String jsonBlob,
+    required DateTime createdAt,
+    this.rowid = const Value.absent(),
+  }) : projectId = Value(projectId),
+       versionId = Value(versionId),
+       jsonBlob = Value(jsonBlob),
+       createdAt = Value(createdAt);
+  static Insertable<CatalogBundleCacheData> custom({
+    Expression<String>? projectId,
+    Expression<String>? versionId,
+    Expression<String>? jsonBlob,
+    Expression<DateTime>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (projectId != null) 'project_id': projectId,
+      if (versionId != null) 'version_id': versionId,
+      if (jsonBlob != null) 'json_blob': jsonBlob,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  CatalogBundleCacheCompanion copyWith({
+    Value<String>? projectId,
+    Value<String>? versionId,
+    Value<String>? jsonBlob,
+    Value<DateTime>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return CatalogBundleCacheCompanion(
+      projectId: projectId ?? this.projectId,
+      versionId: versionId ?? this.versionId,
+      jsonBlob: jsonBlob ?? this.jsonBlob,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (versionId.present) {
+      map['version_id'] = Variable<String>(versionId.value);
+    }
+    if (jsonBlob.present) {
+      map['json_blob'] = Variable<String>(jsonBlob.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('CatalogBundleCacheCompanion(')
+          ..write('projectId: $projectId, ')
+          ..write('versionId: $versionId, ')
+          ..write('jsonBlob: $jsonBlob, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $ActivitiesTable extends Activities
     with TableInfo<$ActivitiesTable, Activity> {
   @override
@@ -6515,6 +7160,17 @@ class $ActivitiesTable extends Activities
     defaultConstraints: GeneratedColumn.constraintIsAlways(
       'REFERENCES catalog_activity_types (id)',
     ),
+  );
+  static const VerificationMeta _catalogVersionIdMeta = const VerificationMeta(
+    'catalogVersionId',
+  );
+  @override
+  late final GeneratedColumn<String> catalogVersionId = GeneratedColumn<String>(
+    'catalog_version_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
   );
   static const VerificationMeta _titleMeta = const VerificationMeta('title');
   @override
@@ -6690,6 +7346,7 @@ class $ActivitiesTable extends Activities
     projectId,
     segmentId,
     activityTypeId,
+    catalogVersionId,
     title,
     description,
     pk,
@@ -6747,6 +7404,15 @@ class $ActivitiesTable extends Activities
       );
     } else if (isInserting) {
       context.missing(_activityTypeIdMeta);
+    }
+    if (data.containsKey('catalog_version_id')) {
+      context.handle(
+        _catalogVersionIdMeta,
+        catalogVersionId.isAcceptableOrUnknown(
+          data['catalog_version_id']!,
+          _catalogVersionIdMeta,
+        ),
+      );
     }
     if (data.containsKey('title')) {
       context.handle(
@@ -6881,6 +7547,10 @@ class $ActivitiesTable extends Activities
         DriftSqlType.string,
         data['${effectivePrefix}activity_type_id'],
       )!,
+      catalogVersionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}catalog_version_id'],
+      ),
       title: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}title'],
@@ -6955,6 +7625,7 @@ class Activity extends DataClass implements Insertable<Activity> {
   final String projectId;
   final String? segmentId;
   final String activityTypeId;
+  final String? catalogVersionId;
   final String title;
   final String? description;
   final int? pk;
@@ -6975,6 +7646,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     required this.projectId,
     this.segmentId,
     required this.activityTypeId,
+    this.catalogVersionId,
     required this.title,
     this.description,
     this.pk,
@@ -7000,6 +7672,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       map['segment_id'] = Variable<String>(segmentId);
     }
     map['activity_type_id'] = Variable<String>(activityTypeId);
+    if (!nullToAbsent || catalogVersionId != null) {
+      map['catalog_version_id'] = Variable<String>(catalogVersionId);
+    }
     map['title'] = Variable<String>(title);
     if (!nullToAbsent || description != null) {
       map['description'] = Variable<String>(description);
@@ -7046,6 +7721,9 @@ class Activity extends DataClass implements Insertable<Activity> {
           ? const Value.absent()
           : Value(segmentId),
       activityTypeId: Value(activityTypeId),
+      catalogVersionId: catalogVersionId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(catalogVersionId),
       title: Value(title),
       description: description == null && nullToAbsent
           ? const Value.absent()
@@ -7092,6 +7770,7 @@ class Activity extends DataClass implements Insertable<Activity> {
       projectId: serializer.fromJson<String>(json['projectId']),
       segmentId: serializer.fromJson<String?>(json['segmentId']),
       activityTypeId: serializer.fromJson<String>(json['activityTypeId']),
+      catalogVersionId: serializer.fromJson<String?>(json['catalogVersionId']),
       title: serializer.fromJson<String>(json['title']),
       description: serializer.fromJson<String?>(json['description']),
       pk: serializer.fromJson<int?>(json['pk']),
@@ -7117,6 +7796,7 @@ class Activity extends DataClass implements Insertable<Activity> {
       'projectId': serializer.toJson<String>(projectId),
       'segmentId': serializer.toJson<String?>(segmentId),
       'activityTypeId': serializer.toJson<String>(activityTypeId),
+      'catalogVersionId': serializer.toJson<String?>(catalogVersionId),
       'title': serializer.toJson<String>(title),
       'description': serializer.toJson<String?>(description),
       'pk': serializer.toJson<int?>(pk),
@@ -7140,6 +7820,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     String? projectId,
     Value<String?> segmentId = const Value.absent(),
     String? activityTypeId,
+    Value<String?> catalogVersionId = const Value.absent(),
     String? title,
     Value<String?> description = const Value.absent(),
     Value<int?> pk = const Value.absent(),
@@ -7160,6 +7841,9 @@ class Activity extends DataClass implements Insertable<Activity> {
     projectId: projectId ?? this.projectId,
     segmentId: segmentId.present ? segmentId.value : this.segmentId,
     activityTypeId: activityTypeId ?? this.activityTypeId,
+    catalogVersionId: catalogVersionId.present
+        ? catalogVersionId.value
+        : this.catalogVersionId,
     title: title ?? this.title,
     description: description.present ? description.value : this.description,
     pk: pk.present ? pk.value : this.pk,
@@ -7186,6 +7870,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       activityTypeId: data.activityTypeId.present
           ? data.activityTypeId.value
           : this.activityTypeId,
+      catalogVersionId: data.catalogVersionId.present
+          ? data.catalogVersionId.value
+          : this.catalogVersionId,
       title: data.title.present ? data.title.value : this.title,
       description: data.description.present
           ? data.description.value
@@ -7223,6 +7910,7 @@ class Activity extends DataClass implements Insertable<Activity> {
           ..write('projectId: $projectId, ')
           ..write('segmentId: $segmentId, ')
           ..write('activityTypeId: $activityTypeId, ')
+          ..write('catalogVersionId: $catalogVersionId, ')
           ..write('title: $title, ')
           ..write('description: $description, ')
           ..write('pk: $pk, ')
@@ -7248,6 +7936,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     projectId,
     segmentId,
     activityTypeId,
+    catalogVersionId,
     title,
     description,
     pk,
@@ -7272,6 +7961,7 @@ class Activity extends DataClass implements Insertable<Activity> {
           other.projectId == this.projectId &&
           other.segmentId == this.segmentId &&
           other.activityTypeId == this.activityTypeId &&
+          other.catalogVersionId == this.catalogVersionId &&
           other.title == this.title &&
           other.description == this.description &&
           other.pk == this.pk &&
@@ -7294,6 +7984,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
   final Value<String> projectId;
   final Value<String?> segmentId;
   final Value<String> activityTypeId;
+  final Value<String?> catalogVersionId;
   final Value<String> title;
   final Value<String?> description;
   final Value<int?> pk;
@@ -7315,6 +8006,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     this.projectId = const Value.absent(),
     this.segmentId = const Value.absent(),
     this.activityTypeId = const Value.absent(),
+    this.catalogVersionId = const Value.absent(),
     this.title = const Value.absent(),
     this.description = const Value.absent(),
     this.pk = const Value.absent(),
@@ -7337,6 +8029,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     required String projectId,
     this.segmentId = const Value.absent(),
     required String activityTypeId,
+    this.catalogVersionId = const Value.absent(),
     required String title,
     this.description = const Value.absent(),
     this.pk = const Value.absent(),
@@ -7364,6 +8057,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     Expression<String>? projectId,
     Expression<String>? segmentId,
     Expression<String>? activityTypeId,
+    Expression<String>? catalogVersionId,
     Expression<String>? title,
     Expression<String>? description,
     Expression<int>? pk,
@@ -7386,6 +8080,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
       if (projectId != null) 'project_id': projectId,
       if (segmentId != null) 'segment_id': segmentId,
       if (activityTypeId != null) 'activity_type_id': activityTypeId,
+      if (catalogVersionId != null) 'catalog_version_id': catalogVersionId,
       if (title != null) 'title': title,
       if (description != null) 'description': description,
       if (pk != null) 'pk': pk,
@@ -7410,6 +8105,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     Value<String>? projectId,
     Value<String?>? segmentId,
     Value<String>? activityTypeId,
+    Value<String?>? catalogVersionId,
     Value<String>? title,
     Value<String?>? description,
     Value<int?>? pk,
@@ -7432,6 +8128,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
       projectId: projectId ?? this.projectId,
       segmentId: segmentId ?? this.segmentId,
       activityTypeId: activityTypeId ?? this.activityTypeId,
+      catalogVersionId: catalogVersionId ?? this.catalogVersionId,
       title: title ?? this.title,
       description: description ?? this.description,
       pk: pk ?? this.pk,
@@ -7465,6 +8162,9 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     }
     if (activityTypeId.present) {
       map['activity_type_id'] = Variable<String>(activityTypeId.value);
+    }
+    if (catalogVersionId.present) {
+      map['catalog_version_id'] = Variable<String>(catalogVersionId.value);
     }
     if (title.present) {
       map['title'] = Variable<String>(title.value);
@@ -7524,6 +8224,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
           ..write('projectId: $projectId, ')
           ..write('segmentId: $segmentId, ')
           ..write('activityTypeId: $activityTypeId, ')
+          ..write('catalogVersionId: $catalogVersionId, ')
           ..write('title: $title, ')
           ..write('description: $description, ')
           ..write('pk: $pk, ')
@@ -12665,6 +13366,9 @@ abstract class _$AppDb extends GeneratedDatabase {
       $CatRelActivityTopicsTable(this);
   late final $CatResultsTable catResults = $CatResultsTable(this);
   late final $CatAttendeesTable catAttendees = $CatAttendeesTable(this);
+  late final $CatalogIndexTable catalogIndex = $CatalogIndexTable(this);
+  late final $CatalogBundleCacheTable catalogBundleCache =
+      $CatalogBundleCacheTable(this);
   late final $ActivitiesTable activities = $ActivitiesTable(this);
   late final $ActivityFieldsTable activityFields = $ActivityFieldsTable(this);
   late final $ActivityLogTable activityLog = $ActivityLogTable(this);
@@ -12694,6 +13398,8 @@ abstract class _$AppDb extends GeneratedDatabase {
     catRelActivityTopics,
     catResults,
     catAttendees,
+    catalogIndex,
+    catalogBundleCache,
     activities,
     activityFields,
     activityLog,
@@ -17398,12 +18104,390 @@ typedef $$CatAttendeesTableProcessedTableManager =
       CatAttendee,
       PrefetchHooks Function()
     >;
+typedef $$CatalogIndexTableCreateCompanionBuilder =
+    CatalogIndexCompanion Function({
+      required String projectId,
+      required String activeVersionId,
+      Value<String?> hash,
+      required DateTime updatedAt,
+      Value<int> rowid,
+    });
+typedef $$CatalogIndexTableUpdateCompanionBuilder =
+    CatalogIndexCompanion Function({
+      Value<String> projectId,
+      Value<String> activeVersionId,
+      Value<String?> hash,
+      Value<DateTime> updatedAt,
+      Value<int> rowid,
+    });
+
+class $$CatalogIndexTableFilterComposer
+    extends Composer<_$AppDb, $CatalogIndexTable> {
+  $$CatalogIndexTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get activeVersionId => $composableBuilder(
+    column: $table.activeVersionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get hash => $composableBuilder(
+    column: $table.hash,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CatalogIndexTableOrderingComposer
+    extends Composer<_$AppDb, $CatalogIndexTable> {
+  $$CatalogIndexTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get activeVersionId => $composableBuilder(
+    column: $table.activeVersionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get hash => $composableBuilder(
+    column: $table.hash,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CatalogIndexTableAnnotationComposer
+    extends Composer<_$AppDb, $CatalogIndexTable> {
+  $$CatalogIndexTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
+
+  GeneratedColumn<String> get activeVersionId => $composableBuilder(
+    column: $table.activeVersionId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get hash =>
+      $composableBuilder(column: $table.hash, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$CatalogIndexTableTableManager
+    extends
+        RootTableManager<
+          _$AppDb,
+          $CatalogIndexTable,
+          CatalogIndexData,
+          $$CatalogIndexTableFilterComposer,
+          $$CatalogIndexTableOrderingComposer,
+          $$CatalogIndexTableAnnotationComposer,
+          $$CatalogIndexTableCreateCompanionBuilder,
+          $$CatalogIndexTableUpdateCompanionBuilder,
+          (
+            CatalogIndexData,
+            BaseReferences<_$AppDb, $CatalogIndexTable, CatalogIndexData>,
+          ),
+          CatalogIndexData,
+          PrefetchHooks Function()
+        > {
+  $$CatalogIndexTableTableManager(_$AppDb db, $CatalogIndexTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CatalogIndexTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CatalogIndexTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CatalogIndexTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> projectId = const Value.absent(),
+                Value<String> activeVersionId = const Value.absent(),
+                Value<String?> hash = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CatalogIndexCompanion(
+                projectId: projectId,
+                activeVersionId: activeVersionId,
+                hash: hash,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String projectId,
+                required String activeVersionId,
+                Value<String?> hash = const Value.absent(),
+                required DateTime updatedAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CatalogIndexCompanion.insert(
+                projectId: projectId,
+                activeVersionId: activeVersionId,
+                hash: hash,
+                updatedAt: updatedAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CatalogIndexTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDb,
+      $CatalogIndexTable,
+      CatalogIndexData,
+      $$CatalogIndexTableFilterComposer,
+      $$CatalogIndexTableOrderingComposer,
+      $$CatalogIndexTableAnnotationComposer,
+      $$CatalogIndexTableCreateCompanionBuilder,
+      $$CatalogIndexTableUpdateCompanionBuilder,
+      (
+        CatalogIndexData,
+        BaseReferences<_$AppDb, $CatalogIndexTable, CatalogIndexData>,
+      ),
+      CatalogIndexData,
+      PrefetchHooks Function()
+    >;
+typedef $$CatalogBundleCacheTableCreateCompanionBuilder =
+    CatalogBundleCacheCompanion Function({
+      required String projectId,
+      required String versionId,
+      required String jsonBlob,
+      required DateTime createdAt,
+      Value<int> rowid,
+    });
+typedef $$CatalogBundleCacheTableUpdateCompanionBuilder =
+    CatalogBundleCacheCompanion Function({
+      Value<String> projectId,
+      Value<String> versionId,
+      Value<String> jsonBlob,
+      Value<DateTime> createdAt,
+      Value<int> rowid,
+    });
+
+class $$CatalogBundleCacheTableFilterComposer
+    extends Composer<_$AppDb, $CatalogBundleCacheTable> {
+  $$CatalogBundleCacheTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get versionId => $composableBuilder(
+    column: $table.versionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get jsonBlob => $composableBuilder(
+    column: $table.jsonBlob,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$CatalogBundleCacheTableOrderingComposer
+    extends Composer<_$AppDb, $CatalogBundleCacheTable> {
+  $$CatalogBundleCacheTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get versionId => $composableBuilder(
+    column: $table.versionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get jsonBlob => $composableBuilder(
+    column: $table.jsonBlob,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$CatalogBundleCacheTableAnnotationComposer
+    extends Composer<_$AppDb, $CatalogBundleCacheTable> {
+  $$CatalogBundleCacheTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
+
+  GeneratedColumn<String> get versionId =>
+      $composableBuilder(column: $table.versionId, builder: (column) => column);
+
+  GeneratedColumn<String> get jsonBlob =>
+      $composableBuilder(column: $table.jsonBlob, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$CatalogBundleCacheTableTableManager
+    extends
+        RootTableManager<
+          _$AppDb,
+          $CatalogBundleCacheTable,
+          CatalogBundleCacheData,
+          $$CatalogBundleCacheTableFilterComposer,
+          $$CatalogBundleCacheTableOrderingComposer,
+          $$CatalogBundleCacheTableAnnotationComposer,
+          $$CatalogBundleCacheTableCreateCompanionBuilder,
+          $$CatalogBundleCacheTableUpdateCompanionBuilder,
+          (
+            CatalogBundleCacheData,
+            BaseReferences<
+              _$AppDb,
+              $CatalogBundleCacheTable,
+              CatalogBundleCacheData
+            >,
+          ),
+          CatalogBundleCacheData,
+          PrefetchHooks Function()
+        > {
+  $$CatalogBundleCacheTableTableManager(
+    _$AppDb db,
+    $CatalogBundleCacheTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$CatalogBundleCacheTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$CatalogBundleCacheTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$CatalogBundleCacheTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> projectId = const Value.absent(),
+                Value<String> versionId = const Value.absent(),
+                Value<String> jsonBlob = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => CatalogBundleCacheCompanion(
+                projectId: projectId,
+                versionId: versionId,
+                jsonBlob: jsonBlob,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String projectId,
+                required String versionId,
+                required String jsonBlob,
+                required DateTime createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => CatalogBundleCacheCompanion.insert(
+                projectId: projectId,
+                versionId: versionId,
+                jsonBlob: jsonBlob,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$CatalogBundleCacheTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDb,
+      $CatalogBundleCacheTable,
+      CatalogBundleCacheData,
+      $$CatalogBundleCacheTableFilterComposer,
+      $$CatalogBundleCacheTableOrderingComposer,
+      $$CatalogBundleCacheTableAnnotationComposer,
+      $$CatalogBundleCacheTableCreateCompanionBuilder,
+      $$CatalogBundleCacheTableUpdateCompanionBuilder,
+      (
+        CatalogBundleCacheData,
+        BaseReferences<
+          _$AppDb,
+          $CatalogBundleCacheTable,
+          CatalogBundleCacheData
+        >,
+      ),
+      CatalogBundleCacheData,
+      PrefetchHooks Function()
+    >;
 typedef $$ActivitiesTableCreateCompanionBuilder =
     ActivitiesCompanion Function({
       required String id,
       required String projectId,
       Value<String?> segmentId,
       required String activityTypeId,
+      Value<String?> catalogVersionId,
       required String title,
       Value<String?> description,
       Value<int?> pk,
@@ -17427,6 +18511,7 @@ typedef $$ActivitiesTableUpdateCompanionBuilder =
       Value<String> projectId,
       Value<String?> segmentId,
       Value<String> activityTypeId,
+      Value<String?> catalogVersionId,
       Value<String> title,
       Value<String?> description,
       Value<int?> pk,
@@ -17598,6 +18683,11 @@ class $$ActivitiesTableFilterComposer
   });
   ColumnFilters<String> get id => $composableBuilder(
     column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get catalogVersionId => $composableBuilder(
+    column: $table.catalogVersionId,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -17853,6 +18943,11 @@ class $$ActivitiesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get catalogVersionId => $composableBuilder(
+    column: $table.catalogVersionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get title => $composableBuilder(
     column: $table.title,
     builder: (column) => ColumnOrderings(column),
@@ -18028,6 +19123,11 @@ class $$ActivitiesTableAnnotationComposer
   });
   GeneratedColumn<String> get id =>
       $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get catalogVersionId => $composableBuilder(
+    column: $table.catalogVersionId,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get title =>
       $composableBuilder(column: $table.title, builder: (column) => column);
@@ -18290,6 +19390,7 @@ class $$ActivitiesTableTableManager
                 Value<String> projectId = const Value.absent(),
                 Value<String?> segmentId = const Value.absent(),
                 Value<String> activityTypeId = const Value.absent(),
+                Value<String?> catalogVersionId = const Value.absent(),
                 Value<String> title = const Value.absent(),
                 Value<String?> description = const Value.absent(),
                 Value<int?> pk = const Value.absent(),
@@ -18311,6 +19412,7 @@ class $$ActivitiesTableTableManager
                 projectId: projectId,
                 segmentId: segmentId,
                 activityTypeId: activityTypeId,
+                catalogVersionId: catalogVersionId,
                 title: title,
                 description: description,
                 pk: pk,
@@ -18334,6 +19436,7 @@ class $$ActivitiesTableTableManager
                 required String projectId,
                 Value<String?> segmentId = const Value.absent(),
                 required String activityTypeId,
+                Value<String?> catalogVersionId = const Value.absent(),
                 required String title,
                 Value<String?> description = const Value.absent(),
                 Value<int?> pk = const Value.absent(),
@@ -18355,6 +19458,7 @@ class $$ActivitiesTableTableManager
                 projectId: projectId,
                 segmentId: segmentId,
                 activityTypeId: activityTypeId,
+                catalogVersionId: catalogVersionId,
                 title: title,
                 description: description,
                 pk: pk,
@@ -21505,6 +22609,10 @@ class $AppDbManager {
       $$CatResultsTableTableManager(_db, _db.catResults);
   $$CatAttendeesTableTableManager get catAttendees =>
       $$CatAttendeesTableTableManager(_db, _db.catAttendees);
+  $$CatalogIndexTableTableManager get catalogIndex =>
+      $$CatalogIndexTableTableManager(_db, _db.catalogIndex);
+  $$CatalogBundleCacheTableTableManager get catalogBundleCache =>
+      $$CatalogBundleCacheTableTableManager(_db, _db.catalogBundleCache);
   $$ActivitiesTableTableManager get activities =>
       $$ActivitiesTableTableManager(_db, _db.activities);
   $$ActivityFieldsTableTableManager get activityFields =>

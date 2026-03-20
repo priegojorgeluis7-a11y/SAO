@@ -9,6 +9,9 @@ import '../models/sync_dto.dart';
 /// Handles pull/push sync with backend using ApiClient (Phase 3A)
 class SyncApiRepository {
   final ApiClient _apiClient;
+  static final RegExp _uuidPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  );
 
   SyncApiRepository({ApiClient? apiClient})
       : _apiClient = apiClient ?? GetIt.instance<ApiClient>();
@@ -17,7 +20,7 @@ class SyncApiRepository {
   /// 
   /// [projectId] - Project ID to sync (e.g., "TMQ", "TAP")
   /// [sinceVersion] - Last sync_version client has; server returns activities > this
-  /// [limit] - Maximum number of activities to return (default: 500, max: 1000)
+  /// [limit] - Maximum number of activities to return (default/max: 200)
   /// [untilVersion] - Optional upper bound for sync_version filtering
   /// 
   /// Returns [SyncPullResponse] with current_version and activities list
@@ -26,19 +29,20 @@ class SyncApiRepository {
     required String projectId,
     int sinceVersion = 0,
     String? afterUuid,
-    int limit = 500,
+    int limit = 200,
     int? untilVersion,
   }) async {
     try {
+      final safeLimit = limit.clamp(1, 200).toInt();
       appLogger.i(
-        '🔽 Sync Pull: project=$projectId, since=$sinceVersion, after=$afterUuid, limit=$limit, until=$untilVersion',
+        '🔽 Sync Pull: project=$projectId, since=$sinceVersion, after=$afterUuid, limit=$safeLimit, until=$untilVersion',
       );
 
       final request = SyncPullRequest(
         projectId: projectId,
         sinceVersion: sinceVersion,
         afterUuid: afterUuid,
-        limit: limit,
+        limit: safeLimit,
         untilVersion: untilVersion,
       );
 
@@ -136,6 +140,36 @@ class SyncApiRepository {
     } catch (e, stackTrace) {
       appLogger.e('💥 Sync Push Unknown Error', error: e, stackTrace: stackTrace);
       rethrow;
+    }
+  }
+
+  /// Resolve latest catalog version UUID for a project using `/catalog/versions`.
+  /// Returns null when the backend does not provide a UUID-like value.
+  Future<String?> resolveCatalogVersionUuid({required String projectId}) async {
+    final normalized = projectId.trim().toUpperCase();
+    if (normalized.isEmpty) return null;
+
+    try {
+      final response = await _apiClient.get<dynamic>(
+        '/catalog/versions',
+        queryParameters: {'project_ids': normalized},
+      );
+
+      final payload = response.data;
+      if (payload is! Map) return null;
+
+      final rawDigest = payload[normalized] ?? payload[projectId] ?? payload[projectId.trim()];
+      if (rawDigest is! Map) return null;
+
+      final candidate = rawDigest['version_id']?.toString().trim();
+      if (candidate == null || !_uuidPattern.hasMatch(candidate)) {
+        return null;
+      }
+
+      return candidate;
+    } catch (e) {
+      appLogger.w('Could not resolve catalog UUID for project $normalized: $e');
+      return null;
     }
   }
 

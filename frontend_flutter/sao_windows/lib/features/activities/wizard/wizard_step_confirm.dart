@@ -1,6 +1,7 @@
 // lib/features/activities/wizard/wizard_step_confirm.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import 'wizard_controller.dart';
@@ -280,7 +281,7 @@ class WizardStepConfirm extends StatelessWidget {
           BoxShadow(
             blurRadius: 10,
             offset: const Offset(0, 4),
-            color: SaoColors.gray900.withOpacity(0.04),
+            color: SaoColors.gray900.withValues(alpha: 0.04),
           ),
         ],
       ),
@@ -303,12 +304,12 @@ class WizardStepConfirm extends StatelessWidget {
           BoxShadow(
             blurRadius: 10,
             offset: const Offset(0, 4),
-            color: SaoColors.gray900.withOpacity(0.04),
+            color: SaoColors.gray900.withValues(alpha: 0.04),
           ),
         ],
       ),
       child: Material(
-        color: Theme.of(context).colorScheme.surface.withOpacity(0),
+        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0),
         child: InkWell(
           onTap: onEdit,
           borderRadius: BorderRadius.circular(14),
@@ -348,8 +349,42 @@ class WizardStepConfirm extends StatelessWidget {
   Future<void> _handleSave(BuildContext context, bool hasEvidence) async {
     // Validación Gatekeeper antes de guardar
     final gk = controller.validateBeforeSave();
-    
+
     if (!gk.isValid) {
+      if (gk.errorFieldKey == 'btn_agregar_foto') {
+        final savePending = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.pending_actions_rounded, color: SaoColors.warning),
+                SizedBox(width: 8),
+                Text('Guardar como pendiente'),
+              ],
+            ),
+            content: const Text(
+              'La evidencia es obligatoria, pero puedes guardar esta actividad como pendiente '
+              'y completar las fotos después.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Volver a evidencia'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Guardar pendiente'),
+              ),
+            ],
+          ),
+        );
+
+        if (savePending == true) {
+          await _persistActivity(context, hasEvidence: false, allowPendingWithoutEvidence: true);
+          return;
+        }
+      }
+
       // Vibración para indicar error
       HapticFeedback.heavyImpact();
       
@@ -382,7 +417,15 @@ class WizardStepConfirm extends StatelessWidget {
       
       return;
     }
-    
+
+    await _persistActivity(context, hasEvidence: hasEvidence);
+  }
+
+  Future<void> _persistActivity(
+    BuildContext context, {
+    required bool hasEvidence,
+    bool allowPendingWithoutEvidence = false,
+  }) async {
     // Mostrar loading
     showDialog<void>(
       context: context,
@@ -405,7 +448,9 @@ class WizardStepConfirm extends StatelessWidget {
     );
 
     try {
-      final activityId = await controller.saveToDatabase();
+      final activityId = await controller.saveToDatabase(
+        allowPendingWithoutEvidence: allowPendingWithoutEvidence,
+      );
 
       if (!context.mounted) return;
 
@@ -415,12 +460,15 @@ class WizardStepConfirm extends StatelessWidget {
       // Mostrar éxito
       final closeText = controller.isUnplanned
           ? 'Enviada a revisión pendiente'
+          : allowPendingWithoutEvidence
+            ? 'Guardada en pendiente para completar evidencia'
           : hasEvidence
               ? 'Terminada (con evidencia)'
               : 'Terminada (sin evidencia)';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('✅ Actividad guardada — $closeText'),
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Actividad guardada — $closeText',
           backgroundColor: SaoColors.success,
         ),
       );
@@ -435,9 +483,10 @@ class WizardStepConfirm extends StatelessWidget {
       Navigator.of(context).pop();
 
       // Mostrar error
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('❌ Error al guardar: $e'),
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Error al guardar: $e',
           backgroundColor: SaoColors.error,
         ),
       );

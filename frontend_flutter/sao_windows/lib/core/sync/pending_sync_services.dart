@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:dio/dio.dart';
 
 import '../di/service_locator.dart';
 import '../../features/sync/services/sync_service.dart';
@@ -26,7 +27,16 @@ class ActivitySyncServiceImpl implements ActivitySyncService {
 
   @override
   Future<void> syncProject(String projectId) async {
-    await _syncService.pushPendingChanges();
+    try {
+      await _syncService.pushPendingChanges();
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      if (statusCode != 403) {
+        rethrow;
+      }
+      // Read-only profiles can fail push with 403 (activity.edit) but still
+      // should be able to refresh Home data with pull (activity.view).
+    }
     await _syncService.pullChanges(projectId: projectId);
   }
 }
@@ -45,7 +55,17 @@ class AssignmentSyncServiceImpl implements AssignmentSyncService {
 
   @override
   Future<void> syncPending() async {
-    await _repository.syncPending();
+    try {
+      await _repository.syncPending();
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      if (statusCode == 404 || statusCode == 403) {
+        // Some deployments/roles do not expose assignments sync endpoints.
+        // Keep sync orchestration healthy instead of surfacing a hard failure.
+        return;
+      }
+      rethrow;
+    }
   }
 }
 
@@ -64,6 +84,7 @@ final assignmentSyncServiceProvider = Provider<AssignmentSyncService>((ref) {
   final repository = agenda.AssignmentsRepository(
     apiClient: getIt<ApiClient>(),
     localStore: AssignmentsDao(getIt<AppDb>()),
+    database: getIt<AppDb>(),
   );
   return AssignmentSyncServiceImpl(repository);
 });

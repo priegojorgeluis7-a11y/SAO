@@ -144,12 +144,36 @@ class RolesCatalog {
   // ============================================================
   // LISTA COMPLETA
   // ============================================================
+  static const desarrollador = RoleType(
+    id: 'desarrollador',
+    label: 'Desarrollador',
+    description: 'Acceso técnico para pruebas y soporte',
+    icon: Icons.code,
+    color: Color(0xFF0EA5E9),
+    level: 4,
+    permissions: [
+      permCreateActivity,
+      permEditActivity,
+      permDeleteActivity,
+      permApproveActivity,
+      permRejectActivity,
+      permViewReports,
+      permExportData,
+      permManageUsers,
+      permManageCatalogs,
+      permManageProjects,
+      permAuditLogs,
+      permSyncData,
+    ],
+  );
+
   static const List<RoleType> all = [
     consulta,
     operativo,
     coordinador,
     auditor,
     admin,
+    desarrollador,
   ];
 
   // ============================================================
@@ -222,9 +246,9 @@ class RolesCatalog {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: role.color.withOpacity(0.14),
+        color: role.color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: role.color.withOpacity(0.3)),
+        border: Border.all(color: role.color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

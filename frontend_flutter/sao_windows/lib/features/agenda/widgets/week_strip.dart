@@ -7,8 +7,12 @@ import '../../../ui/theme/sao_typography.dart';
 class WeekStrip extends StatelessWidget {
   final DateTime selectedDay;
   final int weekOffset;
-  final ValueChanged<int> onChangeWeek;
+  // Async porque el controller hace await en la carga de asignaciones
+  final Future<void> Function(int) onChangeWeek;
   final ValueChanged<DateTime> onSelectDay;
+  /// Callback para volver a la semana actual. Solo visible cuando
+  /// [weekOffset] != 0.
+  final VoidCallback? onGoToToday;
 
   const WeekStrip({
     super.key,
@@ -16,6 +20,7 @@ class WeekStrip extends StatelessWidget {
     required this.weekOffset,
     required this.onChangeWeek,
     required this.onSelectDay,
+    this.onGoToToday,
   });
 
   @override
@@ -44,10 +49,25 @@ class WeekStrip extends StatelessWidget {
                   child: Center(
                     child: Text(
                       _getWeekLabel(days.first, days.last),
-                      style: SaoTypography.bodyTextBold.copyWith(color: SaoColors.gray500),
+                      style: SaoTypography.bodyTextBold
+                          .copyWith(color: SaoColors.gray500),
                     ),
                   ),
                 ),
+                // Botón "Hoy": solo visible cuando no estamos en la semana actual
+                if (weekOffset != 0 && onGoToToday != null)
+                  TextButton(
+                    onPressed: onGoToToday,
+                    style: TextButton.styleFrom(
+                      foregroundColor: SaoColors.actionPrimary,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: const Size(0, 36),
+                    ),
+                    child: const Text(
+                      'Hoy',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
                 IconButton(
                   onPressed: () => onChangeWeek(1),
                   icon: const Icon(Icons.chevron_right_rounded),
