@@ -1,20 +1,14 @@
-import json
-from datetime import datetime
-from uuid import UUID
+﻿import json
+import logging
+from datetime import datetime, timezone
+from typing import Any
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from app.core.api_errors import api_error
 
 from app.api.deps import require_any_role, user_has_any_role
-from app.core.database import get_db
-from app.models.activity import Activity, ExecutionState
-from app.models.catalog import CATActivityType, CATEvidenceRule, EntityType
-from app.models.audit_log import AuditLog
-from app.models.evidence import Evidence
-from app.models.front import Front
-from app.models.observation import Observation
-from app.models.reject_reason import RejectReason
-from app.models.user import User
+from app.core.firestore import get_firestore_client
 from app.schemas.review import (
     ReviewActivityOut,
     ReviewChangeFieldOut,
@@ -30,21 +24,39 @@ from app.schemas.review import (
     ReviewRejectPlaybookResponse,
     ReviewRejectReasonCreateIn,
 )
-from app.services.audit_service import write_audit_log
+from app.services.audit_redaction import sanitize_audit_details
 
 router = APIRouter(prefix="/review", tags=["review"])
+logger = logging.getLogger(__name__)
+
+REVISION_PENDIENTE = "REVISION_PENDIENTE"
+COMPLETADA = "COMPLETADA"
 
 
-def _status_from_audit(latest_action: str | None, activity: Activity) -> str:
-    if latest_action == "REVIEW_REJECT":
+def _review_status_from_firestore(activity_payload: dict) -> str:
+    decision = str(activity_payload.get("review_decision") or "").upper()
+    if decision == "REJECT":
         return "RECHAZADO"
-    if latest_action == "REVIEW_APPROVE":
+    if decision in {"APPROVE", "APPROVE_EXCEPTION"}:
         return "APROBADO"
-    if latest_action == "REVIEW_APPROVE_EXCEPTION":
-        return "APROBADO"
-    if activity.execution_state == ExecutionState.REVISION_PENDIENTE.value:
+    if str(activity_payload.get("execution_state") or "") == REVISION_PENDIENTE:
         return "PENDIENTE_REVISION"
     return "PENDIENTE_REVISION"
+
+
+def _safe_dt(value: object, fallback: datetime) -> datetime:
+    if isinstance(value, datetime):
+        return value
+    return fallback
+
+
+def _should_include_in_review_queue(execution_state: str | None, review_status: str, evidence_count: int) -> bool:
+    # Keep rejected activities visible in review queue/history views.
+    if review_status == "RECHAZADO":
+        return True
+    if review_status != "PENDIENTE_REVISION":
+        return False
+    return execution_state in {REVISION_PENDIENTE, COMPLETADA}
 
 
 def _severity_from_flags(gps_critical: bool, has_conflicts: bool, missing_evidence: bool) -> str:
@@ -55,165 +67,21 @@ def _severity_from_flags(gps_critical: bool, has_conflicts: bool, missing_eviden
     return "LOW"
 
 
-def _has_valid_gps_coordinates(activity: Activity) -> bool:
-    if not activity.latitude or not activity.longitude:
-        return False
+def _pk_label(pk_start: Any, pk_end: Any) -> str | None:
+    def _fmt(val: Any) -> str | None:
+        try:
+            n = int(val)
+            return f"{n // 1000}+{n % 1000:03d}"
+        except (TypeError, ValueError):
+            return str(val) if val else None
 
-    try:
-        lat = float(str(activity.latitude).strip())
-        lon = float(str(activity.longitude).strip())
-    except (TypeError, ValueError):
-        return False
-
-    return -90.0 <= lat <= 90.0 and -180.0 <= lon <= 180.0
-
-
-def _requires_gps_for_activity(
-    activity: Activity,
-    db: Session,
-    cache: dict[tuple[str, str], bool],
-) -> bool:
-    cache_key = (str(activity.catalog_version_id), activity.activity_type_code)
-    if cache_key in cache:
-        return cache[cache_key]
-
-    activity_type = (
-        db.query(CATActivityType)
-        .filter(
-            CATActivityType.version_id == activity.catalog_version_id,
-            CATActivityType.code == activity.activity_type_code,
-            CATActivityType.is_active.is_(True),
-        )
-        .first()
-    )
-
-    if activity_type is None:
-        cache[cache_key] = False
-        return False
-
-    evidence_rule = (
-        db.query(CATEvidenceRule)
-        .filter(
-            CATEvidenceRule.version_id == activity.catalog_version_id,
-            CATEvidenceRule.entity_type == EntityType.ACTIVITY,
-            CATEvidenceRule.type_id == activity_type.id,
-        )
-        .first()
-    )
-
-    requires_gps = bool(evidence_rule and evidence_rule.requires_gps)
-    cache[cache_key] = requires_gps
-    return requires_gps
-
-
-def _pk_outside_front_range(activity: Activity, front: Front | None) -> bool:
-    if front is None:
-        return False
-    if front.pk_start is None or front.pk_end is None:
-        return False
-
-    end_pk = activity.pk_end if activity.pk_end is not None else activity.pk_start
-    return activity.pk_start < front.pk_start or end_pk > front.pk_end
-
-
-def _compute_gps_critical(
-    activity: Activity,
-    front: Front | None,
-    db: Session,
-    gps_requirement_cache: dict[tuple[str, str], bool],
-) -> bool:
-    requires_gps = _requires_gps_for_activity(activity, db, gps_requirement_cache)
-    gps_missing_or_invalid = not _has_valid_gps_coordinates(activity)
-    pk_outside_front = _pk_outside_front_range(activity, front)
-
-    if requires_gps and gps_missing_or_invalid:
-        return True
-    if pk_outside_front:
-        return True
-    return False
-
-
-def _minimum_photos_required_for_activity(
-    activity: Activity,
-    db: Session,
-    cache: dict[tuple[str, str], int],
-) -> int:
-    cache_key = (str(activity.catalog_version_id), activity.activity_type_code)
-    if cache_key in cache:
-        return cache[cache_key]
-
-    activity_type = (
-        db.query(CATActivityType)
-        .filter(
-            CATActivityType.version_id == activity.catalog_version_id,
-            CATActivityType.code == activity.activity_type_code,
-            CATActivityType.is_active.is_(True),
-        )
-        .first()
-    )
-
-    if activity_type is None:
-        cache[cache_key] = 0
-        return 0
-
-    evidence_rule = (
-        db.query(CATEvidenceRule)
-        .filter(
-            CATEvidenceRule.version_id == activity.catalog_version_id,
-            CATEvidenceRule.entity_type == EntityType.ACTIVITY,
-            CATEvidenceRule.type_id == activity_type.id,
-        )
-        .first()
-    )
-
-    min_photos = int(evidence_rule.min_photos) if evidence_rule and evidence_rule.min_photos else 0
-    cache[cache_key] = min_photos
-    return min_photos
-
-
-def _pk_label(activity: Activity) -> str:
-    if activity.pk_end and activity.pk_end > activity.pk_start:
-        return f"PK {activity.pk_start}-{activity.pk_end}"
-    return f"PK {activity.pk_start}"
-
-
-def _validate_approval_checklist(activity: Activity, db: Session) -> list[str]:
-    missing: list[str] = []
-
-    activity_type = (
-        db.query(CATActivityType)
-        .filter(
-            CATActivityType.version_id == activity.catalog_version_id,
-            CATActivityType.code == activity.activity_type_code,
-            CATActivityType.is_active.is_(True),
-        )
-        .first()
-    )
-
-    if activity_type is None:
-        return missing
-
-    evidence_rule = (
-        db.query(CATEvidenceRule)
-        .filter(
-            CATEvidenceRule.version_id == activity.catalog_version_id,
-            CATEvidenceRule.entity_type == EntityType.ACTIVITY,
-            CATEvidenceRule.type_id == activity_type.id,
-        )
-        .first()
-    )
-
-    if evidence_rule is None:
-        return missing
-
-    evidence_count = db.query(Evidence).filter(Evidence.activity_id == activity.uuid).count()
-    if evidence_count < evidence_rule.min_photos:
-        missing.append(f"photo_min_{evidence_rule.min_photos}")
-
-    if evidence_rule.requires_gps and (not activity.latitude or not activity.longitude):
-        missing.append("gps_required")
-
-    return missing
+    start = _fmt(pk_start)
+    end   = _fmt(pk_end)
+    if start is None:
+        return None
+    if end is not None and pk_end != pk_start:
+        return f"PK {start}-{end}"
+    return f"PK {start}"
 
 
 
@@ -226,67 +94,98 @@ def review_queue(
     q: str | None = Query(None),
     from_dt: datetime | None = Query(None, alias="from"),
     to_dt: datetime | None = Query(None, alias="to"),
-    _current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
-    query = db.query(Activity)
-    if project_id:
-        query = query.filter(Activity.project_id == project_id)
-    if front_id:
-        query = query.filter(Activity.front_id == front_id)
-    if from_dt:
-        query = query.filter(Activity.created_at >= from_dt)
-    if to_dt:
-        query = query.filter(Activity.created_at <= to_dt)
-
-    activities = query.order_by(Activity.updated_at.desc()).limit(400).all()
+    client = get_firestore_client()
+    now = datetime.now(timezone.utc)
+    activities_docs = [d.to_dict() or {} for d in client.collection("activities").stream()]
+    fronts_map = {
+        str(doc.id): str((doc.to_dict() or {}).get("name") or "")
+        for doc in client.collection("fronts").stream()
+    }
+    users_map: dict[str, str] = {}
+    for doc in client.collection("users").stream():
+        u = doc.to_dict() or {}
+        name = str(u.get("display_name") or u.get("name") or u.get("email") or "").strip()
+        if name:
+            users_map[str(doc.id)] = name
+    evidences_docs = [d.to_dict() or {} for d in client.collection("evidences").stream()]
+    evidence_count_by_activity: dict[str, int] = {}
+    for ev in evidences_docs:
+        aid = str(ev.get("activity_id") or "")
+        if not aid:
+            continue
+        evidence_count_by_activity[aid] = evidence_count_by_activity.get(aid, 0) + 1
 
     items: list[ReviewQueueItemOut] = []
     counters = {"pending": 0, "changed": 0, "gps_critical": 0, "rejected": 0}
-    gps_requirement_cache: dict[tuple[str, str], bool] = {}
-    min_photos_cache: dict[tuple[str, str], int] = {}
 
-    for activity in activities:
-        front = db.query(Front).filter(Front.id == activity.front_id).first() if activity.front_id else None
-        front_name = front.name if front else None
-        evidence_count = db.query(Evidence).filter(Evidence.activity_id == activity.uuid).count()
-        latest_action = (
-            db.query(AuditLog.action)
-            .filter(AuditLog.entity == "activity", AuditLog.entity_id == str(activity.uuid))
-            .order_by(AuditLog.created_at.desc())
-            .scalar()
+    for activity in activities_docs:
+        if project_id and str(activity.get("project_id") or "") != project_id:
+            continue
+        if front_id and str(activity.get("front_id") or "") != front_id:
+            continue
+
+        created_at = _safe_dt(activity.get("created_at"), now)
+        updated_at = _safe_dt(activity.get("updated_at"), now)
+        if from_dt and created_at < from_dt:
+            continue
+        if to_dt and created_at > to_dt:
+            continue
+
+        lat = activity.get("latitude")
+        lon = activity.get("longitude")
+        gps_critical = bool(activity.get("gps_mismatch", False)) or not (lat and lon)
+        evidence_count = evidence_count_by_activity.get(str(activity.get("uuid") or ""), 0)
+        execution_state = str(activity.get("execution_state") or "")
+        status_value = _review_status_from_firestore(activity)
+        if not _should_include_in_review_queue(execution_state, status_value, evidence_count):
+            continue
+        missing_evidence = evidence_count == 0
+        catalog_change_pending = bool(activity.get("catalog_changed", False)) or bool(
+            activity.get("description") and "catalog" in str(activity.get("description")).lower()
         )
-
-        min_required_photos = _minimum_photos_required_for_activity(activity, db, min_photos_cache)
-        missing_evidence = evidence_count < min_required_photos if min_required_photos > 0 else evidence_count == 0
-        catalog_change_pending = bool(activity.description and "catalog" in activity.description.lower())
-        gps_critical = _compute_gps_critical(activity, front, db, gps_requirement_cache)
         checklist_incomplete = missing_evidence or gps_critical
         has_conflicts = catalog_change_pending or checklist_incomplete
         severity = _severity_from_flags(gps_critical, has_conflicts, missing_evidence)
-        status_value = _status_from_audit(latest_action, activity)
+        pk_label = _pk_label(activity.get("pk_start"), activity.get("pk_end")) or "PK 0+000"
 
-        item = ReviewQueueItemOut(
-            id=activity.uuid,
-            pk=_pk_label(activity),
-            front=front_name,
-            municipality=None,
-            activity_type=activity.activity_type_code,
-            risk="alto" if severity == "HIGH" else "medio" if severity == "MED" else "bajo",
-            created_at=activity.created_at,
-            updated_at=activity.updated_at,
-            status=status_value,
-            gps_critical=gps_critical,
-            missing_evidence=missing_evidence,
-            catalog_change_pending=catalog_change_pending,
-            checklist_incomplete=checklist_incomplete,
-            has_conflicts=has_conflicts,
-            severity=severity,
-            evidence_count=evidence_count,
-            conflict_count=1 if has_conflicts else 0,
-        )
+        assigned_uid = str(activity.get("assigned_to_user_id") or "").strip()
+        try:
+            item = ReviewQueueItemOut(
+                id=UUID(str(activity.get("uuid"))),
+                pk=pk_label,
+                front=fronts_map.get(str(activity.get("front_id") or "")) or None,
+                municipality=None,
+                activity_type=str(activity.get("activity_type_code") or ""),
+                title=str(activity.get("title") or "") or None,
+                project_id=str(activity.get("project_id") or "") or None,
+                assigned_to_user_name=users_map.get(assigned_uid) if assigned_uid else None,
+                risk="alto" if severity == "HIGH" else "medio" if severity == "MED" else "bajo",
+                created_at=created_at,
+                updated_at=updated_at,
+                status=status_value,
+                gps_critical=gps_critical,
+                missing_evidence=missing_evidence,
+                catalog_change_pending=catalog_change_pending,
+                checklist_incomplete=checklist_incomplete,
+                has_conflicts=has_conflicts,
+                severity=severity,
+                evidence_count=evidence_count,
+                conflict_count=1 if has_conflicts else 0,
+                lat=float(lat) if lat not in (None, "") else None,
+                lon=float(lon) if lon not in (None, "") else None,
+            )
+        except Exception as exc:
+            logger.warning(
+                "SKIP_MALFORMED_REVIEW_ITEM uuid=%s project_id=%s error=%s",
+                activity.get("uuid", "?"),
+                activity.get("project_id", "?"),
+                exc,
+            )
+            continue
 
-        searchable = f"{item.pk} {item.front or ''} {item.activity_type} {activity.title or ''}".lower()
+        searchable = f"{item.pk} {item.front or ''} {item.activity_type} {activity.get('title') or ''}".lower()
         if q and q.strip() and q.strip().lower() not in searchable:
             continue
         if only_conflicts and not item.has_conflicts:
@@ -305,8 +204,9 @@ def review_queue(
 
         items.append(item)
 
+    items.sort(key=lambda x: x.updated_at, reverse=True)
     return ReviewQueueResponse(
-        items=items,
+        items=items[:400],
         counters=ReviewQueueCountersOut(
             pending=counters["pending"],
             changed=counters["changed"],
@@ -319,75 +219,84 @@ def review_queue(
 @router.get("/activity/{activity_id}", response_model=ReviewActivityOut)
 def review_activity_detail(
     activity_id: str,
-    _current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
     try:
         activity_uuid = UUID(activity_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid activity id")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_ACTIVITY_ID", message="Invalid activity id")
 
-    activity = db.query(Activity).filter(Activity.uuid == activity_uuid).first()
-    if not activity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
-
-    front = db.query(Front).filter(Front.id == activity.front_id).first() if activity.front_id else None
-    front_name = front.name if front else None
-    latest_action = (
-        db.query(AuditLog.action)
-        .filter(AuditLog.entity == "activity", AuditLog.entity_id == str(activity.uuid))
-        .order_by(AuditLog.created_at.desc())
-        .scalar()
+    client = get_firestore_client()
+    activity_snap = client.collection("activities").document(str(activity_uuid)).get()
+    if not activity_snap.exists:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="REVIEW_ACTIVITY_NOT_FOUND", message="Activity not found")
+    activity = activity_snap.to_dict() or {}
+    wizard_payload_raw = activity.get("wizard_payload")
+    wizard_payload = wizard_payload_raw if isinstance(wizard_payload_raw, dict) else None
+    location_payload = wizard_payload.get("location") if isinstance(wizard_payload, dict) else None
+    municipality_from_payload = (
+        str((location_payload or {}).get("municipio") or "").strip()
+        if isinstance(location_payload, dict)
+        else ""
     )
-    current_status = _status_from_audit(latest_action, activity)
-
-    gps_critical = _compute_gps_critical(activity, front, db, gps_requirement_cache={})
-
+    municipality_value = municipality_from_payload or None
+    front_name = None
+    front_id = activity.get("front_id")
+    if front_id:
+        front_snap = client.collection("fronts").document(str(front_id)).get()
+        if front_snap.exists:
+            front_name = str((front_snap.to_dict() or {}).get("name") or "") or None
+    status_value = _review_status_from_firestore(activity)
+    gps_critical = bool(activity.get("gps_mismatch", False)) or not (activity.get("latitude") and activity.get("longitude"))
+    evidences = [
+        d.to_dict() or {}
+        for d in client.collection("evidences").stream()
+        if str((d.to_dict() or {}).get("activity_id") or "") == str(activity_uuid)
+    ]
     quality_flags = {
-        "evidence_ok": db.query(Evidence).filter(Evidence.activity_id == activity.uuid).count() > 0,
+        "evidence_ok": len(evidences) > 0,
         "gps_ok": not gps_critical,
-        "catalog_ok": not bool(activity.description and "catalog" in activity.description.lower()),
-        "required_fields_ok": bool(activity.title and activity.description),
+        "catalog_ok": not bool(activity.get("catalog_changed", False)),
+        "required_fields_ok": bool(activity.get("title") and activity.get("description")),
     }
-
     changeset: list[ReviewChangeFieldOut] = []
-    if activity.description and "catalog" in activity.description.lower():
+    if bool(activity.get("catalog_changed", False)):
         changeset.append(
             ReviewChangeFieldOut(
                 field_key="description",
-                original="Descripción original",
-                proposed=activity.description,
+                original="DescripciÃ³n original",
+                proposed=str(activity.get("description") or ""),
                 conflict_type="catalog_change",
                 suggested_options=["ACCEPT", "RESTORE", "CHOOSE_CATALOG"],
             )
         )
-
-    history_rows = (
-        db.query(AuditLog)
-        .filter(AuditLog.entity == "activity", AuditLog.entity_id == str(activity.uuid))
-        .order_by(AuditLog.created_at.desc())
-        .limit(20)
-        .all()
-    )
+    history_rows = [
+        d.to_dict() or {}
+        for d in client.collection("audit_logs").stream()
+        if (d.to_dict() or {}).get("entity") == "activity"
+        and str((d.to_dict() or {}).get("entity_id") or "") == str(activity_uuid)
+    ]
+    history_rows.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)), reverse=True)
     history = [
         {
-            "at": row.created_at.isoformat(),
-            "actor": row.actor_email,
-            "action": row.action,
-            "details": row.details_json,
+            "at": _safe_dt(row.get("created_at"), datetime.now(timezone.utc)).isoformat(),
+            "actor": row.get("actor_email"),
+            "action": row.get("action"),
+            "details": sanitize_audit_details(row.get("details_json")),
         }
-        for row in history_rows
+        for row in history_rows[:20]
     ]
-
     return ReviewActivityOut(
-        id=activity.uuid,
-        project_id=activity.project_id,
+        id=activity_uuid,
+        project_id=str(activity.get("project_id") or ""),
         front=front_name,
-        municipality=None,
-        activity_type=activity.activity_type_code,
-        title=activity.title,
-        description=activity.description,
-        status=current_status,
+        activity_type=str(activity.get("activity_type_code") or ""),
+        title=activity.get("title"),
+        description=activity.get("description"),
+        wizard_payload=wizard_payload,
+        municipality=municipality_value,
+        pk=_pk_label(activity.get("pk_start"), activity.get("pk_end")),
+        status=status_value,
         quality_flags=quality_flags,
         changeset=changeset,
         history=history,
@@ -397,34 +306,34 @@ def review_activity_detail(
 @router.get("/activity/{activity_id}/evidences", response_model=list[ReviewEvidenceOut])
 def review_activity_evidences(
     activity_id: str,
-    _current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
     try:
         activity_uuid = UUID(activity_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid activity id")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_ACTIVITY_ID", message="Invalid activity id")
 
-    evidences = (
-        db.query(Evidence)
-        .filter(Evidence.activity_id == activity_uuid)
-        .order_by(Evidence.created_at.asc())
-        .all()
-    )
-
+    client = get_firestore_client()
+    evidences_docs = [
+        d.to_dict() or {}
+        for d in client.collection("evidences").stream()
+        if str((d.to_dict() or {}).get("activity_id") or "") == str(activity_uuid)
+    ]
+    evidences_docs.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)))
     return [
         ReviewEvidenceOut(
-            id=evidence.id,
-            takenAt=evidence.created_at,
+            id=UUID(str(row.get("id"))),
+            takenAt=_safe_dt(row.get("created_at"), datetime.now(timezone.utc)),
             lat=None,
             lng=None,
             accuracy=None,
             device=None,
-            description=evidence.caption,
-            gcsKey=evidence.object_path,
-            status="UPLOADED" if evidence.object_path else "PENDING",
+            description=row.get("caption"),
+            gcsKey=row.get("object_path"),
+            status="UPLOADED" if row.get("object_path") else "PENDING",
         )
-        for evidence in evidences
+        for row in evidences_docs
+        if row.get("id")
     ]
 
 
@@ -432,27 +341,42 @@ def review_activity_evidences(
 def review_validate_evidence(
     evidence_id: str,
     body: ReviewEvidenceValidateIn,
-    current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
 ):
     try:
         evidence_uuid = UUID(evidence_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence id")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_EVIDENCE_ID", message="Invalid evidence id")
 
-    evidence = db.query(Evidence).filter(Evidence.id == evidence_uuid).first()
-    if not evidence:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found")
-
-    write_audit_log(
-        db,
-        action="REVIEW_EVIDENCE_VALIDATE",
-        entity="evidence",
-        entity_id=str(evidence.id),
-        actor=current_user,
-        details={"status": body.status, "reason_code": body.reason_code, "comment": body.comment},
+    client = get_firestore_client()
+    evidence_ref = client.collection("evidences").document(str(evidence_uuid))
+    if not evidence_ref.get().exists:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="REVIEW_EVIDENCE_NOT_FOUND", message="Evidence not found")
+    now = datetime.now(timezone.utc)
+    client.collection("review_evidence_actions").document(str(uuid4())).set(
+        {
+            "evidence_id": str(evidence_uuid),
+            "action": "REVIEW_EVIDENCE_VALIDATE",
+            "status": body.status,
+            "reason_code": body.reason_code,
+            "comment": body.comment,
+            "actor_id": str(getattr(current_user, "id", "")),
+            "actor_email": getattr(current_user, "email", ""),
+            "created_at": now,
+        }
     )
-    db.commit()
+    client.collection("audit_logs").document(str(uuid4())).set(
+        {
+            "id": str(uuid4()),
+            "created_at": now,
+            "actor_id": str(getattr(current_user, "id", "")),
+            "actor_email": getattr(current_user, "email", ""),
+            "action": "REVIEW_EVIDENCE_VALIDATE",
+            "entity": "evidence",
+            "entity_id": str(evidence_uuid),
+            "details_json": json.dumps({"status": body.status, "reason_code": body.reason_code, "comment": body.comment}),
+        }
+    )
     return {"ok": True}
 
 
@@ -460,28 +384,29 @@ def review_validate_evidence(
 def review_patch_evidence(
     evidence_id: str,
     body: ReviewEvidencePatchIn,
-    current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
-    db: Session = Depends(get_db),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
     try:
         evidence_uuid = UUID(evidence_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid evidence id")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_EVIDENCE_ID", message="Invalid evidence id")
 
-    evidence = db.query(Evidence).filter(Evidence.id == evidence_uuid).first()
-    if not evidence:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence not found")
-
-    evidence.caption = body.description
-    write_audit_log(
-        db,
-        action="REVIEW_EVIDENCE_PATCH",
-        entity="evidence",
-        entity_id=str(evidence.id),
-        actor=current_user,
-        details={"description": body.description},
+    client = get_firestore_client()
+    evidence_ref = client.collection("evidences").document(str(evidence_uuid))
+    if not evidence_ref.get().exists:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="REVIEW_EVIDENCE_NOT_FOUND", message="Evidence not found")
+    now = datetime.now(timezone.utc)
+    evidence_ref.set({"caption": body.description, "updated_at": now}, merge=True)
+    client.collection("review_evidence_actions").document(str(uuid4())).set(
+        {
+            "evidence_id": str(evidence_uuid),
+            "action": "REVIEW_EVIDENCE_PATCH",
+            "description": body.description,
+            "actor_id": str(getattr(current_user, "id", "")),
+            "actor_email": getattr(current_user, "email", ""),
+            "created_at": now,
+        }
     )
-    db.commit()
     return {"ok": True}
 
 
@@ -489,105 +414,96 @@ def review_patch_evidence(
 def review_decision(
     activity_id: str,
     body: ReviewDecisionIn,
-    current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
-    db: Session = Depends(get_db),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
 ):
     try:
         activity_uuid = UUID(activity_id)
     except ValueError:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid activity id")
-
-    activity = db.query(Activity).filter(Activity.uuid == activity_uuid).first()
-    if not activity:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Activity not found")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_ACTIVITY_ID", message="Invalid activity id")
 
     decision = body.decision.upper().strip()
     if decision not in {"APPROVE", "REJECT", "APPROVE_EXCEPTION"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid decision")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_DECISION", message="Invalid decision")
 
     if decision == "APPROVE_EXCEPTION" and not (body.comment and body.comment.strip()):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Exception approval requires comment")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_EXCEPTION_REQUIRES_COMMENT", message="Exception approval requires comment")
 
-    if decision == "APPROVE_EXCEPTION" and not user_has_any_role(current_user, ["ADMIN"], db):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="APPROVE_EXCEPTION requires ADMIN role")
+    if decision == "APPROVE_EXCEPTION" and not user_has_any_role(current_user, ["ADMIN"], None):
+        raise api_error(status_code=status.HTTP_403_FORBIDDEN, code="REVIEW_EXCEPTION_REQUIRES_ADMIN", message="APPROVE_EXCEPTION requires ADMIN role")
+
+    client = get_firestore_client()
+    now = datetime.now(timezone.utc)
+
+    activity_ref = client.collection("activities").document(str(activity_uuid))
+    activity_snap = activity_ref.get()
+    if not activity_snap.exists:
+        docs = (
+            client.collection("activities")
+            .where("uuid", "==", str(activity_uuid))
+            .limit(1)
+            .stream()
+        )
+        activity_doc = next(iter(docs), None)
+        if activity_doc is None:
+            raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="REVIEW_ACTIVITY_NOT_FOUND", message="Activity not found")
+        activity_ref = activity_doc.reference
+        activity_payload = activity_doc.to_dict() or {}
+    else:
+        activity_payload = activity_snap.to_dict() or {}
 
     if decision == "REJECT":
         if not body.reject_reason_code:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="reject_reason_code is required when decision is REJECT",
-            )
-        reject_reason = (
-            db.query(RejectReason)
-            .filter(
-                RejectReason.reason_code == body.reject_reason_code.strip().upper(),
-                RejectReason.is_active.is_(True),
-            )
-            .first()
-        )
-        if not reject_reason:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"reject_reason_code '{body.reject_reason_code}' not found or inactive",
-            )
-        if reject_reason.requires_comment and not (body.comment and body.comment.strip()):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"reject_reason_code '{reject_reason.reason_code}' requires comment"
-                ),
-            )
+            raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_REJECT_REASON_REQUIRED", message="reject_reason_code is required when decision is REJECT")
 
-    if decision == "APPROVE":
-        missing_items = _validate_approval_checklist(activity, db)
-        if missing_items:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail={
-                    "error": "CHECKLIST_INCOMPLETE",
-                    "activity_id": str(activity.uuid),
-                    "activity_type": activity.activity_type_code,
-                    "missing_items": missing_items,
-                },
-            )
+    next_state = COMPLETADA if decision in {"APPROVE", "APPROVE_EXCEPTION"} else REVISION_PENDIENTE
+    next_sync_version = int(activity_payload.get("sync_version") or 0) + 1
+    action = "REVIEW_APPROVE_EXCEPTION" if decision == "APPROVE_EXCEPTION" else ("REVIEW_APPROVE" if decision == "APPROVE" else "REVIEW_REJECT")
 
-    if decision in {"APPROVE", "APPROVE_EXCEPTION"}:
-        activity.execution_state = ExecutionState.COMPLETADA.value
-        action = "REVIEW_APPROVE_EXCEPTION" if decision == "APPROVE_EXCEPTION" else "REVIEW_APPROVE"
-    else:
-        activity.execution_state = ExecutionState.REVISION_PENDIENTE.value
-        action = "REVIEW_REJECT"
-    activity.increment_sync_version()
+    activity_ref.set(
+        {
+            "execution_state": next_state,
+            "sync_version": next_sync_version,
+            "updated_at": now,
+            "review_decision": decision,
+            "review_reject_reason_code": body.reject_reason_code,
+            "review_comment": body.comment,
+            "last_reviewed_by": str(getattr(current_user, "id", "")),
+            "last_reviewed_at": now,
+        },
+        merge=True,
+    )
 
-    write_audit_log(
-        db,
-        action=action,
-        entity="activity",
-        entity_id=str(activity.uuid),
-        actor=current_user,
-        details={
+    client.collection("review_decisions").document(str(uuid4())).set(
+        {
+            "activity_id": str(activity_uuid),
+            "project_id": activity_payload.get("project_id"),
             "decision": decision,
+            "status": "RECHAZADO" if decision == "REJECT" else "APROBADO",
+            "action": action,
             "reject_reason_code": body.reject_reason_code,
             "comment": body.comment,
             "field_resolutions": [resolution.model_dump() for resolution in body.field_resolutions],
             "apply_to_similar": body.apply_to_similar,
-        },
+            "actor_id": str(getattr(current_user, "id", "")),
+            "actor_email": getattr(current_user, "email", ""),
+            "created_at": now,
+            "activity_sync_version": next_sync_version,
+        }
     )
-    db.commit()
 
     if decision == "REJECT" and body.comment:
-        obs = Observation(
-            project_id=activity.project_id,
-            activity_id=activity.uuid,
-            assignee_user_id=activity.assigned_to_user_id,
-            tags_json=json.dumps(["review", "correction"]),
-            message=body.comment,
-            severity="HIGH",
-            status="OPEN",
+        client.collection("observations").document(str(uuid4())).set(
+            {
+                "project_id": activity_payload.get("project_id"),
+                "activity_id": str(activity_uuid),
+                "assignee_user_id": activity_payload.get("assigned_to_user_id"),
+                "tags_json": json.dumps(["review", "correction"]),
+                "message": body.comment,
+                "severity": "HIGH",
+                "status": "OPEN",
+                "created_at": now,
+            }
         )
-        db.add(obs)
-        db.flush()
-        db.commit()
 
     return ReviewDecisionOut(ok=True, status="RECHAZADO" if decision == "REJECT" else "APROBADO")
 
@@ -595,57 +511,65 @@ def review_decision(
 @router.get("/reject-playbook", response_model=ReviewRejectPlaybookResponse)
 def review_reject_playbook(
     project_id: str | None = Query(None),
-    _current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
     _ = project_id
-    rows = (
-        db.query(RejectReason)
-        .filter(RejectReason.is_active.is_(True))
-        .order_by(RejectReason.reason_code.asc())
-        .all()
+    client = get_firestore_client()
+    rows = [d.to_dict() or {} for d in client.collection("reject_reasons").stream()]
+    rows = [row for row in rows if bool(row.get("is_active", True))]
+    rows.sort(key=lambda row: str(row.get("reason_code") or ""))
+    if not rows:
+        rows = [
+            {"reason_code": "PHOTO_BLUR", "label": "Foto borrosa o ilegible", "severity": "MED", "requires_comment": False},
+            {"reason_code": "GPS_MISMATCH", "label": "GPS no coincide con PK declarados", "severity": "HIGH", "requires_comment": False},
+            {"reason_code": "MISSING_INFO", "label": "Informacion obligatoria ausente", "severity": "MED", "requires_comment": True},
+        ]
+    return ReviewRejectPlaybookResponse(
+        items=[
+            ReviewRejectPlaybookItemOut(
+                reason_code=str(row.get("reason_code") or ""),
+                label=str(row.get("label") or ""),
+                severity=str(row.get("severity") or "MED"),
+                requires_comment=bool(row.get("requires_comment", False)),
+            )
+            for row in rows
+            if row.get("reason_code") and row.get("label")
+        ]
     )
-    items = [
-        ReviewRejectPlaybookItemOut(
-            reason_code=row.reason_code,
-            label=row.label,
-            severity=row.severity,
-            requires_comment=row.requires_comment,
-        )
-        for row in rows
-    ]
-    return ReviewRejectPlaybookResponse(items=items)
 
 
 @router.post("/reject-reasons", response_model=ReviewRejectPlaybookItemOut)
 def create_reject_reason(
     body: ReviewRejectReasonCreateIn,
-    current_user: User = Depends(require_any_role(["ADMIN"])),
-    db: Session = Depends(get_db),
+    current_user: Any = Depends(require_any_role(["ADMIN"])),
 ):
     reason_code = body.reason_code.strip().upper()
     if not reason_code:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="reason_code is required")
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_REJECT_REASON_CODE_REQUIRED", message="reason_code is required")
 
-    existing = db.query(RejectReason).filter(RejectReason.reason_code == reason_code).first()
+    client = get_firestore_client()
+    existing = [
+        d.to_dict() or {}
+        for d in client.collection("reject_reasons").stream()
+        if str((d.to_dict() or {}).get("reason_code") or "") == reason_code
+    ]
     if existing:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=f"Reason {reason_code} already exists")
+        raise api_error(status_code=status.HTTP_409_CONFLICT, code="REVIEW_REJECT_REASON_DUPLICATE", message=f"Reason {reason_code} already exists")
 
-    reason = RejectReason(
-        reason_code=reason_code,
-        label=body.label.strip(),
-        severity=body.severity.strip().upper() if body.severity else "MED",
-        requires_comment=body.requires_comment,
-        is_active=True,
-        created_by_id=current_user.id,
-    )
-    db.add(reason)
-    db.commit()
-    db.refresh(reason)
-
+    payload = {
+        "reason_code": reason_code,
+        "label": body.label.strip(),
+        "severity": body.severity.strip().upper() if body.severity else "MED",
+        "requires_comment": body.requires_comment,
+        "is_active": True,
+        "created_by_id": str(getattr(current_user, "id", "")),
+        "created_at": datetime.now(timezone.utc),
+    }
+    client.collection("reject_reasons").document(reason_code).set(payload)
     return ReviewRejectPlaybookItemOut(
-        reason_code=reason.reason_code,
-        label=reason.label,
-        severity=reason.severity,
-        requires_comment=reason.requires_comment,
+        reason_code=payload["reason_code"],
+        label=payload["label"],
+        severity=payload["severity"],
+        requires_comment=payload["requires_comment"],
     )
+

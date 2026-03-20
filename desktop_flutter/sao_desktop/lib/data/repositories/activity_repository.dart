@@ -1,13 +1,11 @@
-import 'dart:async';
-
-import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:drift/drift.dart' show Value;
+
 import '../../core/config/data_mode.dart';
+import '../catalog/activity_status.dart';
 import '../database/app_database.dart';
 import '../models/activity_model.dart';
-import '../catalog/activity_status.dart';
 import 'backend_api_client.dart';
-import 'review_decision_outbox.dart';
 
 final activityRepositoryProvider = Provider<ActivityRepository>((ref) {
   final db = ref.watch(databaseProvider);
@@ -17,47 +15,20 @@ final activityRepositoryProvider = Provider<ActivityRepository>((ref) {
 class ActivityRepository {
   final AppDatabase _db;
   final BackendApiClient _apiClient = const BackendApiClient();
-  final ReviewDecisionOutbox _reviewOutbox = ReviewDecisionOutbox.shared;
 
   ActivityRepository(this._db);
 
-  Future<List<RejectionPlaybookItem>> getRejectPlaybook({String? projectId}) async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    if (baseUrl.isEmpty) {
-      return const [
-        RejectionPlaybookItem(
-          reasonCode: 'PHOTO_BLUR',
-          label: 'Foto borrosa',
-          severity: 'MED',
-          requiresComment: false,
-        ),
-        RejectionPlaybookItem(
-          reasonCode: 'GPS_MISMATCH',
-          label: 'GPS no coincide',
-          severity: 'HIGH',
-          requiresComment: true,
-        ),
-        RejectionPlaybookItem(
-          reasonCode: 'MISSING_INFO',
-          label: 'Falta información',
-          severity: 'MED',
-          requiresComment: true,
-        ),
-      ];
-    }
+  String _requireBackend() => AppDataMode.requireRealBackendUrl();
 
+  Future<List<RejectionPlaybookItem>> getRejectPlaybook({String? projectId}) async {
+    _requireBackend();
     final query = (projectId != null && projectId.trim().isNotEmpty)
         ? '?project_id=${Uri.encodeQueryComponent(projectId.trim())}'
         : '';
     final decoded = await _apiClient.getJson('/api/v1/review/reject-playbook$query');
-    if (decoded is! Map<String, dynamic>) {
-      return const [];
-    }
-
+    if (decoded is! Map<String, dynamic>) return const [];
     final items = decoded['items'];
-    if (items is! List) {
-      return const [];
-    }
+    if (items is! List) return const [];
 
     return items
         .whereType<Map<String, dynamic>>()
@@ -68,29 +39,20 @@ class ActivityRepository {
               requiresComment: (item['requires_comment'] as bool?) ?? false,
             ))
         .where((item) => item.reasonCode.isNotEmpty)
-        .toList();
+        .toList(growable: false);
   }
 
   Future<void> updateEvidenceCaption(String evidenceId, String caption) async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    if (baseUrl.isEmpty) {
-      return;
-    }
+    _requireBackend();
     await _apiClient.patchJson('/api/v1/review/evidence/$evidenceId', {
       'description': caption,
     });
   }
 
   Future<List<ActivityTimelineEntry>> getActivityTimeline(String activityId) async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    if (baseUrl.isEmpty) {
-      return const [];
-    }
-
+    _requireBackend();
     final decoded = await _apiClient.getJson('/api/v1/activities/$activityId/timeline');
-    if (decoded is! List) {
-      return const [];
-    }
+    if (decoded is! List) return const [];
 
     return decoded
         .whereType<Map<String, dynamic>>()
@@ -103,7 +65,6 @@ class ActivityRepository {
               : detailsRaw is Map
                   ? detailsRaw.cast<String, dynamic>()
                   : null;
-
           return ActivityTimelineEntry(
             at: at,
             actor: item['actor']?.toString(),
@@ -114,330 +75,353 @@ class ActivityRepository {
         .toList(growable: false);
   }
 
-  // Obtener actividades pendientes de revisión
-  Stream<List<ActivityWithDetails>> watchPendingReview() {
-    return _watchPendingReviewFromBackendOrDb();
+  Future<ActivityWithDetails?> hydrateReviewActivity(ActivityWithDetails summary) async {
+    _requireBackend();
+    final detail = await _apiClient.getJson('/api/v1/review/activity/${summary.activity.id}');
+    final evidencesJson = await _apiClient.getJson('/api/v1/review/activity/${summary.activity.id}/evidences');
+    if (detail is! Map<String, dynamic>) {
+      return summary;
+    }
+
+    final now = DateTime.now();
+    final detailTitle = (detail['title'] ?? '').toString().trim();
+    final detailDescription = detail['description']?.toString().trim();
+    final detailFront = detail['front']?.toString().trim();
+    final detailMunicipality = detail['municipality']?.toString().trim();
+    final wizardPayloadRaw = detail['wizard_payload'];
+    final wizardPayload = wizardPayloadRaw is Map<String, dynamic>
+      ? wizardPayloadRaw
+      : wizardPayloadRaw is Map
+        ? wizardPayloadRaw.cast<String, dynamic>()
+        : null;
+    final activityTypeCode = (detail['activity_type'] ?? summary.activityType?.code ?? '').toString().trim();
+    final qualityFlagsRaw = detail['quality_flags'];
+    final qualityFlags = qualityFlagsRaw is Map<String, dynamic>
+        ? qualityFlagsRaw
+        : qualityFlagsRaw is Map
+            ? qualityFlagsRaw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+
+    final evidences = _parseReviewEvidences(
+      summary.activity.id,
+      evidencesJson,
+      now,
+    );
+
+    return ActivityWithDetails(
+      activity: summary.activity.copyWith(
+        title: detailTitle.isEmpty ? summary.activity.title : detailTitle,
+        description: Value(
+          detailDescription?.isNotEmpty == true
+              ? detailDescription
+              : summary.activity.description,
+        ),
+      ),
+      activityType: ActivityType(
+        id: summary.activityType?.id ?? 'act-type-${activityTypeCode.isEmpty ? summary.activity.title : activityTypeCode}',
+        name: activityTypeCode.isEmpty ? (summary.activityType?.name ?? summary.activity.title) : activityTypeCode,
+        code: activityTypeCode.isEmpty ? (summary.activityType?.code ?? summary.activity.title) : activityTypeCode,
+        projectId: summary.activity.projectId,
+      ),
+      assignedUser: summary.assignedUser,
+      front: Front(
+        id: summary.front?.id ?? _slugify(detailFront ?? summary.front?.name ?? 'sin-frente'),
+        name: detailFront?.isNotEmpty == true ? detailFront! : (summary.front?.name ?? 'Sin frente'),
+        projectId: summary.activity.projectId,
+      ),
+      municipality: Municipality(
+        id: summary.municipality?.id ?? _slugify(detailMunicipality ?? summary.municipality?.name ?? 'sin-municipio'),
+        name: detailMunicipality?.isNotEmpty == true ? detailMunicipality! : (summary.municipality?.name ?? 'Sin municipio'),
+        state: summary.municipality?.state ?? '',
+      ),
+      evidences: evidences,
+      flags: ActivityFlags(
+        gpsMismatch: !(qualityFlags['gps_ok'] as bool? ?? !summary.flags.gpsMismatch),
+        catalogChanged: !(qualityFlags['catalog_ok'] as bool? ?? !summary.flags.catalogChanged),
+        checklistIncomplete: !(qualityFlags['required_fields_ok'] as bool? ?? !summary.flags.checklistIncomplete) ||
+            !(qualityFlags['evidence_ok'] as bool? ?? evidences.isNotEmpty),
+      ),
+      pkLabel: (detail['pk'] as String?)?.trim().isNotEmpty == true
+          ? (detail['pk'] as String).trim()
+          : summary.pkLabel,
+      wizardPayload: wizardPayload,
+    );
   }
 
-  Stream<List<ActivityWithDetails>> _watchPendingReviewFromBackendOrDb() {
-    return Stream.fromFuture(_fetchPendingReviewFromBackend()).asyncExpand((backendData) {
-      if (backendData != null && backendData.isNotEmpty) {
-        return Stream.value(backendData);
-      }
-      return _watchPendingReviewFromDb();
-    });
+  Stream<List<ActivityWithDetails>> watchPendingReview({String? projectId}) {
+    _requireBackend();
+    return Stream.fromFuture(
+      _fetchPendingReviewFromBackend(projectId: projectId),
+    );
   }
 
-  Stream<List<ActivityWithDetails>> _watchPendingReviewFromDb() {
-    return (_db.select(_db.activities)
-          ..where((a) => a.status.equals(ActivityStatus.pendingReview))
-          ..orderBy([(a) => OrderingTerm.desc(a.executedAt)]))
-        .watch()
-        .asyncMap((activities) async {
-      final results = <ActivityWithDetails>[];
-      for (final activity in activities) {
-        final details = await _getActivityDetails(activity);
-        results.add(details);
-      }
-      return results;
-    });
-  }
+  Future<List<ActivityWithDetails>> _fetchPendingReviewFromBackend({
+    String? projectId,
+  }) async {
+    _requireBackend();
+    final selectedProjectId = projectId?.trim() ?? '';
+    String normalizeProject(String? value) =>
+        (value ?? '').trim().toUpperCase();
 
-  Future<List<ActivityWithDetails>?> _fetchPendingReviewFromBackend() async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    if (baseUrl.isEmpty) return null;
-
-    try {
-      final decoded = await _apiClient.getJson('/api/v1/review/queue');
-      if (decoded is! Map<String, dynamic>) return null;
+    Future<List<dynamic>> fetchItemsForProject(String? pid) async {
+      final query = (pid == null || pid.isEmpty)
+          ? ''
+          : '?project_id=${Uri.encodeQueryComponent(pid)}';
+      final decoded = await _apiClient.getJson('/api/v1/review/queue$query');
+      if (decoded is! Map<String, dynamic>) return const [];
       final items = decoded['items'];
-      if (items is! List) return null;
+      if (items is! List) return const [];
+      return items;
+    }
 
-      final now = DateTime.now();
-      final result = <ActivityWithDetails>[];
+    var items = await fetchItemsForProject(
+      selectedProjectId.isEmpty ? null : selectedProjectId,
+    );
 
-      for (final item in items) {
-        if (item is! Map<String, dynamic>) continue;
-        final activityId = item['id']?.toString() ?? '';
-        if (activityId.isEmpty) continue;
+    // Strict by project, but tolerant to backend case-sensitive matching.
+    if (items.isEmpty && selectedProjectId.isNotEmpty) {
+      final lower = selectedProjectId.toLowerCase();
+      final upper = selectedProjectId.toUpperCase();
+      if (selectedProjectId != lower) {
+        items = await fetchItemsForProject(lower);
+      }
+      if (items.isEmpty && selectedProjectId != upper) {
+        items = await fetchItemsForProject(upper);
+      }
 
-        final activityTypeCode = (item['activity_type'] ?? 'ACT').toString().toUpperCase();
-        final activityTypeName = activityTypeCode;
-        final rawStatus = (item['status'] ?? 'PENDIENTE_REVISION').toString();
-        final status = switch (rawStatus) {
-          'APROBADO' => ActivityStatus.approved,
-          'RECHAZADO' => ActivityStatus.rejected,
-          _ => ActivityStatus.pendingReview,
-        };
-        final pkLabel = (item['pk'] ?? '').toString();
-        final frontName = (item['front'] ?? 'Sin frente').toString();
-        final municipalityName = (item['municipality'] ?? 'Sin municipio').toString();
-        final gpsMismatch = (item['gps_critical'] as bool?) ?? false;
-        final catalogChanged = (item['catalog_change_pending'] as bool?) ?? false;
-        final checklistIncomplete = (item['checklist_incomplete'] as bool?) ?? false;
+      // Final strict fallback: fetch all and keep only the selected project.
+      // This avoids mixed results while compensating for backend filtering edge cases.
+      if (items.isEmpty) {
+        final allItems = await fetchItemsForProject(null);
+        final selectedNorm = normalizeProject(selectedProjectId);
+        items = allItems.where((raw) {
+          if (raw is! Map<String, dynamic>) return false;
+          return normalizeProject(raw['project_id']?.toString()) == selectedNorm;
+        }).toList(growable: false);
+      }
+    }
 
-        final activity = Activity(
-          id: activityId,
-          projectId: (item['project_id'] ?? 'proj-backend').toString(),
-          activityTypeId: 'act-type-$activityTypeCode',
-          assignedTo: (item['assignedTo'] ?? 'usr-backend').toString(),
-          frontId: null,
-          municipalityId: null,
-          title: activityTypeName,
-          description: pkLabel,
-          status: status,
-          executedAt: DateTime.tryParse((item['created_at'] ?? '').toString()),
-          reviewedAt: DateTime.tryParse((item['reviewedAt'] ?? '').toString()),
-          reviewedBy: item['reviewedBy']?.toString(),
-          reviewComments: item['reviewComments']?.toString(),
-          latitude: null,
-          longitude: null,
-          createdAt: DateTime.tryParse((item['created_at'] ?? '').toString()) ?? now,
-        );
+    final now = DateTime.now();
+    final result = <ActivityWithDetails>[];
 
-        final type = ActivityType(
-          id: activity.activityTypeId,
-          name: activityTypeName,
-          code: activityTypeCode,
-          projectId: activity.projectId,
-        );
+    for (final raw in items) {
+      if (raw is! Map<String, dynamic>) continue;
+      final activityId = (raw['id'] ?? '').toString().trim();
+      if (activityId.isEmpty) continue;
 
-        final user = User(
-          id: activity.assignedTo,
-          email: (item['assignedEmail'] ?? 'backend@sao.local').toString(),
-          fullName: (item['assignedName'] ?? 'Sin responsable').toString(),
-          role: (item['assignedRole'] ?? 'ENGINEER').toString(),
-          status: 'ACTIVE',
-          createdAt: now,
-        );
+      final activityTypeCode = (raw['activity_type'] ?? 'ACT').toString().toUpperCase();
+      final statusRaw = (raw['status'] ?? 'PENDIENTE_REVISION').toString();
+      final status = switch (statusRaw) {
+        'APROBADO' => ActivityStatus.approved,
+        'RECHAZADO' => ActivityStatus.rejected,
+        _ => ActivityStatus.pendingReview,
+      };
+      final frontName = (raw['front'] ?? 'Sin frente').toString();
+      final municipalityName = (raw['municipality'] ?? 'Sin municipio').toString();
+      final evidenceCount = (raw['evidence_count'] as num?)?.toInt() ?? 0;
 
-        final municipality = Municipality(
-          id: municipalityName.toLowerCase().replaceAll(' ', '-'),
-          name: municipalityName,
-          state: (item['state'] ?? 'N/A').toString(),
-        );
+      final activity = Activity(
+        id: activityId,
+        projectId: (raw['project_id'] ?? '').toString(),
+        activityTypeId: 'act-type-$activityTypeCode',
+        assignedTo: (raw['assigned_to_user_id'] ?? 'usr-backend').toString(),
+        frontId: null,
+        municipalityId: null,
+        title: (raw['title'] ?? activityTypeCode).toString(),
+        description: (raw['pk'] ?? '').toString(),
+        status: status,
+        executedAt: DateTime.tryParse((raw['created_at'] ?? '').toString()),
+        reviewedAt: DateTime.tryParse((raw['reviewed_at'] ?? '').toString()),
+        reviewedBy: raw['reviewed_by']?.toString(),
+        reviewComments: raw['review_comments']?.toString(),
+        latitude: null,
+        longitude: null,
+        createdAt: DateTime.tryParse((raw['created_at'] ?? '').toString()) ?? now,
+      );
 
-        final evidences = <Evidence>[];
-        final evidenceCount = (item['evidence_count'] as num?)?.toInt() ?? 0;
-        for (var index = 0; index < evidenceCount; index++) {
-          evidences.add(Evidence(
-            id: 'ev-$activityId-$index',
-            activityId: activityId,
-            filePath: 'backend://evidence/$activityId/$index',
-            fileType: 'IMAGE',
-            capturedAt: now,
-          ));
-        }
+      final evidences = List<Evidence>.generate(
+        evidenceCount,
+        (index) => Evidence(
+          id: 'ev-$activityId-$index',
+          activityId: activityId,
+          filePath: 'backend://evidence/$activityId/$index',
+          fileType: 'IMAGE',
+          capturedAt: now,
+        ),
+      );
 
-        result.add(ActivityWithDetails(
+      result.add(
+        ActivityWithDetails(
           activity: activity,
-          activityType: type,
-          assignedUser: user,
+          activityType: ActivityType(
+            id: activity.activityTypeId,
+            name: activityTypeCode,
+            code: activityTypeCode,
+            projectId: activity.projectId,
+          ),
+          assignedUser: User(
+            id: activity.assignedTo,
+            email: (raw['assigned_to_user_email'] ?? 'backend@sao.mx').toString(),
+            fullName: (raw['assigned_to_user_name'] ?? 'Sin responsable').toString(),
+            role: (raw['assigned_to_user_role'] ?? 'OPERATIVO').toString(),
+            status: 'ACTIVE',
+            createdAt: now,
+          ),
           front: Front(
             id: frontName.toLowerCase().replaceAll(' ', '-'),
             name: frontName,
             projectId: activity.projectId,
           ),
-          municipality: municipality,
+          municipality: Municipality(
+            id: municipalityName.toLowerCase().replaceAll(' ', '-'),
+            name: municipalityName,
+            state: (raw['state'] ?? '').toString(),
+          ),
           evidences: evidences,
           flags: ActivityFlags(
-            gpsMismatch: gpsMismatch,
-            catalogChanged: catalogChanged,
-            checklistIncomplete: checklistIncomplete,
+            gpsMismatch: (raw['gps_critical'] as bool?) ?? false,
+            catalogChanged: (raw['catalog_change_pending'] as bool?) ?? false,
+            checklistIncomplete: (raw['checklist_incomplete'] as bool?) ?? false,
           ),
-        ));
-      }
-
-      return result;
-    } catch (_) {
-      return null;
+          pkLabel: (raw['pk'] as String?)?.trim(),
+        ),
+      );
     }
+
+    return result;
   }
 
-  // Obtener detalles de una actividad
-  Future<ActivityWithDetails> _getActivityDetails(Activity activity) async {
-    final actType = await (_db.select(_db.activityTypes)
-          ..where((t) => t.id.equals(activity.activityTypeId)))
-        .getSingleOrNull();
-
-    final user = await (_db.select(_db.users)
-          ..where((u) => u.id.equals(activity.assignedTo)))
-        .getSingleOrNull();
-
-    Front? front;
-    if (activity.frontId != null) {
-      front = await (_db.select(_db.fronts)
-            ..where((f) => f.id.equals(activity.frontId!)))
-          .getSingleOrNull();
-    }
-
-    Municipality? muni;
-    if (activity.municipalityId != null) {
-      muni = await (_db.select(_db.municipalities)
-            ..where((m) => m.id.equals(activity.municipalityId!)))
-          .getSingleOrNull();
-    }
-
-    final evidences = await (_db.select(_db.evidences)
-          ..where((e) => e.activityId.equals(activity.id))
-          ..orderBy([(e) => OrderingTerm.asc(e.capturedAt)]))
-        .get();
-
-    return ActivityWithDetails(
-      activity: activity,
-      activityType: actType,
-      assignedUser: user,
-      front: front,
-      municipality: muni,
-      evidences: evidences,
-      flags: const ActivityFlags(),
-    );
-  }
-
-  // Obtener actividad por ID con detalles
   Future<ActivityWithDetails?> getActivityById(String id) async {
-    final activity = await (_db.select(_db.activities)
-          ..where((a) => a.id.equals(id)))
-        .getSingleOrNull();
-
-    if (activity == null) return null;
-
-    return _getActivityDetails(activity);
+    _requireBackend();
+    final items = await _fetchPendingReviewFromBackend();
+    for (final item in items) {
+      if (item.activity.id == id) {
+        return hydrateReviewActivity(item);
+      }
+    }
+    return null;
   }
 
-  // Aprobar actividad
+  List<Evidence> _parseReviewEvidences(
+    String activityId,
+    dynamic decoded,
+    DateTime fallback,
+  ) {
+    if (decoded is! List) return const <Evidence>[];
+
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map((raw) {
+          final evidenceId = (raw['id'] ?? '').toString().trim();
+          if (evidenceId.isEmpty) {
+            return null;
+          }
+          final takenAt = DateTime.tryParse((raw['takenAt'] ?? '').toString()) ?? fallback;
+          final gcsKey = (raw['gcsKey'] ?? '').toString().trim();
+          final fileType = gcsKey.toLowerCase().endsWith('.pdf') ? 'DOCUMENT' : 'IMAGE';
+          return Evidence(
+            id: evidenceId,
+            activityId: activityId,
+            filePath: 'backend://evidence/$evidenceId',
+            fileType: fileType,
+            caption: raw['description']?.toString(),
+            capturedAt: takenAt,
+            latitude: (raw['lat'] as num?)?.toDouble(),
+            longitude: (raw['lng'] as num?)?.toDouble(),
+          );
+        })
+        .whereType<Evidence>()
+        .toList(growable: false);
+  }
+
+  String _slugify(String value) {
+    return value
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), '-')
+        .replaceAll(RegExp(r'[^a-z0-9\-]'), '');
+  }
+
   Future<void> approveActivity(String activityId, String reviewerId) async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    final path = '/api/v1/review/activity/$activityId/decision';
-    final payload = {
+    _requireBackend();
+    await _apiClient.postJson('/api/v1/review/activity/$activityId/decision', {
       'decision': 'APPROVE',
       'comment': '',
       'field_resolutions': <Map<String, dynamic>>[],
       'apply_to_similar': false,
-    };
-    if (baseUrl.isNotEmpty) {
-      try {
-        await _apiClient.postJson(path, payload);
-        unawaited(_reviewOutbox.flush());
-        return;
-      } catch (_) {
-        _reviewOutbox.enqueue(path: path, payload: payload);
-      }
-    }
-
-    await (_db.update(_db.activities)..where((a) => a.id.equals(activityId)))
-        .write(ActivitiesCompanion(
-      status: const Value(ActivityStatus.approved),
-      reviewedAt: Value(DateTime.now()),
-      reviewedBy: Value(reviewerId),
-    ));
-
-    // Agregar a sync queue
-    await _db.into(_db.syncQueue).insert(SyncQueueCompanion.insert(
-          id: 'sync-${DateTime.now().millisecondsSinceEpoch}',
-          entity: 'ACTIVITY',
-          entityId: activityId,
-          action: 'UPDATE',
-          payloadJson: '{"status":"${ActivityStatus.approved}"}',
-          status: 'PENDING',
-          createdAt: DateTime.now(),
-        ));
+    });
   }
 
-  // Rechazar actividad
   Future<void> rejectActivity(
     String activityId,
     String reviewerId,
     String comments,
     [String? rejectReasonCode]
   ) async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    final path = '/api/v1/review/activity/$activityId/decision';
-    final payload = {
+    _requireBackend();
+    await _apiClient.postJson('/api/v1/review/activity/$activityId/decision', {
       'decision': 'REJECT',
       'reject_reason_code': (rejectReasonCode ?? 'MISSING_INFO'),
       'comment': comments,
       'field_resolutions': <Map<String, dynamic>>[],
       'apply_to_similar': false,
-    };
-    if (baseUrl.isNotEmpty) {
-      try {
-        await _apiClient.postJson(path, payload);
-        unawaited(_reviewOutbox.flush());
-        return;
-      } catch (_) {
-        _reviewOutbox.enqueue(path: path, payload: payload);
-      }
-    }
-
-    await (_db.update(_db.activities)..where((a) => a.id.equals(activityId)))
-        .write(ActivitiesCompanion(
-      status: const Value(ActivityStatus.rejected),
-      reviewedAt: Value(DateTime.now()),
-      reviewedBy: Value(reviewerId),
-      reviewComments: Value(comments),
-    ));
-
-    await _db.into(_db.syncQueue).insert(SyncQueueCompanion.insert(
-          id: 'sync-${DateTime.now().millisecondsSinceEpoch}',
-          entity: 'ACTIVITY',
-          entityId: activityId,
-          action: 'UPDATE',
-          payloadJson: '{"status":"${ActivityStatus.rejected}","comments":"$comments"}',
-          status: 'PENDING',
-          createdAt: DateTime.now(),
-        ));
+    });
   }
 
-  // Marcar como necesita corrección
+  Future<void> deleteActivity(String activityId) async {
+    _requireBackend();
+    await _apiClient.deleteJson('/api/v1/activities/$activityId');
+  }
+
+  Future<void> updateActivityFields(
+    String activityId, {
+    String? title,
+    String? description,
+    String? activityTypeCode,
+  }) async {
+    _requireBackend();
+    final payload = <String, dynamic>{};
+    if (title != null) payload['title'] = title;
+    if (description != null) payload['description'] = description;
+    if (activityTypeCode != null) payload['activity_type_code'] = activityTypeCode;
+    if (payload.isEmpty) return;
+    await _apiClient.putJson('/api/v1/activities/$activityId', payload);
+  }
+
+  Future<void> markNeedsFixStrictBackend(
+    String activityId,
+    String comments,
+    [String? rejectReasonCode]
+  ) async {
+    _requireBackend();
+    await _apiClient.postJson('/api/v1/review/activity/$activityId/decision', {
+      'decision': 'REJECT',
+      'reject_reason_code': (rejectReasonCode ?? 'MISSING_INFO'),
+      'comment': comments,
+      'field_resolutions': <Map<String, dynamic>>[],
+      'apply_to_similar': false,
+    });
+  }
+
   Future<void> markNeedsFix(
     String activityId,
     String reviewerId,
     String comments,
   ) async {
-    final baseUrl = AppDataMode.backendBaseUrl.trim();
-    final path = '/api/v1/review/activity/$activityId/decision';
-    final payload = {
-      'decision': 'REJECT',
-      'reject_reason_code': 'MISSING_INFO',
-      'comment': comments,
-      'field_resolutions': <Map<String, dynamic>>[],
-      'apply_to_similar': false,
-    };
-    if (baseUrl.isNotEmpty) {
-      try {
-        await _apiClient.postJson(path, payload);
-        unawaited(_reviewOutbox.flush());
-        return;
-      } catch (_) {
-        _reviewOutbox.enqueue(path: path, payload: payload);
-      }
-    }
-
-    await (_db.update(_db.activities)..where((a) => a.id.equals(activityId)))
-        .write(ActivitiesCompanion(
-      status: const Value(ActivityStatus.needsFix),
-      reviewedAt: Value(DateTime.now()),
-      reviewedBy: Value(reviewerId),
-      reviewComments: Value(comments),
-    ));
-
-    await _db.into(_db.syncQueue).insert(SyncQueueCompanion.insert(
-          id: 'sync-${DateTime.now().millisecondsSinceEpoch}',
-          entity: 'ACTIVITY',
-          entityId: activityId,
-          action: 'UPDATE',
-          payloadJson: '{"status":"${ActivityStatus.needsFix}","comments":"$comments"}',
-          status: 'PENDING',
-          createdAt: DateTime.now(),
-        ));
+    await markNeedsFixStrictBackend(activityId, comments, 'MISSING_INFO');
   }
 
-  // Obtener motivos de rechazo
   Future<List<RejectionReason>> getRejectionReasons() async {
-    return (_db.select(_db.rejectionReasons)
-          ..where((r) => r.isActive.equals(true)))
-        .get();
+    final items = await getRejectPlaybook();
+    return items
+        .map(
+          (item) => RejectionReason(
+            id: item.reasonCode,
+            reason: item.label,
+            isActive: true,
+          ),
+        )
+        .toList(growable: false);
   }
 }
 

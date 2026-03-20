@@ -1,8 +1,10 @@
 // lib/features/sync/services/sync_service.dart
 import 'dart:convert';
 
+import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 
+import '../../../core/network/exceptions.dart';
 import '../../../core/utils/logger.dart';
 import '../../../data/local/app_db.dart';
 import '../../../features/events/data/events_api_repository.dart';
@@ -95,6 +97,9 @@ class SyncService {
   final SyncApiRepository _apiRepository;
   final AppDb _db;
   final EventsApiRepository? _eventsApiRepository;
+  static final RegExp _uuidPattern = RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  );
 
   SyncService({
     required SyncApiRepository apiRepository,
@@ -106,9 +111,10 @@ class SyncService {
 
   Future<PullSyncResult> pullChanges({
     required String projectId,
-    int pageSize = 500,
+    int pageSize = 200,
     bool resetActivityCursor = false,
   }) async {
+    final effectivePageSize = pageSize.clamp(1, 200).toInt();
     final initialCursor = resetActivityCursor
         ? const _PullCursor(sinceVersion: 0, afterUuid: null)
         : await _readProjectPullCursor(projectId);
@@ -125,7 +131,7 @@ class SyncService {
         projectId: projectId,
         sinceVersion: cursor.sinceVersion,
         afterUuid: cursor.afterUuid,
-        limit: pageSize,
+        limit: effectivePageSize,
       );
 
       pages += 1;
@@ -153,7 +159,7 @@ class SyncService {
 
     final eventPull = await _pullEventChanges(
       projectId: projectId,
-      pageSize: pageSize,
+      pageSize: effectivePageSize,
     );
 
     await (_db.update(_db.syncState)..where((s) => s.id.equals(1))).write(
@@ -233,20 +239,47 @@ class SyncService {
         final items = entry.value;
         pushed += items.length;
 
+        final fallbackCatalogVersionId =
+            await _apiRepository.resolveCatalogVersionUuid(projectId: projectId);
+
+        final normalizedItems = <_PendingItem>[];
+        for (final item in items) {
+          final normalized = await _normalizePendingItem(
+            item,
+            fallbackCatalogVersionId: fallbackCatalogVersionId,
+          );
+          if (normalized == null) {
+            errors++;
+            pushed--;
+            continue;
+          }
+          normalizedItems.add(normalized);
+        }
+
+        if (normalizedItems.isEmpty) {
+          continue;
+        }
+
         try {
           final response = await _apiRepository.pushActivities(
             projectId: projectId,
-            activities: items.map((i) => i.dto).toList(),
+            activities: normalizedItems.map((i) => i.dto).toList(),
             forceOverride: forceOverride,
           );
 
+          final itemByUuid = {
+            for (final item in normalizedItems) item.dto.uuid: item,
+          };
+          final retryWithOverride = <_PendingItem>[];
+
           // 5. Process per-item results
           for (final result in response.results) {
-            final match = items.firstWhere(
-              (i) => i.dto.uuid == result.uuid,
-              orElse: () =>
-                  throw StateError('Server returned unknown UUID ${result.uuid}'),
-            );
+            final match = itemByUuid[result.uuid];
+            if (match == null) {
+              errors++;
+              appLogger.w('Server returned unknown UUID ${result.uuid}');
+              continue;
+            }
 
             switch (result.status) {
               case 'CREATED':
@@ -259,23 +292,78 @@ class SyncService {
                 unchanged++;
                 await _markDone(match.row);
               case 'CONFLICT':
-                conflicts++;
-                await _markError(
-                    match.row, 'CONFLICT: ítem modificado en servidor');
+                if (!forceOverride) {
+                  retryWithOverride.add(match);
+                } else {
+                  conflicts++;
+                  await _markError(match.row, 'CONFLICT: item changed on server');
+                }
               default:
                 errors++;
-                await _markError(
-                    match.row, 'Estado inesperado: ${result.status}');
+                await _markError(match.row, 'Unexpected server status: ${result.status}');
+            }
+          }
+
+          if (retryWithOverride.isNotEmpty && !forceOverride) {
+            appLogger.w(
+              'Retrying ${retryWithOverride.length} conflicted item(s) with force override for project $projectId',
+            );
+            try {
+              final retryResponse = await _apiRepository.pushActivities(
+                projectId: projectId,
+                activities: retryWithOverride.map((i) => i.dto).toList(),
+                forceOverride: true,
+              );
+
+              for (final retryResult in retryResponse.results) {
+                final retryMatch = itemByUuid[retryResult.uuid];
+                if (retryMatch == null) {
+                  errors++;
+                  appLogger.w('Retry returned unknown UUID ${retryResult.uuid}');
+                  continue;
+                }
+
+                switch (retryResult.status) {
+                  case 'CREATED':
+                    created++;
+                    await _markDone(retryMatch.row);
+                  case 'UPDATED':
+                    updated++;
+                    await _markDone(retryMatch.row);
+                  case 'UNCHANGED':
+                    unchanged++;
+                    await _markDone(retryMatch.row);
+                  case 'CONFLICT':
+                    conflicts++;
+                    await _markError(retryMatch.row, 'CONFLICT: item changed on server');
+                  default:
+                    errors++;
+                    await _markError(
+                      retryMatch.row,
+                      'Unexpected retry status: ${retryResult.status}',
+                    );
+                }
+              }
+            } on Exception catch (retryError) {
+              final retryErrorDetail = _formatSyncError(retryError);
+              appLogger.e(
+                'Conflict retry failed for project $projectId: $retryErrorDetail',
+              );
+              for (final retryItem in retryWithOverride) {
+                await _markError(retryItem.row, retryErrorDetail);
+                errors++;
+              }
             }
           }
         } on Exception catch (e) {
-          // Network/server error → put all back to ERROR
-          appLogger.e('❌ Push failed for project $projectId: $e');
-          for (final item in items) {
-            await _markError(item.row, e.toString());
+          // Network/server error -> put all back to ERROR
+          final errorDetail = _formatSyncError(e);
+          appLogger.e('Push failed for project $projectId: $errorDetail');
+          for (final item in normalizedItems) {
+            await _markError(item.row, errorDetail);
           }
-          errors += items.length;
-          pushed -= items.length;
+          errors += normalizedItems.length;
+          pushed -= normalizedItems.length;
         }
       }
 
@@ -290,7 +378,7 @@ class SyncService {
           .write(SyncStateCompanion(lastSyncAt: Value(DateTime.now())));
 
       appLogger.i(
-        '✅ Sync complete: pushed=$pushed created=$created '
+        'Sync complete: pushed=$pushed created=$created '
         'updated=$updated unchanged=$unchanged '
         'conflicts=$conflicts errors=$errors',
       );
@@ -306,7 +394,7 @@ class SyncService {
       );
     } catch (e, st) {
       appLogger.e(
-        '💥 SyncService.pushPendingChanges fatal error',
+        'SyncService.pushPendingChanges fatal error',
         error: e,
         stackTrace: st,
       );
@@ -323,6 +411,218 @@ class SyncService {
     }
   }
 
+  Future<_PendingItem?> _normalizePendingItem(
+    _PendingItem item, {
+    required String? fallbackCatalogVersionId,
+  }) async {
+    final dto = item.dto;
+
+    final normalizedCatalogVersionId = await _resolveCatalogVersionId(
+      activityId: dto.uuid,
+      dtoCatalogVersionId: dto.catalogVersionId,
+      fallbackCatalogVersionId: fallbackCatalogVersionId,
+    );
+    if (normalizedCatalogVersionId == null) {
+      await _markError(
+        item.row,
+        'Missing valid catalog version ID for sync payload',
+      );
+      return null;
+    }
+
+    final normalizedActivityTypeCode = await _resolveActivityTypeCode(
+      activityId: dto.uuid,
+      dtoActivityTypeCode: dto.activityTypeCode,
+    );
+    if (normalizedActivityTypeCode == null) {
+      await _markError(
+        item.row,
+        'Missing valid activity type code for sync payload',
+      );
+      return null;
+    }
+
+    final normalizedFrontId = _sanitizeOptionalUuid(dto.frontId);
+    final normalizedAssignedToUserId = _sanitizeOptionalUuid(dto.assignedToUserId);
+    final normalizedCreatedByUserId = _sanitizeRequiredUuid(dto.createdByUserId);
+    if (normalizedCreatedByUserId == null) {
+      await _markError(
+        item.row,
+        'Missing valid created_by_user_id UUID for sync payload',
+      );
+      return null;
+    }
+
+    final normalizedDto = ActivityDTO(
+      uuid: dto.uuid,
+      serverId: dto.serverId,
+      projectId: dto.projectId,
+      frontId: normalizedFrontId,
+      pkStart: dto.pkStart,
+      pkEnd: dto.pkEnd,
+      executionState: dto.executionState,
+      assignedToUserId: normalizedAssignedToUserId,
+      assignedToUserName: dto.assignedToUserName,
+      createdByUserId: normalizedCreatedByUserId,
+      catalogVersionId: normalizedCatalogVersionId,
+      activityTypeCode: normalizedActivityTypeCode,
+      latitude: dto.latitude,
+      longitude: dto.longitude,
+      title: dto.title,
+      description: dto.description,
+      wizardPayload: dto.wizardPayload,
+      createdAt: dto.createdAt,
+      updatedAt: dto.updatedAt,
+      deletedAt: dto.deletedAt,
+      syncVersion: dto.syncVersion,
+    );
+
+    if (normalizedCatalogVersionId == dto.catalogVersionId &&
+        normalizedActivityTypeCode == dto.activityTypeCode &&
+        normalizedFrontId == dto.frontId &&
+        normalizedAssignedToUserId == dto.assignedToUserId &&
+        normalizedCreatedByUserId == dto.createdByUserId) {
+      return item;
+    }
+
+    await (_db.update(_db.syncQueue)..where((s) => s.id.equals(item.row.id))).write(
+      SyncQueueCompanion(payloadJson: Value(jsonEncode(normalizedDto.toJson()))),
+    );
+
+    return _PendingItem(item.row, normalizedDto);
+  }
+
+  Future<String?> _resolveCatalogVersionId({
+    required String activityId,
+    required String? dtoCatalogVersionId,
+    required String? fallbackCatalogVersionId,
+  }) async {
+    if (_isUuid(dtoCatalogVersionId)) {
+      return dtoCatalogVersionId!.trim();
+    }
+
+    // Accept non-UUID non-empty strings (e.g., "tmq-v1.0.0").
+    // The backend schema now accepts semantic version strings in Firestore mode.
+    final rawDto = dtoCatalogVersionId?.trim() ?? '';
+    if (rawDto.isNotEmpty) {
+      return rawDto;
+    }
+
+    final activity = await ( _db.select(_db.activities)
+          ..where((a) => a.id.equals(activityId)))
+        .getSingleOrNull();
+    if (activity == null) {
+      return _isUuid(fallbackCatalogVersionId) ? fallbackCatalogVersionId!.trim() : null;
+    }
+
+    if (_isUuid(activity.catalogVersionId)) {
+      return activity.catalogVersionId!.trim();
+    }
+
+    final catalogIndex = await (_db.select(_db.catalogIndex)
+          ..where((c) => c.projectId.equals(activity.projectId)))
+        .getSingleOrNull();
+    if (_isUuid(catalogIndex?.activeVersionId)) {
+      return catalogIndex!.activeVersionId.trim();
+    }
+
+    if (_isUuid(fallbackCatalogVersionId)) {
+      return fallbackCatalogVersionId!.trim();
+    }
+
+    return null;
+  }
+
+  Future<String?> _resolveActivityTypeCode({
+    required String activityId,
+    required String dtoActivityTypeCode,
+  }) async {
+    final raw = dtoActivityTypeCode.trim();
+    if (raw.isNotEmpty && !_isUuid(raw) && raw.toUpperCase() != 'UNKNOWN') {
+      return raw;
+    }
+
+    final activity = await (_db.select(_db.activities)
+          ..where((a) => a.id.equals(activityId)))
+        .getSingleOrNull();
+    if (activity == null) {
+      return null;
+    }
+
+    final type = await (_db.select(_db.catalogActivityTypes)
+          ..where((t) => t.id.equals(activity.activityTypeId)))
+        .getSingleOrNull();
+    final resolved = type?.code.trim();
+    if (resolved == null || resolved.isEmpty || _isUuid(resolved)) {
+      return null;
+    }
+
+    return resolved;
+  }
+
+  bool _isUuid(String? value) {
+    final raw = value?.trim();
+    if (raw == null || raw.isEmpty) return false;
+    return _uuidPattern.hasMatch(raw);
+  }
+
+  String? _sanitizeOptionalUuid(String? value) {
+    if (!_isUuid(value)) return null;
+    return value!.trim();
+  }
+
+  String? _sanitizeRequiredUuid(String? value) {
+    if (!_isUuid(value)) return null;
+    return value!.trim();
+  }
+
+  String _formatSyncError(Exception error) {
+    if (error is ServerException) {
+      final detail = _extractBackendDetail(error.data);
+      if (detail != null && detail.isNotEmpty) {
+        return 'HTTP ${error.statusCode}: $detail';
+      }
+      return error.toString();
+    }
+
+    if (error is DioException) {
+      final detail = _extractBackendDetail(error.response?.data);
+      if (detail != null && detail.isNotEmpty) {
+        return 'HTTP ${error.response?.statusCode}: $detail';
+      }
+      return error.toString();
+    }
+    return error.toString();
+  }
+
+  String? _extractBackendDetail(dynamic data) {
+    if (data is Map) {
+      final detail = data['detail'];
+      if (detail is String && detail.trim().isNotEmpty) {
+        return detail.trim();
+      }
+      if (detail is List && detail.isNotEmpty) {
+        final messages = detail
+            .map((item) {
+              if (item is Map && item['msg'] != null) {
+                return item['msg'].toString();
+              }
+              return item.toString();
+            })
+            .where((msg) => msg.trim().isNotEmpty)
+            .join('; ');
+        if (messages.isNotEmpty) {
+          return messages;
+        }
+      }
+      final message = data['message'];
+      if (message is String && message.trim().isNotEmpty) {
+        return message.trim();
+      }
+    }
+    return null;
+  }
+
   // ──────────────────────── helpers ────────────────────────
 
   Future<void> _markDone(SyncQueueData row) async {
@@ -333,6 +633,14 @@ class SyncService {
       attempts: Value(row.attempts + 1),
       lastError: const Value(null),
     ));
+    // Update activity local status so home view reflects "Sincronizada"
+    if (row.entity == 'ACTIVITY') {
+      await (_db.update(_db.activities)
+            ..where((a) =>
+                a.id.equals(row.entityId) &
+                a.status.isIn(const ['READY_TO_SYNC', 'DRAFT'])))
+          .write(const ActivitiesCompanion(status: Value('SYNCED')));
+    }
   }
 
   Future<void> _markError(SyncQueueData row, String error) async {
@@ -382,7 +690,18 @@ class SyncService {
         } else {
           final dto = EventDTO.fromJson(payloadMap);
           if (action == 'UPDATE') {
-            result = await _eventsApiRepository!.updateEvent(dto);
+            try {
+              result = await _eventsApiRepository!.updateEvent(dto);
+            } on DioException catch (e) {
+              if (e.response?.statusCode == 404) {
+                appLogger.w(
+                  '⚠️ UPDATE 404 for event ${dto.uuid} — falling back to CREATE',
+                );
+                result = await _eventsApiRepository!.createEvent(dto);
+              } else {
+                rethrow;
+              }
+            }
           } else {
             // UPSERT fallback: create is idempotent by UUID.
             result = await _eventsApiRepository!.createEvent(dto);
@@ -444,13 +763,50 @@ class SyncService {
           }
         }
 
+        final creatorId = dto.createdByUserId.trim();
+        if (creatorId.isEmpty || creatorId.length < 8) {
+          appLogger.w(
+            'Sync Pull Diagnostics: suspicious created_by_user_id '
+            '(activity=${dto.uuid}, project=${dto.projectId}, value=${_maskIdForLog(creatorId)})',
+          );
+        }
+
         await _ensureProjectExists(dto.projectId);
         await _ensureUserExists(dto.createdByUserId);
         final activityTypeId = await _ensureActivityTypeExists(dto.activityTypeCode);
+        final activityTypeName = await _resolveActivityTypeName(activityTypeId);
+        final resolvedTitle = _resolveActivityTitle(
+          catalogActivityName: activityTypeName,
+          fallbackTitle: dto.title,
+          activityTypeCode: dto.activityTypeCode,
+        );
 
         final existing = await (_db.select(_db.activities)
               ..where((t) => t.id.equals(dto.uuid)))
             .getSingleOrNull();
+
+        final executionState = dto.executionState.trim().toUpperCase();
+        final reviewDecision = dto.reviewDecision?.trim().toUpperCase();
+        final isRejectedByReview = reviewDecision == 'REJECT';
+        final startedAt = switch (executionState) {
+          'EN_CURSO' => existing?.startedAt ?? dto.updatedAt.toLocal(),
+          'COMPLETADA' => existing?.startedAt ?? dto.updatedAt.toLocal(),
+          'REVISION_PENDIENTE' => existing?.startedAt ?? dto.updatedAt.toLocal(),
+          _ => null,
+        };
+        final finishedAt = switch (executionState) {
+          'COMPLETADA' => dto.updatedAt.toLocal(),
+          'REVISION_PENDIENTE' => dto.updatedAt.toLocal(),
+          _ => null,
+        };
+        final localStatus = dto.deletedAt != null
+            ? 'CANCELED'
+            : isRejectedByReview
+                ? 'RECHAZADA'
+                : switch (executionState) {
+                    'REVISION_PENDIENTE' => 'REVISION_PENDIENTE',
+                    _ => 'SYNCED',
+                  };
 
         await _db.into(_db.activities).insertOnConflictUpdate(
               ActivitiesCompanion.insert(
@@ -458,27 +814,47 @@ class SyncService {
                 projectId: dto.projectId,
                 segmentId: const Value(null),
                 activityTypeId: activityTypeId,
-                title: (dto.title == null || dto.title!.trim().isEmpty)
-                    ? 'Actividad ${dto.activityTypeCode}'
-                    : dto.title!,
+                title: resolvedTitle,
                 description: Value(dto.description),
                 pk: Value(dto.pkStart),
                 pkRefType: const Value(null),
                 createdAt: dto.createdAt.toLocal(),
-                startedAt: const Value(null),
-                finishedAt: dto.executionState == 'COMPLETADA'
-                    ? Value(dto.updatedAt.toLocal())
-                    : const Value(null),
+                startedAt: Value(startedAt),
+                finishedAt: Value(finishedAt),
                 createdByUserId: dto.createdByUserId,
-                status: Value(dto.deletedAt != null ? 'CANCELED' : 'SYNCED'),
+                status: Value(localStatus),
                 geoLat: Value(_parseNullableDouble(dto.latitude)),
                 geoLon: Value(_parseNullableDouble(dto.longitude)),
                 geoAccuracy: const Value(null),
                 deviceId: const Value(null),
                 localRevision: Value(existing?.localRevision ?? 1),
                 serverRevision: Value(dto.syncVersion),
+                catalogVersionId: Value(dto.catalogVersionId),
               ),
             );
+
+        if (dto.assignedToUserId != null && dto.assignedToUserId!.trim().isNotEmpty) {
+          final assignedId = dto.assignedToUserId!.trim();
+          if (assignedId.length < 8) {
+            appLogger.w(
+              'Sync Pull Diagnostics: suspicious assigned_to_user_id '
+              '(activity=${dto.uuid}, project=${dto.projectId}, value=${_maskIdForLog(assignedId)})',
+            );
+          }
+          await _ensureUserExists(
+            dto.assignedToUserId!,
+            name: dto.assignedToUserName,
+          );
+          final fieldId = '${dto.uuid}:assignee_user_id';
+          await _db.into(_db.activityFields).insertOnConflictUpdate(
+                ActivityFieldsCompanion.insert(
+                  id: fieldId,
+                  activityId: dto.uuid,
+                  fieldKey: 'assignee_user_id',
+                  valueText: Value(dto.assignedToUserId!.trim()),
+                ),
+              );
+        }
       }
     });
   }
@@ -488,6 +864,17 @@ class SyncService {
       return null;
     }
     return double.tryParse(value);
+  }
+
+  String _maskIdForLog(String value) {
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      return '<empty>';
+    }
+    if (normalized.length <= 8) {
+      return normalized;
+    }
+    return '${normalized.substring(0, 8)}...';
   }
 
   Future<void> _ensureProjectExists(String projectId) async {
@@ -506,16 +893,36 @@ class SyncService {
         );
   }
 
-  Future<void> _ensureUserExists(String userId) async {
-    final existing = await (_db.select(_db.users)..where((t) => t.id.equals(userId)))
-        .getSingleOrNull();
-    if (existing != null) {
+  Future<void> _ensureUserExists(String userId, {String? name}) async {
+    final normalizedUserId = userId.trim();
+    if (normalizedUserId.isEmpty) {
       return;
     }
+
+    final existing = await (_db.select(_db.users)..where((t) => t.id.equals(normalizedUserId)))
+        .getSingleOrNull();
+
+    final fallbackLabel = normalizedUserId.length >= 8
+        ? normalizedUserId.substring(0, 8)
+        : normalizedUserId;
+    final resolvedName = (name?.trim().isNotEmpty ?? false)
+        ? name!.trim()
+        : 'Usuario $fallbackLabel';
+
+    if (existing != null) {
+      // Update name if we now have a real name and the stored one is still a placeholder.
+      final isPlaceholder = existing.name.startsWith('Usuario ');
+      if (isPlaceholder && !resolvedName.startsWith('Usuario ')) {
+        await (_db.update(_db.users)..where((t) => t.id.equals(normalizedUserId)))
+            .write(UsersCompanion(name: Value(resolvedName)));
+      }
+      return;
+    }
+
     await _db.into(_db.users).insertOnConflictUpdate(
           UsersCompanion.insert(
-            id: userId,
-            name: 'Usuario ${userId.substring(0, 8)}',
+            id: normalizedUserId,
+            name: resolvedName,
             roleId: 4,
           ),
         );
@@ -546,6 +953,44 @@ class SyncService {
     return activityTypeCode;
   }
 
+  Future<String?> _resolveActivityTypeName(String activityTypeId) async {
+    final row = await (_db.select(_db.catalogActivityTypes)
+          ..where((t) => t.id.equals(activityTypeId)))
+        .getSingleOrNull();
+    final name = row?.name.trim();
+    if (name == null || name.isEmpty) return null;
+    return name;
+  }
+
+  String _resolveActivityTitle({
+    required String? catalogActivityName,
+    required String? fallbackTitle,
+    required String activityTypeCode,
+  }) {
+    final byCatalog = catalogActivityName?.trim();
+    if (byCatalog != null && byCatalog.isNotEmpty) {
+      return byCatalog;
+    }
+
+    final fallback = _stripLegacyTitlePrefixes(fallbackTitle ?? '');
+    if (fallback.isNotEmpty) {
+      return fallback;
+    }
+    return activityTypeCode.trim().isEmpty ? 'Actividad' : activityTypeCode.trim();
+  }
+
+  String _stripLegacyTitlePrefixes(String rawTitle) {
+    final trimmed = rawTitle.trim();
+    if (trimmed.isEmpty) return '';
+    final lowered = trimmed.toLowerCase();
+    if (lowered.startsWith('frente:') ||
+        lowered.startsWith('estado:') ||
+        lowered.startsWith('municipio:')) {
+      return '';
+    }
+    return trimmed;
+  }
+
   Future<_PullCursor> _readProjectPullCursor(String projectId) async {
     final state = await (_db.select(_db.syncState)..where((s) => s.id.equals(1)))
         .getSingleOrNull();
@@ -574,7 +1019,11 @@ class SyncService {
       if (projectCursor is num) {
         return _PullCursor(sinceVersion: projectCursor.toInt(), afterUuid: null);
       }
-    } catch (_) {}
+    } catch (e, st) {
+      appLogger.w(
+        'Invalid pull cursor payload for project=$projectId: $e\n$st',
+      );
+    }
 
     return const _PullCursor(sinceVersion: 0, afterUuid: null);
   }
@@ -591,7 +1040,11 @@ class SyncService {
         if (decoded is Map<String, dynamic>) {
           map.addAll(decoded);
         }
-      } catch (_) {}
+      } catch (e, st) {
+        appLogger.w(
+          'Failed to decode existing pull cursor map for project=$projectId: $e\n$st',
+        );
+      }
     }
 
     map[projectId] = {
@@ -627,13 +1080,37 @@ class SyncService {
     final localEventsRepo = EventsLocalRepository(db: _db);
 
     while (true) {
-      final response = await _eventsApiRepository!.listEvents(
-        projectId: projectId,
-        sinceVersion: sinceVersion,
-        includeDeleted: true,
-        page: page,
-        pageSize: pageSize,
-      );
+      final response = await (() async {
+        try {
+          return await _eventsApiRepository.listEvents(
+            projectId: projectId,
+            sinceVersion: sinceVersion,
+            includeDeleted: true,
+            page: page,
+            pageSize: pageSize,
+          );
+        } catch (e) {
+          if (_isOptionalEventEndpointAccessError(e)) {
+            appLogger.w(
+              'Skipping event pull for project=$projectId due to '
+              'insufficient permission or unavailable endpoint: $e',
+            );
+            return null;
+          }
+          if (_isUnsupportedSqlDependencyError(e)) {
+            appLogger.w(
+              'Skipping event pull for project=$projectId because backend endpoint '
+              'is not available in current DATA_BACKEND mode: $e',
+            );
+            return null;
+          }
+          rethrow;
+        }
+      })();
+
+      if (response == null) {
+        break;
+      }
 
       pages += 1;
       if (response.items.isNotEmpty) {
@@ -656,6 +1133,60 @@ class SyncService {
 
     await _writeProjectEventCursor(projectId, sinceVersion);
     return (pulledEvents, pages, sinceVersion);
+  }
+
+  bool _isUnsupportedSqlDependencyError(Object error) {
+    if (error is! DioException) {
+      return false;
+    }
+
+    final data = error.response?.data;
+    String detail = '';
+    if (data is Map<String, dynamic>) {
+      detail = (data['detail'] ?? '').toString();
+    } else if (data != null) {
+      detail = data.toString();
+    }
+
+    final normalized = detail.toLowerCase();
+    return normalized.contains('sql database is disabled for current data_backend mode') ||
+        normalized.contains('sync pull/push is still sql-backed') ||
+        normalized.contains('sql database is unavailable for current backend mode');
+  }
+
+  bool _isOptionalEventEndpointAccessError(Object error) {
+    if (error is! DioException) {
+      return false;
+    }
+
+    final statusCode = error.response?.statusCode;
+    if (statusCode != 403 && statusCode != 404) {
+      return false;
+    }
+
+    final data = error.response?.data;
+    String detail = '';
+    if (data is Map<String, dynamic>) {
+      final rawDetail = data['detail'];
+      if (rawDetail is String) {
+        detail = rawDetail;
+      } else if (rawDetail is List) {
+        detail = rawDetail.map((item) => item.toString()).join(' ');
+      } else {
+        detail = data.toString();
+      }
+    } else if (data != null) {
+      detail = data.toString();
+    }
+
+    final normalized = detail.toLowerCase();
+    if (statusCode == 404) {
+      return true;
+    }
+
+    return normalized.contains('missing permission') ||
+        normalized.contains('auth_missing_permission') ||
+        normalized.contains('for project');
   }
 
   Future<int> _readProjectEventCursor(String projectId) async {
@@ -683,7 +1214,11 @@ class SyncService {
       if (value is Map<String, dynamic>) {
         return (value['since_version'] as num?)?.toInt() ?? 0;
       }
-    } catch (_) {}
+    } catch (e, st) {
+      appLogger.w(
+        'Invalid event cursor payload for project=$projectId: $e\n$st',
+      );
+    }
 
     return 0;
   }
@@ -700,7 +1235,11 @@ class SyncService {
         if (decoded is Map<String, dynamic>) {
           map.addAll(decoded);
         }
-      } catch (_) {}
+      } catch (e, st) {
+        appLogger.w(
+          'Failed to decode existing event cursor map for project=$projectId: $e\n$st',
+        );
+      }
     }
 
     final eventsRoot = <String, dynamic>{};

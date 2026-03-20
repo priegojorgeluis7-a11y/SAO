@@ -9,6 +9,8 @@ class ActivityWithDetails {
   final Municipality? municipality;
   final List<Evidence> evidences;
   final ActivityFlags flags;
+  final String? pkLabel;
+  final Map<String, dynamic>? wizardPayload;
 
   ActivityWithDetails({
     required this.activity,
@@ -18,6 +20,8 @@ class ActivityWithDetails {
     this.municipality,
     required this.evidences,
     this.flags = const ActivityFlags(),
+    this.pkLabel,
+    this.wizardPayload,
   });
 
   String get statusLabel {

@@ -17,7 +17,7 @@ class SyncPullRequest {
     this.sinceVersion = 0,
     this.afterUuid,
     this.untilVersion,
-    this.limit = 500,
+    this.limit = 200,
   });
 
   Map<String, dynamic> toJson() {
@@ -69,14 +69,17 @@ class ActivityDTO {
   final int pkStart;
   final int? pkEnd;
   final String executionState;
+  final String? reviewDecision;
   final String? assignedToUserId;
+  final String? assignedToUserName;
   final String createdByUserId;
-  final String catalogVersionId;
+  final String? catalogVersionId;
   final String activityTypeCode;
   final String? latitude;
   final String? longitude;
   final String? title;
   final String? description;
+  final Map<String, dynamic>? wizardPayload;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -90,7 +93,9 @@ class ActivityDTO {
     required this.pkStart,
     this.pkEnd,
     required this.executionState,
+    this.reviewDecision,
     this.assignedToUserId,
+    this.assignedToUserName,
     required this.createdByUserId,
     required this.catalogVersionId,
     required this.activityTypeCode,
@@ -98,6 +103,7 @@ class ActivityDTO {
     this.longitude,
     this.title,
     this.description,
+    this.wizardPayload,
     required this.createdAt,
     required this.updatedAt,
     this.deletedAt,
@@ -105,28 +111,53 @@ class ActivityDTO {
   });
 
   factory ActivityDTO.fromJson(Map<String, dynamic> json) {
+    String? asStringOrNull(String key) {
+      final v = json[key];
+      if (v == null) return null;
+      final s = v.toString().trim();
+      return s.isEmpty ? null : s;
+    }
+
+    int asInt(String key, {int fallback = 0}) {
+      final v = json[key];
+      if (v is int) return v;
+      if (v is num) return v.toInt();
+      return int.tryParse(v?.toString() ?? '') ?? fallback;
+    }
+
+    DateTime parseDate(String key) {
+      final raw = asStringOrNull(key);
+      if (raw == null) return DateTime.now().toUtc();
+      return DateTime.tryParse(raw)?.toUtc() ?? DateTime.now().toUtc();
+    }
+
     return ActivityDTO(
-      uuid: json['uuid'] as String,
+      uuid: asStringOrNull('uuid') ?? '',
       serverId: json['server_id'] as int?,
-      projectId: json['project_id'] as String,
-      frontId: json['front_id'] as String?,
-      pkStart: json['pk_start'] as int,
+      projectId: asStringOrNull('project_id') ?? '',
+      frontId: asStringOrNull('front_id'),
+      pkStart: asInt('pk_start'),
       pkEnd: json['pk_end'] as int?,
-      executionState: json['execution_state'] as String,
-      assignedToUserId: json['assigned_to_user_id'] as String?,
-      createdByUserId: json['created_by_user_id'] as String,
-      catalogVersionId: json['catalog_version_id'] as String,
-      activityTypeCode: json['activity_type_code'] as String,
-      latitude: json['latitude'] as String?,
-      longitude: json['longitude'] as String?,
-      title: json['title'] as String?,
-      description: json['description'] as String?,
-      createdAt: DateTime.parse(json['created_at'] as String),
-      updatedAt: DateTime.parse(json['updated_at'] as String),
-      deletedAt: json['deleted_at'] != null
-          ? DateTime.parse(json['deleted_at'] as String)
+      executionState: asStringOrNull('execution_state') ?? 'PENDIENTE',
+      reviewDecision: asStringOrNull('review_decision'),
+      assignedToUserId: asStringOrNull('assigned_to_user_id'),
+      assignedToUserName: asStringOrNull('assigned_to_user_name'),
+      createdByUserId: asStringOrNull('created_by_user_id') ?? '',
+      catalogVersionId: asStringOrNull('catalog_version_id'),
+      activityTypeCode: asStringOrNull('activity_type_code') ?? 'UNKNOWN',
+      latitude: asStringOrNull('latitude'),
+      longitude: asStringOrNull('longitude'),
+      title: asStringOrNull('title'),
+      description: asStringOrNull('description'),
+        wizardPayload: json['wizard_payload'] is Map
+          ? Map<String, dynamic>.from(json['wizard_payload'] as Map)
           : null,
-      syncVersion: json['sync_version'] as int,
+      createdAt: parseDate('created_at'),
+      updatedAt: parseDate('updated_at'),
+      deletedAt: asStringOrNull('deleted_at') != null
+          ? DateTime.tryParse(asStringOrNull('deleted_at')!)?.toUtc()
+          : null,
+      syncVersion: asInt('sync_version'),
     );
   }
 
@@ -139,6 +170,7 @@ class ActivityDTO {
       'pk_start': pkStart,
       'pk_end': pkEnd,
       'execution_state': executionState,
+      'review_decision': reviewDecision,
       'assigned_to_user_id': assignedToUserId,
       'created_by_user_id': createdByUserId,
       'catalog_version_id': catalogVersionId,
@@ -147,6 +179,7 @@ class ActivityDTO {
       'longitude': longitude,
       'title': title,
       'description': description,
+      if (wizardPayload != null) 'wizard_payload': wizardPayload,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'deleted_at': deletedAt?.toIso8601String(),
@@ -188,7 +221,7 @@ class SyncPushResultItem {
   final String status;
 
   /// Server-assigned integer ID.
-  final int serverId;
+  final int? serverId;
 
   /// sync_version after the operation.
   final int syncVersion;
@@ -196,7 +229,7 @@ class SyncPushResultItem {
   const SyncPushResultItem({
     required this.uuid,
     required this.status,
-    required this.serverId,
+    this.serverId,
     required this.syncVersion,
   });
 
@@ -204,7 +237,7 @@ class SyncPushResultItem {
       SyncPushResultItem(
         uuid: json['uuid'] as String,
         status: json['status'] as String,
-        serverId: json['server_id'] as int,
+        serverId: json['server_id'] as int?,
         syncVersion: json['sync_version'] as int,
       );
 

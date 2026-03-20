@@ -10,6 +10,9 @@ class ReviewQueueItemOut(BaseModel):
     front: str | None = None
     municipality: str | None = None
     activity_type: str
+    title: str | None = None
+    project_id: str | None = None
+    assigned_to_user_name: str | None = None
     risk: str
     created_at: datetime
     updated_at: datetime
@@ -22,6 +25,8 @@ class ReviewQueueItemOut(BaseModel):
     severity: str
     evidence_count: int
     conflict_count: int
+    lat: float | None = None
+    lon: float | None = None
 
 
 class ReviewQueueCountersOut(BaseModel):
@@ -52,6 +57,8 @@ class ReviewActivityOut(BaseModel):
     activity_type: str
     title: str | None = None
     description: str | None = None
+    wizard_payload: dict[str, object] | None = None
+    pk: str | None = None
     status: str
     quality_flags: dict[str, bool]
     changeset: list[ReviewChangeFieldOut]

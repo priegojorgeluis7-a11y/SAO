@@ -1,7 +1,7 @@
 """Sync schemas for pull/push operations"""
 
 from datetime import datetime
-from typing import Literal
+from typing import Literal, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -47,12 +47,31 @@ class SyncPushActivityItem(BaseModel):
     execution_state: str = Field(..., description="PENDIENTE | EN_CURSO | REVISION_PENDIENTE | COMPLETADA")
     assigned_to_user_id: UUID | None = Field(None, description="User ID (UUID) assigned")
     created_by_user_id: UUID = Field(..., description="User ID (UUID) who created")
-    catalog_version_id: UUID = Field(..., description="Catalog version ID (UUID)")
+    catalog_version_id: Union[UUID, str] = Field(..., description="Catalog version ID (UUID or semantic string such as 'tmq-v1.0.0' for Firestore mode)")
+
+    @field_validator("catalog_version_id", mode="before")
+    @classmethod
+    def normalize_catalog_version_id(cls, v: object) -> Union[UUID, str]:
+        if isinstance(v, UUID):
+            return v
+        if isinstance(v, str):
+            stripped = v.strip()
+            if not stripped:
+                raise ValueError("catalog_version_id must not be empty")
+            try:
+                return UUID(stripped)
+            except ValueError:
+                return stripped
+        raise ValueError("catalog_version_id must be a UUID or non-empty string")
     activity_type_code: str = Field(..., description="Activity type code from catalog")
     latitude: str | None = Field(None, description="Latitude in decimal degrees")
     longitude: str | None = Field(None, description="Longitude in decimal degrees")
     title: str | None = Field(None, description="Activity title")
     description: str | None = Field(None, description="Activity description")
+    wizard_payload: dict[str, object] | None = Field(
+        None,
+        description="Structured wizard payload with classification/location metadata",
+    )
     deleted_at: datetime | None = Field(None, description="Deletion timestamp if soft-deleted")
     # Client-provided timestamps and sync_version are ignored by server
     created_at: datetime | None = None

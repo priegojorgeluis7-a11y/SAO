@@ -1,21 +1,28 @@
 // lib/features/activities/wizard/wizard_controller.dart
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:drift/drift.dart' as drift;
+import 'package:get_it/get_it.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
+import '../../../core/catalog/sync/catalog_sync_service.dart';
+import '../../../core/services/connectivity_service.dart';
 import '../../../core/utils/logger.dart';
 import '../../home/models/today_activity.dart';
 import '../../catalog/catalog_repository.dart';
 import '../../evidence/pending_evidence_store.dart';
+import '../../sync/models/sync_dto.dart';
+import '../../sync/services/sync_service.dart';
 import 'wizard_validation.dart';
 import 'validation/unplanned_validation.dart' as unplanned_val;
 import 'models/evidence_draft.dart';
 
 enum RiskLevel { bajo, medio, alto, prioritario }
 enum TipoUbicacion { puntual, tramo, general }
+enum WizardLocationSource { assignment, operative, manual }
 
 const _uuid = Uuid();
 
@@ -50,6 +57,8 @@ class WizardController extends ChangeNotifier {
   final String currentUserId; // Usuario que está creando la actividad
   final bool isUnplanned; // true → modo actividad no planeada
 
+  late final ActivityDao _dao;
+
   WizardController({
     required this.activity,
     required this.projectCode,
@@ -58,9 +67,12 @@ class WizardController extends ChangeNotifier {
     required this.database,
     required this.currentUserId,
     this.isUnplanned = false,
-  });
+  }) {
+    _dao = ActivityDao(database);
+  }
 
-  bool loading = true;
+  bool _loading = true;
+  bool get loading => _loading;
 
   // =========================
   // Estado (form)
@@ -75,6 +87,11 @@ class WizardController extends ChangeNotifier {
   double? geoLat;
   double? geoLon;
   double? geoAccuracy;
+  double? assignmentGeoLat;
+  double? assignmentGeoLon;
+  double? operativeGeoLat;
+  double? operativeGeoLon;
+  WizardLocationSource locationSource = WizardLocationSource.manual;
 
   String? selectedProjectId;
   String selectedProjectCode = '';
@@ -124,28 +141,42 @@ class WizardController extends ChangeNotifier {
   // Init
   // =========================
   Future<void> init() async {
-    if (catalogRepo.isReady) {
-      _postInitPreselect();
-      await _loadContextOptions();
-      await _rehydrateContextFields();
-      await _rehydrateReportFields();
-      loading = false;
-      notifyListeners();
-      return;
-    }
-
-    loading = true;
+    await _refreshCatalogIfOnline(selectedProjectId ?? projectCode);
+    _loading = true;
     notifyListeners();
 
+    // Always initialize against the current project code.
+    // The shared singleton can already be ready for a different project.
     await catalogRepo.init(projectId: selectedProjectId ?? projectCode);
 
     _postInitPreselect();
     await _loadContextOptions();
+    await _prefillContextFromAssignment();
     await _rehydrateContextFields();
     await _rehydrateReportFields();
+    await _ensureDraftActivity();
 
-    loading = false;
+    // Auto-fill horaInicio with current time if not already set from startedAt or draft
+    if (horaInicio == null) {
+      final initNow = DateTime.now();
+      horaInicio = TimeOfDay(hour: initNow.hour, minute: initNow.minute);
+    }
+
+    _loading = false;
     notifyListeners();
+  }
+
+  Future<void> _refreshCatalogIfOnline(String projectId) async {
+    try {
+      final connectivity = GetIt.I<ConnectivityService>();
+      final online = await connectivity.hasConnection();
+      if (!online) return;
+
+      final syncService = GetIt.I<CatalogSyncService>();
+      await syncService.ensureCatalogUpToDate(projectId);
+    } catch (e, st) {
+      appLogger.w('Catalog refresh skipped: $e', error: e, stackTrace: st);
+    }
   }
 
   void _postInitPreselect() {
@@ -186,6 +217,9 @@ class WizardController extends ChangeNotifier {
     if (initialGps != null) {
       geoLat = initialGps.$1;
       geoLon = initialGps.$2;
+      operativeGeoLat = initialGps.$1;
+      operativeGeoLon = initialGps.$2;
+      locationSource = WizardLocationSource.operative;
     }
 
     selectedProjectId = projectCode;
@@ -239,7 +273,7 @@ class WizardController extends ChangeNotifier {
   }
 
   Future<void> _loadContextOptions() async {
-    final dao = ActivityDao(database);
+    final dao = _dao;
 
     try {
       final projects = await dao.listActiveProjects();
@@ -248,7 +282,8 @@ class WizardController extends ChangeNotifier {
               .map((p) => ProjectRef(id: p.id, code: p.code, name: p.name))
               .toList()
           : _fallbackProjects;
-    } catch (_) {
+    } catch (e) {
+      appLogger.w('loadProjectOptions: falling back to local projects — $e');
       _availableProjects = _fallbackProjects;
     }
 
@@ -267,8 +302,212 @@ class WizardController extends ChangeNotifier {
     await loadLocationOptionsForProject(selectedProjectId ?? projectCode, notify: false);
   }
 
+  bool _isEmptyOrUnknown(String? value) {
+    final normalized = (value ?? '').trim().toLowerCase();
+    return normalized.isEmpty ||
+        normalized == 'sin frente' ||
+        normalized == 'sin ubicación' ||
+        normalized == 'sin ubicacion';
+  }
+
+  String _parseTitlePart(String title, String marker, List<String> stopMarkers) {
+    final source = title.trim();
+    final markerIndex = source.toLowerCase().indexOf(marker.toLowerCase());
+    if (markerIndex == -1) return '';
+
+    final start = markerIndex + marker.length;
+    var end = source.length;
+    final tail = source.substring(start);
+
+    for (final stop in stopMarkers) {
+      final relative = tail.toLowerCase().indexOf(stop.toLowerCase());
+      if (relative != -1) {
+        end = start + relative;
+        break;
+      }
+    }
+
+    return source.substring(start, end).replaceAll('•', '').trim();
+  }
+
+  Future<void> _prefillContextFromAssignment() async {
+    try {
+      final assignment = await _resolveBestAssignmentForWizard();
+
+      if (assignment != null) {
+        if (_isEmptyOrUnknown(selectedFrontName) && assignment.frente.trim().isNotEmpty) {
+          selectedFrontName = assignment.frente.trim();
+          final matchingFront = _availableFronts.cast<FrontRef?>().firstWhere(
+                (front) => front?.name.trim().toLowerCase() == selectedFrontName.toLowerCase(),
+                orElse: () => null,
+              );
+          if (matchingFront != null) {
+            selectedFrontId = matchingFront.id;
+          }
+        }
+
+        if ((municipioId ?? '').trim().isEmpty && assignment.municipio.trim().isNotEmpty) {
+          municipioId = assignment.municipio.trim();
+        }
+        if ((estadoId ?? '').trim().isEmpty && assignment.estado.trim().isNotEmpty) {
+          estadoId = assignment.estado.trim();
+        }
+        if (pkInicio == null && assignment.pk != null) {
+          pkInicio = assignment.pk;
+          tipoUbicacion = TipoUbicacion.puntual;
+        }
+
+        final assignmentCoords = await _resolveAssignmentCoordinatesForActivity(activity.id);
+        if (assignmentCoords != null) {
+          assignmentGeoLat = assignmentCoords.$1;
+          assignmentGeoLon = assignmentCoords.$2;
+          if (!hasValidGpsCoordinates) {
+            geoLat = assignmentCoords.$1;
+            geoLon = assignmentCoords.$2;
+            locationSource = WizardLocationSource.assignment;
+          }
+        }
+      }
+
+      if (_isEmptyOrUnknown(selectedFrontName)) {
+        final parsedFront = _parseTitlePart(
+          activity.title,
+          'Frente:',
+          const ['Estado:', 'Municipio:'],
+        );
+        if (parsedFront.isNotEmpty) {
+          selectedFrontName = parsedFront;
+        }
+      }
+
+      if ((estadoId ?? '').trim().isEmpty) {
+        final parsedEstado = _parseTitlePart(
+          activity.title,
+          'Estado:',
+          const ['Municipio:'],
+        );
+        if (parsedEstado.isNotEmpty) {
+          estadoId = parsedEstado;
+        }
+      }
+
+      if ((municipioId ?? '').trim().isEmpty) {
+        final parsedMunicipio = _parseTitlePart(
+          activity.title,
+          'Municipio:',
+          const [],
+        );
+        if (parsedMunicipio.isNotEmpty) {
+          municipioId = parsedMunicipio;
+        }
+      }
+    } catch (e, st) {
+      appLogger.w('prefillContextFromAssignment skipped: $e', stackTrace: st);
+    }
+  }
+
+  Future<(double, double)?> _resolveAssignmentCoordinatesForActivity(String activityId) async {
+    final fields = await _dao.getFieldsByKey(activityId);
+
+    final fromNumbers = (
+      fields['assignment_latitude']?.valueNumber,
+      fields['assignment_longitude']?.valueNumber,
+    );
+    if (fromNumbers.$1 != null && fromNumbers.$2 != null) {
+      return (fromNumbers.$1!, fromNumbers.$2!);
+    }
+
+    final fromText = (
+      double.tryParse((fields['assignment_latitude']?.valueText ?? '').trim()),
+      double.tryParse((fields['assignment_longitude']?.valueText ?? '').trim()),
+    );
+    if (fromText.$1 != null && fromText.$2 != null) {
+      return (fromText.$1!, fromText.$2!);
+    }
+
+    return null;
+  }
+
+  Future<AgendaAssignment?> _resolveBestAssignmentForWizard() async {
+    // 1) Match directo por id (algunas rutas usan el id de asignación como id de actividad local)
+    final direct = await ((database.select(database.agendaAssignments)
+          ..where((t) => t.id.equals(activity.id) | t.activityId.equals(activity.id))
+          ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+          ..limit(1))
+        .getSingleOrNull());
+    if (direct != null) return direct;
+
+    final projectId = (selectedProjectId ?? projectCode).trim();
+    if (projectId.isEmpty) return null;
+
+    final candidates = await ((database.select(database.agendaAssignments)
+          ..where((t) => t.projectId.equals(projectId))
+          ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+          ..limit(200))
+        .get());
+    if (candidates.isEmpty) return null;
+
+    final activityPk = activity.pk;
+    final expectedName = _normalizeActivityNameForMatch(activity.title);
+
+    AgendaAssignment? best;
+    var bestScore = -1;
+
+    for (final item in candidates) {
+      var score = 0;
+
+      if (activityPk != null && item.pk == activityPk) {
+        score += 5;
+      }
+
+      final itemName = _normalizeActivityNameForMatch(item.title);
+      if (itemName == expectedName && expectedName.isNotEmpty) {
+        score += 3;
+      }
+
+      if (!_isEmptyOrUnknown(item.frente)) {
+        score += 1;
+      }
+      if ((item.municipio).trim().isNotEmpty || (item.estado).trim().isNotEmpty) {
+        score += 1;
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        best = item;
+      }
+    }
+
+    // Evita falsos positivos: exigir al menos una coincidencia fuerte
+    if (bestScore < 3) return null;
+    return best;
+  }
+
+  String _normalizeActivityNameForMatch(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return '';
+
+    final upper = trimmed.toUpperCase();
+    const codes = <String, String>{
+      'CAM': 'CAMINAMIENTO',
+      'REU': 'REUNION',
+      'INS': 'INSPECCION',
+      'SUP': 'SUPERVISION',
+    };
+
+    final expanded = codes[upper] ?? upper;
+    return expanded
+        .replaceAll('Á', 'A')
+        .replaceAll('É', 'E')
+        .replaceAll('Í', 'I')
+        .replaceAll('Ó', 'O')
+        .replaceAll('Ú', 'U')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
   Future<void> loadFrontOptionsForProject(String projectCodeOrId, {bool notify = true}) async {
-    final dao = ActivityDao(database);
+    final dao = _dao;
     try {
       final remoteFronts = await catalogRepo.fetchFrontsForProject(projectCodeOrId);
       if (remoteFronts.isNotEmpty) {
@@ -281,7 +520,8 @@ class WizardController extends ChangeNotifier {
             .map((s) => FrontRef(id: s.id, name: s.segmentName))
             .toList();
       }
-    } catch (_) {
+    } catch (e) {
+      appLogger.w('loadFrontOptionsForProject: falling back to empty — $e');
       _availableFronts = const [];
     }
 
@@ -300,7 +540,8 @@ class WizardController extends ChangeNotifier {
   Future<void> loadLocationOptionsForProject(String projectCodeOrId, {bool notify = true}) async {
     try {
       _availableStates = await catalogRepo.fetchStatesForProject(projectCodeOrId);
-    } catch (_) {
+    } catch (e) {
+      appLogger.w('loadLocationOptionsForProject: no states loaded — $e');
       _availableStates = const [];
     }
 
@@ -325,7 +566,8 @@ class WizardController extends ChangeNotifier {
   }) async {
     try {
       _availableMunicipios = await catalogRepo.fetchMunicipiosForProject(projectCodeOrId, estado);
-    } catch (_) {
+    } catch (e) {
+      appLogger.w('loadMunicipiosForCurrentState: no municipios loaded — $e');
       _availableMunicipios = const [];
     }
 
@@ -369,6 +611,16 @@ class WizardController extends ChangeNotifier {
 
   List<CatItem> get attendeesInstitutional => catalogRepo.asistentesInstitucionales;
   List<CatItem> get attendeesLocal => catalogRepo.asistentesLocales;
+
+  CatItem? attendeeById(String id) {
+    for (final attendee in attendeesInstitutional) {
+      if (attendee.id == id) return attendee;
+    }
+    for (final attendee in attendeesLocal) {
+      if (attendee.id == id) return attendee;
+    }
+    return null;
+  }
 
   List<CatItem> get results => catalogRepo.resultados;
 
@@ -502,12 +754,24 @@ class WizardController extends ChangeNotifier {
   void addPhoto(String path) {
     evidencias.add(EvidenceDraft(localPath: path));
     notifyListeners();
+    unawaited(_saveEvidencesToDb(activity.id));
+  }
+
+  void addPhotoWithMetadata(
+    String path, {
+    double? lat,
+    double? lng,
+  }) {
+    evidencias.add(EvidenceDraft(localPath: path, lat: lat, lng: lng));
+    notifyListeners();
+    unawaited(_saveEvidencesToDb(activity.id));
   }
 
   void removePhotoAt(int index) {
     if (index < 0 || index >= evidencias.length) return;
     evidencias.removeAt(index);
     notifyListeners();
+    unawaited(_saveEvidencesToDb(activity.id));
   }
 
   void updateDescripcion(int index, String descripcion) {
@@ -571,6 +835,46 @@ class WizardController extends ChangeNotifier {
     notifyListeners();
   }
 
+  bool get hasAssignmentCoordinates => assignmentGeoLat != null && assignmentGeoLon != null;
+  bool get hasOperativeCoordinates => operativeGeoLat != null && operativeGeoLon != null;
+
+  void setOperativeCoordinates({
+    required double latitude,
+    required double longitude,
+    double? accuracy,
+  }) {
+    operativeGeoLat = latitude;
+    operativeGeoLon = longitude;
+    geoAccuracy = accuracy ?? geoAccuracy;
+    notifyListeners();
+  }
+
+  void useAssignmentCoordinates() {
+    if (!hasAssignmentCoordinates) return;
+    geoLat = assignmentGeoLat;
+    geoLon = assignmentGeoLon;
+    locationSource = WizardLocationSource.assignment;
+    notifyListeners();
+  }
+
+  void useOperativeCoordinates() {
+    if (!hasOperativeCoordinates) return;
+    geoLat = operativeGeoLat;
+    geoLon = operativeGeoLon;
+    locationSource = WizardLocationSource.operative;
+    notifyListeners();
+  }
+
+  void setManualMapPoint({
+    required double latitude,
+    required double longitude,
+  }) {
+    geoLat = latitude;
+    geoLon = longitude;
+    locationSource = WizardLocationSource.manual;
+    notifyListeners();
+  }
+
   void setProject(ProjectRef project) {
     selectedProjectId = project.id;
     selectedProjectCode = project.code;
@@ -581,7 +885,10 @@ class WizardController extends ChangeNotifier {
     municipioId = null;
     _availableStates = const [];
     _availableMunicipios = const [];
-    catalogRepo.loadProjectBundle(project.id);
+    unawaited(_refreshCatalogIfOnline(project.id));
+    unawaited(catalogRepo.loadProjectBundle(project.id).then((_) {
+      notifyListeners();
+    }));
     notifyListeners();
   }
 
@@ -1001,12 +1308,23 @@ class WizardController extends ChangeNotifier {
     String? segmentId,
     int? pk,
     String? pkRefType,
+    bool allowPendingWithoutEvidence = false,
   }) async {
     try {
-      final dao = ActivityDao(database);
+      final dao = _dao;
       final hasExistingActivity = await dao.activityExists(activity.id);
+      final existingActivity = hasExistingActivity
+          ? await dao.getActivityById(activity.id)
+          : null;
       final activityId = hasExistingActivity ? activity.id : _uuid.v4();
       final now = DateTime.now();
+      // Derive start/end timestamps from time pickers for accurate recording
+      final DateTime resolvedStartedAt = horaInicio != null
+          ? DateTime(now.year, now.month, now.day, horaInicio!.hour, horaInicio!.minute)
+          : (activity.horaInicio ?? now);
+      final DateTime resolvedFinishedAt = horaFin != null
+          ? DateTime(now.year, now.month, now.day, horaFin!.hour, horaFin!.minute)
+          : now;
       final cleanedNotes = getReportNotes();
       final cleanedAgreements = getReportAgreements();
 
@@ -1037,6 +1355,14 @@ class WizardController extends ChangeNotifier {
 
       var resolvedProjectId = await dao.resolveProjectId(requestedProjectId);
       var resolvedActivityTypeId = await dao.resolveActivityTypeId(requestedActivityTypeId);
+      final effectivePk = pk ?? pkInicio ?? existingActivity?.pk ?? activity.pk;
+      final effectivePkRefType = pkRefType ??
+          existingActivity?.pkRefType ??
+          switch (tipoUbicacion) {
+            TipoUbicacion.puntual => 'PK',
+            TipoUbicacion.tramo => 'TRAMO',
+            TipoUbicacion.general => 'GENERAL',
+          };
 
         if (hasExistingActivity && !isUnplanned) {
         final existing = await dao.getActivityById(activity.id);
@@ -1046,6 +1372,11 @@ class WizardController extends ChangeNotifier {
         }
       }
 
+        final saveAsPending = !isUnplanned && !hasEvidence && allowPendingWithoutEvidence;
+        final activityStatus = isUnplanned
+          ? 'REVISION_PENDIENTE'
+          : (saveAsPending ? 'DRAFT' : 'READY_TO_SYNC');
+
       // Preparar datos de la actividad principal
       final activityCompanion = ActivitiesCompanion.insert(
         id: activityId,
@@ -1054,14 +1385,17 @@ class WizardController extends ChangeNotifier {
         activityTypeId: resolvedActivityTypeId,
         title: resolvedTitle,
         description: drift.Value(_buildDescription()),
-        pk: drift.Value(pk),
-        pkRefType: drift.Value(pkRefType),
+        pk: drift.Value(effectivePk),
+        pkRefType: drift.Value(effectivePkRefType),
         createdAt: now,
         createdByUserId: currentUserId,
-        status: drift.Value(isUnplanned ? 'REVISION_PENDIENTE' : 'DRAFT'),
+        status: drift.Value(activityStatus),
+        startedAt: drift.Value(resolvedStartedAt),
+        finishedAt: (isUnplanned || saveAsPending) ? const drift.Value(null) : drift.Value(resolvedFinishedAt),
         geoLat: drift.Value(geoLat),
         geoLon: drift.Value(geoLon),
         geoAccuracy: drift.Value(geoAccuracy),
+        catalogVersionId: drift.Value(catalogRepo.currentVersionId),
       );
 
       // Preparar fields custom
@@ -1151,7 +1485,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'attendees',
             valueJson: drift.Value(jsonEncode(selectedAttendeeIds.toList())),
           ),
-          
+
         // Resultado
         if (selectedResult != null)
           ActivityFieldsCompanion.insert(
@@ -1168,6 +1502,14 @@ class WizardController extends ChangeNotifier {
           fieldKey: 'has_evidence',
           valueText: drift.Value(hasEvidence ? 'true' : 'false'),
         ),
+
+        if (saveAsPending)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'evidence_pending',
+            valueText: const drift.Value('true'),
+          ),
 
         // Notas narrativas para minuta/reporte
         if (cleanedNotes.isNotEmpty)
@@ -1227,9 +1569,18 @@ class WizardController extends ChangeNotifier {
         fields: fields,
       );
 
+      // Guardar evidencias en DB
+      await _saveEvidencesToDb(activityId);
+
+      // Encolar para sincronización (solo actividades completadas)
+      if (activityStatus == 'READY_TO_SYNC') {
+        await _enqueueForSync(activityId, activityCompanion);
+        _triggerBackgroundPush();
+      }
+
       appLogger.i('Actividad guardada exitosamente: $activityId');
       return activityId;
-      
+
     } catch (e, stack) {
       appLogger.e('Error guardando actividad', error: e, stackTrace: stack);
       rethrow;
@@ -1237,7 +1588,7 @@ class WizardController extends ChangeNotifier {
   }
 
   Future<void> _rehydrateReportFields() async {
-    final dao = ActivityDao(database);
+    final dao = _dao;
     final fields = await dao.getFieldsByKey(activity.id);
 
     final notesField = fields['report_notes'];
@@ -1261,7 +1612,7 @@ class WizardController extends ChangeNotifier {
   }
 
   Future<void> _rehydrateContextFields() async {
-    final dao = ActivityDao(database);
+    final dao = _dao;
     final fields = await dao.getFieldsByKey(activity.id);
     final existingActivity = await dao.getActivityById(activity.id);
 
@@ -1269,8 +1620,24 @@ class WizardController extends ChangeNotifier {
       geoLat = existingActivity.geoLat;
       geoLon = existingActivity.geoLon;
       geoAccuracy = existingActivity.geoAccuracy;
+      if (existingActivity.geoLat != null && existingActivity.geoLon != null) {
+        operativeGeoLat = existingActivity.geoLat;
+        operativeGeoLon = existingActivity.geoLon;
+      }
     }
 
+    final assignmentCoords = await _resolveAssignmentCoordinatesForActivity(activity.id);
+    if (assignmentCoords != null) {
+      assignmentGeoLat = assignmentCoords.$1;
+      assignmentGeoLon = assignmentCoords.$2;
+      if (!hasValidGpsCoordinates) {
+        geoLat = assignmentCoords.$1;
+        geoLon = assignmentCoords.$2;
+        locationSource = WizardLocationSource.assignment;
+      }
+    }
+
+    // Frente
     final frontIdField = fields['front_id'];
     if (frontIdField?.valueText != null && frontIdField!.valueText!.trim().isNotEmpty) {
       selectedFrontId = frontIdField.valueText!.trim();
@@ -1287,6 +1654,492 @@ class WizardController extends ChangeNotifier {
     if (frontNameField?.valueText != null && frontNameField!.valueText!.trim().isNotEmpty) {
       selectedFrontName = frontNameField.valueText!.trim();
     }
+
+    // Nivel de riesgo
+    final riskField = fields['risk_level'];
+    if (riskField?.valueText != null) {
+      try {
+        risk = RiskLevel.values.firstWhere((r) => r.name == riskField!.valueText);
+      } catch (_) {}
+    }
+
+    // Tipo de actividad
+    final activityTypeField = fields['activity_type'];
+    if (activityTypeField?.valueText != null) {
+      final found = catalogRepo.activities.cast<CatItem?>().firstWhere(
+        (a) => a?.id == activityTypeField!.valueText,
+        orElse: () => null,
+      );
+      if (found != null) _selectedActivity = found;
+    }
+
+    // Subcategoría
+    if (_selectedActivity != null) {
+      final subcatField = fields['subcategory'];
+      if (subcatField?.valueText != null) {
+        final found = catalogRepo.subcatsFor(_selectedActivity!.id).cast<CatItem?>().firstWhere(
+          (s) => s?.id == subcatField!.valueText,
+          orElse: () => null,
+        );
+        if (found != null) _selectedSubcategory = found;
+      }
+
+      // Propósito
+      if (_selectedSubcategory != null) {
+        final purposeField = fields['purpose'];
+        if (purposeField?.valueText != null) {
+          final found = catalogRepo.purposesForCascade(
+            activityId: _selectedActivity!.id,
+            subcategoryId: _selectedSubcategory!.id,
+          ).cast<CatItem?>().firstWhere(
+            (p) => p?.id == purposeField!.valueText,
+            orElse: () => null,
+          );
+          if (found != null) _selectedPurpose = found;
+        }
+      }
+    }
+
+    // Texto de subcategoría "otro"
+    final subcatOtherField = fields['subcategory_other_text'];
+    if (subcatOtherField?.valueText != null) {
+      otherSubcategoryText = subcatOtherField!.valueText!;
+    }
+
+    // Temas
+    if (selectedTopicIds.isEmpty) {
+      final topicsField = fields['topics'];
+      if (topicsField?.valueJson != null) {
+        try {
+          final decoded = jsonDecode(topicsField!.valueJson!);
+          if (decoded is List) selectedTopicIds.addAll(decoded.map((e) => e.toString()));
+        } catch (_) {}
+      }
+    }
+
+    final topicOtherField = fields['topic_other_text'];
+    if (topicOtherField?.valueText != null) {
+      otherTopicText = topicOtherField!.valueText!;
+    }
+
+    // Asistentes
+    if (selectedAttendeeIds.isEmpty) {
+      final attendeesField = fields['attendees'];
+      if (attendeesField?.valueJson != null) {
+        try {
+          final decoded = jsonDecode(attendeesField!.valueJson!);
+          if (decoded is List) selectedAttendeeIds.addAll(decoded.map((e) => e.toString()));
+        } catch (_) {}
+      }
+    }
+
+    // Resultado
+    if (selectedResult == null) {
+      final resultField = fields['result'];
+      if (resultField?.valueText != null) {
+        final found = catalogRepo.resultados.cast<CatItem?>().firstWhere(
+          (r) => r?.id == resultField!.valueText,
+          orElse: () => null,
+        );
+        if (found != null) selectedResult = found;
+      }
+    }
+
+    // PK desde actividad existente
+    if (existingActivity?.pk != null && pkInicio == null) {
+      pkInicio = existingActivity!.pk;
+    }
+
+    // Hora inicio / fin guardadas como draft fields
+    final horaInicioField = fields['draft_hora_inicio'];
+    if (horaInicioField?.valueText != null && horaInicio == null) {
+      final parts = horaInicioField!.valueText!.split(':');
+      if (parts.length == 2) {
+        final h = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        if (h != null && m != null) horaInicio = TimeOfDay(hour: h, minute: m);
+      }
+    }
+
+    final horaFinField = fields['draft_hora_fin'];
+    if (horaFinField?.valueText != null && horaFin == null) {
+      final parts = horaFinField!.valueText!.split(':');
+      if (parts.length == 2) {
+        final h = int.tryParse(parts[0]);
+        final m = int.tryParse(parts[1]);
+        if (h != null && m != null) horaFin = TimeOfDay(hour: h, minute: m);
+      }
+    }
+
+    // Motivo actividad no planeada
+    if (isUnplanned && unplannedReason == null) {
+      final reasonField = fields['unplanned_reason'];
+      if (reasonField?.valueText != null) unplannedReason = reasonField!.valueText;
+
+      final reasonOtherField = fields['unplanned_reason_other_text'];
+      if (reasonOtherField?.valueText != null) {
+        unplannedReasonOtherText = reasonOtherField!.valueText!;
+      }
+
+      final refField = fields['unplanned_reference'];
+      if (refField?.valueText != null) unplannedReference = refField!.valueText!;
+    }
+
+    // Evidencias guardadas en DB
+    await _rehydrateEvidences();
+  }
+
+  Future<void> _rehydrateEvidences() async {
+    if (evidencias.isNotEmpty) return;
+    try {
+      final dao = _dao;
+      final dbEvidences = await dao.getEvidencesForActivity(activity.id);
+      if (dbEvidences.isEmpty) return;
+      for (final ev in dbEvidences) {
+        evidencias.add(EvidenceDraft(
+          localPath: ev.filePathLocal,
+          descripcion: ev.caption ?? '',
+          createdAt: ev.takenAt ?? DateTime.now(),
+          lat: ev.geoLat,
+          lng: ev.geoLon,
+        ));
+      }
+    } catch (_) {}
+  }
+
+  // =========================
+  // Draft persistence helpers
+  // =========================
+
+  /// Ensures a DRAFT activity row exists in DB for this wizard session.
+  /// Only inserts if the activity doesn't exist yet (for new unplanned activities).
+  Future<void> _ensureDraftActivity() async {
+    try {
+      final dao = _dao;
+      if (await dao.activityExists(activity.id)) return;
+
+      final resolvedProjectId = await dao.resolveProjectId(selectedProjectId ?? projectCode);
+      final typeId = _selectedActivity?.id ?? activity.title;
+      final resolvedTypeId = await dao.resolveActivityTypeId(typeId);
+
+      await dao.upsertActivityRow(ActivitiesCompanion.insert(
+        id: activity.id,
+        projectId: resolvedProjectId,
+        activityTypeId: resolvedTypeId,
+        segmentId: drift.Value(selectedFrontId?.trim().isNotEmpty == true ? selectedFrontId!.trim() : null),
+        title: activity.title.isNotEmpty ? activity.title : 'Actividad',
+        createdAt: DateTime.now(),
+        createdByUserId: currentUserId,
+        pk: drift.Value(pkInicio ?? activity.pk),
+        catalogVersionId: drift.Value(catalogRepo.currentVersionId),
+      ));
+    } catch (e) {
+      appLogger.w('_ensureDraftActivity failed silently: $e');
+    }
+  }
+
+  /// Saves all current form fields and evidences to DB as a draft.
+  /// Safe to call on exit — never throws.
+  Future<void> saveDraftSilently() async {
+    try {
+      final dao = _dao;
+      final activityId = activity.id;
+      final existing = await dao.getActivityById(activityId);
+
+      final resolvedProjectId = await dao.resolveProjectId(selectedProjectId ?? projectCode);
+      final typeId = _selectedActivity?.id ?? existing?.activityTypeId ?? activity.title;
+      final resolvedTypeId = await dao.resolveActivityTypeId(typeId);
+
+      final now = DateTime.now();
+      final descText = _buildDescription();
+
+      // Preserve existing status unless it's still a plain DRAFT
+      final existingStatus = existing?.status;
+      final saveStatus = (existingStatus == 'READY_TO_SYNC' || existingStatus == 'SYNCED')
+          ? existingStatus!
+          : 'DRAFT';
+
+      final companion = ActivitiesCompanion.insert(
+        id: activityId,
+        projectId: resolvedProjectId,
+        activityTypeId: resolvedTypeId,
+        segmentId: drift.Value(selectedFrontId?.trim().isNotEmpty == true ? selectedFrontId!.trim() : null),
+        title: activity.title.isNotEmpty ? activity.title : 'Actividad',
+        description: drift.Value(descText.isNotEmpty ? descText : null),
+        pk: drift.Value(pkInicio ?? existing?.pk ?? activity.pk),
+        pkRefType: drift.Value(
+          existing?.pkRefType ??
+              switch (tipoUbicacion) {
+                TipoUbicacion.puntual => 'PK',
+                TipoUbicacion.tramo => 'TRAMO',
+                TipoUbicacion.general => 'GENERAL',
+              },
+        ),
+        createdAt: existing?.createdAt ?? now,
+        createdByUserId: currentUserId,
+        status: drift.Value(saveStatus),
+        geoLat: drift.Value(geoLat),
+        geoLon: drift.Value(geoLon),
+        geoAccuracy: drift.Value(geoAccuracy),
+        catalogVersionId: drift.Value(catalogRepo.currentVersionId),
+      );
+
+      final fields = _buildDraftFields(activityId);
+
+      await dao.upsertActivityRow(companion);
+      await dao.replaceActivityFields(activityId, fields);
+      await _saveEvidencesToDb(activityId);
+
+      appLogger.d('Draft saved: $activityId (${fields.length} fields, ${evidencias.length} evidencias)');
+    } catch (e, st) {
+      appLogger.w('saveDraftSilently failed: $e', stackTrace: st);
+    }
+  }
+
+  List<ActivityFieldsCompanion> _buildDraftFields(String activityId) {
+    final fields = <ActivityFieldsCompanion>[];
+
+    void add(String key, {String? text, String? json}) {
+      if (text == null && json == null) return;
+      fields.add(ActivityFieldsCompanion.insert(
+        id: _uuid.v4(),
+        activityId: activityId,
+        fieldKey: key,
+        valueText: drift.Value(text),
+        valueJson: drift.Value(json),
+      ));
+    }
+
+    if (risk != null) add('risk_level', text: risk!.name);
+    if (_selectedActivity != null) add('activity_type', text: _selectedActivity!.id);
+    if (_selectedSubcategory != null) add('subcategory', text: _selectedSubcategory!.id);
+    if (isOtherSubcategory && otherSubcategoryText.trim().isNotEmpty) {
+      add('subcategory_other_text', text: otherSubcategoryText.trim());
+    }
+    if (_selectedPurpose != null) add('purpose', text: _selectedPurpose!.id);
+    if (selectedFrontId?.trim().isNotEmpty == true) {
+      add('front_id', text: selectedFrontId!.trim());
+    } else if (selectedFrontName.trim().isNotEmpty) {
+      add('front_name', text: selectedFrontName.trim());
+    }
+    if (selectedTopicIds.isNotEmpty) {
+      add('topics', json: jsonEncode(selectedTopicIds.toList()));
+    }
+    if (isOtherTopicSelected && otherTopicText.trim().isNotEmpty) {
+      add('topic_other_text', text: otherTopicText.trim());
+    }
+    if (selectedAttendeeIds.isNotEmpty) {
+      add('attendees', json: jsonEncode(selectedAttendeeIds.toList()));
+    }
+    if (selectedResult != null) add('result', text: selectedResult!.id);
+    if (reportNotes.trim().isNotEmpty) add('report_notes', text: reportNotes.trim());
+    final cleanedAgreements = getReportAgreements();
+    if (cleanedAgreements.isNotEmpty) {
+      add('report_agreements', json: jsonEncode(cleanedAgreements));
+    }
+    if (horaInicio != null) {
+      add('draft_hora_inicio',
+          text: '${horaInicio!.hour.toString().padLeft(2, '0')}:${horaInicio!.minute.toString().padLeft(2, '0')}');
+    }
+    if (horaFin != null) {
+      add('draft_hora_fin',
+          text: '${horaFin!.hour.toString().padLeft(2, '0')}:${horaFin!.minute.toString().padLeft(2, '0')}');
+    }
+    if (isUnplanned) {
+      add('origin', text: 'unplanned');
+      if (unplannedReason != null) add('unplanned_reason', text: unplannedReason);
+      if (unplannedReasonOtherText.trim().isNotEmpty) {
+        add('unplanned_reason_other_text', text: unplannedReasonOtherText.trim());
+      }
+      if (unplannedReference.trim().isNotEmpty) {
+        add('unplanned_reference', text: unplannedReference.trim());
+      }
+    }
+    add('has_evidence', text: hasEvidence ? 'true' : 'false');
+    return fields;
+  }
+
+  /// Saves (or replaces) all in-memory evidencias to the evidences table.
+  Future<void> _saveEvidencesToDb(String activityId) async {
+    try {
+      await (database.delete(database.evidences)
+            ..where((t) => t.activityId.equals(activityId)))
+          .go();
+      for (final draft in evidencias) {
+        await database.into(database.evidences).insertOnConflictUpdate(
+              EvidencesCompanion.insert(
+                id: _uuid.v4(),
+                activityId: activityId,
+                type: 'PHOTO',
+                filePathLocal: draft.localPath,
+                takenAt: drift.Value(draft.createdAt),
+                geoLat: drift.Value(draft.lat),
+                geoLon: drift.Value(draft.lng),
+                caption: drift.Value(
+                    draft.descripcion.trim().isNotEmpty ? draft.descripcion.trim() : null),
+              ),
+            );
+      }
+    } catch (e) {
+      appLogger.w('_saveEvidencesToDb error: $e');
+    }
+  }
+
+  /// Adds the activity to sync_queue so SyncService can push it to the server.
+  Future<void> _enqueueForSync(String activityId, ActivitiesCompanion companion) async {
+    try {
+      final dao = _dao;
+      final activityTypeCode = companion.activityTypeId.value;
+      final now = DateTime.now();
+      final assignedToUserId = await _resolveAssignedUserIdForSync(activityId);
+      final pkStartForSync = companion.pk.value ?? pkInicio ?? activity.pk ?? 0;
+      final pkEndForSync = tipoUbicacion == TipoUbicacion.tramo ? pkFin : null;
+      final wizardPayload = _buildWizardPayloadForSync();
+
+      final dto = ActivityDTO(
+        uuid: activityId,
+        projectId: companion.projectId.value,
+        frontId: companion.segmentId.value,
+        pkStart: pkStartForSync,
+        pkEnd: pkEndForSync,
+        executionState: 'COMPLETADA',
+        assignedToUserId: assignedToUserId,
+        createdByUserId: companion.createdByUserId.value,
+        catalogVersionId: companion.catalogVersionId.value ?? '',
+        activityTypeCode: activityTypeCode,
+        latitude: companion.geoLat.value?.toString(),
+        longitude: companion.geoLon.value?.toString(),
+        title: companion.title.value,
+        description: companion.description.value,
+        wizardPayload: wizardPayload,
+        createdAt: companion.createdAt.value,
+        updatedAt: now,
+        syncVersion: 0,
+      );
+
+      await dao.markReadyToSync(
+        activityId: activityId,
+        userId: currentUserId,
+        payload: dto.toJson(),
+      );
+    } catch (e) {
+      appLogger.w('_enqueueForSync error: $e');
+    }
+  }
+
+  Map<String, dynamic> _buildWizardPayloadForSync() {
+    final topicItems = <Map<String, String>>[];
+    for (final topicId in selectedTopicIds) {
+      if (topicId == 'OTRO_TEMA') continue;
+      final match = topics.cast<CatItem?>().firstWhere(
+            (item) => item?.id == topicId,
+            orElse: () => null,
+          );
+      topicItems.add({
+        'id': topicId,
+        'name': (match?.name ?? topicId).trim(),
+      });
+    }
+
+    final attendeeItems = selectedAttendeeIds
+        .map((id) {
+          final attendee = attendeeById(id);
+          return {
+            'id': id,
+            'name': (attendee?.name ?? id).trim(),
+          };
+        })
+        .toList(growable: false);
+
+    return {
+      'risk_level': risk?.name,
+      'activity': _selectedActivity == null
+          ? null
+          : {
+              'id': _selectedActivity!.id,
+              'name': _selectedActivity!.name,
+            },
+      'subcategory': _selectedSubcategory == null
+          ? null
+          : {
+              'id': _selectedSubcategory!.id,
+              'name': _selectedSubcategory!.name,
+              'other_text': otherSubcategoryText.trim().isEmpty
+                  ? null
+                  : otherSubcategoryText.trim(),
+            },
+      'purpose': _selectedPurpose == null
+          ? null
+          : {
+              'id': _selectedPurpose!.id,
+              'name': _selectedPurpose!.name,
+            },
+      'topics': topicItems,
+      'topic_other_text': otherTopicText.trim().isEmpty
+          ? null
+          : otherTopicText.trim(),
+      'attendees': attendeeItems,
+      'result': selectedResult == null
+          ? null
+          : {
+              'id': selectedResult!.id,
+              'name': selectedResult!.name,
+            },
+      'notes': reportNotes.trim().isEmpty ? null : reportNotes.trim(),
+      'agreements': getReportAgreements(),
+      'location': {
+        'tipo_ubicacion': tipoUbicacion.name,
+        'pk_inicio': pkInicio,
+        'pk_fin': pkFin,
+        'pk_ref_type': switch (tipoUbicacion) {
+          TipoUbicacion.puntual => 'PK',
+          TipoUbicacion.tramo => 'TRAMO',
+          TipoUbicacion.general => 'GENERAL',
+        },
+        'estado': estadoId,
+        'municipio': municipioId,
+        'colonia': colonia.trim().isEmpty ? null : colonia.trim(),
+        'front_id': selectedFrontId,
+        'front_name': selectedFrontName.trim().isEmpty ? null : selectedFrontName.trim(),
+      },
+      'unplanned': {
+        'is_unplanned': isUnplanned,
+        'reason': unplannedReason,
+        'reason_other_text':
+            unplannedReasonOtherText.trim().isEmpty ? null : unplannedReasonOtherText.trim(),
+        'reference': unplannedReference.trim().isEmpty ? null : unplannedReference.trim(),
+      },
+    };
+  }
+
+  Future<String?> _resolveAssignedUserIdForSync(String activityId) async {
+    final fromActivity = activity.assignedToUserId?.trim();
+    if (fromActivity != null && fromActivity.isNotEmpty) {
+      return fromActivity;
+    }
+
+    final assignment = await ((database.select(database.agendaAssignments)
+          ..where((t) => t.activityId.equals(activityId) | t.id.equals(activityId))
+          ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+          ..limit(1))
+        .getSingleOrNull());
+
+    final fromAssignment = assignment?.resourceId.trim();
+    if (fromAssignment != null && fromAssignment.isNotEmpty) {
+      return fromAssignment;
+    }
+
+    return null;
+  }
+
+  /// Triggers a background sync push. Fire-and-forget — never throws.
+  void _triggerBackgroundPush() {
+    try {
+      final syncService = GetIt.I<SyncService>();
+      unawaited(syncService.pushPendingChanges());
+    } catch (_) {
+      // SyncService not available or offline — silently ignore
+    }
   }
 
   String _buildDescription() {
@@ -1298,9 +2151,29 @@ class WizardController extends ChangeNotifier {
     if (_selectedSubcategory != null) {
       parts.add('Subcategoría: ${_selectedSubcategory!.name}');
     }
-    if (risk != null) {
-      parts.add('Riesgo: ${risk!.name.toUpperCase()}');
+    if (_selectedPurpose != null) {
+      parts.add('Propósito: ${_selectedPurpose!.name}');
     }
+
+    final topicNames = <String>[];
+    for (final topicId in selectedTopicIds) {
+      if (topicId == 'OTRO_TEMA') continue;
+      final match = topics.cast<CatItem?>().firstWhere(
+            (item) => item?.id == topicId,
+            orElse: () => null,
+          );
+      final topicName = (match?.name ?? topicId).trim();
+      if (topicName.isNotEmpty) {
+        topicNames.add(topicName);
+      }
+    }
+    if (isOtherTopicSelected && otherTopicText.trim().isNotEmpty) {
+      topicNames.add(otherTopicText.trim());
+    }
+    if (topicNames.isNotEmpty) {
+      parts.add('Temas: ${topicNames.join(', ')}');
+    }
+
     if (selectedResult != null) {
       parts.add('Resultado: ${selectedResult!.name}');
     }
