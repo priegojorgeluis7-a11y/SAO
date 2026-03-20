@@ -3,17 +3,13 @@
 
 param(
     [Parameter(Mandatory = $true)][string]$ProjectId,
-    [Parameter(Mandatory = $true)][string]$DbSecret,
-    [Parameter(Mandatory = $true)][string]$JwtTokenSecret,
     [Parameter(Mandatory = $false)][string]$Region = "us-central1",
     [Parameter(Mandatory = $false)][string]$ServiceName = "sao-api",
     [Parameter(Mandatory = $false)][string]$ImageName = "sao-api",
-    [Parameter(Mandatory = $false)][string]$DbName = "sao",
-    [Parameter(Mandatory = $false)][string]$DbUser = "sao_user",
-    [Parameter(Mandatory = $false)][string]$InstanceName = "sao-postgres-ent",
     [Parameter(Mandatory = $false)][string]$ServiceAccountEmail = "",
-    [Parameter(Mandatory = $false)][switch]$SkipSqlSetup,
-    [Parameter(Mandatory = $false)][switch]$AllowUnauthenticated
+    [Parameter(Mandatory = $false)][string]$SmokeEmail = "",
+    [Parameter(Mandatory = $false)][string]$SmokePassword = "",
+    [Parameter(Mandatory = $false)][switch]$DisallowUnauthenticated
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,65 +21,35 @@ function Assert-LastCommand {
     }
 }
 
-function Assert-NotEmpty {
-    param([string]$Value, [string]$Name)
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        throw "$Name cannot be empty"
-    }
-}
-
 if ($ProjectId -notmatch '^[a-z][a-z0-9-]{4,28}[a-z0-9]$') {
     throw "Invalid ProjectId format: $ProjectId"
 }
-
-Assert-NotEmpty -Value $DbSecret -Name "DbSecret"
-Assert-NotEmpty -Value $JwtTokenSecret -Name "JwtTokenSecret"
 
 if ([string]::IsNullOrWhiteSpace($ServiceAccountEmail)) {
     $ServiceAccountEmail = "sao-runner@$ProjectId.iam.gserviceaccount.com"
 }
 
-$InstanceConnectionName = "$ProjectId`:$Region`:$InstanceName"
-$DBConnectionString = "postgresql://${DbUser}:${DbSecret}@/${DbName}?host=/cloudsql/${InstanceConnectionName}"
+if ([string]::IsNullOrWhiteSpace($SmokeEmail)) {
+    $SmokeEmail = $env:SAO_SMOKE_EMAIL
+}
+
+if ([string]::IsNullOrWhiteSpace($SmokePassword)) {
+    $SmokePassword = $env:SAO_SMOKE_PASSWORD
+}
 
 Write-Host "`n🚀 SAO Backend - Cloud Run Deployment" -ForegroundColor Cyan
 Write-Host ("=" * 70)
 Write-Host "Project: $ProjectId | Region: $Region | Service: $ServiceName" -ForegroundColor White
 Write-Host "Service Account: $ServiceAccountEmail" -ForegroundColor White
-Write-Host "Cloud SQL: $InstanceConnectionName" -ForegroundColor White
+Write-Host "Mode: Firestore-only strict" -ForegroundColor White
 Write-Host ("=" * 70)
 
-Write-Host "`n[0/4] Setting active project..." -ForegroundColor Yellow
+Write-Host "`n[1/5] Setting active project..." -ForegroundColor Yellow
 gcloud config set project $ProjectId
 Assert-LastCommand -Step "set active project"
 gcloud auth application-default set-quota-project $ProjectId
 if ($LASTEXITCODE -ne 0) {
     Write-Host "⚠️ Could not set ADC quota project. Continuing." -ForegroundColor Yellow
-}
-
-if (-not $SkipSqlSetup) {
-    Write-Host "`n[1/4] Ensuring Cloud SQL instance exists..." -ForegroundColor Yellow
-    gcloud sql instances describe $InstanceName --project $ProjectId 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Creating Cloud SQL instance $InstanceName..." -ForegroundColor Yellow
-        gcloud sql instances create $InstanceName `
-            --database-version=POSTGRES_15 `
-            --tier=db-g1-small `
-            --region=$Region `
-            --storage-type=SSD `
-            --storage-size=20GB `
-            --availability-type=REGIONAL `
-            --backup-start-time=03:00 `
-            --quiet
-        Assert-LastCommand -Step "create Cloud SQL instance"
-        Write-Host "✅ Cloud SQL instance created" -ForegroundColor Green
-    }
-    else {
-        Write-Host "✅ Cloud SQL instance exists, skipping create" -ForegroundColor Green
-    }
-}
-else {
-    Write-Host "`n[1/4] Skipping Cloud SQL setup (existing infrastructure mode)." -ForegroundColor Green
 }
 
 Write-Host "`n[2/5] Building container image..." -ForegroundColor Yellow
@@ -92,7 +58,7 @@ gcloud builds submit --tag gcr.io/$ProjectId/$ImageName .
 Assert-LastCommand -Step "build image"
 
 Write-Host "`n[3/5] Deploying Cloud Run service..." -ForegroundColor Yellow
-if ($AllowUnauthenticated) {
+if (-not $DisallowUnauthenticated) {
     gcloud run deploy $ServiceName `
         --image gcr.io/$ProjectId/$ImageName `
         --region $Region `
@@ -103,8 +69,10 @@ if ($AllowUnauthenticated) {
         --max-instances 10 `
         --timeout 300 `
         --concurrency 80 `
-        --add-cloudsql-instances $InstanceConnectionName `
-        --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest" `
+        --set-env-vars "DATA_BACKEND=firestore,RUN_STARTUP_MIGRATIONS=false,FIRESTORE_PROJECT_ID=$ProjectId,FIRESTORE_DATABASE=(default),FIRESTORE_READ_EVENTS=true,FIRESTORE_READ_ACTIVITIES=true" `
+        --update-secrets "JWT_SECRET=JWT_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest" `
+        --remove-secrets "DATABASE_URL" `
+        --clear-cloudsql-instances `
         --allow-unauthenticated
 }
 else {
@@ -118,8 +86,10 @@ else {
         --max-instances 10 `
         --timeout 300 `
         --concurrency 80 `
-        --add-cloudsql-instances $InstanceConnectionName `
-        --set-secrets "DATABASE_URL=DATABASE_URL:latest,JWT_SECRET=JWT_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest" `
+        --set-env-vars "DATA_BACKEND=firestore,RUN_STARTUP_MIGRATIONS=false,FIRESTORE_PROJECT_ID=$ProjectId,FIRESTORE_DATABASE=(default),FIRESTORE_READ_EVENTS=true,FIRESTORE_READ_ACTIVITIES=true" `
+        --update-secrets "JWT_SECRET=JWT_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest" `
+        --remove-secrets "DATABASE_URL" `
+        --clear-cloudsql-instances `
         --no-allow-unauthenticated
 }
 Assert-LastCommand -Step "deploy Cloud Run"
@@ -135,7 +105,7 @@ Write-Host "`nRecent logs:" -ForegroundColor White
 gcloud run services logs read $ServiceName --region $Region --limit 20
 
 Write-Host "`n[5/5] Running smoke test..." -ForegroundColor Yellow
-.\scripts\smoke_test_prod.ps1 -BaseUrl $serviceUrl
+.\scripts\smoke_test_prod.ps1 -BaseUrl $serviceUrl -Email $SmokeEmail -LoginPassword $SmokePassword
 Assert-LastCommand -Step "smoke test"
 Write-Host "✅ Smoke test passed" -ForegroundColor Green
 

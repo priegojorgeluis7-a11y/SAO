@@ -1,29 +1,88 @@
 """Authentication and authorization dependencies for API endpoints."""
 
 import logging
-from uuid import UUID
+from typing import Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
-from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.config import settings
+from app.core.enums import UserStatus
+from app.core.permission_catalog import DEFAULT_ROLE_PERMISSION_CODES
 from app.core.security import verify_token
-from app.models.permission import Permission
-from app.models.role import Role, role_permissions
-from app.models.user import User, UserStatus
-from app.models.user_role_scope import UserRoleScope
+from app.services.firestore_identity_service import get_firestore_user_by_id
 
 logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
 
 
+def get_db_optional():
+    """Firestore-only runtime: always yield None (no SQL session)."""
+    yield None
+
+_PERMISSION_ALIASES: dict[str, set[str]] = {
+    "activity.view": {"activity.view", "ver actividades"},
+    "activity.create": {"activity.create", "crear actividades"},
+    "activity.edit": {"activity.edit", "editar actividades"},
+    "activity.delete": {"activity.delete", "eliminar actividades"},
+    "activity.approve": {"activity.approve", "aprobar actividades"},
+    "activity.reject": {"activity.reject", "rechazar actividades"},
+    "event.view": {"event.view", "ver eventos"},
+    "event.create": {"event.create", "crear eventos"},
+    "event.edit": {"event.edit", "editar eventos"},
+    "catalog.view": {"catalog.view", "ver catálogo", "ver catalogo"},
+    "catalog.edit": {"catalog.edit", "editar catálogo", "editar catalogo"},
+    "catalog.publish": {"catalog.publish", "publicar catálogo", "publicar catalogo"},
+    "user.view": {"user.view", "ver usuarios"},
+    "user.create": {"user.create", "crear usuarios"},
+    "user.edit": {"user.edit", "editar usuarios"},
+    "report.view": {"report.view", "ver reportes"},
+    "report.export": {"report.export", "exportar reportes"},
+    "assignment.manage": {"assignment.manage", "administrar asignaciones"},
+    "project.manage": {"project.manage", "administrar proyectos"},
+    "flow.approve_exception": {
+        "flow.approve_exception",
+        "aprobar excepciones de flujo",
+    },
+}
+
+
+def _normalize_permission_code(value: str | None) -> str:
+    return str(value or "").strip().lower()
+
+
+def _permission_matches(candidate: str | None, requested: str) -> bool:
+    candidate_norm = _normalize_permission_code(candidate)
+    requested_norm = _normalize_permission_code(requested)
+    if not candidate_norm or not requested_norm:
+        return False
+
+    aliases = _PERMISSION_ALIASES.get(requested_norm)
+    if aliases:
+        return candidate_norm in aliases
+
+    reverse_aliases = _PERMISSION_ALIASES.get(candidate_norm)
+    if reverse_aliases:
+        return requested_norm in reverse_aliases
+
+    return candidate_norm == requested_norm
+
+
 async def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
-) -> User:
-    """Dependency para obtener usuario actual desde JWT"""
+    db: Any | None = Depends(get_db_optional),
+) -> Any:
+    """Dependency para obtener usuario actual desde JWT."""
+    _ = db  # Firestore-only runtime keeps signature parity with existing dependencies.
+
+    if settings.DATA_BACKEND != "firestore":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Only firestore backend mode is supported",
+        )
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Could not validate credentials",
@@ -32,84 +91,128 @@ async def get_current_user(
 
     try:
         payload = verify_token(token, expected_type="access")
-        user_id: str = payload.get("sub")
-        if user_id is None:
+        user_id = str(payload.get("sub") or "").strip()
+        if not user_id:
             raise credentials_exception
     except ValueError:
         raise credentials_exception
 
-    try:
-        user = db.query(User).filter(User.id == UUID(user_id)).first()
-    except Exception:
-        logger.exception(
-            "DB error resolving user_id=%s — possible schema inconsistency "
-            "(enum case mismatch / pending migrations). "
-            "Run: python scripts/fix_prod_migrations.py --mode upgrade",
-            user_id,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error — check server logs",
-        )
-
+    user = get_firestore_user_by_id(user_id)
     if user is None:
         raise credentials_exception
 
     if user.status != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive or locked"
+            detail="User account is inactive or locked",
         )
 
+    token_iat = payload.get("iat")
+    if token_iat and user.last_logout_at:
+        from datetime import datetime, timezone as _tz
+
+        token_issued_at = datetime.fromtimestamp(token_iat, tz=_tz.utc)
+        if token_issued_at < user.last_logout_at:
+            raise credentials_exception
+
+    request.state.user_id = str(getattr(user, "id", ""))
     return user
 
 
-def verify_project_access(user: User, project_id: str, db: Session) -> None:
-    """
-    Verify that user has access to the specified project.
-    
-    Raises HTTPException if user does not have access.
-    Access is granted if:
-    - User has a UserRoleScope with project_id=NULL (access to all projects), OR
-    - User has a UserRoleScope with project_id matching the requested project
-    """
-    # Check if user has any role scope for this project or for all projects (NULL)
-    has_access = db.query(UserRoleScope).filter(
-        UserRoleScope.user_id == user.id,
-        (UserRoleScope.project_id == project_id) | (UserRoleScope.project_id.is_(None)),
-    ).first() is not None
-    
-    if not has_access:
+def verify_project_access(user: Any, project_id: str, db: Any) -> None:
+    """Verify that the user can access the requested project id."""
+    _ = db
+
+    if settings.DATA_BACKEND != "firestore":
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail=f"User does not have access to project {project_id}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Only firestore backend mode is supported",
         )
 
+    project_ids = getattr(user, "project_ids", []) or []
+    if not project_ids or "*" in project_ids or project_id in project_ids:
+        return
 
-def user_has_permission(user: User, permission_code: str, db: Session) -> bool:
-    """Return True if user has the requested permission through any assigned role."""
-    permission = (
-        db.query(Permission.id)
-        .join(role_permissions, Permission.id == role_permissions.c.permission_id)
-        .join(Role, Role.id == role_permissions.c.role_id)
-        .join(UserRoleScope, UserRoleScope.role_id == Role.id)
-        .filter(
-            UserRoleScope.user_id == user.id,
-            Permission.code == permission_code,
-        )
-        .first()
+    logger.warning(
+        "PROJECT_ACCESS_DENIED user_id=%s project_id=%s",
+        getattr(user, "id", "?"),
+        project_id,
     )
-    return permission is not None
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=f"User does not have access to project {project_id}",
+    )
+
+
+def _normalize_project_id(project_id: str | None) -> str | None:
+    if project_id is None:
+        return None
+    normalized = project_id.strip().upper()
+    return normalized or None
+
+
+def user_has_permission(
+    user: Any,
+    permission_code: str,
+    db: Any | None,
+    project_id: str | None = None,
+) -> bool:
+    """Return True if user has the requested permission with deny-overrides semantics."""
+    _ = db
+
+    if settings.DATA_BACKEND != "firestore":
+        return False
+
+    normalized_project_id = _normalize_project_id(project_id)
+    direct_scopes = getattr(user, "permission_scopes", []) or []
+
+    def _scope_applies(scope_project_id: str | None) -> bool:
+        if normalized_project_id is None:
+            return scope_project_id is None
+        return scope_project_id is None or scope_project_id == normalized_project_id
+
+    for scope in direct_scopes:
+        scope_code = str(scope.get("permission_code") or "").strip()
+        scope_effect = str(scope.get("effect") or "allow").strip().lower()
+        scope_project_id = _normalize_project_id(scope.get("project_id"))
+        if _permission_matches(scope_code, permission_code) and scope_effect == "deny" and _scope_applies(scope_project_id):
+            return False
+
+    role_codes: set[str] = set()
+    for role_name in getattr(user, "roles", []) or []:
+        role_codes.update(
+            DEFAULT_ROLE_PERMISSION_CODES.get(str(role_name).strip().upper(), [])
+        )
+    if any(_permission_matches(code, permission_code) for code in role_codes):
+        return True
+
+    for scope in direct_scopes:
+        scope_code = str(scope.get("permission_code") or "").strip()
+        scope_effect = str(scope.get("effect") or "allow").strip().lower()
+        scope_project_id = _normalize_project_id(scope.get("project_id"))
+        if _permission_matches(scope_code, permission_code) and scope_effect == "allow" and _scope_applies(scope_project_id):
+            return True
+    return False
 
 
 def require_permission(permission_code: str):
     """FastAPI dependency factory to enforce RBAC permissions."""
 
     def _permission_dependency(
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-    ) -> User:
+        current_user: Any = Depends(get_current_user),
+        db: Any | None = Depends(get_db_optional),
+    ) -> Any:
+        if settings.DATA_BACKEND != "firestore":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Only firestore backend mode is supported",
+            )
         if not user_has_permission(current_user, permission_code, db):
+            logger.warning(
+                "PERMISSION_DENIED user_id=%s permission=%s",
+                getattr(current_user, "id", "?"),
+                permission_code,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing permission: {permission_code}",
@@ -119,31 +222,87 @@ def require_permission(permission_code: str):
     return _permission_dependency
 
 
-def user_has_any_role(user: User, role_names: list[str], db: Session) -> bool:
+def require_project_permission(permission_code: str, project_param: str = "project_id"):
+    """Dependency factory that enforces permission within a project scope."""
+
+    async def _permission_dependency(
+        request: Request,
+        current_user: Any = Depends(get_current_user),
+        db: Any | None = Depends(get_db_optional),
+    ) -> Any:
+        if settings.DATA_BACKEND != "firestore":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Only firestore backend mode is supported",
+            )
+
+        project_id = request.path_params.get(project_param) or request.query_params.get(project_param)
+        if project_id is None:
+            try:
+                body = await request.json()
+            except Exception:
+                body = None
+            if isinstance(body, dict):
+                project_id = body.get(project_param)
+
+        normalized_project_id = _normalize_project_id(project_id)
+        if normalized_project_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Missing required project parameter: {project_param}",
+            )
+
+        if not user_has_permission(
+            current_user,
+            permission_code,
+            db,
+            project_id=normalized_project_id,
+        ):
+            logger.warning(
+                "PERMISSION_DENIED user_id=%s permission=%s project_id=%s",
+                getattr(current_user, "id", "?"),
+                permission_code,
+                normalized_project_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"Missing permission: {permission_code} "
+                    f"for project: {normalized_project_id}"
+                ),
+            )
+
+        request.state.project_id = normalized_project_id
+        return current_user
+
+    return _permission_dependency
+
+
+def user_has_any_role(user: Any, role_names: list[str], db: Any | None) -> bool:
+    """Return True if user has at least one role from role_names."""
+    _ = db
+
     normalized = [name.strip().upper() for name in role_names if name and name.strip()]
-    if not normalized:
+    if not normalized or settings.DATA_BACKEND != "firestore":
         return False
 
-    role_row = (
-        db.query(Role.id)
-        .join(UserRoleScope, UserRoleScope.role_id == Role.id)
-        .filter(
-            UserRoleScope.user_id == user.id,
-            Role.name.in_(normalized),
-        )
-        .first()
-    )
-    return role_row is not None
+    user_roles = [r.upper() for r in (getattr(user, "roles", []) or [])]
+    return any(role in normalized for role in user_roles)
 
 
 def require_any_role(role_names: list[str]):
     """FastAPI dependency factory to enforce one-of role checks."""
 
     def _role_dependency(
-        current_user: User = Depends(get_current_user),
-        db: Session = Depends(get_db),
-    ) -> User:
+        current_user: Any = Depends(get_current_user),
+        db: Any | None = Depends(get_db_optional),
+    ) -> Any:
         if not user_has_any_role(current_user, role_names, db):
+            logger.warning(
+                "ROLE_DENIED user_id=%s required=%s",
+                getattr(current_user, "id", "?"),
+                role_names,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Missing required role. Expected one of: {', '.join(role_names)}",

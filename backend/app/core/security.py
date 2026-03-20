@@ -33,7 +33,14 @@ def get_password_hash(password: str) -> str:
 def _create_token(data: dict, expires_at: datetime, token_type: str) -> str:
     """Build and encode JWT token payload with a fixed expiration and type."""
     payload = data.copy()
-    payload.update({"exp": expires_at, "type": token_type})
+    issued_at = datetime.now(timezone.utc)
+    payload.update(
+        {
+            "exp": expires_at,
+            "iat": int(issued_at.timestamp()),
+            "type": token_type,
+        }
+    )
     return jwt.encode(payload, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 

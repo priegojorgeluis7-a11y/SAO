@@ -1,0 +1,69 @@
+"""Canonical permission catalog and default role mappings."""
+
+from __future__ import annotations
+
+CANONICAL_PERMISSION_CODES: list[str] = [
+    "Ver actividades",
+    "Crear actividades",
+    "Editar actividades",
+    "Eliminar actividades",
+    "Aprobar actividades",
+    "Rechazar actividades",
+    "Crear eventos",
+    "Editar eventos",
+    "Ver eventos",
+    "Ver catálogo",
+    "Editar catálogo",
+    "Publicar catálogo",
+    "Crear usuarios",
+    "Editar usuarios",
+    "Ver usuarios",
+    "Ver reportes",
+    "Exportar reportes",
+    "Administrar asignaciones",
+    "Administrar proyectos",
+    "Aprobar excepciones de flujo",
+]
+
+DEFAULT_ROLE_PERMISSION_CODES: dict[str, list[str]] = {
+    "ADMIN": list(CANONICAL_PERMISSION_CODES),
+    "COORD": [
+        "Ver actividades",
+        "Crear actividades",
+        "Editar actividades",
+        "Aprobar actividades",
+        "Rechazar actividades",
+        "Crear eventos",
+        "Editar eventos",
+        "Ver eventos",
+        "Ver catálogo",
+        "Ver reportes",
+        "Exportar reportes",
+        "Administrar asignaciones",
+    ],
+    "SUPERVISOR": [
+        "Ver actividades",
+        "Crear actividades",
+        "Editar actividades",
+        "Aprobar actividades",
+        "Rechazar actividades",
+        "Crear eventos",
+        "Editar eventos",
+        "Ver eventos",
+        "Ver reportes",
+    ],
+    "OPERATIVO": [
+        "Ver actividades",
+        "Crear actividades",
+        "Editar actividades",
+        "Ver eventos",
+        "Crear eventos",
+    ],
+    "LECTOR": [
+        "Ver actividades",
+        "Ver eventos",
+        "Ver catálogo",
+        "Ver usuarios",
+        "Ver reportes",
+    ],
+}

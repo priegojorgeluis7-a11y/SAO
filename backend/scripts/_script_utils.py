@@ -3,23 +3,12 @@
 from __future__ import annotations
 
 import logging
-import os
 import sys
 from pathlib import Path
-
-import sqlalchemy as sa
-from alembic.config import Config
 
 
 def configure_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-
-
-def get_database_url() -> str:
-    database_url = os.getenv("DATABASE_URL")
-    if not database_url:
-        raise RuntimeError("DATABASE_URL environment variable is not set")
-    return database_url
 
 
 def get_base_dir() -> Path:
@@ -34,26 +23,27 @@ def add_repo_root_to_path(base_dir: Path | None = None) -> Path:
     return resolved_base_dir
 
 
-def create_engine_from_env() -> sa.Engine:
-    return sa.create_engine(get_database_url())
+def _retired_sql_helper(name: str) -> None:
+    raise RuntimeError(
+        f"{name} is retired in firestore-only mode. "
+        "Do not use SQL/Alembic maintenance helpers."
+    )
 
 
-def build_alembic_config(base_dir: Path) -> Config:
-    alembic_config = Config(str(base_dir / "alembic.ini"))
-    alembic_config.set_main_option("script_location", str(base_dir / "alembic"))
-    return alembic_config
+def get_database_url() -> str:
+    _retired_sql_helper("get_database_url")
+    return ""
+
+
+def create_engine_from_env():
+    _retired_sql_helper("create_engine_from_env")
+    return None
+
+
+def build_alembic_config(_base_dir: Path):
+    _retired_sql_helper("build_alembic_config")
+    return None
 
 
 def run_common_seeds() -> None:
-    from app.core.database import SessionLocal
-    from app.seeds.initial_data import run_all_seeds
-
-    logging.info("Running seeds")
-    db = SessionLocal()
-    try:
-        run_all_seeds(db)
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
+    _retired_sql_helper("run_common_seeds")

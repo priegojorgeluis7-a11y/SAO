@@ -9,8 +9,9 @@ RUN addgroup --system appgroup \
     && adduser --system --ingroup appgroup appuser
 
 COPY requirements.txt ./
+COPY requirements.firestore-runtime.txt ./
 RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+    && pip install --no-cache-dir -r requirements.firestore-runtime.txt
 
 COPY . .
 

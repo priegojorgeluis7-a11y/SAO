@@ -1,15 +1,15 @@
-"""Authentication endpoints for login, refresh and profile retrieval."""
+﻿"""Authentication endpoints for login, refresh and profile retrieval."""
 
 import logging
 from datetime import datetime, timezone
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user
 from app.core.config import settings
-from app.core.database import get_db
+from app.core.api_errors import api_error
 from app.core.rate_limit import enforce_rate_limit
 from app.core.security import (
     create_access_token,
@@ -18,10 +18,9 @@ from app.core.security import (
     verify_password,
     verify_token,
 )
-from app.models.role import Role
-from app.models.user import User, UserStatus
-from app.models.user_role_scope import UserRoleScope
+from app.core.enums import UserStatus
 from app.schemas.auth import (
+    ChangePasswordRequest,
     LoginRequest,
     RefreshRequest,
     SignupRequest,
@@ -29,8 +28,17 @@ from app.schemas.auth import (
     TokenResponse,
     UpdatePinRequest,
 )
+from app.core.firestore import get_firestore_client
 from app.schemas.user import UserResponse
-from app.services.audit_service import write_audit_log
+from app.services.audit_service import write_firestore_audit_log
+from app.services.firestore_identity_service import (
+    create_firestore_user,
+    get_firestore_user_by_id,
+    get_firestore_user_by_email,
+    list_firestore_users,
+    update_last_login,
+    update_last_logout,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,88 +48,77 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
 async def signup(
     payload: SignupRequest,
-    db: Session = Depends(get_db),
+    http_request: Request,
 ) -> SignupResponse:
+    enforce_rate_limit(
+        http_request,
+        scope="auth.signup",
+        limit=settings.RATE_LIMIT_AUTH_SENSITIVE_PER_MINUTE,
+        window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        identifier=payload.email,
+    )
     role_name = payload.role.upper().strip()
     invite_code = payload.invite_code.strip()
 
     if role_name == "ADMIN":
         if not settings.ADMIN_INVITE_CODE:
-            raise HTTPException(
+            raise api_error(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="ADMIN signup is disabled",
+                code="AUTH_ADMIN_SIGNUP_DISABLED",
+                message="ADMIN signup is disabled",
             )
         if invite_code != settings.ADMIN_INVITE_CODE:
-            raise HTTPException(
+            raise api_error(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid invite code",
+                code="AUTH_INVALID_INVITE_CODE",
+                message="Invalid invite code",
             )
     else:
         if not settings.SIGNUP_INVITE_CODE:
-            raise HTTPException(
+            raise api_error(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Signup is disabled",
+                code="AUTH_SIGNUP_DISABLED",
+                message="Signup is disabled",
             )
         if invite_code != settings.SIGNUP_INVITE_CODE:
-            raise HTTPException(
+            raise api_error(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Invalid invite code",
+                code="AUTH_INVALID_INVITE_CODE",
+                message="Invalid invite code",
             )
 
-    existing_user = db.query(User).filter(User.email == payload.email).first()
-    if existing_user is not None:
-        raise HTTPException(
+    email_normalized = payload.email.strip().lower()
+    if get_firestore_user_by_email(email_normalized):
+        raise api_error(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Email already registered",
+            code="AUTH_EMAIL_ALREADY_REGISTERED",
+            message="Email already registered",
         )
 
-    role = db.query(Role).filter(Role.name == role_name).first()
-    if role is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Role {role_name} is not configured",
-        )
-
-    user = User(
-        email=payload.email,
-        password_hash=get_password_hash(payload.password),
+    principal = create_firestore_user(
+        email=email_normalized,
         full_name=payload.display_name.strip(),
-        status=UserStatus.ACTIVE,
+        password_hash=get_password_hash(payload.password),
+        roles=[role_name],
+        project_ids=[],
     )
-
-    db.add(user)
-    db.flush()
-
-    scope = UserRoleScope(
-        user_id=user.id,
-        role_id=role.id,
-        project_id=None,
-        front_id=None,
-        location_id=None,
-        assigned_by_id=None,
-    )
-    db.add(scope)
-    db.commit()
-    db.refresh(user)
 
     return SignupResponse(
-        user_id=str(user.id),
-        email=user.email,
+        user_id=str(principal.id),
+        email=principal.email,
         role=role_name,
     )
 
 
 @router.get("/roles", response_model=list[str])
-async def list_signup_roles(db: Session = Depends(get_db)) -> list[str]:
-    roles = db.query(Role).order_by(Role.name.asc()).all()
-    return [role.name for role in roles]
+async def list_signup_roles() -> list[str]:
+    return ["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"]
 
 
 @router.post("/login", response_model=TokenResponse)
 async def login(
     credentials: LoginRequest,
     http_request: Request,
-    db: Session = Depends(get_db)
 ) -> TokenResponse:
     """Login con email/password. Devuelve access + refresh tokens"""
     enforce_rate_limit(
@@ -129,31 +126,48 @@ async def login(
         scope="auth.login",
         limit=settings.RATE_LIMIT_AUTH_LOGIN_PER_MINUTE,
         window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        identifier=credentials.email,
     )
 
     try:
-        # Buscar usuario
-        user = db.query(User).filter(User.email == credentials.email).first()
+        user = get_firestore_user_by_email(credentials.email)
 
-        if not user or not verify_password(credentials.password, user.password_hash):
+        if not user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # Verificar estado
         if user.status != UserStatus.ACTIVE:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User account is inactive or locked"
             )
 
-        # Actualizar last_login
-        user.last_login_at = datetime.now(timezone.utc)
-        db.commit()
+        password_hash = getattr(user, "password_hash", None)
+        if not password_hash:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-        # Generar tokens
+        if not verify_password(credentials.password, password_hash):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect email or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        update_last_login(user.id)
+        write_firestore_audit_log(
+            action="LOGIN",
+            entity="user",
+            entity_id=str(user.id),
+            actor=user,
+        )
+
         access_token = create_access_token({"sub": str(user.id)})
         refresh_token = create_refresh_token({"sub": str(user.id)})
 
@@ -166,9 +180,7 @@ async def login(
         raise
     except Exception:
         logger.exception(
-            "Unexpected error in POST /auth/login for email=%r. "
-            "Likely cause: DB schema inconsistency (enum case mismatch) or "
-            "missing migration. Check alembic_version and pg_enum.userstatus.",
+            "Unexpected error in POST /auth/login for email=%r.",
             credentials.email,
         )
         raise HTTPException(
@@ -181,7 +193,6 @@ async def login(
 async def refresh(
     body: RefreshRequest,
     http_request: Request,
-    db: Session = Depends(get_db)
 ) -> TokenResponse:
     """Renovar access token usando refresh token"""
     enforce_rate_limit(
@@ -204,16 +215,25 @@ async def refresh(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = db.query(User).filter(User.id == user_id).first()
-    if not user or user.status != UserStatus.ACTIVE:
+    firestore_user = get_firestore_user_by_id(user_id)
+    if firestore_user is None or firestore_user.status != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid refresh token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+    token_iat = payload.get("iat")
+    if token_iat and firestore_user.last_logout_at:
+        token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
+        if token_issued_at < firestore_user.last_logout_at:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid refresh token",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
 
-    new_access_token = create_access_token({"sub": str(user.id)})
-    new_refresh_token = create_refresh_token({"sub": str(user.id)})
+    new_access_token = create_access_token({"sub": str(firestore_user.id)})
+    new_refresh_token = create_refresh_token({"sub": str(firestore_user.id)})
 
     return TokenResponse(
         access_token=new_access_token,
@@ -223,45 +243,83 @@ async def refresh(
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(current_user: User = Depends(get_current_user)) -> UserResponse:
-    """Obtener información del usuario autenticado"""
-    return UserResponse.model_validate(current_user)
+async def get_me(current_user: Any = Depends(get_current_user)) -> UserResponse:
+    """Obtener informaciÃ³n del usuario autenticado"""
+    now = datetime.now(timezone.utc)
+    payload = {
+        "id": getattr(current_user, "id"),
+        "email": getattr(current_user, "email"),
+        "full_name": getattr(current_user, "full_name", ""),
+        "status": getattr(current_user, "status", UserStatus.ACTIVE),
+        "last_login_at": getattr(current_user, "last_login_at", None),
+        "created_at": getattr(current_user, "created_at", now),
+        "roles": getattr(current_user, "roles", []),
+    }
+    return UserResponse.model_validate(payload)
 
 
 @router.post("/logout")
 async def logout(
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    current_user: object = Depends(get_current_user),
 ):
-    write_audit_log(
-        db,
-        action="AUTH_LOGOUT",
-        entity="auth",
-        entity_id=str(current_user.id),
+    update_last_logout(current_user.id)
+    write_firestore_audit_log(
+        action="LOGOUT",
+        entity="user",
+        entity_id=str(getattr(current_user, "id", "")),
         actor=current_user,
-        details={"message": "User logged out"},
     )
-    db.commit()
+    return {"ok": True}
+
+
+@router.put("/me/password", status_code=status.HTTP_200_OK)
+async def change_my_password(
+    payload: ChangePasswordRequest,
+    http_request: Request,
+    current_user: object = Depends(get_current_user),
+):
+    """Cambiar contraseña del usuario autenticado."""
+    enforce_rate_limit(
+        http_request,
+        scope="auth.password_change",
+        limit=settings.RATE_LIMIT_AUTH_SENSITIVE_PER_MINUTE,
+        window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        identifier=str(getattr(current_user, "id", "")),
+    )
+    if not verify_password(payload.current_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect",
+        )
+
+    get_firestore_client().collection("users").document(str(current_user.id)).set(
+        {"password_hash": get_password_hash(payload.new_password)}, merge=True
+    )
+    write_firestore_audit_log(
+        action="PASSWORD_CHANGED",
+        entity="user",
+        entity_id=str(getattr(current_user, "id", "")),
+        actor=current_user,
+    )
     return {"ok": True}
 
 
 @router.put("/me/pin", status_code=status.HTTP_200_OK)
 async def update_my_pin(
     payload: UpdatePinRequest,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
+    http_request: Request,
+    current_user: object = Depends(get_current_user),
 ):
-    current_user.pin_hash = get_password_hash(payload.pin)
-    db.add(current_user)
-    db.commit()
-
-    write_audit_log(
-        db,
-        action="AUTH_PIN_UPDATED",
-        entity="auth",
-        entity_id=str(current_user.id),
-        actor=current_user,
-        details={"message": "User updated offline PIN"},
+    enforce_rate_limit(
+        http_request,
+        scope="auth.pin_change",
+        limit=settings.RATE_LIMIT_AUTH_SENSITIVE_PER_MINUTE,
+        window_seconds=settings.RATE_LIMIT_WINDOW_SECONDS,
+        identifier=str(getattr(current_user, "id", "")),
     )
-    db.commit()
+    get_firestore_client().collection("users").document(str(current_user.id)).set(
+        {"pin_hash": get_password_hash(payload.pin)}, merge=True
+    )
     return {"ok": True}
+
+

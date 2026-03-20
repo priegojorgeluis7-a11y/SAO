@@ -5,7 +5,7 @@ from pydantic import field_validator
 
 class LoginRequest(BaseModel):
     email: EmailStr
-    password: str = Field(..., min_length=1, max_length=256)
+    password: str = Field(..., min_length=8, max_length=256)
 
 
 class TokenResponse(BaseModel):
@@ -45,3 +45,8 @@ class UpdatePinRequest(BaseModel):
         if not value.isdigit():
             raise ValueError("PIN must contain only digits")
         return value
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=256)
+    new_password: str = Field(..., min_length=8, max_length=256)

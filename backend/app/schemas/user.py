@@ -1,9 +1,10 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
-from app.models.user import UserStatus
+from app.core.enums import UserStatus
 
 
 class UserBase(BaseModel):
@@ -20,6 +21,7 @@ class UserResponse(UserBase):
     status: UserStatus
     last_login_at: datetime | None
     created_at: datetime
+    roles: list[str] = Field(default_factory=list)
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -33,12 +35,37 @@ class UserAgendaListItem(BaseModel):
     is_active: bool = True
 
 
+class AdminUserScopeInput(BaseModel):
+    role: str
+    project_id: str | None = None
+
+
+class AdminUserScopeItem(BaseModel):
+    role_name: str
+    project_id: str | None = None
+
+
+class AdminUserPermissionInput(BaseModel):
+    permission_code: str
+    project_id: str | None = None
+    effect: Literal["allow", "deny"] = "allow"
+
+
+class AdminUserPermissionItem(BaseModel):
+    permission_code: str
+    project_id: str | None = None
+    effect: Literal["allow", "deny"] = "allow"
+
+
 class AdminUserCreate(BaseModel):
     email: EmailStr
     full_name: str
     password: str
-    role: str
+    role: str | None = None
     project_id: str | None = None
+    scopes: list[AdminUserScopeInput] | None = None
+    permission_codes: list[str] | None = None
+    permission_scopes: list[AdminUserPermissionInput] | None = None
 
 
 class AdminUserUpdate(BaseModel):
@@ -46,6 +73,9 @@ class AdminUserUpdate(BaseModel):
     status: UserStatus | None = None
     role: str | None = None
     project_id: str | None = None
+    scopes: list[AdminUserScopeInput] | None = None
+    permission_codes: list[str] | None = None
+    permission_scopes: list[AdminUserPermissionInput] | None = None
 
 
 class AdminUserListItem(BaseModel):
@@ -55,6 +85,11 @@ class AdminUserListItem(BaseModel):
     status: UserStatus
     role_name: str
     project_id: str | None = None
+    roles: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
+    scopes: list[AdminUserScopeItem] = Field(default_factory=list)
+    permission_codes: list[str] = Field(default_factory=list)
+    permission_scopes: list[AdminUserPermissionItem] = Field(default_factory=list)
 
 
 class AdminUserCreateResponse(BaseModel):
@@ -64,6 +99,11 @@ class AdminUserCreateResponse(BaseModel):
     status: UserStatus
     role_name: str
     project_id: str | None = None
+    roles: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
+    scopes: list[AdminUserScopeItem] = Field(default_factory=list)
+    permission_codes: list[str] = Field(default_factory=list)
+    permission_scopes: list[AdminUserPermissionItem] = Field(default_factory=list)
 
 
 class MyProjectItem(BaseModel):

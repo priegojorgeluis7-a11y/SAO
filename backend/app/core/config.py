@@ -2,7 +2,7 @@
 
 from functools import lru_cache
 
-from pydantic import ValidationError
+from pydantic import ValidationError, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -16,13 +16,31 @@ class Settings(BaseSettings):
     # Environment: "development" | "staging" | "production"
     ENV: str = "development"
 
-    # Database
-    DATABASE_URL: str
+    # Persistence backend frozen to firestore-only mode.
+    DATA_BACKEND: str = "firestore"
+
+    # Legacy SQL setting retained only for backwards-compatible tooling.
+    DATABASE_URL: str | None = None
+
+    # Firestore
+    FIRESTORE_PROJECT_ID: str | None = None
+    FIRESTORE_DATABASE: str = "(default)"
+    # Reads are always from Firestore in firestore-only mode.
+    FIRESTORE_READ_EVENTS: bool = True
+    FIRESTORE_READ_ACTIVITIES: bool = True
 
     # JWT
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours
+
+    @field_validator("JWT_SECRET")
+    @classmethod
+    def jwt_secret_min_length(cls, v: str) -> str:
+        if len(v) < 32:
+            raise ValueError("JWT_SECRET must be at least 32 characters")
+        return v
+
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 720  # 12 hours (tokens issued before logout are rejected via last_logout_at)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Signup invite codes
@@ -50,10 +68,16 @@ class Settings(BaseSettings):
     RATE_LIMIT_WINDOW_SECONDS: int = 60
     RATE_LIMIT_AUTH_LOGIN_PER_MINUTE: int = 10
     RATE_LIMIT_AUTH_REFRESH_PER_MINUTE: int = 30
+    RATE_LIMIT_AUTH_SENSITIVE_PER_MINUTE: int = 5  # signup, password change, PIN change
     RATE_LIMIT_EVIDENCE_UPLOAD_INIT_PER_MINUTE: int = 60
     RATE_LIMIT_SYNC_PUSH_PER_MINUTE: int = 30
 
-    model_config = SettingsConfigDict(case_sensitive=True, extra="ignore")
+    model_config = SettingsConfigDict(
+        case_sensitive=True,
+        extra="ignore",
+        env_file=".env",
+        env_file_encoding="utf-8",
+    )
 
     def get_cors_origins_list(self) -> list[str]:
         """Return CORS_ORIGINS as a parsed list."""

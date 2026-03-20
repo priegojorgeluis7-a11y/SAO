@@ -1,0 +1,10 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // All access controlled via backend API (Cloud Run service account).
+    // Direct client access is not permitted.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

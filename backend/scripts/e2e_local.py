@@ -34,9 +34,9 @@ Usage
 
 Prerequisites
 -------------
-    - Backend running on localhost:8000 (start_local.ps1 or uvicorn directly)
-    - Migrations applied (alembic upgrade head)
-    - Seeds applied (python -m app.seeds.initial_data)
+    - Backend running on localhost:8000 (uvicorn app.main:app ...)
+    - DATA_BACKEND=firestore
+    - Firestore base catalogs available (see ensure_firestore_base_catalogs.py)
     - EVIDENCE_STORAGE_BACKEND=local
 """
 from __future__ import annotations

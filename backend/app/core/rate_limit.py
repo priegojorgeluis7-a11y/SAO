@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import math
 import threading
 import time
 from collections import defaultdict, deque
+from datetime import datetime, timezone
 from typing import Deque
 
 from fastapi import HTTPException, Request, status
+from google.cloud.firestore import transactional
+
+from app.core.config import settings
+from app.core.firestore import get_firestore_client
+
+logger = logging.getLogger(__name__)
 
 
 class InMemoryRateLimiter:
@@ -55,9 +64,76 @@ def _client_id(request: Request) -> str:
     return "unknown"
 
 
-def enforce_rate_limit(request: Request, *, scope: str, limit: int, window_seconds: int) -> None:
-    key = f"{scope}:{_client_id(request)}"
-    retry_after = rate_limiter.consume(key, limit=limit, window_seconds=window_seconds)
+def _bucket_window(now: float, window_seconds: int) -> tuple[int, int]:
+    window_start = int(now // window_seconds) * window_seconds
+    return window_start, window_start + window_seconds
+
+
+def _shared_rate_limit_key(scope: str, client_key: str, window_start: int) -> str:
+    digest = hashlib.sha256(f"{scope}:{client_key}:{window_start}".encode("utf-8")).hexdigest()
+    return f"{window_start}:{digest}"
+
+
+def _shared_consume(client_key: str, *, scope: str, limit: int, window_seconds: int) -> float | None:
+    now = time.time()
+    window_start, window_end = _bucket_window(now, window_seconds)
+    collection = get_firestore_client().collection("rate_limits")
+    doc_ref = collection.document(_shared_rate_limit_key(scope, client_key, window_start))
+    transaction = get_firestore_client().transaction()
+
+    @transactional
+    def _consume_in_transaction(txn):
+        snapshot = doc_ref.get(transaction=txn)
+        current_count = 0
+        if snapshot.exists:
+            current_count = int((snapshot.to_dict() or {}).get("count") or 0)
+        if current_count >= limit:
+            return max(window_end - now, 0.0)
+
+        txn.set(
+            doc_ref,
+            {
+                "scope": scope,
+                "client_key_hash": hashlib.sha256(client_key.encode("utf-8")).hexdigest(),
+                "count": current_count + 1,
+                "window_start": datetime.fromtimestamp(window_start, tz=timezone.utc),
+                "expires_at": datetime.fromtimestamp(window_end, tz=timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+            },
+            merge=True,
+        )
+        return None
+
+    try:
+        return _consume_in_transaction(transaction)
+    except Exception:
+        logger.warning("Shared rate limiter fallback to in-memory storage", exc_info=True)
+        return None
+
+
+def enforce_rate_limit(
+    request: Request,
+    *,
+    scope: str,
+    limit: int,
+    window_seconds: int,
+    identifier: str | None = None,
+) -> None:
+    client_key = _client_id(request)
+    if identifier:
+        client_key = f"{client_key}:{identifier.strip().lower()}"
+
+    retry_after = None
+    if settings.FIRESTORE_PROJECT_ID:
+        retry_after = _shared_consume(
+            client_key,
+            scope=scope,
+            limit=limit,
+            window_seconds=window_seconds,
+        )
+    if retry_after is None:
+        key = f"{scope}:{client_key}"
+        retry_after = rate_limiter.consume(key, limit=limit, window_seconds=window_seconds)
     if retry_after is None:
         return
 

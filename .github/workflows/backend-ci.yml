@@ -42,14 +42,157 @@ jobs:
       - name: Run pytest
         run: pytest tests -q
 
+  firestore-smoke:
+    name: Firestore Regression Smoke
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run firestore smoke suite
+        shell: pwsh
+        run: |
+          ./scripts/run_firestore_regression_smoke.ps1 -PythonExe python
+
+  codeql-gate:
+    name: CodeQL Security Gate
+    runs-on: ubuntu-latest
+    # Only run on pushes/PRs that target main (same condition as deploy)
+    if: github.ref == 'refs/heads/main' || github.event_name == 'pull_request'
+
+    permissions:
+      contents: read
+      security-events: write  # Required to upload SARIF to Security tab
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+          queries: security-and-quality
+          config: |
+            paths:
+              - backend/app
+            paths-ignore:
+              - backend/alembic
+              - backend/tests
+              - backend/scripts
+              - '**/__pycache__'
+              - '**/*.pyc'
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:python'
+          upload: always
+          output: ${{ github.workspace }}/codeql-results
+
+      - name: Gate — fail on High/Critical alerts
+        working-directory: ${{ github.workspace }}
+        run: |
+          python3 - <<'EOF'
+          import json, sys, pathlib
+
+          sarif_path = pathlib.Path("codeql-results/python.sarif")
+
+          # Guard 1: file missing (CodeQL skipped or action misconfigured)
+          if not sarif_path.exists():
+              print("::warning::SARIF file not found — gate skipped (no results to evaluate)")
+              sys.exit(0)
+
+          # Guard 2: file is empty (CodeQL ran but produced 0 results)
+          if sarif_path.stat().st_size == 0:
+              print("SARIF file is empty — CodeQL found nothing, gate passed")
+              sys.exit(0)
+
+          try:
+              with open(sarif_path) as f:
+                  sarif = json.load(f)
+          except json.JSONDecodeError as exc:
+              print(f"::warning::SARIF file is not valid JSON ({exc}) — gate skipped")
+              sys.exit(0)
+
+          alerts = []
+          for run in sarif.get("runs", []):
+              rules = {
+                  r["id"]: r
+                  for r in run.get("tool", {})
+                            .get("driver", {})
+                            .get("rules", [])
+              }
+              for result in run.get("results", []):
+                  level = result.get("level", "warning")
+                  if level != "error":
+                      continue
+                  rule_id = result.get("ruleId", "unknown")
+                  rule    = rules.get(rule_id, {})
+                  name    = rule.get("name", rule_id)
+                  msg     = result.get("message", {}).get("text", "")
+                  loc     = ""
+                  locs    = result.get("locations", [])
+                  if locs:
+                      pl   = locs[0].get("physicalLocation", {})
+                      uri  = pl.get("artifactLocation", {}).get("uri", "")
+                      line = pl.get("region", {}).get("startLine", "")
+                      loc  = f"{uri}:{line}"
+                  alerts.append(f"  [{rule_id}] {name} — {msg} ({loc})")
+
+          if alerts:
+              print(f"::error::CodeQL found {len(alerts)} High/Critical alert(s) — deploy blocked:")
+              for a in alerts:
+                  print(a)
+              sys.exit(1)
+
+          print("CodeQL gate passed — no High/Critical alerts.")
+          EOF
+
   deploy:
     name: Deploy to Cloud Run
-    needs: test
+    needs: [test, firestore-smoke, codeql-gate]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     env:
       SERVICE_NAME: sao-api
       REGION: us-central1
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
 
     permissions:
       contents: read
@@ -59,17 +202,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
+      - name: Authenticate to Google Cloud (SA key)
+        if: env.GCP_SA_KEY != ''
+        id: auth-key
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ env.GCP_SA_KEY }}
+
+      - name: Authenticate to Google Cloud (WIF fallback)
+        if: env.GCP_SA_KEY == ''
         id: auth
         uses: google-github-actions/auth@v2
         with:
-          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
-          service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
         with:
-          project_id: ${{ secrets.GCP_PROJECT_ID }}
+          project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Build and push image via Cloud Build
         shell: bash
@@ -113,22 +264,31 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          PROJECT_ID="${{ env.GCP_PROJECT_ID }}"
 
           gcloud run deploy "$SERVICE_NAME" \
             --image "$IMAGE" \
             --region "$REGION" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --project "$PROJECT_ID" \
             --platform managed \
+            --set-env-vars "DATA_BACKEND=firestore,RUN_STARTUP_MIGRATIONS=false,FIRESTORE_PROJECT_ID=${PROJECT_ID},FIRESTORE_DATABASE=(default),FIRESTORE_READ_EVENTS=true,FIRESTORE_READ_ACTIVITIES=true" \
+            --update-secrets "JWT_SECRET=JWT_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest" \
+            --remove-secrets "DATABASE_URL" \
+            --clear-cloudsql-instances \
             --quiet
 
       - name: Smoke test
+        env:
+          SERVICE_NAME: sao-api
+          REGION: us-central1
+          GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
         shell: bash
         run: |
           set -euo pipefail
 
           SERVICE_URL="$(gcloud run services describe "$SERVICE_NAME" \
             --region "$REGION" \
-            --project "${{ secrets.GCP_PROJECT_ID }}" \
+            --project "${{ env.GCP_PROJECT_ID }}" \
             --format='value(status.url)')"
 
           if [ -z "$SERVICE_URL" ]; then
@@ -137,9 +297,14 @@ jobs:
           fi
 
           HEALTH_URL="$SERVICE_URL/health"
-          ID_TOKEN="$(gcloud auth print-identity-token \
-            --impersonate-service-account="${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --audiences="$SERVICE_URL")"
+          if [ -n "${GCP_SERVICE_ACCOUNT:-}" ]; then
+            ID_TOKEN="$(gcloud auth print-identity-token \
+              --impersonate-service-account="$GCP_SERVICE_ACCOUNT" \
+              --audiences="$SERVICE_URL")"
+          else
+            ID_TOKEN="$(gcloud auth print-identity-token \
+              --audiences="$SERVICE_URL")"
+          fi
 
           for i in $(seq 1 6); do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
@@ -149,9 +314,155 @@ jobs:
               echo "Health check passed (attempt $i)"
               exit 0
             fi
-            echo "Attempt $i: status $STATUS — waiting 10s..."
+            echo "Attempt $i: status $STATUS - waiting 10s..."
             sleep 10
           done
 
           echo "Smoke test failed after 60s"
           exit 1
+
+  post-deploy-e2e:
+    name: Post-Deploy E2E Gate
+    needs: [deploy]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+      GCP_SERVICE_ACCOUNT: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+      SAO_E2E_OPERATIVO_EMAIL: ${{ secrets.SAO_E2E_OPERATIVO_EMAIL }}
+      SAO_E2E_OPERATIVO_PASSWORD: ${{ secrets.SAO_E2E_OPERATIVO_PASSWORD }}
+      SAO_E2E_SUPERVISOR_EMAIL: ${{ secrets.SAO_E2E_SUPERVISOR_EMAIL }}
+      SAO_E2E_SUPERVISOR_PASSWORD: ${{ secrets.SAO_E2E_SUPERVISOR_PASSWORD }}
+    defaults:
+      run:
+        working-directory: backend
+
+    permissions:
+      contents: read
+      id-token: write   # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          missing=0
+
+          for name in GCP_PROJECT_ID; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::$name is not configured"
+              missing=1
+            fi
+          done
+
+          # Auth mode: prefer GCP_SA_KEY, fallback to WIF secrets.
+          if [ -z "${GCP_SA_KEY:-}" ]; then
+            for name in GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT; do
+              if [ -z "${!name:-}" ]; then
+                echo "::error title=Missing secret::$name is required when GCP_SA_KEY is not configured"
+                missing=1
+              fi
+            done
+          fi
+
+          for name in \
+            SAO_E2E_OPERATIVO_EMAIL \
+            SAO_E2E_OPERATIVO_PASSWORD \
+            SAO_E2E_SUPERVISOR_EMAIL \
+            SAO_E2E_SUPERVISOR_PASSWORD; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error title=Missing secret::$name is not configured"
+              missing=1
+            fi
+          done
+
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Authenticate to Google Cloud (SA key)
+        if: env.GCP_SA_KEY != ''
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ env.GCP_SA_KEY }}
+
+      - name: Authenticate to Google Cloud (WIF fallback)
+        if: env.GCP_SA_KEY == ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+
+      - name: Resolve Cloud Run URL
+        id: resolve_url
+        shell: bash
+        run: |
+          SERVICE_URL="$(gcloud run services describe sao-api \
+            --region us-central1 \
+            --project "${{ env.GCP_PROJECT_ID }}" \
+            --format='value(status.url)')"
+          echo "url=$SERVICE_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch identity token for Cloud Run
+        id: id_token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -n "${GCP_SERVICE_ACCOUNT:-}" ]; then
+            TOKEN="$(gcloud auth print-identity-token \
+              --impersonate-service-account="$GCP_SERVICE_ACCOUNT" \
+              --audiences="${{ steps.resolve_url.outputs.url }}")"
+          else
+            TOKEN="$(gcloud auth print-identity-token \
+              --audiences="${{ steps.resolve_url.outputs.url }}")"
+          fi
+          echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Run E2E staging flow
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/e2e_staging_flow.py \
+            --base-url "${{ steps.resolve_url.outputs.url }}" \
+            --operativo-email "${{ secrets.SAO_E2E_OPERATIVO_EMAIL }}" \
+            --operativo-password "${{ secrets.SAO_E2E_OPERATIVO_PASSWORD }}" \
+            --supervisor-email "${{ secrets.SAO_E2E_SUPERVISOR_EMAIL }}" \
+            --supervisor-password "${{ secrets.SAO_E2E_SUPERVISOR_PASSWORD }}" \
+            --project-id "TMQ" \
+            --cloud-run-private \
+            --identity-token "${{ steps.id_token.outputs.token }}" \
+            --verbose \
+            2>&1 | tee "$GITHUB_WORKSPACE/e2e-evidence.txt"
+          # Propagate non-zero exit from the python script through tee
+          test "${PIPESTATUS[0]}" -eq 0
+
+      - name: Upload E2E evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-evidence-${{ github.sha }}
+          path: e2e-evidence.txt
+          retention-days: 30

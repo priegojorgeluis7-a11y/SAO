@@ -1,15 +1,11 @@
-from uuid import UUID, uuid4
+﻿from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, Query, status
+from app.core.api_errors import api_error
 
 from app.api.deps import require_any_role
-from app.core.database import get_db
-from app.models.front import Front
-from app.models.location import Location
-from app.models.project import Project
-from app.models.project_location_scope import ProjectLocationScope
-from app.models.user import User
+from app.core.firestore import get_firestore_client
+from typing import Any
 from app.schemas.territory import FrontCreate, FrontOut, LocationOut, LocationScopeCreate, StateSummaryOut
 
 router = APIRouter(tags=["territory"])
@@ -18,105 +14,103 @@ router = APIRouter(tags=["territory"])
 @router.get("/fronts", response_model=list[FrontOut])
 def list_fronts(
     project_id: str = Query(..., min_length=1, max_length=10),
-    _current_user: User = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
 ):
     code = project_id.strip().upper()
-    rows = (
-        db.query(Front)
-        .filter(Front.project_id == code)
-        .order_by(Front.code.asc(), Front.name.asc())
-        .all()
+
+    client = get_firestore_client()
+    docs = (
+        client.collection("fronts")
+        .where("project_id", "==", code)
+        .stream()
     )
-    return [
-        FrontOut(
-            id=str(item.id),
-            project_id=item.project_id,
-            code=item.code,
-            name=item.name,
-            pk_start=item.pk_start,
-            pk_end=item.pk_end,
+    result: list[FrontOut] = []
+    for doc in docs:
+        f = doc.to_dict() or {}
+        result.append(
+            FrontOut(
+                id=str(f.get("id") or doc.id),
+                project_id=str(f.get("project_id") or code),
+                code=str(f.get("code") or ""),
+                name=str(f.get("name") or ""),
+                pk_start=f.get("pk_start"),
+                pk_end=f.get("pk_end"),
+            )
         )
-        for item in rows
-    ]
+    result.sort(key=lambda fr: (fr.code, fr.name))
+    return result
 
 
 @router.post("/fronts", response_model=FrontOut, status_code=status.HTTP_201_CREATED)
 def create_front(
     payload: FrontCreate,
     project_id: str = Query(..., min_length=1, max_length=10),
-    _current_user: User = Depends(require_any_role(["ADMIN"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN"])),
 ):
+    client = get_firestore_client()
     code = project_id.strip().upper()
-    project = db.query(Project).filter(Project.id == code).first()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    project_ref = client.collection("projects").document(code)
+    project_doc = project_ref.get()
+    if not project_doc.exists:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="TERRITORY_PROJECT_NOT_FOUND", message="Project not found")
 
     front_code = (payload.code.strip().upper() if payload.code else "").strip()
+    docs = [d.to_dict() or {} for d in client.collection("fronts").where("project_id", "==", code).stream()]
+
     if not front_code:
-        total = db.query(Front).filter(Front.project_id == code).count()
-        front_code = f"F{total + 1}"
+        front_code = f"F{len(docs) + 1}"
 
-    existing = (
-        db.query(Front)
-        .filter(Front.project_id == code, Front.code == front_code)
-        .first()
-    )
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Front code already exists in project")
+    if any(str((d.get("code") or "")).strip().upper() == front_code for d in docs):
+        raise api_error(status_code=status.HTTP_409_CONFLICT, code="TERRITORY_FRONT_CODE_CONFLICT", message="Front code already exists in project")
 
-    front = Front(
-        id=uuid4(),
+    front_id = str(uuid4())
+    payload_doc = {
+        "id": front_id,
+        "project_id": code,
+        "code": front_code,
+        "name": payload.name.strip(),
+        "pk_start": payload.pk_start,
+        "pk_end": payload.pk_end,
+    }
+    client.collection("fronts").document(front_id).set(payload_doc)
+
+    return FrontOut(
+        id=front_id,
         project_id=code,
         code=front_code,
         name=payload.name.strip(),
         pk_start=payload.pk_start,
         pk_end=payload.pk_end,
     )
-    db.add(front)
-    db.commit()
-    db.refresh(front)
-
-    return FrontOut(
-        id=str(front.id),
-        project_id=front.project_id,
-        code=front.code,
-        name=front.name,
-        pk_start=front.pk_start,
-        pk_end=front.pk_end,
-    )
 
 
 @router.get("/locations/states", response_model=list[StateSummaryOut])
 def list_project_states(
     project_id: str = Query(..., min_length=1, max_length=10),
-    _current_user: User = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
 ):
+    client = get_firestore_client()
     code = project_id.strip().upper()
-    rows = (
-        db.query(Location.estado)
-        .join(ProjectLocationScope, ProjectLocationScope.location_id == Location.id)
-        .filter(ProjectLocationScope.project_id == code, ProjectLocationScope.is_active.is_(True))
-        .distinct()
-        .all()
-    )
-    states = [r[0] for r in rows]
-    output: list[StateSummaryOut] = []
-    for estado in sorted(states):
-        count = (
-            db.query(Location)
-            .join(ProjectLocationScope, ProjectLocationScope.location_id == Location.id)
-            .filter(
-                ProjectLocationScope.project_id == code,
-                ProjectLocationScope.is_active.is_(True),
-                Location.estado == estado,
-            )
-            .count()
-        )
-        output.append(StateSummaryOut(estado=estado, municipios_count=count))
-    return output
+    project_doc = client.collection("projects").document(code).get()
+    if not project_doc.exists:
+        return []
+
+    payload = project_doc.to_dict() or {}
+    scope = payload.get("location_scope") or []
+    counts: dict[str, set[str]] = {}
+    for item in scope:
+        if not isinstance(item, dict):
+            continue
+        estado_item = str(item.get("estado") or "").strip()
+        municipio_item = str(item.get("municipio") or "").strip()
+        if not estado_item or not municipio_item:
+            continue
+        counts.setdefault(estado_item, set()).add(municipio_item)
+
+    return [
+        StateSummaryOut(estado=estado, municipios_count=len(municipios))
+        for estado, municipios in sorted(counts.items(), key=lambda row: row[0])
+    ]
 
 
 @router.get("/locations", response_model=list[LocationOut])
@@ -124,90 +118,107 @@ def list_project_locations(
     project_id: str | None = Query(default=None, min_length=1, max_length=10),
     estado: str | None = Query(default=None),
     front_id: str | None = Query(default=None),
-    _current_user: User = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
 ):
+    client = get_firestore_client()
     resolved_project = project_id.strip().upper() if project_id else None
     if resolved_project is None and front_id:
-        try:
-            parsed_front_id = UUID(front_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid front_id") from exc
-        front = db.query(Front).filter(Front.id == parsed_front_id).first()
-        if front is None:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Front not found")
-        resolved_project = front.project_id
+        front_doc = client.collection("fronts").document(front_id).get()
+        if not front_doc.exists:
+            raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="TERRITORY_FRONT_NOT_FOUND", message="Front not found")
+        front_payload = front_doc.to_dict() or {}
+        resolved_project = str(front_payload.get("project_id") or "").strip().upper() or None
 
-    query = db.query(Location)
+    if not resolved_project:
+        return []
 
-    if resolved_project:
-        query = (
-            query.join(ProjectLocationScope, ProjectLocationScope.location_id == Location.id)
-            .filter(
-                ProjectLocationScope.project_id == resolved_project,
-                ProjectLocationScope.is_active.is_(True),
+    project_doc = client.collection("projects").document(resolved_project).get()
+    if not project_doc.exists:
+        return []
+    payload = project_doc.to_dict() or {}
+    scope = payload.get("location_scope") or []
+
+    result: list[LocationOut] = []
+    seen: set[tuple[str, str]] = set()
+    for item in scope:
+        if not isinstance(item, dict):
+            continue
+        estado_item = str(item.get("estado") or "").strip()
+        municipio_item = str(item.get("municipio") or "").strip()
+        if not estado_item or not municipio_item:
+            continue
+        if estado and estado.strip() and estado_item != estado.strip():
+            continue
+        key = (estado_item, municipio_item)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(
+            LocationOut(
+                id=str(item.get("id") or f"{estado_item}:{municipio_item}"),
+                estado=estado_item,
+                municipio=municipio_item,
             )
         )
 
-    if estado and estado.strip():
-        query = query.filter(Location.estado == estado.strip())
-
-    rows = query.order_by(Location.estado.asc(), Location.municipio.asc()).all()
-    return [LocationOut(id=str(item.id), estado=item.estado, municipio=item.municipio) for item in rows]
+    result.sort(key=lambda row: (row.estado, row.municipio))
+    return result
 
 
 @router.post("/projects/{project_id}/locations", response_model=list[LocationOut])
 def upsert_project_locations(
     project_id: str,
     payload: list[LocationScopeCreate],
-    _current_user: User = Depends(require_any_role(["ADMIN"])),
-    db: Session = Depends(get_db),
+    _current_user: Any = Depends(require_any_role(["ADMIN"])),
 ):
+    client = get_firestore_client()
     code = project_id.strip().upper()
-    project = db.query(Project).filter(Project.id == code).first()
-    if project is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    project_ref = client.collection("projects").document(code)
+    project_doc = project_ref.get()
+    if not project_doc.exists:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="TERRITORY_PROJECT_NOT_FOUND", message="Project not found")
+
+    existing = (project_doc.to_dict() or {}).get("location_scope") or []
+    merged: dict[tuple[str, str], dict] = {}
+
+    for item in existing:
+        if not isinstance(item, dict):
+            continue
+        estado_item = str(item.get("estado") or "").strip()
+        municipio_item = str(item.get("municipio") or "").strip()
+        if not estado_item or not municipio_item:
+            continue
+        merged[(estado_item, municipio_item)] = {
+            "estado": estado_item,
+            "municipio": municipio_item,
+        }
 
     for entry in payload:
-        estado = entry.estado.strip()
-        municipio = entry.municipio.strip()
-        if not estado or not municipio:
+        estado_item = entry.estado.strip()
+        municipio_item = entry.municipio.strip()
+        if not estado_item or not municipio_item:
             continue
+        merged[(estado_item, municipio_item)] = {
+            "estado": estado_item,
+            "municipio": municipio_item,
+        }
 
-        location = (
-            db.query(Location)
-            .filter(Location.estado == estado, Location.municipio == municipio)
-            .first()
-        )
-        if location is None:
-            location = Location(estado=estado, municipio=municipio)
-            db.add(location)
-            db.flush()
-
-        scoped = (
-            db.query(ProjectLocationScope)
-            .filter(
-                ProjectLocationScope.project_id == code,
-                ProjectLocationScope.location_id == location.id,
-            )
-            .first()
-        )
-        if scoped is None:
-            db.add(
-                ProjectLocationScope(
-                    project_id=code,
-                    location_id=location.id,
-                    is_active=True,
-                )
-            )
-
-    db.commit()
-
-    rows = (
-        db.query(Location)
-        .join(ProjectLocationScope, ProjectLocationScope.location_id == Location.id)
-        .filter(ProjectLocationScope.project_id == code, ProjectLocationScope.is_active.is_(True))
-        .order_by(Location.estado.asc(), Location.municipio.asc())
-        .all()
+    merged_rows = sorted(
+        merged.values(),
+        key=lambda item: (item["estado"], item["municipio"]),
     )
-    return [LocationOut(id=str(item.id), estado=item.estado, municipio=item.municipio) for item in rows]
+    project_ref.update(
+        {
+            "location_scope": merged_rows,
+        }
+    )
+
+    return [
+        LocationOut(
+            id=f"{item['estado']}:{item['municipio']}",
+            estado=item["estado"],
+            municipio=item["municipio"],
+        )
+        for item in merged_rows
+    ]
+

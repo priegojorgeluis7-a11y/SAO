@@ -24,8 +24,14 @@ PyJWT==2.9.0
 python-jose[cryptography]==3.3.0
 
 # Utilities / Integrations (runtime)
+google-cloud-firestore==2.20.0
 google-cloud-storage==2.18.2
+numpy==1.26.4
+pillow==10.4.0
+pypdf==5.3.1
+pypdfium2==4.30.0
 python-dotenv==1.0.0
+rapidocr-onnxruntime==1.3.24
 
 # Testing (dev/test)
 pytest==7.4.3

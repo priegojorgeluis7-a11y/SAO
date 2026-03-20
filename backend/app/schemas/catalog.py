@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.catalog import CatalogStatus, EntityType, WidgetType
+from app.core.enums import CatalogStatus, EntityType, WidgetType
 
 
 ORM_CONFIG = ConfigDict(from_attributes=True)

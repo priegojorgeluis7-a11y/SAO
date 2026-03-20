@@ -1,16 +1,13 @@
-import json
+﻿import json
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
 
 from app.api.deps import require_any_role
-from app.core.database import get_db
-from app.models.observation import Observation
-from app.models.user import User
+from app.core.firestore import get_firestore_client
+from typing import Any
 from app.schemas.observation import ObservationCreateIn, ObservationOut, ObservationResolveOut
-from app.services.audit_service import write_audit_log
 
 router = APIRouter(tags=["observations"])
 
@@ -18,44 +15,57 @@ router = APIRouter(tags=["observations"])
 @router.post("/observations", response_model=ObservationOut, status_code=status.HTTP_201_CREATED)
 def create_observation(
     body: ObservationCreateIn,
-    current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
-    db: Session = Depends(get_db),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
-    obs = Observation(
+    client = get_firestore_client()
+    obs_id = uuid4()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "id": str(obs_id),
+        "project_id": body.project_id,
+        "activity_id": str(body.activity_id),
+        "assignee_user_id": str(body.assignee_user_id) if body.assignee_user_id else None,
+        "tags_json": json.dumps(body.tags),
+        "message": body.message,
+        "severity": body.severity,
+        "due_date": body.due_date,
+        "status": "OPEN",
+        "resolved_at": None,
+        "created_at": now,
+        "sync_version": 1,
+    }
+    client.collection("observations").document(str(obs_id)).set(payload)
+    client.collection("audit_logs").document(str(uuid4())).set(
+        {
+            "id": str(uuid4()),
+            "created_at": now,
+            "actor_id": str(getattr(current_user, "id", "")),
+            "actor_email": getattr(current_user, "email", ""),
+            "action": "OBSERVATION_CREATED",
+            "entity": "observation",
+            "entity_id": str(obs_id),
+            "details_json": json.dumps(
+                {
+                    "project_id": body.project_id,
+                    "activity_id": str(body.activity_id),
+                    "severity": body.severity,
+                }
+            ),
+        }
+    )
+
+    return ObservationOut(
+        id=obs_id,
         project_id=body.project_id,
         activity_id=body.activity_id,
         assignee_user_id=body.assignee_user_id,
-        tags_json=json.dumps(body.tags),
+        tags=body.tags,
         message=body.message,
         severity=body.severity,
         due_date=body.due_date,
         status="OPEN",
-    )
-    db.add(obs)
-    db.flush()
-    write_audit_log(
-        db,
-        action="OBSERVATION_CREATED",
-        entity="observation",
-        entity_id=str(obs.id),
-        actor=current_user,
-        details={"project_id": body.project_id, "activity_id": str(body.activity_id), "severity": body.severity},
-    )
-    db.commit()
-    db.refresh(obs)
-
-    return ObservationOut(
-        id=obs.id,
-        project_id=obs.project_id,
-        activity_id=obs.activity_id,
-        assignee_user_id=obs.assignee_user_id,
-        tags=body.tags,
-        message=obs.message,
-        severity=obs.severity,
-        due_date=obs.due_date,
-        status=obs.status,
-        resolved_at=obs.resolved_at,
-        created_at=obs.created_at,
+        resolved_at=None,
+        created_at=now,
     )
 
 
@@ -63,78 +73,87 @@ def create_observation(
 def list_mobile_observations(
     project_id: str | None = Query(None),
     status_filter: str = Query("open", alias="status"),
-    current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
-    db: Session = Depends(get_db),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
-    query = db.query(Observation)
-    if project_id:
-        query = query.filter(Observation.project_id == project_id)
-
+    client = get_firestore_client()
+    rows = [d.to_dict() or {} for d in client.collection("observations").stream()]
     normalized = status_filter.strip().upper()
-    if normalized == "OPEN":
-        query = query.filter(Observation.status == "OPEN")
-    elif normalized == "RESOLVED":
-        query = query.filter(Observation.status == "RESOLVED")
-
-    if current_user:
-        query = query.filter((Observation.assignee_user_id == current_user.id) | (Observation.assignee_user_id.is_(None)))
-
-    rows = query.order_by(Observation.created_at.desc()).limit(200).all()
-    output: list[ObservationOut] = []
+    out: list[ObservationOut] = []
+    user_id = str(getattr(current_user, "id", "")) if current_user else ""
     for row in rows:
+        if project_id and row.get("project_id") != project_id:
+            continue
+        if normalized == "OPEN" and row.get("status") != "OPEN":
+            continue
+        if normalized == "RESOLVED" and row.get("status") != "RESOLVED":
+            continue
+        assignee = row.get("assignee_user_id")
+        if assignee and user_id and assignee != user_id:
+            continue
         tags = []
-        if row.tags_json:
+        raw_tags = row.get("tags_json")
+        if raw_tags:
             try:
-                parsed = json.loads(row.tags_json)
+                parsed = json.loads(raw_tags) if isinstance(raw_tags, str) else raw_tags
                 if isinstance(parsed, list):
                     tags = [str(item) for item in parsed]
             except Exception:
                 tags = []
-
-        output.append(
+        out.append(
             ObservationOut(
-                id=row.id,
-                project_id=row.project_id,
-                activity_id=row.activity_id,
-                assignee_user_id=row.assignee_user_id,
+                id=UUID(str(row.get("id"))),
+                project_id=str(row.get("project_id") or ""),
+                activity_id=UUID(str(row.get("activity_id"))),
+                assignee_user_id=UUID(str(assignee)) if assignee else None,
                 tags=tags,
-                message=row.message,
-                severity=row.severity,
-                due_date=row.due_date,
-                status=row.status,
-                resolved_at=row.resolved_at,
-                created_at=row.created_at,
+                message=str(row.get("message") or ""),
+                severity=str(row.get("severity") or "MED"),
+                due_date=row.get("due_date"),
+                status=str(row.get("status") or "OPEN"),
+                resolved_at=row.get("resolved_at"),
+                created_at=row.get("created_at") or datetime.now(timezone.utc),
             )
         )
-
-    return output
+    out.sort(key=lambda x: x.created_at, reverse=True)
+    return out[:200]
 
 
 @router.post("/mobile/observations/{observation_id}/resolve", response_model=ObservationResolveOut)
 def resolve_mobile_observation(
     observation_id: str,
-    current_user: User = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
-    db: Session = Depends(get_db),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
+    client = get_firestore_client()
     try:
         obs_uuid = UUID(observation_id)
     except ValueError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid observation id")
 
-    row = db.query(Observation).filter(Observation.id == obs_uuid).first()
-    if not row:
+    doc_ref = client.collection("observations").document(str(obs_uuid))
+    snap = doc_ref.get()
+    if not snap.exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Observation not found")
-
-    row.status = "RESOLVED"
-    row.resolved_at = datetime.now(timezone.utc)
-    row.increment_sync_version()
-    write_audit_log(
-        db,
-        action="OBSERVATION_RESOLVED",
-        entity="observation",
-        entity_id=str(row.id),
-        actor=current_user,
-        details={"status": "RESOLVED"},
+    payload = snap.to_dict() or {}
+    now = datetime.now(timezone.utc)
+    doc_ref.set(
+        {
+            "status": "RESOLVED",
+            "resolved_at": now,
+            "sync_version": int(payload.get("sync_version") or 0) + 1,
+        },
+        merge=True,
     )
-    db.commit()
+    client.collection("audit_logs").document(str(uuid4())).set(
+        {
+            "id": str(uuid4()),
+            "created_at": now,
+            "actor_id": str(getattr(current_user, "id", "")),
+            "actor_email": getattr(current_user, "email", ""),
+            "action": "OBSERVATION_RESOLVED",
+            "entity": "observation",
+            "entity_id": str(obs_uuid),
+            "details_json": json.dumps({"status": "RESOLVED"}),
+        }
+    )
     return ObservationResolveOut(ok=True)
+

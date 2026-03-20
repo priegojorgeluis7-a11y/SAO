@@ -1,0 +1,24 @@
+{
+  "project_id": "TMQ",
+  "checked_at": "2026-03-10T02:13:02.235584+00:00",
+  "results": [
+    {
+      "module": "events",
+      "ok": true,
+      "postgres_count": 0,
+      "firestore_count": 0,
+      "missing_in_firestore": [],
+      "missing_in_postgres": [],
+      "field_mismatches": []
+    },
+    {
+      "module": "activities",
+      "ok": true,
+      "postgres_count": 8,
+      "firestore_count": 8,
+      "missing_in_firestore": [],
+      "missing_in_postgres": [],
+      "field_mismatches": []
+    }
+  ]
+}

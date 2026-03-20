@@ -151,7 +151,7 @@ class CatalogOp(BaseModel):
     op: Literal[
         "upsert", "patch", "deactivate", "activate",
         "rel_upsert", "rel_deactivate", "reorder",
-        "delete",  # alias for deactivate, accepted from Desktop clients
+        "delete",  # remove row from bundle, accepted from Desktop clients
     ]
     entity: str
     id: str

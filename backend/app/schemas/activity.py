@@ -88,9 +88,11 @@ class ActivityDTO(BaseModel):
     pk_start: int
     pk_end: int | None = None
     execution_state: str
+    review_decision: str | None = Field(None, description="APPROVE | REJECT")
     assigned_to_user_id: UUID | None = None
+    assigned_to_user_name: str | None = None
     created_by_user_id: UUID
-    catalog_version_id: UUID
+    catalog_version_id: UUID | None = None
     activity_type_code: str
     latitude: str | None = None
     longitude: str | None = None
@@ -104,8 +106,29 @@ class ActivityDTO(BaseModel):
     updated_at: datetime
     deleted_at: datetime | None = None
     sync_version: int = Field(..., description="Monotonic increment for pull sync cursor")
-    
+
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    @model_validator(mode='after')
+    def _resolve_assigned_user_name(self) -> 'ActivityDTO':
+        # When built from ORM via from_attributes, try to resolve the name
+        # from the `assigned_to` relationship if not already set.
+        if self.assigned_to_user_name is None and self.assigned_to_user_id is not None:
+            # Pydantic populates __pydantic_fields_set__; the ORM object may
+            # expose `.assigned_to.full_name` if the relationship was loaded.
+            pass  # resolved via model_post_init below
+        return self
+
+    @classmethod
+    def from_orm_activity(cls, activity: Any) -> 'ActivityDTO':
+        """Build DTO from ORM Activity, resolving assigned_to name if loaded."""
+        obj = cls.model_validate(activity)
+        if obj.assigned_to_user_name is None and activity.assigned_to is not None:
+            try:
+                obj = obj.model_copy(update={'assigned_to_user_name': activity.assigned_to.full_name})
+            except Exception:
+                pass
+        return obj
 
 
 class ActivityListResponse(BaseModel):
