@@ -103,6 +103,12 @@ def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
     normalized["created_at"] = _coerce_firestore_datetime(normalized.get("created_at")) or now
     normalized["updated_at"] = _coerce_firestore_datetime(normalized.get("updated_at")) or now
     normalized["deleted_at"] = _coerce_firestore_datetime(normalized.get("deleted_at"))
+    
+    # Fallback: if assigned_to_user_id is missing or null, use created_by_user_id
+    # This ensures every activity has a responsible user for mobile Home filtering
+    if not normalized.get("assigned_to_user_id"):
+        normalized["assigned_to_user_id"] = normalized.get("created_by_user_id")
+    
     sync_version = _coerce_sync_version(normalized.get("sync_version"))
     if sync_version is None:
         raise ValueError("Invalid sync_version in firestore activity payload")
@@ -440,6 +446,10 @@ def _result_item(
     message: str | None = None,
 ) -> SyncPushResultItem:
     """Create normalized per-item response payload."""
+    retryable, suggested_action = _sync_error_guidance(
+        result_status=result_status,
+        error_code=error_code,
+    )
     return SyncPushResultItem(
         uuid=item_uuid,
         status=result_status,
@@ -447,7 +457,38 @@ def _result_item(
         sync_version=sync_version,
         error_code=error_code,
         message=message,
+        retryable=retryable,
+        suggested_action=suggested_action,
     )
+
+
+def _sync_error_guidance(
+    *,
+    result_status: str,
+    error_code: str | None,
+) -> tuple[bool | None, str | None]:
+    status_normalized = str(result_status or "").strip().upper()
+    code_normalized = str(error_code or "").strip().upper()
+
+    if status_normalized in {"CREATED", "UPDATED", "UNCHANGED"}:
+        return None, None
+
+    if status_normalized == "CONFLICT":
+        return False, "PULL_AND_RESOLVE_CONFLICT"
+
+    if code_normalized == "SERVER_ERROR":
+        return True, "RETRY_AUTOMATIC"
+
+    if code_normalized == "PROJECT_ID_MISMATCH":
+        return False, "FIX_PROJECT_CONTEXT"
+
+    if code_normalized in {"CATALOG_VERSION_NOT_FOUND", "ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION"}:
+        return False, "REFRESH_CATALOG_AND_RETRY"
+
+    if status_normalized == "INVALID":
+        return False, "REVIEW_PAYLOAD"
+
+    return None, None
 
 
 @router.post("/pull", response_model=SyncPullResponse, status_code=status.HTTP_200_OK)
