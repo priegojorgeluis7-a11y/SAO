@@ -9,7 +9,8 @@ class _FakeAuthHttp implements AuthHttp {
   _FakeAuthHttp({
     required this.onPost,
     required this.onGet,
-  });
+    Future<dynamic> Function(String path, String token)? onGetAny,
+  }) : onGetAny = onGetAny ?? ((path, token) => onGet(path, token));
 
   final Future<Map<String, dynamic>> Function(
     String path,
@@ -18,6 +19,7 @@ class _FakeAuthHttp implements AuthHttp {
   ) onPost;
 
   final Future<Map<String, dynamic>> Function(String path, String token) onGet;
+  final Future<dynamic> Function(String path, String token) onGetAny;
 
   @override
   Future<Map<String, dynamic>> post(
@@ -31,6 +33,11 @@ class _FakeAuthHttp implements AuthHttp {
   @override
   Future<Map<String, dynamic>> get(String path, String token) {
     return onGet(path, token);
+  }
+
+  @override
+  Future<dynamic> getAny(String path, String token) {
+    return onGetAny(path, token);
   }
 }
 

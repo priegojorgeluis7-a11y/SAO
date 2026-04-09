@@ -135,11 +135,22 @@ def _principal_from_doc(payload: dict[str, Any]) -> FirestoreUserPrincipal | Non
 
 
 def get_firestore_user_by_id(user_id: str | UUID) -> FirestoreUserPrincipal | None:
+    import logging
+    logger = logging.getLogger(__name__)
+    
     client = get_firestore_client()
     snap = client.collection("users").document(str(user_id)).get()
     if not snap.exists:
+        logger.warning(f"User {user_id} not found in Firestore")
         return None
-    return _principal_from_doc(snap.to_dict() or {})
+    
+    payload = snap.to_dict() or {}
+    logger.info(f"get_firestore_user_by_id({user_id}): email={payload.get('email')} roles={payload.get('roles')}")
+    
+    principal = _principal_from_doc(payload)
+    if principal:
+        logger.info(f"  → Principal created: {principal.full_name} roles={principal.roles}")
+    return principal
 
 
 def get_firestore_user_by_email(email: str) -> FirestoreUserPrincipal | None:
@@ -274,3 +285,14 @@ def update_firestore_user(
 
     refreshed = ref.get()
     return _principal_from_doc(refreshed.to_dict() or {})
+
+
+def delete_firestore_user(user_id: UUID) -> bool:
+    """Delete an existing user document in Firestore. Returns True if deleted."""
+    client = get_firestore_client()
+    ref = client.collection("users").document(str(user_id))
+    snap = ref.get()
+    if not snap.exists:
+        return False
+    ref.delete()
+    return True

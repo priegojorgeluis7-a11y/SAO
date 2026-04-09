@@ -169,38 +169,46 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
 
   final now = DateTime.now();
   final currentStart = _rangeStart(now, range);
-  final previousStart = _rangeStart(now.subtract(_rangeDuration(range)), range);
-  final previousEnd = currentStart;
   final projectQuery = activeProjectId.isEmpty
       ? ''
       : '?project_id=${Uri.encodeQueryComponent(activeProjectId)}';
+    final dailyTrendQuery = activeProjectId.isEmpty
+      ? '?days=2'
+      : '?project_id=${Uri.encodeQueryComponent(activeProjectId)}&days=2';
 
   try {
-    final decoded =
-        await client.getJson('/api/v1/dashboard/kpis$projectQuery') as Map<String, dynamic>?;
+    final decoded = await _tryGetJsonMap(client, '/api/v1/dashboard/kpis$projectQuery');
     if (decoded == null) return _empty(user, range);
 
-    final queueDecoded = await client.getJson('/api/v1/review/queue$projectQuery') as Map<String, dynamic>?;
-    final reportsCurrent = await client.getJson(
+    final dailyTrendDecoded = await _tryGetJsonMap(
+      client,
+      '/api/v1/dashboard/kpis/daily-trend$dailyTrendQuery',
+    );
+    final queueDecoded = await _tryGetJsonMap(client, '/api/v1/review/queue$projectQuery');
+    final reportsCurrent = await _tryGetJsonMap(
+      client,
       '/api/v1/reports/activities${_reportsQuery(projectId: activeProjectId, from: currentStart, to: now)}',
-    ) as Map<String, dynamic>?;
-    final reportsPrevious = await client.getJson(
-      '/api/v1/reports/activities${_reportsQuery(projectId: activeProjectId, from: previousStart, to: previousEnd)}',
-    ) as Map<String, dynamic>?;
+    );
 
-    final counters = decoded['kpis'] as Map<String, dynamic>? ?? {};
+    final counters = decoded['kpis'] as Map<String, dynamic>? ?? decoded;
     final queueItemsRaw = queueDecoded?['items'] as List<dynamic>? ?? const [];
     final reportCurrentItems = (reportsCurrent?['items'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList(growable: false);
-    final reportPreviousItems = (reportsPrevious?['items'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .toList(growable: false);
+    final trendRows = (dailyTrendDecoded?['trend'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .toList(growable: false);
+    final trendCurrent = trendRows.isNotEmpty ? trendRows.first : const <String, dynamic>{};
+    final trendPrevious = trendRows.length > 1 ? trendRows[1] : const <String, dynamic>{};
 
-    final pendingCount = (counters['pending_review'] as num?)?.toInt() ?? 0;
-    final approvedCount = _countByStatus(reportCurrentItems, 'COMPLETADA');
-    final rejectedCount = (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ?? 0;
-    final needsFixCount = (counters['in_progress'] as num?)?.toInt() ?? 0;
+    final pendingCount =
+      (counters['review_queue_count'] as num?)?.toInt() ?? (counters['pending_review'] as num?)?.toInt() ?? 0;
+    final approvedCount =
+      (counters['completed_today'] as num?)?.toInt() ?? (counters['approved'] as num?)?.toInt() ?? 0;
+    final rejectedCount =
+      (counters['overdue_review_count'] as num?)?.toInt() ?? (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ?? 0;
+    final needsFixCount =
+      (counters['pending_today'] as num?)?.toInt() ?? (counters['in_progress'] as num?)?.toInt() ?? 0;
 
     final projectId = (decoded['project_id'] ?? 'N/A').toString();
 
@@ -216,20 +224,20 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
     final frontProgress = _buildFrontProgress(reportCurrentItems);
 
     final approvedTrend = DashboardTrend(
-      current: approvedCount,
-      previous: _countByStatus(reportPreviousItems, 'COMPLETADA'),
+      current: _trendInt(trendCurrent, 'completed', approvedCount),
+      previous: _trendInt(trendPrevious, 'completed', 0),
     );
     final pendingTrend = DashboardTrend(
-      current: pendingCount,
-      previous: _countByStatus(reportPreviousItems, 'REVISION_PENDIENTE'),
+      current: _trendInt(trendCurrent, 'pending', pendingCount),
+      previous: _trendInt(trendPrevious, 'pending', 0),
     );
     final needsFixTrend = DashboardTrend(
       current: needsFixCount,
-      previous: _countByStatus(reportPreviousItems, 'EN_CURSO'),
+      previous: _trendInt(trendPrevious, 'pending', 0),
     );
     final rejectedTrend = DashboardTrend(
       current: rejectedCount,
-      previous: 0,
+      previous: _trendInt(trendPrevious, 'overdue_review_count', 0),
     );
 
     final avgValidationHours = _computeAvgValidationHours(reportCurrentItems, now);
@@ -239,7 +247,8 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
       approvedCount: approvedCount,
       rejectedCount: rejectedCount,
       needsFixCount: needsFixCount,
-      totalInQueue: (counters['total'] as num?)?.toInt() ??
+        totalInQueue: (counters['total_activities'] as num?)?.toInt() ??
+          (counters['total'] as num?)?.toInt() ??
           (pendingCount + approvedCount + rejectedCount + needsFixCount),
       projectId: projectId,
       range: range,
@@ -259,6 +268,20 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
     return _empty(user, range);
   }
 });
+
+Future<Map<String, dynamic>?> _tryGetJsonMap(
+  BackendApiClient client,
+  String path,
+) async {
+  try {
+    final decoded = await client.getJson(path);
+    if (decoded is Map<String, dynamic>) return decoded;
+    if (decoded is Map) return decoded.cast<String, dynamic>();
+    return null;
+  } catch (_) {
+    return null;
+  }
+}
 
 DashboardData _empty(dynamic user, DashboardRange range) => DashboardData(
       pendingCount: 0,
@@ -294,8 +317,11 @@ String _reportsQuery({
   return '?${params.entries.map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}').join('&')}';
 }
 
-int _countByStatus(List<Map<String, dynamic>> items, String status) {
-  return items.where((item) => (item['status'] ?? '').toString().toUpperCase() == status).length;
+int _trendInt(Map<String, dynamic> row, String key, int fallback) {
+  final value = row[key];
+  if (value is num) return value.toInt();
+  if (value is String) return int.tryParse(value) ?? fallback;
+  return fallback;
 }
 
 DateTime _rangeStart(DateTime now, DashboardRange range) {
@@ -308,17 +334,6 @@ DateTime _rangeStart(DateTime now, DashboardRange range) {
       return DateTime.utc(start.year, start.month, start.day);
     case DashboardRange.month:
       return DateTime.utc(now.year, now.month, 1);
-  }
-}
-
-Duration _rangeDuration(DashboardRange range) {
-  switch (range) {
-    case DashboardRange.today:
-      return const Duration(days: 1);
-    case DashboardRange.week:
-      return const Duration(days: 7);
-    case DashboardRange.month:
-      return const Duration(days: 30);
   }
 }
 

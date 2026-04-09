@@ -1,4 +1,9 @@
+import 'dart:io';
+
+import 'package:drift/drift.dart' as drift;
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sao_windows/data/local/app_db.dart';
 import 'package:sao_windows/features/agenda/data/assignments_dao.dart';
 import 'package:sao_windows/features/agenda/data/assignments_repository.dart';
 import 'package:sao_windows/features/agenda/models/agenda_item.dart';
@@ -40,6 +45,23 @@ class _FakeAssignmentsLocalStore implements AssignmentsLocalStore {
   @override
   Future<void> upsertAssignments(List<AgendaAssignmentRecord> records) async {
     _records.removeWhere((existing) => records.any((incoming) => incoming.id == existing.id));
+    _records.addAll(records);
+  }
+
+  @override
+  Future<void> replaceSyncedInRange({
+    required String projectId,
+    required DateTime from,
+    required DateTime to,
+    required List<AgendaAssignmentRecord> records,
+  }) async {
+    _records.removeWhere(
+      (existing) =>
+          existing.projectId == projectId &&
+          existing.syncStatus == SyncStatus.synced &&
+          existing.startAt.isBefore(to) &&
+          existing.endAt.isAfter(from),
+    );
     _records.addAll(records);
   }
 
@@ -100,9 +122,30 @@ class _FakeAssignmentsLocalStore implements AssignmentsLocalStore {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  const pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
+
+  setUpAll(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(pathProviderChannel, (call) async {
+      if (call.method == 'getApplicationDocumentsDirectory') {
+        return Directory.systemTemp.createTempSync('sao_windows_test').path;
+      }
+      return null;
+    });
+  });
+
+  tearDownAll(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(pathProviderChannel, null);
+  });
+
   group('AssignmentsRepository', () {
     test('offline retorna solo local queryRange', () async {
       final local = _FakeAssignmentsLocalStore();
+      final database = AppDb();
+      addTearDown(database.close);
       final now = DateTime.now();
       await local.seed([
         AgendaAssignmentRecord(
@@ -125,6 +168,7 @@ void main() {
       var remoteCalls = 0;
       final repo = AssignmentsRepository(
         localStore: local,
+        database: database,
         fetchAssignments: ({required String projectId, required DateTime from, required DateTime to}) async {
           remoteCalls++;
           return [];
@@ -145,10 +189,35 @@ void main() {
 
     test('online refresca remoto y queda synced', () async {
       final local = _FakeAssignmentsLocalStore();
+      final database = AppDb();
+      addTearDown(database.close);
       final now = DateTime.now();
+
+      await database.into(database.projects).insert(
+            ProjectsCompanion.insert(
+              id: 'TMQ',
+              code: 'TMQ',
+              name: 'Tren Mexico Queretaro',
+              isActive: const drift.Value(true),
+            ),
+          );
+      await database.into(database.catalogActivityTypes).insert(
+            CatalogActivityTypesCompanion.insert(
+              id: 'unknown_activity_type',
+              code: 'UNKNOWN_ACTIVITY_TYPE',
+              name: 'Actividad desconocida',
+              requiresPk: const drift.Value(false),
+              requiresGeo: const drift.Value(false),
+              requiresMinuta: const drift.Value(false),
+              requiresEvidence: const drift.Value(false),
+              isActive: const drift.Value(true),
+              catalogVersion: const drift.Value(1),
+            ),
+          );
 
       final repo = AssignmentsRepository(
         localStore: local,
+        database: database,
         fetchAssignments: ({required String projectId, required DateTime from, required DateTime to}) async {
           return [
             {

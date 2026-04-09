@@ -365,7 +365,7 @@ class _AdminActivityHistoryPageState extends State<AdminActivityHistoryPage> {
             Icon(icon, size: 14, color: isActive ? SaoColors.onPrimary : SaoColors.gray600),
             const SizedBox(width: 5),
             Text(
-              isActive ? (labelMap?[value] ?? value!) : label,
+              isActive ? (labelMap?[value] ?? value) : label,
               style: SaoTypography.caption.copyWith(
                 fontWeight: FontWeight.w700,
                 color: isActive ? SaoColors.onPrimary : SaoColors.gray600,

@@ -195,6 +195,9 @@ class SyncRepository {
     final subtitle = row.lastAttemptAt != null
         ? _formatTimestamp(row.lastAttemptAt)
         : 'Pendiente de sincronizar';
+    final retryable = _resolveRetryable(row);
+    final suggestedAction = _resolveSuggestedAction(row);
+    final cleanError = _cleanErrorMessage(row.lastError);
 
     return UploadQueueItem(
       id: row.id,
@@ -205,22 +208,82 @@ class SyncRepository {
       subtitle: subtitle,
       status: status,
       progress: status == UploadItemStatus.uploading ? 0.5 : null,
-      errorMessage: row.lastError,
+      errorMessage: cleanError,
+      retryable: retryable,
+      suggestedAction: suggestedAction,
       retryCount: row.attempts,
       createdAt: row.lastAttemptAt ?? DateTime.now(),
     );
   }
 
+  bool _isRetryableError(String? rawError) {
+    final error = rawError?.toUpperCase() ?? '';
+    if (error.contains('[RETRYABLE]')) return true;
+    if (error.contains('[NON_RETRYABLE]')) return false;
+    return false;
+  }
+
+  bool _resolveRetryable(SyncQueueData row) {
+    final inferred = _isRetryableError(row.lastError);
+    return inferred || row.retryable;
+  }
+
+  String? _resolveSuggestedAction(SyncQueueData row) {
+    final raw = row.suggestedAction ?? _extractSuggestedAction(row.lastError);
+    if (raw == null || raw.trim().isEmpty) {
+      return null;
+    }
+    return _humanizeSuggestedAction(raw.trim());
+  }
+
+  String _humanizeSuggestedAction(String action) {
+    switch (action.toUpperCase()) {
+      case 'RETRY_AUTOMATIC':
+        return 'Reintentar automaticamente';
+      case 'PULL_AND_RESOLVE_CONFLICT':
+        return 'Actualizar desde servidor y resolver conflicto';
+      case 'FIX_PROJECT_CONTEXT':
+        return 'Verificar proyecto activo antes de reenviar';
+      case 'REFRESH_CATALOG_AND_RETRY':
+        return 'Actualizar catalogo y volver a intentar';
+      case 'REVIEW_PAYLOAD':
+        return 'Revisar datos capturados antes de reenviar';
+      default:
+        return action;
+    }
+  }
+
+  String? _extractSuggestedAction(String? rawError) {
+    final error = rawError?.trim();
+    if (error == null || error.isEmpty) return null;
+    const marker = '| accion sugerida:';
+    final lower = error.toLowerCase();
+    final idx = lower.indexOf(marker);
+    if (idx == -1) return null;
+    final value = error.substring(idx + marker.length).trim();
+    return value.isEmpty ? null : value;
+  }
+
+  String? _cleanErrorMessage(String? rawError) {
+    final error = rawError?.trim();
+    if (error == null || error.isEmpty) return null;
+    final markerIdx = error.toLowerCase().indexOf('| accion sugerida:');
+    final base = markerIdx == -1 ? error : error.substring(0, markerIdx).trim();
+    final withoutRetryable = base.replaceAll('[retryable]', '').replaceAll('[RETRYABLE]', '').trim();
+    return withoutRetryable.isEmpty ? null : withoutRetryable;
+  }
+
   String _extractTitle(String entity, String entityId) {
+    final shortId = entityId.length <= 8 ? entityId : entityId.substring(0, 8);
     switch (entity.toUpperCase()) {
       case 'ACTIVITY':
-        return 'Actividad #${entityId.substring(0, 8)}';
+        return 'Actividad #$shortId';
       case 'EVENT':
-        return 'Incidencia #${entityId.substring(0, 8)}';
+        return 'Incidencia #$shortId';
       case 'EVIDENCE':
         return 'Evidencia fotográfica';
       default:
-        return 'Ítem #${entityId.substring(0, 8)}';
+        return 'Ítem #$shortId';
     }
   }
 

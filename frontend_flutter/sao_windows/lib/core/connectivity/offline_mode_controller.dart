@@ -17,7 +17,7 @@ final offlineModeProvider =
 class OfflineModeController extends StateNotifier<bool> {
   OfflineModeController({required KvStore kv})
       : _kv = kv,
-        super(true);
+        super(false);
 
   final KvStore _kv;
   bool _hasLoaded = false;
@@ -27,6 +27,8 @@ class OfflineModeController extends StateNotifier<bool> {
     final storedValue = await _kv.getString(offlineModeKey);
     if (storedValue != null) {
       state = storedValue.toLowerCase() == 'true';
+    } else {
+      state = false;
     }
     _hasLoaded = true;
   }

@@ -90,32 +90,52 @@ class AgendaController extends StateNotifier<AgendaState> {
   final AssignmentsRepository _assignmentsRepository;
   String? _projectId;
   bool _isOffline = false;
+  Resource? _selfResource;
 
   Future<void> initialize({
     String? projectId,
     required bool isOffline,
+    Resource? selfResource,
   }) async {
     _projectId = projectId;
     _isOffline = isOffline;
+    _selfResource = selfResource;
     state = state.copyWith(loadingUsers: true, usersError: null, items: const []);
 
     try {
-      final resources = await _usersRepository.getOperationalUsers(
+      final fetched = await _usersRepository.getOperationalUsers(
         projectId: projectId,
         isOffline: isOffline,
+      );
+      final resources = _withSelfFirst(fetched, selfResource);
+      final selectedFilterId = _resolveFilterSelection(
+        currentFilterId: state.selectedFilterId,
+        resources: resources,
+        selfResource: selfResource,
+        preferSelf: true,
       );
       appLogger.i(
         'AgendaController.initialize resources=${resources.length} '
         'project=$projectId offline=$isOffline',
       );
       state = state.copyWith(
+        selectedFilterId: selectedFilterId,
         resources: resources,
         loadingUsers: false,
         usersError: null,
       );
     } catch (e) {
       appLogger.e('AgendaController.initialize users load error: $e');
+      final fallbackResources = _withSelfFirst(const [], selfResource);
+      final selectedFilterId = _resolveFilterSelection(
+        currentFilterId: state.selectedFilterId,
+        resources: fallbackResources,
+        selfResource: selfResource,
+        preferSelf: true,
+      );
       state = state.copyWith(
+        selectedFilterId: selectedFilterId,
+        resources: fallbackResources,
         loadingUsers: false,
         usersError: 'No se pudieron cargar los recursos operativos.',
       );
@@ -200,6 +220,10 @@ class AgendaController extends StateNotifier<AgendaState> {
     await _loadCurrentWeekAssignments();
   }
 
+  Future<void> refresh() async {
+    await _loadCurrentWeekAssignments();
+  }
+
   /// Cancela una asignación localmente.
   /// - Si está pendiente/en error: la elimina sin necesitar red.
   /// - Si ya fue sincronizada: la elimina del caché local; el próximo sync
@@ -223,7 +247,73 @@ class AgendaController extends StateNotifier<AgendaState> {
     if (state.resources.isNotEmpty || state.loadingUsers) return;
     if (projectId == null || projectId.trim().isEmpty) return;
     appLogger.i('AgendaController.ensureResourcesReady retry project=$projectId');
-    await initialize(projectId: projectId, isOffline: false);
+    await initialize(projectId: projectId, isOffline: false, selfResource: _selfResource);
+  }
+
+  /// Guarantees the logged user is present in resources.
+  /// Useful when auth user arrives after initial agenda load.
+  void ensureSelfResource(Resource? selfResource) {
+    if (selfResource == null) return;
+    _selfResource = selfResource;
+    final updated = _withSelfFirst(state.resources, selfResource);
+    final selectedFilterId = _resolveFilterSelection(
+      currentFilterId: state.selectedFilterId,
+      resources: updated,
+      selfResource: selfResource,
+      preferSelf: state.selectedFilterId == 'Todos',
+    );
+    if (_sameResourceOrder(updated, state.resources) &&
+        selectedFilterId == state.selectedFilterId) {
+      return;
+    }
+    state = state.copyWith(
+      resources: updated,
+      selectedFilterId: selectedFilterId,
+    );
+  }
+
+  static String _resolveFilterSelection({
+    required String currentFilterId,
+    required List<Resource> resources,
+    required Resource? selfResource,
+    required bool preferSelf,
+  }) {
+    final activeIds = resources.where((resource) => resource.isActive).map((resource) => resource.id).toSet();
+    final selfId = selfResource?.id;
+
+    if (preferSelf && selfId != null && activeIds.contains(selfId)) {
+      return selfId;
+    }
+
+    if (currentFilterId == 'Todos') {
+      return 'Todos';
+    }
+
+    if (activeIds.contains(currentFilterId)) {
+      return currentFilterId;
+    }
+
+    if (selfId != null && activeIds.contains(selfId)) {
+      return selfId;
+    }
+
+    return 'Todos';
+  }
+
+  static bool _sameResourceOrder(List<Resource> a, List<Resource> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].id != b[i].id) return false;
+    }
+    return true;
+  }
+
+  /// Garantiza que [self] aparezca primero en la lista.
+  /// Si ya está presente (mismo id), solo lo mueve al frente.
+  static List<Resource> _withSelfFirst(List<Resource> resources, Resource? self) {
+    if (self == null) return resources;
+    final without = resources.where((r) => r.id != self.id).toList();
+    return [self, ...without];
   }
 
   Future<void> syncNow() async {

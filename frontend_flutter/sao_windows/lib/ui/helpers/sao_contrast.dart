@@ -1,4 +1,5 @@
 // lib/ui/helpers/sao_contrast.dart
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 
 /// Utilidades para garantizar buen contraste entre texto y fondo
@@ -24,7 +25,7 @@ class SaoContrast {
     if (normalized <= 0.03928) {
       return normalized / 12.92;
     }
-    return ((normalized + 0.055) / 1.055).pow(2.4).toDouble();
+    return math.pow((normalized + 0.055) / 1.055, 2.4).toDouble();
   }
 
   /// Retorna el color de texto que proporciona mejor contraste

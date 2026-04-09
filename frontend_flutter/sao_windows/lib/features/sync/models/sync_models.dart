@@ -49,6 +49,8 @@ class UploadQueueItem {
   final UploadItemStatus status;
   final double? progress; // 0.0 a 1.0 para uploading
   final String? errorMessage;
+  final bool retryable;
+  final String? suggestedAction;
   final int retryCount;
   final DateTime createdAt;
 
@@ -62,6 +64,8 @@ class UploadQueueItem {
     required this.status,
     this.progress,
     this.errorMessage,
+    this.retryable = true,
+    this.suggestedAction,
     this.retryCount = 0,
     required this.createdAt,
   });

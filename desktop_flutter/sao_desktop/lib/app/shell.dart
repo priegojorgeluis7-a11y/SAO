@@ -4,13 +4,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/dashboard/dashboard_page.dart';
-import '../features/operations/validation_page_new_design.dart';
+import '../features/operations/operations_hub_page.dart';
 import '../features/planning/planning_page.dart';
 import '../features/events/events_page.dart';
 import '../features/ocr/ocr_minutes_page.dart';
-import '../features/reports/reports_page.dart';
 import '../features/profile/profile_settings_page.dart';
-import '../features/completed_activities/completed_activities_page.dart';
 import '../features/structure/structure_page.dart';
 import '../features/ui_catalog/ui_catalog_page.dart';
 import '../core/providers/app_refresh_provider.dart';
@@ -24,7 +22,7 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
-  int _selectedIndex = 1; // Start on Operations
+  int _selectedIndex = 2; // Start on Operations
   int _refreshToken = 0;
 
   List<_NavItem> get _navItems {
@@ -35,19 +33,14 @@ class _AppShellState extends ConsumerState<AppShell> {
         page: const DashboardPage(),
       ),
       _NavItem(
-        icon: Icons.rule_folder_rounded,
-        label: 'Operaciones',
-        page: const ValidationPageNewDesign(),
-      ),
-      _NavItem(
         icon: Icons.calendar_month_rounded,
         label: 'Planeación',
         page: const PlanningPage(),
       ),
       _NavItem(
-        icon: Icons.task_alt_rounded,
-        label: 'Completadas',
-        page: const CompletedActivitiesPage(),
+        icon: Icons.rule_folder_rounded,
+        label: 'Operaciones',
+        page: const OperationsHubPage(),
       ),
       _NavItem(
         icon: Icons.account_tree_rounded,
@@ -60,19 +53,9 @@ class _AppShellState extends ConsumerState<AppShell> {
         page: const EventsPage(),
       ),
       _NavItem(
-        icon: Icons.person_rounded,
-        label: 'Configuración',
-        page: const ProfileSettingsPage(),
-      ),
-      _NavItem(
         icon: Icons.document_scanner_rounded,
         label: 'OCR Minutas',
         page: const OcrMinutesPage(),
-      ),
-      _NavItem(
-        icon: Icons.insert_drive_file_rounded,
-        label: 'Reportes',
-        page: const ReportsPage(),
       ),
       if (kDebugMode)
         _NavItem(
@@ -80,6 +63,11 @@ class _AppShellState extends ConsumerState<AppShell> {
           label: 'UI Catalog',
           page: const UiCatalogPage(),
         ),
+      _NavItem(
+        icon: Icons.person_rounded,
+        label: 'Configuración',
+        page: const ProfileSettingsPage(),
+      ),
     ];
     return items;
   }
@@ -114,7 +102,8 @@ class _AppShellState extends ConsumerState<AppShell> {
               // ── Contenido principal ────────────────────────────────────
               Expanded(
                 child: KeyedSubtree(
-                  key: ValueKey('page-$safeIndex-$_refreshToken-$appRefreshToken'),
+                  key: ValueKey(
+                      'page-$safeIndex-$_refreshToken-$appRefreshToken'),
                   child: navItems[safeIndex].page,
                 ),
               ),
@@ -124,12 +113,11 @@ class _AppShellState extends ConsumerState<AppShell> {
       ),
     );
   }
-
 }
 
 // ── Color de acento de la barra activa (teal del logo) ─────────────────────
-const _kNavAccent      = Color(0xFF104848); // teal oscuro del logo
-const _kNavAccentDark  = Color(0xFF5EEAD4); // teal claro para dark mode
+const _kNavAccent = Color(0xFF104848); // teal oscuro del logo
+const _kNavAccentDark = Color(0xFF5EEAD4); // teal claro para dark mode
 
 // ── Sidebar ────────────────────────────────────────────────────────────────
 
@@ -146,7 +134,7 @@ class _SideNav extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final cs     = Theme.of(context).colorScheme;
+    final cs = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
@@ -167,9 +155,7 @@ class _SideNav extends StatelessWidget {
             ),
           ),
           Divider(
-              height: 1,
-              thickness: 1,
-              color: Theme.of(context).dividerColor),
+              height: 1, thickness: 1, color: Theme.of(context).dividerColor),
           const SizedBox(height: 4),
           // ── Items ─────────────────────────────────────────────────────
           Expanded(
@@ -215,8 +201,8 @@ class _NavTileState extends State<_NavTile> {
 
   @override
   Widget build(BuildContext context) {
-    final isDark  = Theme.of(context).brightness == Brightness.dark;
-    final accent  = isDark ? _kNavAccentDark : _kNavAccent;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final accent = isDark ? _kNavAccentDark : _kNavAccent;
 
     final Color iconColor;
     final Color labelColor;
@@ -224,22 +210,21 @@ class _NavTileState extends State<_NavTile> {
     final Color barColor;
 
     if (widget.selected) {
-      iconColor  = accent;
+      iconColor = accent;
       labelColor = accent;
-      bgColor    = accent.withValues(alpha: isDark ? 0.14 : 0.09);
-      barColor   = accent;
+      bgColor = accent.withValues(alpha: isDark ? 0.14 : 0.09);
+      barColor = accent;
     } else if (_hovered) {
-      iconColor  = isDark ? const Color(0xFFCBD5E1) : AppColors.gray700;
+      iconColor = isDark ? const Color(0xFFCBD5E1) : AppColors.gray700;
       labelColor = isDark ? const Color(0xFFCBD5E1) : AppColors.gray700;
-      bgColor    = isDark
-          ? Colors.white.withValues(alpha: 0.05)
-          : AppColors.gray100;
-      barColor   = Colors.transparent;
+      bgColor =
+          isDark ? Colors.white.withValues(alpha: 0.05) : AppColors.gray100;
+      barColor = Colors.transparent;
     } else {
-      iconColor  = isDark ? const Color(0xFF64748B) : AppColors.gray400;
+      iconColor = isDark ? const Color(0xFF64748B) : AppColors.gray400;
       labelColor = isDark ? const Color(0xFF64748B) : AppColors.gray500;
-      bgColor    = Colors.transparent;
-      barColor   = Colors.transparent;
+      bgColor = Colors.transparent;
+      barColor = Colors.transparent;
     }
 
     return MouseRegion(
@@ -267,8 +252,7 @@ class _NavTileState extends State<_NavTile> {
             // Contenido con fondo de esquinas derechas redondeadas
             Expanded(
               child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
+                padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 2),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 150),
                   curve: Curves.easeOut,

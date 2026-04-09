@@ -1,6 +1,7 @@
 // lib/features/agenda/widgets/agenda_mini_card.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/flow/activity_flow_projection.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
@@ -70,6 +71,17 @@ class AgendaMiniCard extends StatelessWidget {
                       style: const TextStyle(
                         fontSize: 12,
                         color: SaoColors.statusBorrador,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      nextActionLabel(item.nextAction),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: SaoColors.info,
                       ),
                     ),
                   ],

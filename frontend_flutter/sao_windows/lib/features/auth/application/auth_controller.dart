@@ -230,6 +230,80 @@ class AuthController extends StateNotifier<AuthState> {
     }
   }
 
+  /// Login using biometric quick unlock.
+  ///
+  /// Requires biometric preference enabled and a previously cached session.
+  Future<void> loginWithBiometrics() async {
+    state = const AuthState.loading();
+
+    try {
+      final biometricEnabled = await _repository.isBiometricEnabled();
+      if (!biometricEnabled) {
+        state = const AuthState.unauthenticated(
+          'La biometría no está habilitada en esta cuenta',
+        );
+        return;
+      }
+
+      final canUse = await _biometricService.hasBiometricCredentials();
+      if (!canUse) {
+        state = const AuthState.unauthenticated(
+          'Tu dispositivo no tiene biometría configurada',
+        );
+        return;
+      }
+
+      final authenticated = await _biometricService.authenticate(
+        localizedReason: 'Autentícate con huella para entrar',
+        biometricOnly: false,
+      );
+      if (!authenticated) {
+        state = const AuthState.unauthenticated(
+          'Autenticación biométrica cancelada',
+        );
+        return;
+      }
+
+      final result = await _repository.bootstrap();
+
+      switch (result) {
+        case BootstrapResult.authenticated:
+          final user = await _repository.getCurrentUser();
+          final pinConfigured = await _repository.isPinConfigured();
+          state = AuthState.authenticated(
+            user,
+            needsPinSetup: !pinConfigured,
+          );
+          return;
+
+        case BootstrapResult.pinLocked:
+          final cachedJson = await _repository.getCachedUserJson();
+          if (cachedJson == null) {
+            state = const AuthState.unauthenticated(
+              'No hay sesión disponible para desbloquear',
+            );
+            return;
+          }
+
+          state = AuthState.offlineAuthenticated(User.fromJson(cachedJson));
+          return;
+
+        case BootstrapResult.unauthenticated:
+          state = const AuthState.unauthenticated(
+            'No hay una sesión previa para desbloquear con biometría',
+          );
+          return;
+      }
+    } on AuthException catch (e) {
+      state = AuthState.unauthenticated(e.message);
+    } catch (e) {
+      appLogger.e('Unexpected biometric login error: $e');
+      state = const AuthState.unauthenticated(
+        'No se pudo iniciar sesión con biometría',
+      );
+    }
+  }
+
   /// Enable/disable tutorial mode for current authenticated session
   void setTutorialMode(bool enabled) {
     if (!state.isAuthenticated) return;
@@ -368,15 +442,36 @@ class AuthController extends StateNotifier<AuthState> {
         );
       }
 
-      final authenticated = await _biometricService.authenticate(
+      final authResult = await _biometricService.authenticateWithResult(
         localizedReason: 'Confirma para habilitar inicio rápido',
+        biometricOnly: false,
       );
-      if (!authenticated) {
-        throw AuthException('Autenticación cancelada', StackTrace.current);
+      if (!authResult.authenticated) {
+        final failure = authResult.failure ?? BiometricAuthFailure.other;
+        throw AuthException(_biometricFailureMessage(failure), StackTrace.current);
       }
     }
 
     await _repository.setBiometricEnabled(enabled);
+  }
+
+  String _biometricFailureMessage(BiometricAuthFailure failure) {
+    switch (failure) {
+      case BiometricAuthFailure.canceled:
+        return 'Autenticación cancelada';
+      case BiometricAuthFailure.notSupported:
+        return 'Este dispositivo no soporta biometría';
+      case BiometricAuthFailure.notAvailable:
+        return 'Biometría no disponible en este momento';
+      case BiometricAuthFailure.notEnrolled:
+        return 'No hay biometría registrada. Configúrala en el dispositivo';
+      case BiometricAuthFailure.lockedOut:
+        return 'Biometría temporalmente bloqueada. Intenta de nuevo en unos segundos';
+      case BiometricAuthFailure.permanentLockout:
+        return 'Biometría bloqueada. Desbloquea con PIN/contraseña del dispositivo';
+      case BiometricAuthFailure.other:
+        return 'No se pudo validar biometría. Intenta de nuevo';
+    }
   }
 
   /// Clear error state

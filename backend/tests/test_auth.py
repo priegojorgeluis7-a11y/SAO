@@ -116,6 +116,7 @@ def test_firestore_verify_project_access_enforces_scope(force_firestore_backend)
     assert exc_info.value.status_code == 403
 
 
-def test_login_nonexistent_user_returns_401(client):
+def test_login_nonexistent_user_returns_401(client, monkeypatch, force_firestore_backend):
+    monkeypatch.setattr("app.api.v1.auth.get_firestore_user_by_email", lambda _email: None)
     response = _login(client, "nonexistent@example.com", "anypassword")
     assert response.status_code == 401

@@ -63,6 +63,37 @@ class CatalogRepository {
   String? _lastEditorVersionId;
   String? get lastEditorVersionId => _lastEditorVersionId;
 
+  Set<String> _activityAliases(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return const <String>{};
+
+    final aliases = <String>{
+      value,
+      value.toUpperCase(),
+      value.toLowerCase(),
+    };
+
+    final upper = value.toUpperCase();
+    if (upper.startsWith('ACT-TYPE-') && value.length > 9) {
+      final stripped = value.substring(9).trim();
+      if (stripped.isNotEmpty) {
+        aliases
+          ..add(stripped)
+          ..add(stripped.toUpperCase())
+          ..add(stripped.toLowerCase());
+      }
+    }
+    return aliases;
+  }
+
+  bool _sameActivityId(String left, String right) {
+    final leftAliases = _activityAliases(left);
+    if (leftAliases.isEmpty) return false;
+    final rightAliases = _activityAliases(right);
+    if (rightAliases.isEmpty) return false;
+    return leftAliases.any(rightAliases.contains);
+  }
+
   Future<void> init({String projectId = ''}) async {
     await loadProject(projectId);
   }
@@ -85,6 +116,7 @@ class CatalogRepository {
         _lastBundle = bundle;
         _data = CatalogData.fromBundle(bundle);
         _ready = true;
+        print('[CATALOG] Loaded from /catalog/bundle for project=$_projectId, version=${lastCatalogVersionId ?? "unknown"}');
         return;
       }
     } catch (_) {}
@@ -97,6 +129,7 @@ class CatalogRepository {
           decoded.containsKey('activities')) {
         _data = CatalogData.fromEffectiveJson(decoded);
         _ready = true;
+        print('[CATALOG] Loaded from /catalog/effective for project=$_projectId');
         return;
       }
     } catch (_) {}
@@ -109,6 +142,7 @@ class CatalogRepository {
         _data = CatalogData.fromEditorJson(decoded);
         _lastEditorVersionId = _extractVersionIdFromEditor(decoded);
         _ready = true;
+        print('[CATALOG] Loaded from /catalog/editor for project=$_projectId, version=$_lastEditorVersionId');
         return;
       }
     } catch (_) {}
@@ -976,7 +1010,8 @@ class CatalogRepository {
     final normalized = activityId.trim();
     if (normalized.isEmpty) return const <CatItem>[];
     return _data.subcategories
-        .where((entry) => entry.isActive && entry.activityId == normalized)
+        .where((entry) =>
+            entry.isActive && _sameActivityId(entry.activityId, normalized))
         .map((entry) => CatItem(id: entry.id, name: entry.name))
         .toList();
   }
@@ -992,12 +1027,16 @@ class CatalogRepository {
     return _data.purposes
         .where((entry) {
           if (!entry.isActive) return false;
-          if (entry.activityId != normalizedActivity) return false;
+          if (!_sameActivityId(entry.activityId, normalizedActivity)) {
+            return false;
+          }
+          if (normalizedSubcategory == null || normalizedSubcategory.isEmpty) {
+            // In review flows we need the full purpose space for the activity,
+            // not only global purposes.
+            return true;
+          }
           final isGlobal = entry.subcategoryId == null ||
               entry.subcategoryId!.trim().isEmpty;
-          if (normalizedSubcategory == null || normalizedSubcategory.isEmpty) {
-            return isGlobal;
-          }
           return isGlobal || entry.subcategoryId == normalizedSubcategory;
         })
         .map((entry) => CatItem(id: entry.id, name: entry.name))
@@ -1013,7 +1052,8 @@ class CatalogRepository {
     final mapById = {for (final topic in activeTopics) topic.id: topic};
 
     final suggestedIds = _data.relations
-        .where((entry) => entry.isActive && entry.activityId == normalized)
+      .where((entry) =>
+        entry.isActive && _sameActivityId(entry.activityId, normalized))
         .map((entry) => entry.topicId)
         .toSet();
 
@@ -1024,16 +1064,7 @@ class CatalogRepository {
         if (mapById[id] != null) mapById[id]!
     ].map((entry) => CatItem(id: entry.id, name: entry.name)).toList();
 
-    if (mode == 'suggested_only' || !includeAllWhenAllowed) {
-      return suggested;
-    }
-
-    if (mode == 'any') {
-      return activeTopics
-          .map((entry) => CatItem(id: entry.id, name: entry.name))
-          .toList();
-    }
-
+    // Always return only suggested topics for project scope (no global fallback)
     return suggested;
   }
 
@@ -1052,24 +1083,83 @@ class CatalogRepository {
   }
 
   List<String> getMunicipalities() {
-    return const [
-      'Apaseo el Grande',
-      'Celaya',
-      'Pedro Escobedo',
-      'Querétaro',
-      'Tizayuca',
-      'Temascalapa',
-      'Zumpango',
-    ];
+    final dynamicValues = _extractLocationValuesFromBundle(
+      municipalityKeys: const ['municipio', 'municipality'],
+      stateKeys: const ['estado', 'state'],
+      wantMunicipalities: true,
+    );
+    // Return only data from loaded bundle, not global fallback
+    return dynamicValues;
   }
 
   List<String> getStates() {
-    return const [
-      'Guanajuato',
-      'Hidalgo',
-      'Estado de México',
-      'Querétaro',
-    ];
+    final dynamicValues = _extractLocationValuesFromBundle(
+      municipalityKeys: const ['municipio', 'municipality'],
+      stateKeys: const ['estado', 'state'],
+      wantMunicipalities: false,
+    );
+    // Return only data from loaded bundle, not global fallback
+    return dynamicValues;
+  }
+
+  List<String> _extractLocationValuesFromBundle({
+    required List<String> municipalityKeys,
+    required List<String> stateKeys,
+    required bool wantMunicipalities,
+  }) {
+    final valuesByKey = <String, String>{};
+
+    void addValue(String? raw) {
+      final value = (raw ?? '').trim();
+      if (value.isEmpty) return;
+      valuesByKey.putIfAbsent(value.toLowerCase(), () => value);
+    }
+
+    void visit(dynamic node) {
+      if (node is Map) {
+        final map = node.cast<dynamic, dynamic>();
+
+        String? pickValue(List<String> keys) {
+          for (final key in keys) {
+            if (map.containsKey(key)) {
+              return map[key]?.toString();
+            }
+          }
+          return null;
+        }
+
+        final municipality = pickValue(municipalityKeys);
+        final state = pickValue(stateKeys);
+        if (wantMunicipalities) {
+          addValue(municipality);
+        } else {
+          addValue(state);
+        }
+
+        for (final value in map.values) {
+          visit(value);
+        }
+        return;
+      }
+
+      if (node is List) {
+        for (final item in node) {
+          visit(item);
+        }
+      }
+    }
+
+    final bundle = _lastBundle;
+    if (bundle != null) {
+      visit(bundle.meta);
+      visit(bundle.editor.layers);
+      visit(bundle.effective.formFields);
+      visit(bundle.effective.rules.workflowJson);
+    }
+
+    final values = valuesByKey.values.toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
   }
 
   Future<void> _requestNoBody(String method, String path) async {
@@ -1110,6 +1200,39 @@ class CatalogData {
     required this.assistants,
     required this.relations,
   });
+
+  static Set<String> _activityIdAliases(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return const <String>{};
+
+    final aliases = <String>{
+      value,
+      value.toUpperCase(),
+      value.toLowerCase(),
+    };
+
+    final upper = value.toUpperCase();
+    if (upper.startsWith('ACT-TYPE-') && value.length > 9) {
+      final stripped = value.substring(9).trim();
+      if (stripped.isNotEmpty) {
+        aliases
+          ..add(stripped)
+          ..add(stripped.toUpperCase())
+          ..add(stripped.toLowerCase());
+      }
+    }
+
+    return aliases;
+  }
+
+  static bool _matchesKnownActivityId(String candidate, Set<String> knownAliases) {
+    final value = candidate.trim();
+    if (value.isEmpty) return false;
+    for (final alias in _activityIdAliases(value)) {
+      if (knownAliases.contains(alias)) return true;
+    }
+    return false;
+  }
 
   Map<String, List<CatItem>> get subcategoriesByActivity {
     final result = <String, List<CatItem>>{};
@@ -1162,8 +1285,20 @@ class CatalogData {
             ))
         .toList();
 
+    // Create whitelist of valid activity IDs to prevent global data leakage.
+    // Use aliases to handle id shape differences (e.g. ACT-TYPE-123 vs 123).
+    final validActivityIds = <String>{};
+    for (final activity in activities) {
+      validActivityIds.addAll(_activityIdAliases(activity.id));
+    }
+
     final subcategories = (json['subcategories'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
+        .where((r) {
+          final actId = (r['activity_id'] ?? '').toString();
+          // Keep only rows linked to activities present in this project catalog.
+          return _matchesKnownActivityId(actId, validActivityIds);
+        })
         .map((r) => CatalogSubcategoryItem(
               id: (r['id'] ?? '').toString(),
               activityId: (r['activity_id'] ?? '').toString(),
@@ -1176,6 +1311,11 @@ class CatalogData {
 
     final purposes = (json['purposes'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
+        .where((r) {
+          final actId = (r['activity_id'] ?? '').toString();
+          // Keep only rows linked to activities present in this project catalog.
+          return _matchesKnownActivityId(actId, validActivityIds);
+        })
         .map((r) => CatalogPurposeItem(
               id: (r['id'] ?? '').toString(),
               activityId: (r['activity_id'] ?? '').toString(),
@@ -1200,6 +1340,11 @@ class CatalogData {
 
     final relations = (json['rel_activity_topics'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
+        .where((r) {
+          final actId = (r['activity_id'] ?? '').toString();
+          // Keep only rows linked to activities present in this project catalog.
+          return _matchesKnownActivityId(actId, validActivityIds);
+        })
         .map((r) => CatalogRelationItem(
               activityId: (r['activity_id'] ?? '').toString(),
               topicId: (r['topic_id'] ?? '').toString(),
@@ -1300,7 +1445,19 @@ class CatalogData {
         )
         .toList();
 
+    // Create whitelist of valid activity IDs from this bundle to prevent global data leakage.
+    // Use aliases to handle id shape differences (e.g. ACT-TYPE-123 vs 123).
+    final validActivityIds = <String>{};
+    for (final activity in activities) {
+      validActivityIds.addAll(_activityIdAliases(activity.id));
+    }
+
     final subcategories = bundle.effective.entities.subcategories
+        .where((row) {
+          final actId = (row['activity_id'] ?? '').toString();
+          // Keep only rows linked to activities present in this project catalog.
+          return _matchesKnownActivityId(actId, validActivityIds);
+        })
         .map(
           (row) => CatalogSubcategoryItem(
             id: (row['id'] ?? '').toString(),
@@ -1314,6 +1471,11 @@ class CatalogData {
         .toList();
 
     final purposes = bundle.effective.entities.purposes
+        .where((row) {
+          final actId = (row['activity_id'] ?? '').toString();
+          // Keep only rows linked to activities present in this project catalog.
+          return _matchesKnownActivityId(actId, validActivityIds);
+        })
         .map(
           (row) => CatalogPurposeItem(
             id: (row['id'] ?? '').toString(),
@@ -1368,6 +1530,11 @@ class CatalogData {
         .toList();
 
     final relations = bundle.effective.relations.activityToTopicsSuggested
+        .where((row) {
+          final actId = (row['activity_id'] ?? '').toString();
+          // Keep only rows linked to activities present in this project catalog.
+          return _matchesKnownActivityId(actId, validActivityIds);
+        })
         .map(
           (row) => CatalogRelationItem(
             activityId: (row['activity_id'] ?? '').toString(),

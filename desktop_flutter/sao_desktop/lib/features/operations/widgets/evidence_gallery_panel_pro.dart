@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +23,7 @@ class EvidenceGalleryPanelPro extends StatefulWidget {
   final int selectedIndex;
   final Function(int) onSelectEvidence;
   final Function(String evidenceId, String caption)? onCaptionChanged;
+  final EvidenceRepository? evidenceRepository;
 
   const EvidenceGalleryPanelPro({
     super.key,
@@ -28,6 +31,7 @@ class EvidenceGalleryPanelPro extends StatefulWidget {
     required this.selectedIndex,
     required this.onSelectEvidence,
     this.onCaptionChanged,
+    this.evidenceRepository,
   });
 
   @override
@@ -38,9 +42,13 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   late Map<String, TextEditingController> _captionControllers;
   late Map<String, TextEditingController> _notesControllers;
   late Map<String, bool> _isEditingCaption;
-  final EvidenceRepository _evidenceRepository = EvidenceRepository();
+  final EvidenceRepository _defaultEvidenceRepository = EvidenceRepository();
   final Map<String, String> _signedUrlCache = {};
+  final Map<String, Future<String?>> _signedUrlFutureCache = {};
   int? _lastPrefetchIndex;
+
+  EvidenceRepository get _evidenceRepository =>
+      widget.evidenceRepository ?? _defaultEvidenceRepository;
 
   @override
   void initState() {
@@ -54,9 +62,11 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     _isEditingCaption = {};
 
     if (widget.activity != null) {
-      for (var evidence in widget.activity!.evidences) {
-        _captionControllers[evidence.id] =
-            TextEditingController(text: evidence.caption ?? '');
+      for (final entry in widget.activity!.evidences.asMap().entries) {
+        final evidence = entry.value;
+        _captionControllers[evidence.id] = TextEditingController(
+          text: _resolvedCaptionForEvidence(evidence, indexHint: entry.key),
+        );
         _notesControllers[evidence.id] =
             TextEditingController(text: ''); // TODO: Load from DB if exists
         _isEditingCaption[evidence.id] = false;
@@ -67,9 +77,16 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   @override
   void didUpdateWidget(EvidenceGalleryPanelPro oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.activity?.activity.id != widget.activity?.activity.id ||
+    final activityChanged =
+        oldWidget.activity?.activity.id != widget.activity?.activity.id;
+    if (activityChanged ||
         oldWidget.activity?.evidences.length !=
             widget.activity?.evidences.length) {
+      if (activityChanged) {
+        _signedUrlCache.clear();
+        _signedUrlFutureCache.clear();
+        _lastPrefetchIndex = null;
+      }
       _initializeControllers();
     }
   }
@@ -85,6 +102,63 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     super.dispose();
   }
 
+  String? _firstNonEmptyText(Iterable<Object?> values) {
+    for (final value in values) {
+      final text = (value ?? '').toString().trim();
+      if (text.isNotEmpty && text.toLowerCase() != 'null') {
+        return text;
+      }
+    }
+    return null;
+  }
+
+  String _resolvedCaptionForEvidence(Evidence evidence, {int? indexHint}) {
+    final direct = _firstNonEmptyText([
+      _captionControllers[evidence.id]?.text,
+      evidence.caption,
+    ]);
+    if (direct != null) {
+      return direct;
+    }
+
+    final rawWizardEvidences = widget.activity?.wizardPayload?['evidences'];
+    if (rawWizardEvidences is List) {
+      Map<String, dynamic>? matchedPayload;
+      final evidenceId = evidence.id.trim();
+
+      for (final raw in rawWizardEvidences) {
+        if (raw is! Map) continue;
+        final payload = raw.cast<String, dynamic>();
+        if ((payload['id'] ?? '').toString().trim() == evidenceId) {
+          matchedPayload = payload;
+          break;
+        }
+      }
+
+      if (matchedPayload == null &&
+          indexHint != null &&
+          indexHint >= 0 &&
+          indexHint < rawWizardEvidences.length) {
+        final raw = rawWizardEvidences[indexHint];
+        if (raw is Map) {
+          matchedPayload = raw.cast<String, dynamic>();
+        }
+      }
+
+      final payloadCaption = _firstNonEmptyText([
+        matchedPayload?['caption'],
+        matchedPayload?['description'],
+        matchedPayload?['descripcion'],
+        matchedPayload?['notes'],
+      ]);
+      if (payloadCaption != null) {
+        return payloadCaption;
+      }
+    }
+
+    return '';
+  }
+
   void _saveCaption(String evidenceId) {
     final controller = _captionControllers[evidenceId];
     if (controller != null) {
@@ -98,8 +172,33 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     if (nextIndex >= activity.evidences.length) return;
     if (_lastPrefetchIndex == nextIndex) return;
 
-    // Prefetch skipped for local files on desktop
     _lastPrefetchIndex = nextIndex;
+    unawaited(_warmEvidence(activity.evidences[nextIndex]));
+  }
+
+  void _clearSignedUrlState(String evidenceId) {
+    _signedUrlCache.remove(evidenceId);
+    _signedUrlFutureCache.remove(evidenceId);
+  }
+
+  Future<void> _warmEvidence(Evidence evidence) async {
+    if (_isPendingServerEvidence(evidence) || !_shouldUseSignedUrl(evidence)) {
+      return;
+    }
+
+    final future = _signedUrlFutureCache.putIfAbsent(
+      evidence.id,
+      () => _resolveSignedUrl(evidence),
+    );
+    final signedUrl = await future;
+    if (!mounted || signedUrl == null || signedUrl.isEmpty) {
+      return;
+    }
+    if (_isPdfEvidence(evidence, signedUrl)) {
+      return;
+    }
+
+    await precacheImage(NetworkImage(signedUrl), context);
   }
 
   double? _calculateDistanceMeters(ActivityWithDetails activity, Evidence evidence) {
@@ -134,6 +233,68 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     return evidence.filePath.startsWith('backend://');
   }
 
+  bool _isPendingServerEvidence(Evidence evidence) {
+    final rawPath = evidence.filePath.trim();
+    final lowerPath = rawPath.toLowerCase();
+    if (lowerPath.isEmpty || lowerPath.startsWith('pending://')) {
+      return true;
+    }
+    if (lowerPath.startsWith('backend://') ||
+        lowerPath.startsWith('http://') ||
+        lowerPath.startsWith('https://') ||
+        lowerPath.startsWith('file://')) {
+      return false;
+    }
+
+    return !File(rawPath).existsSync();
+  }
+
+  Widget _buildPendingEvidencePlaceholder(Evidence evidence) {
+    return Container(
+      color: SaoColors.gray100,
+      child: Center(
+        child: SingleChildScrollView(
+          padding: EdgeInsets.all(SaoSpacing.lg),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.cloud_upload_outlined,
+                size: 56,
+                color: SaoColors.warning,
+              ),
+              SizedBox(height: SaoSpacing.md),
+              Text(
+                'La evidencia aún no está disponible en el servidor',
+                style: SaoTypography.bodyText.copyWith(
+                  color: SaoColors.gray700,
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: SaoSpacing.sm),
+              Text(
+                'Sincroniza nuevamente desde el móvil para terminar la carga de la foto y vuelve a abrir esta actividad.',
+                style: SaoTypography.caption.copyWith(
+                  color: SaoColors.gray600,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              SizedBox(height: SaoSpacing.md),
+              OutlinedButton.icon(
+                onPressed: () => setState(() {
+                  _clearSignedUrlState(evidence.id);
+                }),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Reintentar'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   bool _isPdfEvidence(Evidence evidence, String? resolvedUrl) {
     return evidence.fileType.toUpperCase() == 'DOCUMENT' ||
         evidence.filePath.toLowerCase().endsWith('.pdf') ||
@@ -153,16 +314,47 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     return signedUrl;
   }
 
+  Widget _buildLoadingPlaceholder() {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircularProgressIndicator(),
+          const SizedBox(height: 12),
+          Text(
+            'Cargando evidencia del servidor...',
+            style: SaoTypography.bodyText.copyWith(color: SaoColors.gray700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'La primera carga puede tardar unos segundos.',
+            style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openPdfUrl(String url) async {
     final uri = Uri.parse(url);
     await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
   Widget _buildEvidenceContent(Evidence evidence) {
+    final displayCaption = _resolvedCaptionForEvidence(
+      evidence,
+      indexHint: widget.selectedIndex,
+    );
+
+    if (_isPendingServerEvidence(evidence)) {
+      return _buildPendingEvidencePlaceholder(evidence);
+    }
+
     if (!_shouldUseSignedUrl(evidence)) {
-      final imageUrl = evidence.filePath.startsWith('http')
-          ? evidence.filePath
-          : 'asset: ${evidence.filePath}';
+      final rawPath = evidence.filePath.trim();
+      final imageUrl = rawPath.startsWith('http') || rawPath.startsWith('file://')
+          ? rawPath
+          : File(rawPath).uri.toString();
 
       if (_isPdfEvidence(evidence, imageUrl)) {
         return Center(
@@ -176,7 +368,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
 
       return SaoEvidenceViewer(
         imageUrl: imageUrl,
-        caption: evidence.caption ?? 'Evidencia',
+        caption: displayCaption.isNotEmpty ? displayCaption : 'Evidencia',
         latitude: evidence.latitude,
         longitude: evidence.longitude,
         capturedAt: evidence.capturedAt,
@@ -184,11 +376,42 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
       );
     }
 
+    final cachedSignedUrl = _signedUrlCache[evidence.id];
+    if (cachedSignedUrl != null && cachedSignedUrl.isNotEmpty) {
+      final signedUrl = cachedSignedUrl;
+      if (_isPdfEvidence(evidence, signedUrl)) {
+        return Center(
+          child: ElevatedButton.icon(
+            onPressed: () => _openPdfUrl(signedUrl),
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            label: const Text('Abrir PDF firmado'),
+          ),
+        );
+      }
+
+      return SaoEvidenceViewer(
+        imageUrl: signedUrl,
+        caption: displayCaption.isNotEmpty ? displayCaption : 'Evidencia',
+        latitude: evidence.latitude,
+        longitude: evidence.longitude,
+        capturedAt: evidence.capturedAt,
+        onRetry: () {
+          _clearSignedUrlState(evidence.id);
+          setState(() {});
+        },
+      );
+    }
+
+    final signedUrlFuture = _signedUrlFutureCache.putIfAbsent(
+      evidence.id,
+      () => _resolveSignedUrl(evidence),
+    );
+
     return FutureBuilder<String?>(
-      future: _resolveSignedUrl(evidence),
+      future: signedUrlFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return _buildLoadingPlaceholder();
         }
         if (snapshot.hasError || snapshot.data == null || snapshot.data!.isEmpty) {
           return Center(
@@ -197,11 +420,11 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
               children: [
                 const Icon(Icons.error_outline, size: 40),
                 const SizedBox(height: 8),
-                const Text('No fue posible obtener la URL firmada'),
+                const Text('La evidencia tardó demasiado o no pudo abrirse'),
                 const SizedBox(height: 8),
                 TextButton(
                   onPressed: () {
-                    _signedUrlCache.remove(evidence.id);
+                    _clearSignedUrlState(evidence.id);
                     setState(() {});
                   },
                   child: const Text('Reintentar'),
@@ -224,12 +447,12 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
 
         return SaoEvidenceViewer(
           imageUrl: signedUrl,
-          caption: evidence.caption ?? 'Evidencia',
+          caption: displayCaption.isNotEmpty ? displayCaption : 'Evidencia',
           latitude: evidence.latitude,
           longitude: evidence.longitude,
           capturedAt: evidence.capturedAt,
           onRetry: () {
-            _signedUrlCache.remove(evidence.id);
+            _clearSignedUrlState(evidence.id);
             setState(() {});
           },
         );
@@ -277,10 +500,14 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     final activity = widget.activity!;
     final safeSelectedIndex = widget.selectedIndex.clamp(0, activity.evidences.length - 1);
     final evidence = activity.evidences[safeSelectedIndex];
+    final displayCaption = _resolvedCaptionForEvidence(
+      evidence,
+      indexHint: safeSelectedIndex,
+    );
 
     _captionControllers.putIfAbsent(
       evidence.id,
-      () => TextEditingController(text: evidence.caption ?? ''),
+      () => TextEditingController(text: displayCaption),
     );
     _notesControllers.putIfAbsent(
       evidence.id,
@@ -296,6 +523,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
       children: [
         // VISOR DE EVIDENCIA (principal)
         Expanded(
+          flex: 3,
           child: Container(
             decoration: BoxDecoration(
               color: SaoColors.surface,
@@ -384,9 +612,66 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
         SizedBox(height: SaoSpacing.md),
 
         Expanded(
+          flex: 2,
           child: SingleChildScrollView(
             child: Column(
               children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: SaoColors.surface,
+                    borderRadius: BorderRadius.circular(SaoRadii.md),
+                    border: Border.all(color: SaoColors.border),
+                  ),
+                  padding: EdgeInsets.all(SaoSpacing.md),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.tips_and_updates_outlined,
+                              size: 16, color: SaoColors.gray600),
+                          SizedBox(width: SaoSpacing.sm),
+                          Text(
+                            'Resumen rápido',
+                            style: SaoTypography.sectionTitle,
+                          ),
+                        ],
+                      ),
+                      SizedBox(height: SaoSpacing.sm),
+                      Wrap(
+                        spacing: SaoSpacing.sm,
+                        runSpacing: SaoSpacing.sm,
+                        children: [
+                          _buildQuickStatChip(
+                            icon: Icons.access_time_rounded,
+                            label: 'Captura',
+                            value: evidence.capturedAt != null
+                                ? DateFormat('dd/MM HH:mm').format(evidence.capturedAt!)
+                                : 'Sin fecha',
+                          ),
+                          _buildQuickStatChip(
+                            icon: Icons.location_on_outlined,
+                            label: 'GPS',
+                            value: evidence.latitude != null && evidence.longitude != null
+                                ? 'Disponible'
+                                : 'No disponible',
+                            color: gpsMismatch ? SaoColors.error : null,
+                          ),
+                          _buildQuickStatChip(
+                            icon: Icons.insert_drive_file_outlined,
+                            label: 'Archivo',
+                            value: evidence.fileType.toUpperCase() == 'DOCUMENT'
+                                ? 'PDF'
+                                : 'Imagen',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+
+                SizedBox(height: SaoSpacing.md),
+
                 // PIE DE FOTO
                 Container(
                   decoration: BoxDecoration(
@@ -442,7 +727,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                                   onPressed: () {
                                     final captionController = _captionControllers[evidence.id];
                                     if (captionController != null) {
-                                      captionController.text = evidence.caption ?? '';
+                                      captionController.text = displayCaption;
                                     }
                                     setState(() => _isEditingCaption[evidence.id] = false);
                                   },
@@ -467,14 +752,14 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                         )
                       else
                         Text(
-                          evidence.caption?.isNotEmpty == true
-                              ? evidence.caption!
+                          displayCaption.isNotEmpty
+                              ? displayCaption
                               : 'Sin descripción',
                           style: SaoTypography.bodyText.copyWith(
-                            color: evidence.caption?.isNotEmpty == true
+                            color: displayCaption.isNotEmpty
                                 ? SaoColors.gray700
                                 : SaoColors.gray500,
-                            fontStyle: evidence.caption?.isNotEmpty == true
+                            fontStyle: displayCaption.isNotEmpty
                                 ? FontStyle.normal
                                 : FontStyle.italic,
                           ),
@@ -485,117 +770,136 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
 
                 SizedBox(height: SaoSpacing.md),
 
-                // METADATOS
                 Container(
                   decoration: BoxDecoration(
                     color: SaoColors.surface,
                     borderRadius: BorderRadius.circular(SaoRadii.md),
                     border: Border.all(color: SaoColors.border),
                   ),
-                  padding: EdgeInsets.all(SaoSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.info_outline_rounded, size: 16, color: SaoColors.gray600),
-                          SizedBox(width: SaoSpacing.sm),
-                          Text(
-                            'Metadatos',
-                            style: SaoTypography.sectionTitle,
-                          ),
-                        ],
+                  child: Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      initiallyExpanded: false,
+                      tilePadding: EdgeInsets.symmetric(
+                        horizontal: SaoSpacing.md,
+                        vertical: SaoSpacing.xs,
                       ),
-                      SizedBox(height: SaoSpacing.md),
-                      _buildMetadataRow(
-                        'Fecha y hora',
-                        evidence.capturedAt != null
-                            ? DateFormat('dd/MM/yyyy HH:mm:ss').format(evidence.capturedAt!)
-                            : 'No disponible',
-                        Icons.access_time_rounded,
+                      childrenPadding: EdgeInsets.fromLTRB(
+                        SaoSpacing.md,
+                        0,
+                        SaoSpacing.md,
+                        SaoSpacing.md,
                       ),
-                      SizedBox(height: SaoSpacing.sm),
-                      _buildMetadataRow(
-                        'Coordenadas GPS',
-                        evidence.latitude != null && evidence.longitude != null
-                            ? '${evidence.latitude!.toStringAsFixed(6)}°, ${evidence.longitude!.toStringAsFixed(6)}°'
-                            : 'No disponible',
-                        Icons.location_on_outlined,
-                        valueColor: gpsMismatch ? SaoColors.error : null,
+                      leading: Icon(Icons.info_outline_rounded,
+                          size: 16, color: SaoColors.gray600),
+                      title: Text(
+                        'Metadatos completos',
+                        style: SaoTypography.sectionTitle,
                       ),
-                      if (gpsDistanceMeters != null) ...[
+                      subtitle: Text(
+                        'Fecha, GPS, distancia y archivo',
+                        style: SaoTypography.caption.copyWith(
+                          color: SaoColors.gray500,
+                        ),
+                      ),
+                      children: [
+                        _buildMetadataRow(
+                          'Fecha y hora',
+                          evidence.capturedAt != null
+                              ? DateFormat('dd/MM/yyyy HH:mm:ss').format(evidence.capturedAt!)
+                              : 'No disponible',
+                          Icons.access_time_rounded,
+                        ),
                         SizedBox(height: SaoSpacing.sm),
                         _buildMetadataRow(
-                          'Distancia al punto',
-                          '${gpsDistanceMeters.toStringAsFixed(1)} m',
-                          Icons.straighten_rounded,
-                          valueColor: gpsMismatch ? SaoColors.error : SaoColors.success,
+                          'Coordenadas GPS',
+                          evidence.latitude != null && evidence.longitude != null
+                              ? '${evidence.latitude!.toStringAsFixed(6)}°, ${evidence.longitude!.toStringAsFixed(6)}°'
+                              : 'No disponible',
+                          Icons.location_on_outlined,
+                          valueColor: gpsMismatch ? SaoColors.error : null,
+                        ),
+                        if (gpsDistanceMeters != null) ...[
+                          SizedBox(height: SaoSpacing.sm),
+                          _buildMetadataRow(
+                            'Distancia al punto',
+                            '${gpsDistanceMeters.toStringAsFixed(1)} m',
+                            Icons.straighten_rounded,
+                            valueColor: gpsMismatch ? SaoColors.error : SaoColors.success,
+                          ),
+                        ],
+                        SizedBox(height: SaoSpacing.sm),
+                        _buildMetadataRow(
+                          'Archivo',
+                          evidence.filePath.split('/').last,
+                          Icons.insert_drive_file_outlined,
                         ),
                       ],
-                      SizedBox(height: SaoSpacing.sm),
-                      _buildMetadataRow(
-                        'Archivo',
-                        evidence.filePath.split('/').last,
-                        Icons.insert_drive_file_outlined,
-                      ),
-                    ],
+                    ),
                   ),
                 ),
 
                 SizedBox(height: SaoSpacing.md),
 
-                // NOTAS INTERNAS
                 Container(
                   decoration: BoxDecoration(
                     color: SaoColors.surface,
                     borderRadius: BorderRadius.circular(SaoRadii.md),
                     border: Border.all(color: SaoColors.border),
                   ),
-                  padding: EdgeInsets.all(SaoSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(Icons.edit_note_rounded, size: 16, color: SaoColors.gray600),
-                          SizedBox(width: SaoSpacing.sm),
-                          Text(
-                            'Notas internas',
-                            style: SaoTypography.sectionTitle,
-                          ),
-                          Spacer(),
-                          Tooltip(
-                            message: 'Las notas internas solo son visibles para validadores',
-                            child: Icon(Icons.help_outline_rounded, size: 14, color: SaoColors.gray500),
-                          ),
-                        ],
+                  child: Theme(
+                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                    child: ExpansionTile(
+                      initiallyExpanded: false,
+                      tilePadding: EdgeInsets.symmetric(
+                        horizontal: SaoSpacing.md,
+                        vertical: SaoSpacing.xs,
                       ),
-                      SizedBox(height: SaoSpacing.sm),
-                      TextField(
-                        controller: _notesControllers[evidence.id],
-                        maxLines: 3,
-                        decoration: InputDecoration(
-                          hintText: 'Añadir observaciones internas sobre esta evidencia...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(SaoRadii.sm),
-                          ),
-                          contentPadding: EdgeInsets.all(SaoSpacing.sm),
-                          isDense: true,
-                        ),
-                        style: SaoTypography.bodyText,
-                        onChanged: (value) {
-                          // Auto-save notes (debounced in real implementation)
-                        },
+                      childrenPadding: EdgeInsets.fromLTRB(
+                        SaoSpacing.md,
+                        0,
+                        SaoSpacing.md,
+                        SaoSpacing.md,
                       ),
-                      SizedBox(height: SaoSpacing.sm),
-                      Text(
-                        'Estas notas no serán visibles en el reporte final',
+                      leading: Icon(Icons.edit_note_rounded,
+                          size: 16, color: SaoColors.gray600),
+                      title: Text(
+                        'Notas internas',
+                        style: SaoTypography.sectionTitle,
+                      ),
+                      subtitle: Text(
+                        'Solo visibles para validadores',
                         style: SaoTypography.caption.copyWith(
                           color: SaoColors.gray500,
-                          fontStyle: FontStyle.italic,
                         ),
                       ),
-                    ],
+                      children: [
+                        TextField(
+                          controller: _notesControllers[evidence.id],
+                          maxLines: 3,
+                          decoration: InputDecoration(
+                            hintText: 'Añadir observaciones internas sobre esta evidencia...',
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(SaoRadii.sm),
+                            ),
+                            contentPadding: EdgeInsets.all(SaoSpacing.sm),
+                            isDense: true,
+                          ),
+                          style: SaoTypography.bodyText,
+                          onChanged: (value) {
+                            // Auto-save notes (debounced in real implementation)
+                          },
+                        ),
+                        SizedBox(height: SaoSpacing.sm),
+                        Text(
+                          'Estas notas no serán visibles en el reporte final',
+                          style: SaoTypography.caption.copyWith(
+                            color: SaoColors.gray500,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -603,6 +907,39 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildQuickStatChip({
+    required IconData icon,
+    required String label,
+    required String value,
+    Color? color,
+  }) {
+    final accent = color ?? SaoColors.primary;
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: SaoSpacing.sm,
+        vertical: SaoSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: accent.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(SaoRadii.full),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: accent),
+          SizedBox(width: SaoSpacing.xs),
+          Text(
+            '$label: $value',
+            style: SaoTypography.caption.copyWith(
+              color: SaoColors.gray700,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
     );
   }
 

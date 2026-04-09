@@ -63,6 +63,9 @@ class AgendaUsersRepository {
 
       var remoteUsers = _parseOperationalUsers(responseData);
       appLogger.i('Agenda users parsed_count=${remoteUsers.length} source=/users_operativo');
+      for (final user in remoteUsers.take(5)) {
+        appLogger.i('  User: id=${user.id} name=${user.fullName} roleId=${user.roleId}');
+      }
 
       // Fallback: if project-scoped query returns empty, retry without project filter.
       if (remoteUsers.isEmpty && projectId != null && projectId.trim().isNotEmpty) {

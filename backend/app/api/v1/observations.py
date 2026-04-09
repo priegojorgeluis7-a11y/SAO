@@ -73,11 +73,18 @@ def create_observation(
 def list_mobile_observations(
     project_id: str | None = Query(None),
     status_filter: str = Query("open", alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
     client = get_firestore_client()
-    rows = [d.to_dict() or {} for d in client.collection("observations").stream()]
     normalized = status_filter.strip().upper()
+    query = client.collection("observations")
+    if project_id:
+        query = query.where("project_id", "==", project_id)
+    elif normalized in {"OPEN", "RESOLVED"}:
+        query = query.where("status", "==", normalized)
+    rows = [d.to_dict() or {} for d in query.stream()]
     out: list[ObservationOut] = []
     user_id = str(getattr(current_user, "id", "")) if current_user else ""
     for row in rows:
@@ -115,7 +122,8 @@ def list_mobile_observations(
             )
         )
     out.sort(key=lambda x: x.created_at, reverse=True)
-    return out[:200]
+    start = (page - 1) * page_size
+    return out[start : start + page_size]
 
 
 @router.post("/mobile/observations/{observation_id}/resolve", response_model=ObservationResolveOut)

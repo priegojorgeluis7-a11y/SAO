@@ -56,6 +56,7 @@ DEFAULT_ROLE_PERMISSION_CODES: dict[str, list[str]] = {
         "Ver actividades",
         "Crear actividades",
         "Editar actividades",
+        "Ver catálogo",
         "Ver eventos",
         "Crear eventos",
     ],

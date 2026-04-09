@@ -119,6 +119,10 @@ class ProfileStatsNotifier extends StateNotifier<ProfileStats> {
             ..where((t) => t.createdByUserId.equals(userId)))
           .get();
 
+      final directlyAssignedRows = await (db.select(db.activities)
+            ..where((t) => t.assignedToUserId.equals(userId)))
+          .get();
+
       final assignedFieldRows = await (db.select(db.activityFields)
             ..where(
               (t) =>
@@ -128,6 +132,7 @@ class ProfileStatsNotifier extends StateNotifier<ProfileStats> {
           .get();
 
       final assignedActivityIds = <String>{
+        ...directlyAssignedRows.map((r) => r.id),
         ...assignedFieldRows.map((r) => r.activityId),
       };
 
@@ -135,27 +140,58 @@ class ProfileStatsNotifier extends StateNotifier<ProfileStats> {
             ..where((t) => t.resourceId.equals(userId)))
           .get();
       for (final row in agendaRows) {
-        final aid = row.activityId?.trim();
-        if (aid != null && aid.isNotEmpty) {
-          assignedActivityIds.add(aid);
+        final activityId = row.activityId?.trim();
+        if (activityId != null && activityId.isNotEmpty) {
+          assignedActivityIds.add(activityId);
+        }
+
+        final assignmentId = row.id.trim();
+        if (assignmentId.isNotEmpty) {
+          assignedActivityIds.add(assignmentId);
         }
       }
 
       final assignedRows = assignedActivityIds.isEmpty
-          ? <Activity>[]
+          ? <Activity>[...directlyAssignedRows]
           : await (db.select(db.activities)..where((t) => t.id.isIn(assignedActivityIds.toList())))
               .get();
 
       final mergedById = <String, Activity>{
         for (final row in createdRows) row.id: row,
+        for (final row in directlyAssignedRows) row.id: row,
         for (final row in assignedRows) row.id: row,
       };
       final myRows = mergedById.values.where((a) => a.status != 'CANCELED').toList();
 
+      final knownIds = mergedById.keys.toSet();
+      final agendaOnlyKeys = <String>{};
+      var agendaOnlySynced = 0;
+      for (final row in agendaRows) {
+        final activityId = row.activityId?.trim();
+        final assignmentId = row.id.trim();
+        final matchesKnown =
+            (activityId != null && activityId.isNotEmpty && knownIds.contains(activityId)) ||
+            (assignmentId.isNotEmpty && knownIds.contains(assignmentId));
+        if (matchesKnown) {
+          continue;
+        }
+
+        final logicalKey = (activityId != null && activityId.isNotEmpty)
+            ? activityId
+            : assignmentId;
+        if (logicalKey.isEmpty || !agendaOnlyKeys.add(logicalKey)) {
+          continue;
+        }
+
+        if (row.syncStatus.trim().toLowerCase() == 'synced') {
+          agendaOnlySynced++;
+        }
+      }
+
       state = state.copyWith(
-        totalActivities: myRows.length,
+        totalActivities: myRows.length + agendaOnlyKeys.length,
         completedActivities: myRows.where((a) => a.finishedAt != null).length,
-        syncedActivities: myRows.where((a) => a.status == 'SYNCED').length,
+        syncedActivities: myRows.where((a) => a.status == 'SYNCED').length + agendaOnlySynced,
         draftActivities: myRows
             .where((a) => a.status == 'DRAFT' || a.status == 'REVISION_PENDIENTE')
             .length,

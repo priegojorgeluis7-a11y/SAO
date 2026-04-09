@@ -27,20 +27,11 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 logger = logging.getLogger(__name__)
 
 
-def _is_legacy_sql_test_principal(current_user: Any) -> bool:
-    return (
-        not hasattr(current_user, "roles")
-        and not hasattr(current_user, "permission_scopes")
-    )
-
-
 def _enforce_activity_permission(
     current_user: Any,
     permission_code: str,
     project_id: str,
 ) -> None:
-    if _is_legacy_sql_test_principal(current_user):
-        return
     verify_project_access(current_user, project_id, None)
     if not user_has_permission(current_user, permission_code, None, project_id=project_id):
         raise HTTPException(
@@ -68,6 +59,8 @@ def _list_activities_firestore(
     created_by_user_id: str | None,
     updated_since_sync_version: int | None,
     include_deleted: bool,
+    offset: int | None = None,
+    page_size: int | None = None,
 ) -> tuple[list[ActivityDTO], int]:
     try:
         client = get_firestore_client()
@@ -81,8 +74,6 @@ def _list_activities_firestore(
                 query.where("project_id", "==", project_id)
                      .order_by("updated_at", direction="DESCENDING")
             )
-        docs = [d.to_dict() or {} for d in query.stream()]
-
         def _match(doc: dict) -> bool:
             if not include_deleted and doc.get("deleted_at") is not None:
                 return False
@@ -100,14 +91,22 @@ def _list_activities_firestore(
                 return False
             return True
 
-        filtered = [d for d in docs if _match(d)]
-        filtered.sort(
-            key=lambda d: d.get("updated_at") or datetime.fromtimestamp(0, tz=timezone.utc),
-            reverse=True,
-        )
-
+        # Keep a low-memory stream processing path when paging by project.
+        # We still compute total to preserve API contract, but only parse DTOs for the requested page.
+        stream_offset = offset or 0
+        stream_page_size = page_size or 0
+        matched_count = 0
         valid_items: list[ActivityDTO] = []
-        for doc in filtered:
+        for snap in query.stream():
+            doc = snap.to_dict() or {}
+            if not _match(doc):
+                continue
+            matched_count += 1
+            if stream_page_size > 0:
+                if matched_count <= stream_offset:
+                    continue
+                if len(valid_items) >= stream_page_size:
+                    continue
             try:
                 valid_items.append(_dto_from_firestore_doc(doc))
             except Exception:
@@ -117,8 +116,7 @@ def _list_activities_firestore(
                     exc_info=True,
                 )
 
-        total = len(valid_items)
-        return valid_items, total
+        return valid_items, matched_count
     except Exception:
         logger.exception("Firestore list read failed for activities")
         return [], 0
@@ -227,23 +225,39 @@ async def list_activities(
         _enforce_activity_permission(current_user, "activity.view", project_id)
 
     offset = (page - 1) * page_size
-    dto_items, total = _list_activities_firestore(
-        project_id=project_id,
-        front_id=front_id,
-        execution_state=execution_state,
-        assigned_to_user_id=assigned_to_user_id,
-        created_by_user_id=created_by_user_id,
-        updated_since_sync_version=updated_since_sync_version,
-        include_deleted=include_deleted,
-    )
-    visible_items = [item for item in dto_items if _can_view_project(item.project_id)]
-    paged_items = visible_items[offset : offset + page_size]
+    if project_id:
+        paged_items, total = _list_activities_firestore(
+            project_id=project_id,
+            front_id=front_id,
+            execution_state=execution_state,
+            assigned_to_user_id=assigned_to_user_id,
+            created_by_user_id=created_by_user_id,
+            updated_since_sync_version=updated_since_sync_version,
+            include_deleted=include_deleted,
+            offset=offset,
+            page_size=page_size,
+        )
+        visible_items_total = total
+    else:
+        dto_items, total = _list_activities_firestore(
+            project_id=project_id,
+            front_id=front_id,
+            execution_state=execution_state,
+            assigned_to_user_id=assigned_to_user_id,
+            created_by_user_id=created_by_user_id,
+            updated_since_sync_version=updated_since_sync_version,
+            include_deleted=include_deleted,
+        )
+        visible_items = [item for item in dto_items if _can_view_project(item.project_id)]
+        paged_items = visible_items[offset : offset + page_size]
+        visible_items_total = len(visible_items)
+
     return ActivityListResponse(
         items=paged_items,
-        total=len(visible_items),
+        total=visible_items_total,
         page=page,
         page_size=page_size,
-        has_next=offset + len(paged_items) < len(visible_items),
+        has_next=offset + len(paged_items) < visible_items_total,
     )
 
 

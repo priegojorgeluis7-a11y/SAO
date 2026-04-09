@@ -49,6 +49,7 @@ from app.schemas.catalog_bundle import (
     CatalogValidationResponse,
     ProjectOpsRequest,
 )
+from app.services.push_notification_service import notify_catalog_update
 
 logger = logging.getLogger(__name__)
 
@@ -56,20 +57,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
 
-def _is_legacy_sql_test_principal(current_user: Any) -> bool:
-    return (
-        not hasattr(current_user, "roles")
-        and not hasattr(current_user, "permission_scopes")
-    )
-
-
 def _enforce_catalog_permission(
     current_user: Any,
     permission_code: str,
     project_id: str | None = None,
 ) -> None:
-    if _is_legacy_sql_test_principal(current_user):
-        return
     normalized_project_id = str(project_id or "").strip().upper() or None
     if normalized_project_id is not None:
         verify_project_access(current_user, normalized_project_id, None)
@@ -109,35 +101,20 @@ def _resolve_current_version_id_firestore(project_id: str | None = None) -> str:
     client = get_firestore_client()
     normalized_project = (project_id or "").strip().upper()
 
-    # 1) Project-specific pointer document (preferred when present).
+    # Project-specific resolution: choose the freshest published/current payload.
+    # This avoids serving stale versions when catalog_current wasn't updated
+    # but a newer published row already exists in catalog_versions.
     if normalized_project:
-        snap = client.collection("catalog_current").document(normalized_project).get()
-        if snap.exists:
-            payload = snap.to_dict() or {}
-            version_id = (payload.get("version_id") or "").strip()
-            if version_id:
-                return version_id
-
-    # 2) Project-specific current version in catalog_versions collection.
-    if normalized_project:
-        docs = (
-            client.collection("catalog_versions")
-            .where("project_id", "==", normalized_project)
-            .where("is_current", "==", True)
-            .limit(1)
-            .stream()
-        )
-        for doc in docs:
-            payload = doc.to_dict() or {}
+        latest_payload = _latest_catalog_doc_firestore(normalized_project)
+        if latest_payload:
             version_id = (
-                (payload.get("version_id") or "").strip()
-                or (payload.get("id") or "").strip()
-                or doc.id
+                str(latest_payload.get("version_id") or "").strip()
+                or str(latest_payload.get("id") or "").strip()
             )
             if version_id:
                 return version_id
 
-    # 3) Legacy global current pointer.
+    # Legacy global fallback when no project_id is provided.
     docs = (
         client.collection("catalog_versions")
         .where("is_current", "==", True)
@@ -167,16 +144,18 @@ def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
     """Return latest catalog version payload from Firestore for a project."""
     client = get_firestore_client()
     normalized_project = project_id.strip().upper()
+    candidates: list[dict[str, Any]] = []
 
-    # Preferred: explicit current pointer with embedded metadata.
+    # Candidate 1: explicit current pointer with embedded metadata.
     current_snap = client.collection("catalog_current").document(normalized_project).get()
     if current_snap.exists:
         payload = current_snap.to_dict() or {}
         if payload:
             payload.setdefault("project_id", normalized_project)
-            return payload
+            payload.setdefault("_source_priority", 3)
+            candidates.append(payload)
 
-    # Fallback: latest published/current row in catalog_versions.
+    # Candidate 2: is_current row in catalog_versions.
     try:
         docs = (
             client.collection("catalog_versions")
@@ -189,10 +168,12 @@ def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
             payload = doc.to_dict() or {}
             payload.setdefault("id", doc.id)
             payload.setdefault("project_id", normalized_project)
-            return payload
+            payload.setdefault("_source_priority", 2)
+            candidates.append(payload)
     except Exception:
         logger.exception("Failed querying current catalog_versions for project_id=%s", normalized_project)
 
+    # Candidate 3: latest published_at row.
     try:
         docs = (
             client.collection("catalog_versions")
@@ -205,11 +186,24 @@ def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
             payload = doc.to_dict() or {}
             payload.setdefault("id", doc.id)
             payload.setdefault("project_id", normalized_project)
-            return payload
+            payload.setdefault("_source_priority", 1)
+            candidates.append(payload)
     except Exception:
         logger.exception("Failed querying latest catalog_versions for project_id=%s", normalized_project)
 
-    return None
+    if not candidates:
+        return None
+
+    candidates.sort(
+        key=lambda row: (
+            _as_utc_datetime(row.get("published_at")) if row.get("published_at") else datetime.min.replace(tzinfo=timezone.utc),
+            int(row.get("_source_priority") or 0),
+        ),
+        reverse=True,
+    )
+    best = dict(candidates[0])
+    best.pop("_source_priority", None)
+    return best
 
 
 def _catalog_digest_firestore(project_id: str) -> CatalogVersionDigest:
@@ -1141,6 +1135,15 @@ def _publish_bundle_firestore(project_id: str) -> dict:
         merge=True,
     )
 
+    try:
+        notify_catalog_update(project_id=project, version_id=version_id)
+    except Exception:
+        logger.exception(
+            "Failed sending catalog update push project_id=%s version_id=%s",
+            project,
+            version_id,
+        )
+
     return {"version_id": version_id, "published_at": now, "status": "published"}
 
 
@@ -1192,6 +1195,15 @@ def _rollback_bundle_firestore(project_id: str, to_version: str) -> dict:
         },
         merge=True,
     )
+
+    try:
+        notify_catalog_update(project_id=project, version_id=to_version)
+    except Exception:
+        logger.exception(
+            "Failed sending catalog rollback push project_id=%s version_id=%s",
+            project,
+            to_version,
+        )
 
     return {"version_id": to_version, "restored_at": now}
 

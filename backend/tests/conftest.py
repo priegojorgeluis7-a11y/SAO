@@ -30,17 +30,24 @@ def reset_rate_limiter():
 
 @pytest.fixture(scope="function")
 def db():
-    """Retired SQL fixture: skip legacy postgres/sqlite tests."""
-    pytest.skip("SQL legacy tests retired: backend test suite is firestore-only")
+    """Retired SQL fixture. Raises an error to prevent accidentally using it in new tests."""
+    pytest.fail(
+        "The 'db' fixture is retired. Use the 'client' fixture for Firestore-based tests. "
+        "If this is intentional legacy SQL code, remove the test."
+    )
 
 
 @pytest.fixture(scope="function")
 def test_user(db):
-    """Retired SQL fixture kept for compatibility with legacy tests."""
-    pytest.skip("SQL legacy tests retired: backend test suite is firestore-only")
+    """Retired SQL fixture kept for compatibility signature."""
+    pytest.fail(
+        "The 'test_user' fixture is retired. Use 'client' + dependency_overrides instead."
+    )
 
 
 @pytest.fixture(scope="function")
 def auth_headers(db):
-    """Retired SQL fixture kept for compatibility with legacy tests."""
-    pytest.skip("SQL legacy tests retired: backend test suite is firestore-only")
+    """Retired SQL fixture kept for compatibility signature."""
+    pytest.fail(
+        "The 'auth_headers' fixture is retired. Use 'client' + dependency_overrides instead."
+    )

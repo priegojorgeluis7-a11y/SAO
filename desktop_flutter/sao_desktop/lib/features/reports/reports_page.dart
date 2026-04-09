@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../../data/repositories/evidence_repository.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../ui/theme/sao_spacing.dart';
 import '../../ui/theme/sao_typography.dart';
@@ -28,10 +29,29 @@ String _fmtCreatedAt(String raw) {
   }
 }
 
-bool _isApproved(ReportActivityItem item) {
-  final s = item.status.toUpperCase();
-  return s == 'APROBADO' || s == 'APPROVED' || s == 'APROBADA';
+String _previewLocation(ReportActivityItem item) {
+  final parts = [item.municipality, item.state, item.colony]
+      .where((value) => (value ?? '').trim().isNotEmpty)
+      .cast<String>()
+      .toList(growable: false);
+  return parts.isEmpty ? 'Ubicación por confirmar' : parts.join(', ');
 }
+
+String _previewResponsible(ReportActivityItem item) {
+  final name = item.assignedName?.trim() ?? '';
+  return name.isEmpty ? 'Personal operativo' : name;
+}
+
+String _previewWindow(ReportActivityItem item) {
+  final start = item.startTime?.trim() ?? '';
+  final end = item.endTime?.trim() ?? '';
+  if (start.isNotEmpty && end.isNotEmpty) return '$start - $end';
+  if (start.isNotEmpty) return start;
+  if (end.isNotEmpty) return end;
+  return 'N/D';
+}
+
+bool _isApproved(ReportActivityItem item) => item.isApprovedForReport;
 
 // ── Per-activity draft ────────────────────────────────────────────────────────
 
@@ -57,7 +77,7 @@ class _ActivityDraft {
             : 'Actividad validada para emisión de reporte técnico.',
         detail: item.detail?.trim().isNotEmpty == true
             ? item.detail!
-            : 'Registro ${item.id} del frente ${item.frontName} (${item.pk}).',
+            : 'Actividad realizada en ${_previewLocation(item)} para seguimiento operativo del frente ${item.frontName}.',
         agreements: item.agreements?.trim().isNotEmpty == true
             ? item.agreements!
             : '1. Validar cierre operativo.\n2. Integrar evidencia fotográfica.',
@@ -100,7 +120,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
   bool _includeAudit = true;
   bool _includeNotes = false;
   bool _includeAttachments = true;
-  bool _showRisk = true;
+  bool _showRisk = false;
   bool _showTechGps = false;
   bool _showPhotoGps = false;
 
@@ -1076,7 +1096,7 @@ class _TrayItemState extends State<_TrayItem> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '${widget.item.frontName}  ·  ${widget.item.pk}',
+                          '${widget.item.frontName}  ·  ${_fmtCreatedAt(widget.item.createdAt)}',
                           style: SaoTypography.caption.copyWith(
                               color: SaoColors.gray500, fontSize: 11),
                           maxLines: 1,
@@ -1566,7 +1586,7 @@ class _EditorTab extends StatelessWidget {
                               ),
                               const SizedBox(height: 2),
                               Text(
-                                '${item!.frontName}  ·  ${item!.pk}  ·  ${_fmtCreatedAt(item!.createdAt)}',
+                                '${item!.frontName}  ·  ${_previewLocation(item!)}  ·  ${_fmtCreatedAt(item!.createdAt)}',
                                 style: SaoTypography.caption
                                     .copyWith(
                                         color: SaoColors.gray500),
@@ -1589,21 +1609,6 @@ class _EditorTab extends StatelessWidget {
                               color: statusColor,
                               fontWeight: FontWeight.w700,
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: SaoSpacing.sm),
-                        // Folio
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: SaoColors.gray100,
-                            borderRadius:
-                                BorderRadius.circular(SaoRadii.sm),
-                          ),
-                          child: Text(
-                            item!.id,
-                            style: SaoTypography.monoSmall,
                           ),
                         ),
                       ],
@@ -1673,12 +1678,6 @@ class _EditorTab extends StatelessWidget {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            _ToggleChip(
-                              label: 'Nivel de riesgo',
-                              icon: Icons.warning_rounded,
-                              active: showRisk,
-                              onTap: onToggleRisk,
-                            ),
                             _ToggleChip(
                               label: 'GPS técnico',
                               icon: Icons.my_location_rounded,
@@ -1955,11 +1954,17 @@ class _MiniDocPreview extends StatelessWidget {
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 520),
                   child: Container(
+                    clipBehavior: Clip.antiAlias,
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: const Color(0xFFFCFCFC),
                       borderRadius:
                           BorderRadius.circular(SaoRadii.sm),
                       border: Border.all(color: SaoColors.border),
+                      image: const DecorationImage(
+                        image: AssetImage('assets/images/membrete.png'),
+                        fit: BoxFit.fitWidth,
+                        alignment: Alignment.topCenter,
+                      ),
                       boxShadow: [
                         BoxShadow(
                           color: Colors.black.withOpacity(0.05),
@@ -1970,114 +1975,128 @@ class _MiniDocPreview extends StatelessWidget {
                     ),
                     child: Column(
                       children: [
-                        // Membrete strip
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.fromLTRB(
-                              16, 10, 16, 10),
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF9F2241),
-                            borderRadius: BorderRadius.only(
-                              topLeft: Radius.circular(SaoRadii.sm),
-                              topRight: Radius.circular(SaoRadii.sm),
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  'SICT · ATTRAPI · Trenes México',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 9,
-                                    fontWeight: FontWeight.w700,
-                                    letterSpacing: 0.5,
-                                  ),
-                                ),
-                              ),
-                              Text(
-                                'SAO ${DateTime.now().year}',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 9,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
                         // Doc content
                         Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.fromLTRB(20, 118, 20, 20),
                           child: Column(
                             crossAxisAlignment:
                                 CrossAxisAlignment.start,
                             children: [
                               // Title
-                              Text(
-                                titleCtrl.text.isNotEmpty
-                                    ? titleCtrl.text.toUpperCase()
-                                    : item.activityType.toUpperCase(),
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w900,
-                                  color: Color(0xFF9F2241),
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                'Folio: ${item.id}',
-                                style: const TextStyle(
-                                    fontSize: 10, color: SaoColors.gray500),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      titleCtrl.text.isNotEmpty
+                                          ? titleCtrl.text.toUpperCase()
+                                          : item.activityType.toUpperCase(),
+                                      style: const TextStyle(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w900,
+                                        color: Color(0xFF9F2241),
+                                      ),
+                                    ),
+                                  ),
+                                  Text(
+                                    _fmtCreatedAt(item.createdAt),
+                                    style: const TextStyle(
+                                        fontSize: 10, color: SaoColors.gray500),
+                                  ),
+                                ],
                               ),
                               const Divider(height: 12),
 
-                              // Meta row
                               Container(
-                                padding: const EdgeInsets.all(9),
+                                padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
                                   color: SaoColors.gray50,
                                   border: Border.all(color: SaoColors.border),
                                   borderRadius:
                                       BorderRadius.circular(SaoRadii.sm),
                                 ),
-                                child: Row(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Expanded(
-                                      child: _DocCell(
-                                        label: 'Proyecto / Frente',
-                                        value:
-                                            '${item.projectId ?? '-'} / ${item.frontName}',
+                                    const Text(
+                                      'Resumen Ejecutivo',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: Color(0xFF9F2241),
                                       ),
                                     ),
-                                    Expanded(
-                                      child: _DocCell(
-                                        label: 'Cadenamiento',
-                                        value: item.pk,
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '${item.activityType} · ${item.projectId ?? '-'} / ${item.frontName}',
+                                      style: const TextStyle(fontSize: 11, color: SaoColors.gray700),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      _previewLocation(item),
+                                      style: const TextStyle(fontSize: 10, color: SaoColors.gray500),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    RichText(
+                                      text: TextSpan(
+                                        style: const TextStyle(fontSize: 10, color: SaoColors.gray700),
+                                        children: [
+                                          const TextSpan(
+                                            text: 'Resultado: ',
+                                            style: TextStyle(fontWeight: FontWeight.w700),
+                                          ),
+                                          TextSpan(text: item.statusLabel),
+                                        ],
                                       ),
                                     ),
-                                    if (showRisk)
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: SaoColors.warning
-                                              .withOpacity(0.12),
-                                          borderRadius: BorderRadius.circular(
-                                              SaoRadii.full),
-                                          border: Border.all(
-                                              color: SaoColors.warning
-                                                  .withOpacity(0.3)),
-                                        ),
-                                        child: const Text(
-                                          'RIESGO ALTO',
-                                          style: TextStyle(
-                                            fontSize: 9,
-                                            color: SaoColors.warning,
-                                            fontWeight: FontWeight.w800,
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                              Container(
+                                padding: const EdgeInsets.all(9),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  border: Border.all(color: SaoColors.border),
+                                  borderRadius:
+                                      BorderRadius.circular(SaoRadii.sm),
+                                ),
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _DocCell(
+                                            label: 'Proyecto / Frente',
+                                            value:
+                                                '${item.projectId ?? '-'} / ${item.frontName}',
                                           ),
                                         ),
-                                      ),
+                                        Expanded(
+                                          child: _DocCell(
+                                            label: 'Ubicación',
+                                            value: _previewLocation(item),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: _DocCell(
+                                            label: 'Responsable',
+                                            value: _previewResponsible(item),
+                                          ),
+                                        ),
+                                        Expanded(
+                                          child: _DocCell(
+                                            label: 'Horario atención',
+                                            value: _previewWindow(item),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ],
                                 ),
                               ),
@@ -2283,50 +2302,204 @@ class _DocSection extends StatelessWidget {
   }
 }
 
+class _ReportEvidenceImage extends StatefulWidget {
+  final ReportEvidenceItem evidence;
+  final double height;
+
+  const _ReportEvidenceImage({
+    required this.evidence,
+    required this.height,
+  });
+
+  @override
+  State<_ReportEvidenceImage> createState() => _ReportEvidenceImageState();
+}
+
+class _ReportEvidenceImageState extends State<_ReportEvidenceImage> {
+  static final EvidenceRepository _repository = EvidenceRepository();
+  static final Map<String, Future<String?>> _sourceCache = {};
+
+  late Future<String?> _sourceFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _sourceFuture = _resolveSource();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ReportEvidenceImage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.evidence.id != widget.evidence.id ||
+        oldWidget.evidence.filePath != widget.evidence.filePath) {
+      _sourceFuture = _resolveSource();
+    }
+  }
+
+  Future<String?> _resolveSource() {
+    final rawPath = widget.evidence.filePath.trim();
+    final cacheKey = '${widget.evidence.id}|$rawPath';
+
+    return _sourceCache.putIfAbsent(cacheKey, () async {
+      if (rawPath.isEmpty) {
+        return null;
+      }
+
+      if (rawPath.startsWith('http://') ||
+          rawPath.startsWith('https://') ||
+          rawPath.startsWith('file://')) {
+        return rawPath;
+      }
+
+      final localFile = File(rawPath);
+      if (localFile.existsSync()) {
+        return localFile.path;
+      }
+
+      if (widget.evidence.id.trim().isEmpty) {
+        return null;
+      }
+
+      try {
+        return await _repository.getDownloadSignedUrl(widget.evidence.id);
+      } catch (_) {
+        return null;
+      }
+    });
+  }
+
+  Widget _placeholder({bool loading = false}) {
+    return Container(
+      height: widget.height,
+      color: SaoColors.gray100,
+      alignment: Alignment.center,
+      child: loading
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.photo_rounded,
+              size: 24, color: SaoColors.gray300),
+    );
+  }
+
+  Widget _imageFromSource(String source) {
+    if (source.startsWith('file://')) {
+      return Image.file(
+        File(Uri.parse(source).toFilePath()),
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(),
+      );
+    }
+
+    final localFile = File(source);
+    if (!source.startsWith('http://') &&
+        !source.startsWith('https://') &&
+        localFile.existsSync()) {
+      return Image.file(
+        localFile,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _placeholder(),
+      );
+    }
+
+    return Image.network(
+      source,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _placeholder(),
+      loadingBuilder: (context, child, progress) {
+        if (progress == null) {
+          return child;
+        }
+        return _placeholder(loading: true);
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(SaoRadii.sm),
+      child: FutureBuilder<String?>(
+        future: _sourceFuture,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return _placeholder(loading: true);
+          }
+
+          final source = snapshot.data?.trim() ?? '';
+          if (source.isEmpty) {
+            return _placeholder();
+          }
+
+          return SizedBox(
+            height: widget.height,
+            width: double.infinity,
+            child: _imageFromSource(source),
+          );
+        },
+      ),
+    );
+  }
+}
+
 class _SmallThumb extends StatelessWidget {
   final ReportEvidenceItem evidence;
   final bool showGps;
   const _SmallThumb({required this.evidence, required this.showGps});
 
-  bool get _isNetwork =>
-      evidence.filePath.startsWith('http://') ||
-      evidence.filePath.startsWith('https://');
-
   @override
   Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 96,
-          height: 64,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(SaoRadii.sm),
-            child: _isNetwork
-                ? Image.network(evidence.filePath,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) =>
-                        Container(color: SaoColors.gray100,
-                            child: const Icon(Icons.photo_rounded,
-                                size: 20, color: SaoColors.gray300)))
-                : Container(color: SaoColors.gray100,
-                    child: const Icon(Icons.photo_rounded,
-                        size: 20, color: SaoColors.gray300)),
-          ),
-        ),
-        if (showGps &&
-            (evidence.latitude ?? '').isNotEmpty)
+    final caption = evidence.caption?.trim().isNotEmpty == true
+        ? evidence.caption!.trim()
+        : 'Evidencia ${evidence.id}';
+
+    return Container(
+      width: 118,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: SaoColors.border),
+        borderRadius: BorderRadius.circular(SaoRadii.sm),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
           SizedBox(
-            width: 96,
-            child: Text(
+            width: double.infinity,
+            height: 74,
+            child: _ReportEvidenceImage(
+              evidence: evidence,
+              height: 74,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            caption,
+            style: const TextStyle(
+              fontSize: 7.5,
+              color: SaoColors.gray700,
+              fontWeight: FontWeight.w600,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+          if (showGps && (evidence.latitude ?? '').isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
               '${evidence.latitude}, ${evidence.longitude}',
               style: const TextStyle(
-                  fontSize: 7, color: SaoColors.gray500),
+                fontSize: 6.5,
+                color: SaoColors.gray500,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
-          ),
-      ],
+          ],
+        ],
+      ),
     );
   }
 }
@@ -2437,10 +2610,16 @@ class _FullDocPage extends StatelessWidget {
     try { createdAt = DateTime.parse(item.createdAt); } catch (_) {}
 
     return Container(
+      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: const Color(0xFFFCFCFC),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
         border: Border.all(color: SaoColors.border),
+        image: const DecorationImage(
+          image: AssetImage('assets/images/membrete.png'),
+          fit: BoxFit.fitWidth,
+          alignment: Alignment.topCenter,
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.08),
@@ -2451,66 +2630,9 @@ class _FullDocPage extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // ── Header strip ────────────────────────────────────────────────
-          Container(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-            decoration: const BoxDecoration(
-              color: Color(0xFF9F2241),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(SaoRadii.sm),
-                topRight: Radius.circular(SaoRadii.sm),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Comunicaciones',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900)),
-                      Text(
-                          'Secretaría de Infraestructura, Comunicaciones y Transportes',
-                          style: TextStyle(
-                              color: Colors.white70, fontSize: 9)),
-                    ],
-                  ),
-                ),
-                Container(
-                    width: 1, height: 30, color: Colors.white30),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('TRENES MÉXICO',
-                          style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w900)),
-                      Text('Agencia de Trenes y Transporte Público',
-                          style: TextStyle(
-                              color: Colors.white70, fontSize: 9)),
-                    ],
-                  ),
-                ),
-                Text(
-                  '${createdAt?.year ?? DateTime.now().year}',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900),
-                ),
-              ],
-            ),
-          ),
-
           // ── Doc body ─────────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.all(20),
+            padding: const EdgeInsets.fromLTRB(28, 132, 28, 28),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -2533,13 +2655,6 @@ class _FullDocPage extends StatelessWidget {
                               color: Color(0xFF9F2241),
                             ),
                           ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'Folio: ${item.id}',
-                            style: const TextStyle(
-                                fontSize: 10,
-                                color: SaoColors.gray500),
-                          ),
                         ],
                       ),
                     ),
@@ -2553,9 +2668,52 @@ class _FullDocPage extends StatelessWidget {
                 ),
                 const Divider(height: 14),
 
-                // 1. Datos generales
-                _FullDocSection('1. DATOS GENERALES'),
-                const SizedBox(height: 6),
+                // Resumen ejecutivo
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: SaoColors.gray50,
+                    border: Border.all(color: SaoColors.border),
+                    borderRadius:
+                        BorderRadius.circular(SaoRadii.sm),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Resumen Ejecutivo',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: Color(0xFF9F2241),
+                          )),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${item.activityType} · ${item.projectId ?? '-'} / ${item.frontName}',
+                        style: const TextStyle(fontSize: 11, color: SaoColors.gray700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _previewLocation(item),
+                        style: const TextStyle(fontSize: 10, color: SaoColors.gray500),
+                      ),
+                      const SizedBox(height: 6),
+                      RichText(
+                        text: TextSpan(
+                          style: const TextStyle(fontSize: 10, color: SaoColors.gray700),
+                          children: [
+                            const TextSpan(
+                              text: 'Resultado: ',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            TextSpan(text: item.statusLabel),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 8),
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
@@ -2576,15 +2734,8 @@ class _FullDocPage extends StatelessWidget {
                           ),
                           Expanded(
                             child: _DocCell(
-                              label: 'Municipio / Estado',
-                              value: [
-                                item.municipality,
-                                item.state
-                              ]
-                                  .where((v) =>
-                                      (v ?? '').isNotEmpty)
-                                  .join(', ')
-                                  .ifEmpty('-'),
+                              label: 'Ubicación administrativa',
+                              value: _previewLocation(item),
                             ),
                           ),
                         ],
@@ -2594,32 +2745,16 @@ class _FullDocPage extends StatelessWidget {
                         children: [
                           Expanded(
                             child: _DocCell(
-                              label: 'Cadenamiento (PK)',
-                              value: item.pk,
+                              label: 'Responsable',
+                              value: _previewResponsible(item),
                             ),
                           ),
                           Expanded(
                             child: _DocCell(
-                              label: 'Responsable',
-                              value: item.assignedName ?? 'N/D',
+                              label: 'Horario atención',
+                              value: _previewWindow(item),
                             ),
                           ),
-                          if (showRisk)
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: SaoColors.warning
-                                    .withOpacity(0.12),
-                                borderRadius: BorderRadius.circular(
-                                    SaoRadii.full),
-                              ),
-                              child: const Text('RIESGO ALTO',
-                                  style: TextStyle(
-                                      fontSize: 9,
-                                      color: SaoColors.warning,
-                                      fontWeight: FontWeight.w800)),
-                            ),
                         ],
                       ),
                     ],
@@ -2781,65 +2916,59 @@ class _FullEvidenceCard extends StatelessWidget {
   const _FullEvidenceCard(
       {required this.evidence, required this.showGps});
 
-  bool get _isNetwork =>
-      evidence.filePath.startsWith('http://') ||
-      evidence.filePath.startsWith('https://');
-
   @override
   Widget build(BuildContext context) {
+    final caption = evidence.caption?.trim().isNotEmpty == true
+        ? evidence.caption!.trim()
+        : 'Evidencia ${evidence.id}';
+
     return Container(
-      width: 160,
-      padding: const EdgeInsets.all(5),
+      width: 178,
+      padding: const EdgeInsets.all(6),
       decoration: BoxDecoration(
+        color: Colors.white,
         border: Border.all(color: SaoColors.border),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           SizedBox(
-            height: 108,
+            height: 116,
             width: double.infinity,
-            child: ClipRRect(
-              borderRadius:
-                  BorderRadius.circular(SaoRadii.sm),
-              child: _isNetwork
-                  ? Image.network(evidence.filePath,
-                      fit: BoxFit.cover,
-                      errorBuilder: (_, __, ___) =>
-                          _placeholder())
-                  : _placeholder(),
+            child: _ReportEvidenceImage(
+              evidence: evidence,
+              height: 116,
             ),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 6),
           Text(
-            evidence.caption?.trim().isNotEmpty == true
-                ? evidence.caption!
-                : 'Evidencia ${evidence.id}',
+            caption,
             style: const TextStyle(
-                fontSize: 9, color: SaoColors.gray700),
+              fontSize: 9,
+              color: SaoColors.gray700,
+              fontWeight: FontWeight.w600,
+            ),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
-          if (showGps &&
-              (evidence.latitude ?? '').isNotEmpty)
+          if (showGps && (evidence.latitude ?? '').isNotEmpty) ...[
+            const SizedBox(height: 3),
             Text(
               '${evidence.latitude}, ${evidence.longitude}',
               style: const TextStyle(
-                  fontSize: 8, color: SaoColors.gray400),
+                fontSize: 8,
+                color: SaoColors.gray400,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
+          ],
         ],
       ),
     );
   }
-
-  Widget _placeholder() => Container(
-        color: SaoColors.gray100,
-        child: const Center(
-          child: Icon(Icons.photo_camera_rounded,
-              color: SaoColors.gray300, size: 28),
-        ),
-      );
 }
 
 // ── Empty states ──────────────────────────────────────────────────────────────

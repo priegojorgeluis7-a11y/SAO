@@ -43,19 +43,24 @@ class EvidenceUploadRetryWorker {
     appLogger.i('🛑 EvidenceUploadRetryWorker stopped');
   }
 
-  Future<void> processDueUploads() async {
+  Future<void> processDueUploads({bool ignoreRetrySchedule = false}) async {
     if (_isTicking) return;
     _isTicking = true;
 
     try {
       final now = DateTime.now();
-      final rows = await (_db.select(_db.pendingUploads)
-            ..where((t) =>
-                t.status.isNotValue('DONE') &
-                (t.nextRetryAt.isNull() | t.nextRetryAt.isSmallerOrEqualValue(now)))
-            ..orderBy([(t) => drift.OrderingTerm.asc(t.createdAt)])
-            ..limit(10))
-          .get();
+      final query = _db.select(_db.pendingUploads)
+        ..where(
+          (t) =>
+              t.status.isNotValue('DONE') &
+              (ignoreRetrySchedule
+                  ? const drift.Constant(true)
+                  : (t.nextRetryAt.isNull() |
+                      t.nextRetryAt.isSmallerOrEqualValue(now))),
+        )
+        ..orderBy([(t) => drift.OrderingTerm.asc(t.createdAt)])
+        ..limit(10);
+      final rows = await query.get();
 
       for (final row in rows) {
         await _processOne(row);
@@ -66,17 +71,21 @@ class EvidenceUploadRetryWorker {
   }
 
   Future<void> _processOne(PendingUpload row) async {
+    var currentRow = row;
+
     try {
-      if (row.status == 'PENDING_INIT') {
+      currentRow = await _resumeRetryableRow(row);
+
+      if (currentRow.status == 'PENDING_INIT') {
         final init = await _repository.uploadInit(
-          activityId: row.activityId,
-          mimeType: row.mimeType,
-          sizeBytes: row.sizeBytes,
-          fileName: row.fileName,
+          activityId: currentRow.activityId,
+          mimeType: currentRow.mimeType,
+          sizeBytes: currentRow.sizeBytes,
+          fileName: currentRow.fileName,
         );
 
         await _updateRow(
-          row.id,
+          currentRow.id,
           PendingUploadsCompanion(
             evidenceId: drift.Value(init.evidenceId),
             objectPath: drift.Value(init.objectPath),
@@ -87,7 +96,7 @@ class EvidenceUploadRetryWorker {
         );
 
         return _processOne(
-          row.copyWith(
+          currentRow.copyWith(
             status: 'PENDING_UPLOAD',
             evidenceId: drift.Value(init.evidenceId),
             objectPath: drift.Value(init.objectPath),
@@ -96,20 +105,22 @@ class EvidenceUploadRetryWorker {
         );
       }
 
-      if (row.status == 'PENDING_UPLOAD') {
-        if (row.signedUrl == null || row.signedUrl!.isEmpty) {
-          throw StateError('Missing signedUrl for pending upload ${row.id}');
+      if (currentRow.status == 'PENDING_UPLOAD') {
+        if (currentRow.signedUrl == null || currentRow.signedUrl!.isEmpty) {
+          throw StateError(
+            'Missing signedUrl for pending upload ${currentRow.id}',
+          );
         }
 
-        final bytes = await File(row.localPath).readAsBytes();
+        final bytes = await File(currentRow.localPath).readAsBytes();
         await _repository.uploadBytesToSignedUrl(
-          signedUrl: row.signedUrl!,
+          signedUrl: currentRow.signedUrl!,
           bytes: bytes,
-          mimeType: row.mimeType,
+          mimeType: currentRow.mimeType,
         );
 
         await _updateRow(
-          row.id,
+          currentRow.id,
           const PendingUploadsCompanion(
             status: drift.Value('PENDING_COMPLETE'),
             lastError: drift.Value(null),
@@ -117,22 +128,24 @@ class EvidenceUploadRetryWorker {
         );
 
         return _processOne(
-          row.copyWith(
+          currentRow.copyWith(
             status: 'PENDING_COMPLETE',
           ),
         );
       }
 
-      if (row.status == 'PENDING_COMPLETE') {
-        final evidenceId = row.evidenceId;
+      if (currentRow.status == 'PENDING_COMPLETE') {
+        final evidenceId = currentRow.evidenceId;
         if (evidenceId == null || evidenceId.isEmpty) {
-          throw StateError('Missing evidenceId for pending upload ${row.id}');
+          throw StateError(
+            'Missing evidenceId for pending upload ${currentRow.id}',
+          );
         }
 
         await _repository.uploadComplete(evidenceId: evidenceId);
 
         await _updateRow(
-          row.id,
+          currentRow.id,
           const PendingUploadsCompanion(
             status: drift.Value('DONE'),
             nextRetryAt: drift.Value(null),
@@ -141,12 +154,12 @@ class EvidenceUploadRetryWorker {
         );
       }
     } catch (e) {
-      final attempts = row.attempts + 1;
+      final attempts = currentRow.attempts + 1;
       final delaySeconds = _backoffSeconds(attempts);
       final nextRetryAt = DateTime.now().add(Duration(seconds: delaySeconds));
 
       await _updateRow(
-        row.id,
+        currentRow.id,
         PendingUploadsCompanion(
           attempts: drift.Value(attempts),
           status: const drift.Value('ERROR'),
@@ -156,9 +169,48 @@ class EvidenceUploadRetryWorker {
       );
 
       appLogger.w(
-        '⚠️ Upload retry scheduled (${row.id}) in ${delaySeconds}s: $e',
+        '⚠️ Upload retry scheduled (${currentRow.id}) in ${delaySeconds}s: $e',
       );
     }
+  }
+
+  Future<PendingUpload> _resumeRetryableRow(PendingUpload row) async {
+    if (row.status != 'ERROR') {
+      return row;
+    }
+
+    final hasEvidenceId = row.evidenceId?.trim().isNotEmpty ?? false;
+    final hasSignedUrl = row.signedUrl?.trim().isNotEmpty ?? false;
+    final hasObjectPath = row.objectPath?.trim().isNotEmpty ?? false;
+
+    final resumed = (hasEvidenceId && (hasSignedUrl || hasObjectPath))
+        ? row.copyWith(status: 'PENDING_UPLOAD')
+        : row.copyWith(
+            status: 'PENDING_INIT',
+            evidenceId: const drift.Value(null),
+            objectPath: const drift.Value(null),
+            signedUrl: const drift.Value(null),
+          );
+
+    await _updateRow(
+      row.id,
+      PendingUploadsCompanion(
+        status: drift.Value(resumed.status),
+        nextRetryAt: const drift.Value(null),
+        lastError: const drift.Value(null),
+        evidenceId: hasEvidenceId
+            ? drift.Value(resumed.evidenceId)
+            : const drift.Value(null),
+        objectPath: hasObjectPath
+            ? drift.Value(resumed.objectPath)
+            : const drift.Value(null),
+        signedUrl: hasSignedUrl
+            ? drift.Value(resumed.signedUrl)
+            : const drift.Value(null),
+      ),
+    );
+
+    return resumed;
   }
 
   int _backoffSeconds(int attempts) {

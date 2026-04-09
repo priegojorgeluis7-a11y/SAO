@@ -1,9 +1,15 @@
+import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:path/path.dart' as p;
+import 'package:pdf/widgets.dart' as pw;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/project_providers.dart';
+import '../../data/repositories/evidence_repository.dart';
 import '../../ui/sao_ui.dart';
 import 'completed_activities_provider.dart';
 
@@ -459,7 +465,19 @@ class _OptionDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final safeValue = (value != null && options.contains(value)) ? value : null;
+    final normalizedOptions = <String, String>{};
+    for (final raw in options) {
+      final option = raw.trim();
+      if (option.isEmpty) continue;
+      normalizedOptions.putIfAbsent(option.toLowerCase(), () => option);
+    }
+    final dedupedOptions = normalizedOptions.values.toList();
+
+    String? safeValue;
+    final current = (value ?? '').trim();
+    if (current.isNotEmpty) {
+      safeValue = normalizedOptions[current.toLowerCase()];
+    }
 
     return SizedBox(
       width: width,
@@ -499,7 +517,7 @@ class _OptionDropdown extends StatelessWidget {
         items: [
           const DropdownMenuItem<String>(
               value: null, child: Text('Todos', style: TextStyle(fontSize: 13))),
-          ...options.map((o) => DropdownMenuItem<String>(
+          ...dedupedOptions.map((o) => DropdownMenuItem<String>(
                 value: o,
                 child:
                     Text(o, style: const TextStyle(fontSize: 13)),
@@ -1453,6 +1471,418 @@ class _PanelQuickActions extends StatelessWidget {
   final CompletedActivityDetail detail;
   const _PanelQuickActions({required this.detail});
 
+  String _sanitizeSegment(String value) {
+    final cleaned = value.trim().replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_');
+    final compact = cleaned.replaceAll(RegExp(r'\s+'), '_');
+    return compact.isEmpty ? 'evidencia' : compact;
+  }
+
+  String _safeLabel(String value, String fallback) {
+    final trimmed = value.trim();
+    return trimmed.isEmpty ? fallback : trimmed;
+  }
+
+  String _resolvedFrontForExport() {
+    final candidates = [
+      detail.summary.front,
+      detail.dataFields['front'],
+      detail.dataFields['front_name'],
+      detail.dataFields['frente'],
+      detail.dataFields['frente_name'],
+      detail.dataFields['frenteNombre'],
+    ];
+
+    for (final candidate in candidates) {
+      final value = (candidate?.toString() ?? '').trim();
+      if (value.isNotEmpty && value.toLowerCase() != 'null') {
+        return value;
+      }
+    }
+    return 'SIN_FRENTE';
+  }
+
+  Directory _buildActivityDirectory(CompletedActivity summary) {
+    final userProfile = Platform.environment['USERPROFILE'];
+    final documentsRoot = userProfile == null || userProfile.isEmpty
+        ? Directory.current.path
+        : p.join(userProfile, 'Documents');
+
+    final projectDir = _sanitizeSegment(_safeLabel(summary.projectId, 'SIN_PROYECTO'));
+    final frontDir = _sanitizeSegment(_resolvedFrontForExport());
+    final stateDir = _sanitizeSegment(_safeLabel(summary.estado, 'SIN_ESTADO'));
+    final activityName = _sanitizeSegment(_safeLabel(summary.title, 'ACTIVIDAD'));
+    final pkPart = summary.pk.trim().isNotEmpty ? '__${_sanitizeSegment(summary.pk)}' : '';
+
+    return Directory(
+      p.join(documentsRoot, 'SAO', projectDir, frontDir, stateDir, '$activityName$pkPart'),
+    );
+  }
+
+  String _guessExtension(EvidenceItem evidence, String signedUrl) {
+    String extractExtension(String raw) {
+      if (raw.trim().isEmpty) return '';
+      final withoutQuery = raw.split('?').first;
+      return p.extension(withoutQuery);
+    }
+
+    final fromPath = extractExtension(evidence.gcsPath);
+    if (fromPath.isNotEmpty) return fromPath;
+
+    final fromUrl = extractExtension(signedUrl);
+    if (fromUrl.isNotEmpty) return fromUrl;
+
+    switch (evidence.type.toUpperCase()) {
+      case 'PDF':
+      case 'DOCUMENT':
+        return '.pdf';
+      case 'VIDEO':
+        return '.mp4';
+      default:
+        return '.jpg';
+    }
+  }
+
+  String _buildFileName(
+    CompletedActivity summary,
+    EvidenceItem evidence,
+    int index,
+    String signedUrl,
+  ) {
+    final pkPart = _sanitizeSegment(summary.pk.isNotEmpty ? summary.pk : summary.id);
+    final descPart = _sanitizeSegment(
+      evidence.description.isNotEmpty ? evidence.description : 'evidencia_${index + 1}',
+    );
+    final ext = _guessExtension(evidence, signedUrl);
+    return '${(index + 1).toString().padLeft(2, '0')}_${pkPart}_$descPart$ext';
+  }
+
+  Map<String, dynamic> _buildActivitySnapshot() {
+    final s = detail.summary;
+    return {
+      'exported_at': DateTime.now().toIso8601String(),
+      'summary': {
+        'id': s.id,
+        'project_id': s.projectId,
+        'title': s.title,
+        'activity_type': s.activityType,
+        'pk': s.pk,
+        'front': s.front,
+        'estado': s.estado,
+        'municipio': s.municipio,
+        'created_at': s.createdAt,
+        'reviewed_at': s.reviewedAt,
+        'assigned_name': s.assignedName,
+        'reviewed_by_name': s.reviewedByName,
+        'review_decision': s.reviewDecision,
+        'has_report': s.hasReport,
+        'evidence_count': s.evidenceCount,
+      },
+      'detail': {
+        'colonia': detail.colonia,
+        'review_notes': detail.reviewNotes,
+        'sync_version': detail.syncVersion,
+        'data_fields': detail.dataFields,
+        'audit_trail': detail.auditTrail
+            .map((entry) => {
+                  'id': entry.id,
+                  'action': entry.action,
+                  'actor_email': entry.actorEmail,
+                  'actor_name': entry.actorName,
+                  'changes': entry.changes,
+                  'notes': entry.notes,
+                  'timestamp': entry.timestamp,
+                })
+            .toList(growable: false),
+        'evidences': detail.evidences
+            .map((evidence) => {
+                  'id': evidence.id,
+                  'type': evidence.type,
+                  'description': evidence.description,
+                  'gcs_path': evidence.gcsPath,
+                  'uploaded_at': evidence.uploadedAt,
+                  'uploader_name': evidence.uploaderName,
+                })
+            .toList(growable: false),
+      },
+    };
+  }
+
+  Future<void> _writeActivityFiles(Directory activityDir) async {
+    final dataDir = Directory(p.join(activityDir.path, 'datos'));
+    final pdfDir = Directory(p.join(activityDir.path, 'pdfs'));
+    await dataDir.create(recursive: true);
+    await pdfDir.create(recursive: true);
+
+    final snapshot = _buildActivitySnapshot();
+    final encoder = const JsonEncoder.withIndent('  ');
+    await File(p.join(dataDir.path, 'actividad_detalle.json'))
+        .writeAsString(encoder.convert(snapshot), flush: true);
+
+    final s = detail.summary;
+    final resumen = StringBuffer()
+      ..writeln('SAO - Resumen de actividad')
+      ..writeln('Proyecto: ${s.projectId}')
+      ..writeln('Frente: ${s.front}')
+      ..writeln('Estado: ${s.estado}')
+      ..writeln('Municipio: ${s.municipio}')
+      ..writeln('Colonia: ${detail.colonia}')
+      ..writeln('Actividad: ${s.title}')
+      ..writeln('Tipo: ${s.activityType}')
+      ..writeln('PK: ${s.pk}')
+      ..writeln('Responsable: ${s.assignedName}')
+      ..writeln('Revisó: ${s.reviewedByName}')
+      ..writeln('Decisión: ${s.reviewDecision}')
+      ..writeln('Creado: ${s.createdAt}')
+      ..writeln('Revisado: ${s.reviewedAt}')
+      ..writeln('Versión sync: ${detail.syncVersion}')
+      ..writeln('Notas: ${detail.reviewNotes.isEmpty ? 'Sin notas' : detail.reviewNotes}');
+
+    await File(p.join(dataDir.path, 'actividad_resumen.txt'))
+        .writeAsString(resumen.toString(), flush: true);
+
+    final pdf = pw.Document();
+    final dataRows = detail.dataFields.entries
+        .where((entry) => entry.value != null && entry.value.toString().trim().isNotEmpty)
+        .map((entry) => [entry.key, entry.value.toString()])
+        .toList(growable: false);
+
+    pdf.addPage(
+      pw.MultiPage(
+        build: (context) => [
+          pw.Text(
+            'SAO - Resumen de actividad',
+            style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text('Proyecto: ${s.projectId}'),
+          pw.Text('Frente: ${s.front}'),
+          pw.Text('Estado: ${s.estado}'),
+          pw.Text('Municipio: ${s.municipio}'),
+          pw.Text('Colonia: ${detail.colonia}'),
+          pw.Text('Actividad: ${s.title}'),
+          pw.Text('Tipo: ${s.activityType}'),
+          pw.Text('PK: ${s.pk}'),
+          pw.Text('Responsable: ${s.assignedName}'),
+          pw.Text('Revisó: ${s.reviewedByName}'),
+          pw.Text('Decisión: ${s.reviewDecision}'),
+          pw.Text('Creado: ${s.createdAt}'),
+          pw.Text('Revisado: ${s.reviewedAt}'),
+          pw.Text('Versión sync: ${detail.syncVersion}'),
+          if (detail.reviewNotes.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            pw.Text(
+              'Notas de revisión',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            ),
+            pw.Text(detail.reviewNotes),
+          ],
+          if (dataRows.isNotEmpty) ...[
+            pw.SizedBox(height: 12),
+            pw.Text(
+              'Campos registrados',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            ),
+            pw.SizedBox(height: 6),
+            pw.Table.fromTextArray(
+              headers: const ['Campo', 'Valor'],
+              data: dataRows,
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+              cellAlignment: pw.Alignment.centerLeft,
+              headerDecoration: const pw.BoxDecoration(),
+            ),
+          ],
+          if (detail.evidences.isNotEmpty) ...[
+            pw.SizedBox(height: 12),
+            pw.Text(
+              'Evidencias',
+              style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            ),
+            ...detail.evidences.take(50).map(
+                  (evidence) => pw.Bullet(
+                    text:
+                        '${evidence.type} • ${evidence.description.isEmpty ? 'Sin descripción' : evidence.description} • ${evidence.uploadedAt}',
+                  ),
+                ),
+          ],
+        ],
+      ),
+    );
+
+    await File(p.join(pdfDir.path, 'resumen_actividad.pdf'))
+        .writeAsBytes(await pdf.save(), flush: true);
+  }
+
+  Directory _targetDirectoryForEvidence(Directory activityDir, EvidenceItem evidence) {
+    final upper = evidence.type.toUpperCase();
+    final folderName = upper == 'PDF' || upper == 'DOCUMENT' ? 'pdfs' : 'evidencias';
+    return Directory(p.join(activityDir.path, folderName));
+  }
+
+  Future<List<int>> _downloadBytes(String signedUrl) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 20)
+      ..idleTimeout = const Duration(seconds: 20);
+    try {
+      final request = await client.getUrl(Uri.parse(signedUrl));
+      request.followRedirects = true;
+      request.maxRedirects = 5;
+      request.headers.set(HttpHeaders.userAgentHeader, 'SAO-Desktop/1.0');
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('HTTP ${response.statusCode} al descargar evidencia');
+      }
+      return response.fold<List<int>>(<int>[], (buffer, chunk) {
+        buffer.addAll(chunk);
+        return buffer;
+      });
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<void> _downloadFileWithFallback(String signedUrl, File targetFile) async {
+    Object? lastError;
+
+    try {
+      final bytes = await _downloadBytes(signedUrl);
+      if (bytes.isEmpty) {
+        throw StateError('La evidencia regresó 0 bytes');
+      }
+      await targetFile.writeAsBytes(bytes, flush: true);
+      if (await targetFile.exists() && await targetFile.length() > 0) {
+        return;
+      }
+      throw StateError('El archivo descargado quedó vacío');
+    } catch (error) {
+      lastError = error;
+    }
+
+    if (Platform.isWindows) {
+      final curlResult = await Process.run(
+        'curl.exe',
+        ['-L', '--fail', '--silent', '--show-error', '-o', targetFile.path, signedUrl],
+      );
+      if (curlResult.exitCode == 0 && await targetFile.exists() && await targetFile.length() > 0) {
+        return;
+      }
+      final stderr = (curlResult.stderr ?? '').toString().trim();
+      if (stderr.isNotEmpty) {
+        lastError = stderr;
+      }
+    }
+
+    throw Exception('No se pudo descargar ${targetFile.path}: $lastError');
+  }
+
+  Future<void> _downloadEvidences(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final summary = detail.summary;
+    final activityDir = _buildActivityDirectory(summary);
+
+    try {
+      if (!await activityDir.exists()) {
+        await activityDir.create(recursive: true);
+      }
+
+      final evidencesDir = Directory(p.join(activityDir.path, 'evidencias'));
+      final pdfDir = Directory(p.join(activityDir.path, 'pdfs'));
+      if (!await evidencesDir.exists()) {
+        await evidencesDir.create(recursive: true);
+      }
+      if (!await pdfDir.exists()) {
+        await pdfDir.create(recursive: true);
+      }
+
+      await _writeActivityFiles(activityDir);
+
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Actualizando paquete SAO en ${activityDir.path}...'),
+            duration: const Duration(seconds: 2),
+          ),
+        );
+
+      final repository = EvidenceRepository();
+      int savedCount = 0;
+      int skippedCount = 0;
+      final failedDescriptions = <String>[];
+
+      for (var i = 0; i < detail.evidences.length; i++) {
+        final evidence = detail.evidences[i];
+        try {
+          final signedUrl = await repository.getDownloadSignedUrl(evidence.id);
+          final fileName = _buildFileName(summary, evidence, i, signedUrl);
+          final targetDir = _targetDirectoryForEvidence(activityDir, evidence);
+          if (!await targetDir.exists()) {
+            await targetDir.create(recursive: true);
+          }
+          final file = File(p.join(targetDir.path, fileName));
+
+          if (await file.exists() && await file.length() > 0) {
+            skippedCount++;
+            continue;
+          }
+
+          await _downloadFileWithFallback(signedUrl, file);
+          savedCount++;
+        } catch (error) {
+          failedDescriptions.add(
+            '${evidence.description.isNotEmpty ? evidence.description : 'Evidencia ${i + 1}'} -> $error',
+          );
+        }
+      }
+
+      final dataDir = Directory(p.join(activityDir.path, 'datos'));
+      if (!await dataDir.exists()) {
+        await dataDir.create(recursive: true);
+      }
+      final failedFile = File(p.join(dataDir.path, 'evidencias_no_descargadas.txt'));
+      if (failedDescriptions.isNotEmpty) {
+        await failedFile.writeAsString(
+          failedDescriptions.join('\n'),
+          flush: true,
+        );
+      } else if (await failedFile.exists()) {
+        await failedFile.delete();
+      }
+
+      if (!context.mounted) return;
+
+      final message = detail.evidences.isEmpty
+          ? 'Carpeta SAO actualizada en ${activityDir.path}'
+          : failedDescriptions.isEmpty
+              ? 'Actividad actualizada: $savedCount nuevas, $skippedCount ya existentes.'
+              : 'Actividad actualizada: $savedCount nuevas, $skippedCount existentes, ${failedDescriptions.length} con error.';
+
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(message),
+            duration: const Duration(seconds: 10),
+            action: SnackBarAction(
+              label: 'Abrir carpeta',
+              onPressed: () {
+                Process.run('explorer.exe', [activityDir.path]);
+              },
+            ),
+          ),
+        );
+    } catch (e) {
+      if (!context.mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('No se pudo actualizar la carpeta SAO: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = detail.summary;
@@ -1496,11 +1926,7 @@ class _PanelQuickActions extends StatelessWidget {
         ),
         if (s.reviewDecision == 'APPROVE' && detail.evidences.isNotEmpty)
           FilledButton.tonalIcon(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Descarga de evidencias en integración.')),
-              );
-            },
+            onPressed: () => _downloadEvidences(context),
             icon: const Icon(Icons.download_rounded, size: 15),
             label: const Text('Descargar evidencias'),
           ),

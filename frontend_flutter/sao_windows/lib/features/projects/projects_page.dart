@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/constants.dart';
-import '../../core/di/service_locator.dart';
-import '../../core/network/api_client.dart';
+import '../../data/repositories/projects_repository.dart';
 import '../../ui/theme/sao_colors.dart';
 
 class ProjectItem {
@@ -16,19 +16,7 @@ class ProjectItem {
   });
 }
 
-class MyProjectItem {
-  final String projectId;
-  final String projectName;
-  final List<String> roleNames;
-
-  const MyProjectItem({
-    required this.projectId,
-    required this.projectName,
-    required this.roleNames,
-  });
-}
-
-class ProjectsPage extends StatefulWidget {
+class ProjectsPage extends ConsumerStatefulWidget {
   const ProjectsPage({
     super.key,
     required this.selectedCode,
@@ -37,10 +25,10 @@ class ProjectsPage extends StatefulWidget {
   final String selectedCode;
 
   @override
-  State<ProjectsPage> createState() => _ProjectsPageState();
+  ConsumerState<ProjectsPage> createState() => _ProjectsPageState();
 }
 
-class _ProjectsPageState extends State<ProjectsPage> {
+class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   static const _hiddenTemplateProjectCodes = {'PROJECT_0', 'P0'};
 
   static const _allProjectsItem = ProjectItem(
@@ -54,8 +42,6 @@ class _ProjectsPageState extends State<ProjectsPage> {
     ProjectItem(code: 'TAP', name: 'Tren AIFA–Pachuca', isActive: true),
   ];
 
-  final ApiClient _apiClient = getIt<ApiClient>();
-
   List<ProjectItem> _projects = const [];
   bool _loading = true;
   String? _loadError;
@@ -64,6 +50,10 @@ class _ProjectsPageState extends State<ProjectsPage> {
   @override
   void initState() {
     super.initState();
+    final initialCode = widget.selectedCode.trim().toUpperCase();
+    if (initialCode.isNotEmpty) {
+      ref.read(projectSelectionControllerProvider).setActiveProject(initialCode);
+    }
     _loadProjects();
   }
 
@@ -74,59 +64,24 @@ class _ProjectsPageState extends State<ProjectsPage> {
     });
 
     try {
-      final scopedProjects = await _fetchMyProjects();
-      if (scopedProjects.isEmpty) {
-        throw StateError('Lista vacia en /me/projects, intentando /projects');
-      }
+      final scopedProjects = await ref.read(allProjectsProvider.future);
       if (!mounted) return;
       setState(() {
         _projects = scopedProjects
-            .where((item) => !_isHiddenTemplateProject(item.projectId))
+            .where((item) => !_isHiddenTemplateProject(item.code))
             .map(
               (item) => ProjectItem(
-                code: item.projectId,
-                name: item.projectName,
-                isActive: true,
+                code: item.code.trim().toUpperCase(),
+                name: item.name.trim().isEmpty ? item.code : item.name.trim(),
+                isActive: item.isActive,
               ),
             )
             .toList()
           ..sort((a, b) => a.code.compareTo(b.code));
-        _loading = false;
-      });
-      return;
-    } catch (_) {
-      // Fallback to legacy endpoints when /me/projects is unavailable.
-    }
-
-    try {
-      final response = await _apiClient.get<dynamic>('/projects');
-      final data = response.data;
-      if (data is! List) {
-        throw StateError('Respuesta inválida de /projects');
-      }
-
-      final remote = data
-          .whereType<Map<String, dynamic>>()
-          .map((raw) {
-            final map = Map<String, dynamic>.from(raw);
-            final code = (map['id'] ?? '').toString().trim().toUpperCase();
-            if (code.isEmpty) return null;
-            if (_isHiddenTemplateProject(code)) return null;
-            final name = (map['name'] ?? code).toString().trim();
-            final status = (map['status'] ?? '').toString().toLowerCase();
-            return ProjectItem(
-              code: code,
-              name: name.isEmpty ? code : name,
-              isActive: status != 'inactive' && status != 'archived' && status != 'cancelled',
-            );
-          })
-          .whereType<ProjectItem>()
-          .toList()
-        ..sort((a, b) => a.code.compareTo(b.code));
-
-      if (!mounted) return;
-      setState(() {
-        _projects = remote.isEmpty ? _fallbackProjects : remote;
+        if (_projects.isEmpty) {
+          _projects = _fallbackProjects;
+          _loadError = 'No hay proyectos remotos disponibles. Mostrando lista local.';
+        }
         _loading = false;
       });
     } catch (e) {
@@ -134,40 +89,9 @@ class _ProjectsPageState extends State<ProjectsPage> {
       setState(() {
         _projects = _fallbackProjects;
         _loading = false;
-        _loadError = 'No se pudo cargar /me/projects ni /projects. Mostrando lista local.';
+        _loadError = 'No se pudo cargar la lista de proyectos remota. Mostrando lista local.';
       });
     }
-  }
-
-  Future<List<MyProjectItem>> _fetchMyProjects() async {
-    final response = await _apiClient.get<dynamic>('/me/projects');
-    final data = response.data;
-    if (data is! List) {
-      throw StateError('Respuesta inválida de /me/projects');
-    }
-
-    return data
-        .whereType<Map<String, dynamic>>()
-        .map((raw) {
-          final map = Map<String, dynamic>.from(raw);
-          final projectId = (map['project_id'] ?? '').toString().trim().toUpperCase();
-          if (projectId.isEmpty) return null;
-          if (_isHiddenTemplateProject(projectId)) return null;
-          final projectName = (map['project_name'] ?? projectId).toString().trim();
-          final roleNames = (map['role_names'] is List)
-              ? (map['role_names'] as List<dynamic>)
-                  .map((role) => role.toString().trim().toUpperCase())
-                  .where((role) => role.isNotEmpty)
-                  .toList(growable: false)
-              : const <String>[];
-          return MyProjectItem(
-            projectId: projectId,
-            projectName: projectName.isEmpty ? projectId : projectName,
-            roleNames: roleNames,
-          );
-        })
-        .whereType<MyProjectItem>()
-        .toList(growable: false);
   }
 
   bool _isHiddenTemplateProject(String? projectId) {
@@ -283,7 +207,7 @@ class _ProjectsPageState extends State<ProjectsPage> {
                           child: InkWell(
                             borderRadius: BorderRadius.circular(14),
                             onTap: () {
-                              // ✅ Regresa el proyecto seleccionado al Shell/Home
+                              ref.read(projectSelectionControllerProvider).setActiveProject(p.code);
                               Navigator.pop(context, p.code);
                             },
                             child: Container(

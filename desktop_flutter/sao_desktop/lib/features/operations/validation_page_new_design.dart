@@ -13,6 +13,7 @@ import '../../data/repositories/activity_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../ui/sao_ui.dart';
 import '../../ui/widgets/sao_validation_search_bar.dart';
+import 'activity_queue_projection.dart';
 import 'widgets/activity_queue_panel.dart';
 import 'widgets/activity_details_panel_pro.dart';
 import 'widgets/evidence_gallery_panel_pro.dart';
@@ -24,10 +25,12 @@ class ValidationPageNewDesign extends ConsumerStatefulWidget {
   const ValidationPageNewDesign({super.key, this.initialActivityId});
 
   @override
-  ConsumerState<ValidationPageNewDesign> createState() => _ValidationPageNewDesignState();
+  ConsumerState<ValidationPageNewDesign> createState() =>
+      _ValidationPageNewDesignState();
 }
 
-class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesign>
+class _ValidationPageNewDesignState
+    extends ConsumerState<ValidationPageNewDesign>
     with SingleTickerProviderStateMixin {
   static const _kDismissedStorageKey = 'sao_validation_dismissed_ids_v1';
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
@@ -41,7 +44,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
   bool _filterPending = false;
   bool _filterRejected = false;
   bool _filterChanges = false;
-  bool _filterOnlyConflicts = false;   // "Solo conflictos" quick-switch
+  bool _filterOnlyConflicts = false; // "Solo conflictos" quick-switch
   String? _selectedRejectReasonCode;
   late TextEditingController _reviewCommentsController;
   List<ActivityTimelineEntry> _timelineEntries = const [];
@@ -60,13 +63,13 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
 
   // ── Panel animations ────────────────────────────────────────────────────
   late AnimationController _panelAnim;
-  late Animation<Offset> _slideB;      // columna B: desplazamiento
-  late Animation<Offset> _slideC;      // columna C: empieza 80ms después
-  late Animation<double>  _fadePanel;  // fade del contenedor
-  late Animation<double>  _fadeContent;// fade del contenido (cascada)
-  late Animation<double>  _fadeScrim;  // scrim sobre la cola
+  late Animation<Offset> _slideB; // columna B: desplazamiento
+  late Animation<Offset> _slideC; // columna C: empieza 80ms después
+  late Animation<double> _fadePanel; // fade del contenedor
+  late Animation<double> _fadeContent; // fade del contenido (cascada)
+  late Animation<double> _fadeScrim; // scrim sobre la cola
 
-  static const _kOpen  = Duration(milliseconds: 280);
+  static const _kOpen = Duration(milliseconds: 280);
   static const _kClose = Duration(milliseconds: 180);
 
   // Auto-refresh
@@ -79,9 +82,20 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
   void initState() {
     super.initState();
     _reviewCommentsController = TextEditingController();
-    final initialProjectId = ref.read(activeProjectIdProvider).trim().toUpperCase();
-    ref.read(operationsProjectFilterProvider.notifier).state = initialProjectId;
+    final initialProjectId =
+        ref.read(activeProjectIdProvider).trim().toUpperCase();
     _dismissedProjectScope = initialProjectId;
+
+    // Avoid mutating providers during build-related lifecycle callbacks.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final currentProjectId =
+          ref.read(operationsProjectFilterProvider).trim().toUpperCase();
+      if (currentProjectId != initialProjectId) {
+        ref.read(operationsProjectFilterProvider.notifier).state =
+            initialProjectId;
+      }
+    });
 
     _panelAnim = AnimationController(vsync: this, duration: _kOpen);
     _panelAnim.value = 1.0;
@@ -225,8 +239,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     );
 
     final activitiesAsync = ref.watch(pendingActivitiesProvider).whenData(
-      (activities) => activities.toList(growable: false),
-    );
+          (activities) => activities.toList(growable: false),
+        );
     final opsSummaryItems = activitiesAsync.maybeWhen(
       data: (items) => items,
       orElse: () => const <ActivityWithDetails>[],
@@ -258,7 +272,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                 color: Theme.of(context).colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
-                    color: Theme.of(context).colorScheme.shadow.withOpacity(0.05),
+                    color:
+                        Theme.of(context).colorScheme.shadow.withOpacity(0.05),
                     blurRadius: 8,
                     offset: Offset(0, 2),
                   ),
@@ -271,7 +286,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                   Row(
                     children: [
                       Icon(Icons.verified_rounded,
-                           color: SaoColors.primary, size: 28),
+                          color: SaoColors.primary, size: 28),
                       SizedBox(width: 12),
                       Text(
                         'Validación de Actividades',
@@ -288,7 +303,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                           onTap: _manualRefresh,
                           borderRadius: BorderRadius.circular(8),
                           child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: SaoColors.gray100,
                               borderRadius: BorderRadius.circular(8),
@@ -301,7 +317,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                                   width: 14,
                                   height: 14,
                                   child: CircularProgressIndicator(
-                                    value: _secondsUntilRefresh / _autoRefreshInterval.inSeconds,
+                                    value: _secondsUntilRefresh /
+                                        _autoRefreshInterval.inSeconds,
                                     strokeWidth: 2,
                                     color: SaoColors.primary,
                                     backgroundColor: SaoColors.gray300,
@@ -323,7 +340,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     ],
                   ),
                   SizedBox(height: 16),
-                  
+
                   // Barra de busqueda inteligente
                   SaoValidationSearchBar(
                     onSearchChanged: (query) {
@@ -340,7 +357,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                             activity.municipality?.name ?? '',
                             activity.activityType?.name ?? '',
                           ].join(' ').toLowerCase();
-                          return searchableText.contains(_searchQuery.toLowerCase());
+                          return searchableText
+                              .contains(_searchQuery.toLowerCase());
                         }).toList();
                         return filtered.length;
                       },
@@ -353,270 +371,347 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     },
                     allProjectsLabel: 'Todos',
                     onFilterPressed: () => _showAdvancedFilters(),
-                ),
-                const SizedBox(height: 10),
-                _buildConflictSummaryStrip(),
-                const SizedBox(height: 8),
-                _OperationsHealthStrip(items: opsSummaryItems),
-              ],
-            ),
-          ),
-          
-          // ── Bulk action bar (visible when items are selected) ──
-          if (_bulkSelectedIds.isNotEmpty)
-            _BulkActionBar(
-              selectedCount: _bulkSelectedIds.length,
-              visibleActivities: _visibleActivities,
-              bulkSelectedIds: _bulkSelectedIds,
-              onClear: () => setState(() => _bulkSelectedIds.clear()),
-              onApproveAll: _bulkApproveSelected,
-              onDeleteAll: _bulkDeleteSelected,
+                  ),
+                  const SizedBox(height: 10),
+                  _buildConflictSummaryStrip(),
+                  const SizedBox(height: 8),
+                  _OperationsHealthStrip(items: opsSummaryItems),
+                ],
+              ),
             ),
 
-          // ── Tres columnas 20 / 45 / 35 ─────────────────────────
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ── A. Cola compacta (20%) + scrim ───────────
-                  Expanded(
-                    flex: 20,
-                    child: Stack(
-                      children: [
-                        ActivityQueuePanel(
-                      activitiesAsync: activitiesAsync,
-                      selectedActivity: _selectedActivity,
-                      searchQuery: _searchQuery,
-                      queueTab: _queueTab,
-                      filterPending: _filterPending,
-                      filterRejected: _filterRejected,
-                      filterChanges: _filterChanges,
-                      filterOnlyConflicts: _filterOnlyConflicts,
-                      filterFront: _filterFront,
-                      filterDateFrom: _filterDateFrom,
-                      filterDateTo: _filterDateTo,
-                      bulkSelectedIds: _bulkSelectedIds,
-                      onBulkToggle: (id) => setState(() {
-                        if (_bulkSelectedIds.contains(id)) {
-                          _bulkSelectedIds.remove(id);
-                        } else {
-                          _bulkSelectedIds.add(id);
-                        }
-                      }),
-                      onBulkSelectAll: () => setState(() {
-                        _bulkSelectedIds.addAll(
-                            _visibleActivities.map((a) => a.activity.id));
-                      }),
-                      onBulkClear: () =>
-                          setState(() => _bulkSelectedIds.clear()),
-                      onQueueTabChanged: (tab) =>
-                          setState(() => _queueTab = tab),
-                      onVisibleActivitiesChanged: (activities) {
-                        WidgetsBinding.instance.addPostFrameCallback((_) {
-                          if (!mounted) return;
-                          setState(() => _visibleActivities = activities);
-                          final targetId = widget.initialActivityId;
-                          if (targetId != null && !_autoSelectDone && activities.isNotEmpty) {
-                            final match = activities.cast<ActivityWithDetails?>().firstWhere(
-                              (a) => a!.activity.id == targetId,
-                              orElse: () => null,
-                            );
-                            if (match != null) {
-                              _autoSelectDone = true;
-                              _selectActivity(match);
-                            }
-                          }
-                        });
-                      },
-                      onSelectActivity: _selectActivity,
+            // ── Bulk action bar (visible when items are selected) ──
+            if (_bulkSelectedIds.isNotEmpty)
+              _BulkActionBar(
+                selectedCount: _bulkSelectedIds.length,
+                visibleActivities: _visibleActivities,
+                bulkSelectedIds: _bulkSelectedIds,
+                onClear: () => setState(() => _bulkSelectedIds.clear()),
+                onApproveAll: _bulkApproveSelected,
+                onDeleteAll: _bulkDeleteSelected,
+              ),
+
+            // ── Tres columnas 20 / 45 / 35 ─────────────────────────
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // ── A. Cola compacta (20%) + scrim ───────────
+                    Expanded(
+                      flex: 20,
+                      child: Stack(
+                        children: [
+                          ActivityQueuePanel(
+                            activitiesAsync: activitiesAsync,
+                            selectedActivity: _selectedActivity,
+                            searchQuery: _searchQuery,
+                            queueTab: _queueTab,
+                            filterPending: _filterPending,
+                            filterRejected: _filterRejected,
+                            filterChanges: _filterChanges,
+                            filterOnlyConflicts: _filterOnlyConflicts,
+                            filterFront: _filterFront,
+                            filterDateFrom: _filterDateFrom,
+                            filterDateTo: _filterDateTo,
+                            bulkSelectedIds: _bulkSelectedIds,
+                            onBulkToggle: (id) => setState(() {
+                              if (_bulkSelectedIds.contains(id)) {
+                                _bulkSelectedIds.remove(id);
+                              } else {
+                                _bulkSelectedIds.add(id);
+                              }
+                            }),
+                            onBulkSelectAll: () => setState(() {
+                              _bulkSelectedIds.addAll(
+                                  _visibleActivities.map((a) => a.activity.id));
+                            }),
+                            onBulkClear: () =>
+                                setState(() => _bulkSelectedIds.clear()),
+                            onQueueTabChanged: (tab) =>
+                                setState(() => _queueTab = tab),
+                            onVisibleActivitiesChanged: (activities) {
+                              WidgetsBinding.instance.addPostFrameCallback((_) {
+                                if (!mounted) return;
+                                setState(() => _visibleActivities = activities);
+                                final targetId = widget.initialActivityId;
+                                if (targetId != null &&
+                                    !_autoSelectDone &&
+                                    activities.isNotEmpty) {
+                                  final match = activities
+                                      .cast<ActivityWithDetails?>()
+                                      .firstWhere(
+                                        (a) => a!.activity.id == targetId,
+                                        orElse: () => null,
+                                      );
+                                  if (match != null) {
+                                    _autoSelectDone = true;
+                                    _selectActivity(match);
+                                  }
+                                }
+                              });
+                            },
+                            onSelectActivity: _selectActivity,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // ── B. Diff / Detalles (45%) — slide + fade ───
+                    Expanded(
+                      flex: 45,
+                      child: ClipRect(
+                        child: SlideTransition(
+                          position: _slideB,
+                          child: FadeTransition(
+                            opacity: _fadePanel,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius:
+                                    BorderRadius.circular(SaoRadii.md),
+                                border: Border.all(
+                                    color:
+                                        Theme.of(context).colorScheme.outline),
+                              ),
+                              // Contenido con fade en cascada
+                              child: FadeTransition(
+                                opacity: _fadeContent,
+                                child: ActivityDetailsPanelPro(
+                                  activity: _selectedActivity,
+                                  timelineEntries: _timelineEntries,
+                                  timelineLoading: _timelineLoading,
+                                  timelineError: _timelineError,
+                                  onFieldChanged: (field, value) async {
+                                    await _handleQuickFieldChange(field, value);
+                                  },
+                                  onAcceptChange: (field) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(SnackBar(
+                                      content: Text('Cambio aceptado: $field'),
+                                      backgroundColor: SaoColors.success,
+                                    ));
+                                  },
+                                  onRevertChange: (field) {
+                                    ScaffoldMessenger.of(context)
+                                        .showSnackBar(SnackBar(
+                                      content: Text('Cambio revertido: $field'),
+                                      backgroundColor: SaoColors.warning,
+                                    ));
+                                  },
+                                  onCatalogAdd: (field, capturedValue) async {
+                                    await _handleCatalogAdd(
+                                        field, capturedValue);
+                                  },
+                                  onCatalogLink: (field, capturedValue,
+                                      selectedValue) async {
+                                    await _handleCatalogLink(
+                                        field, capturedValue, selectedValue);
+                                  },
+                                  onCatalogCorrection:
+                                      (field, capturedValue) async {
+                                    await _handleCatalogCorrection(
+                                        field, capturedValue);
+                                  },
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+
+                    // ── C. Evidencias + Mapa (35%) — slide retrasado (cascada)
+                    Expanded(
+                      flex: 35,
+                      child: ClipRect(
+                        child: SlideTransition(
+                          position: _slideC,
+                          child: FadeTransition(
+                            opacity: _fadePanel,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.surface,
+                                borderRadius:
+                                    BorderRadius.circular(SaoRadii.md),
+                                border: Border.all(
+                                    color:
+                                        Theme.of(context).colorScheme.outline),
+                              ),
+                              child: FadeTransition(
+                                opacity: _fadeContent,
+                                child: EvidenceGalleryPanelPro(
+                                  activity: _selectedActivity,
+                                  selectedIndex: _selectedEvidenceIndex,
+                                  onSelectEvidence: (index) => setState(
+                                      () => _selectedEvidenceIndex = index),
+                                  onCaptionChanged: (evidenceId, caption) =>
+                                      _saveEvidenceCaption(evidenceId, caption),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-
-                  // ── B. Diff / Detalles (45%) — slide + fade ───
-                  Expanded(
-                    flex: 45,
-                    child: ClipRect(
-                      child: SlideTransition(
-                        position: _slideB,
-                        child: FadeTransition(
-                          opacity: _fadePanel,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius:
-                                  BorderRadius.circular(SaoRadii.md),
-                              border: Border.all(color: Theme.of(context).colorScheme.outline),
-                            ),
-                            // Contenido con fade en cascada
-                            child: FadeTransition(
-                              opacity: _fadeContent,
-                              child: ActivityDetailsPanelPro(
-                                activity: _selectedActivity,
-                                timelineEntries: _timelineEntries,
-                                timelineLoading: _timelineLoading,
-                                timelineError: _timelineError,
-                                onFieldChanged: (field, value) async {
-                                  await _handleQuickFieldChange(field, value);
-                                },
-                                onAcceptChange: (field) {
-                                  ScaffoldMessenger.of(context)
-                                      .showSnackBar(SnackBar(
-                                    content:
-                                        Text('Cambio aceptado: $field'),
-                                    backgroundColor: SaoColors.success,
-                                  ));
-                                },
-                                onRevertChange: (field) {
-                                  ScaffoldMessenger.of(context)
-                                      .showSnackBar(SnackBar(
-                                    content:
-                                        Text('Cambio revertido: $field'),
-                                    backgroundColor: SaoColors.warning,
-                                  ));
-                                },
-                                onCatalogAdd: (field, capturedValue) async {
-                                  await _handleCatalogAdd(field, capturedValue);
-                                },
-                                onCatalogLink: (field, capturedValue, selectedValue) async {
-                                  await _handleCatalogLink(field, capturedValue, selectedValue);
-                                },
-                                onCatalogCorrection: (field, capturedValue) async {
-                                  await _handleCatalogCorrection(field, capturedValue);
-                                },
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-
-                  // ── C. Evidencias + Mapa (35%) — slide retrasado (cascada)
-                  Expanded(
-                    flex: 35,
-                    child: ClipRect(
-                      child: SlideTransition(
-                        position: _slideC,
-                        child: FadeTransition(
-                          opacity: _fadePanel,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              color: Theme.of(context).colorScheme.surface,
-                              borderRadius:
-                                  BorderRadius.circular(SaoRadii.md),
-                              border:
-                                  Border.all(color: Theme.of(context).colorScheme.outline),
-                            ),
-                            child: FadeTransition(
-                              opacity: _fadeContent,
-                              child: EvidenceGalleryPanelPro(
-                                activity: _selectedActivity,
-                                selectedIndex: _selectedEvidenceIndex,
-                                onSelectEvidence: (index) => setState(
-                                    () =>
-                                        _selectedEvidenceIndex = index),
-                                onCaptionChanged:
-                                    (evidenceId, caption) =>
-                                        _saveEvidenceCaption(
-                                            evidenceId, caption),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          
-          // Footer con acciones rapidas
-          if (_selectedActivity != null)
-            Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 16, vertical: 10),
-              decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.surface,
-                border: const Border(
-                  top: BorderSide(color: SaoColors.border),
                 ),
               ),
-              child: Row(
-                children: [
-                  const Icon(Icons.keyboard_rounded,
-                      color: SaoColors.gray400, size: 14),
-                  const SizedBox(width: 6),
-                  Text(
-                    'Enter = Validar  ·  R = Rechazar  ·  Del = Eliminar  ·  Esc = Limpiar selección  ·  A/C = resolver cambio de catálogo',
-                    style: SaoTypography.caption
-                        .copyWith(color: SaoColors.gray400),
-                  ),
-                  Spacer(),
-                  ElevatedButton.icon(
-                    onPressed: _selectedActivity == null ? null : () => _deleteSelectedActivity(),
-                    icon: Icon(Icons.delete_outline_rounded),
-                    label: Text('Eliminar'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: SaoColors.gray700,
-                      foregroundColor: SaoColors.onPrimary,
-                      disabledBackgroundColor: SaoColors.gray300,
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: _selectedActivity == null ? null : () => _showRejectDialog(),
-                    icon: Icon(Icons.cancel_rounded),
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Rechazar'),
-                        SizedBox(width: SaoSpacing.xs),
-                        _buildShortcutPill('R'),
-                      ],
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: SaoColors.error,
-                      foregroundColor: SaoColors.onPrimary,
-                      disabledBackgroundColor: SaoColors.gray300,
-                    ),
-                  ),
-                  SizedBox(width: 12),
-                  ElevatedButton.icon(
-                    onPressed: _selectedActivity == null ? null : () => _approveActivity(),
-                    icon: Icon(Icons.check_circle_rounded),
-                    label: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text('Validar y enviar'),
-                        SizedBox(width: SaoSpacing.xs),
-                        _buildShortcutPill('Enter'),
-                      ],
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: SaoColors.success,
-                      foregroundColor: SaoColors.onPrimary,
-                      disabledBackgroundColor: SaoColors.gray300,
-                    ),
-                  ),
-                ],
-              ),
             ),
-        ],
-      ),
+
+            // Footer con acciones rapidas
+            if (_selectedActivity != null)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.surface,
+                  border: const Border(
+                    top: BorderSide(color: SaoColors.border),
+                  ),
+                ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final compact = constraints.maxWidth < 1260;
+
+                    final currentIssues = _selectedActivity == null
+                        ? const <String>[]
+                        : deriveActivityBlockingIssues(_selectedActivity!);
+                    final guidanceText = _selectedActivity == null
+                        ? 'Selecciona una actividad para empezar.'
+                        : currentIssues.isEmpty
+                            ? 'Siguiente paso: revisa la foto y presiona “Validar y enviar”.'
+                            : 'Siguiente paso: ${currentIssues.first}. Después decide si validas o solicitas corrección.';
+
+                    final helpText = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          guidanceText,
+                          maxLines: compact ? 3 : 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: SaoTypography.bodyText.copyWith(
+                            color: SaoColors.gray800,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.keyboard_rounded,
+                                color: SaoColors.gray400, size: 14),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                'Atajos: Enter = Validar  ·  R = Rechazar  ·  Del = Eliminar  ·  Esc = Limpiar selección',
+                                maxLines: compact ? 2 : 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: SaoTypography.caption
+                                    .copyWith(color: SaoColors.gray400),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    );
+
+                    final actions = Wrap(
+                      spacing: 12,
+                      runSpacing: 8,
+                      alignment: WrapAlignment.end,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: _selectedActivity == null
+                              ? null
+                              : () => _deleteSelectedActivity(),
+                          icon: Icon(Icons.delete_outline_rounded),
+                          label: Text('Eliminar'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: SaoColors.gray700,
+                            foregroundColor: SaoColors.onPrimary,
+                            disabledBackgroundColor: SaoColors.gray300,
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _selectedActivity == null
+                              ? null
+                              : () => _showRejectDialog(),
+                          icon: Icon(Icons.cancel_rounded),
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('Rechazar'),
+                              SizedBox(width: SaoSpacing.xs),
+                              _buildShortcutPill('R'),
+                            ],
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: SaoColors.error,
+                            foregroundColor: SaoColors.onPrimary,
+                            disabledBackgroundColor: SaoColors.gray300,
+                          ),
+                        ),
+                        ElevatedButton.icon(
+                          onPressed: _selectedActivity == null
+                              ? null
+                              : () => _approveActivity(),
+                          icon: Icon(Icons.check_circle_rounded),
+                          label: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('Validar y enviar'),
+                              SizedBox(width: SaoSpacing.xs),
+                              _buildShortcutPill('Enter'),
+                            ],
+                          ),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: SaoColors.success,
+                            foregroundColor: SaoColors.onPrimary,
+                            disabledBackgroundColor: SaoColors.gray300,
+                          ),
+                        ),
+                      ],
+                    );
+
+                    if (compact) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          helpText,
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: actions,
+                          ),
+                        ],
+                      );
+                    }
+
+                    return Row(
+                      children: [
+                        Expanded(child: helpText),
+                        const SizedBox(width: 16),
+                        actions,
+                      ],
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 
   Future<void> _showAdvancedFilters() async {
     // Extraer frentes únicos de las actividades cargadas
-    final activitiesSnapshot = ref.read(pendingActivitiesProvider).value ?? const [];
+    final activitiesSnapshot =
+        ref.read(pendingActivitiesProvider).value ?? const [];
     final fronts = activitiesSnapshot
         .map((a) => a.front?.name ?? 'Sin asignar')
         .toSet()
@@ -633,8 +728,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       builder: (ctx) {
         return StatefulBuilder(builder: (ctx, setLocal) {
           return AlertDialog(
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(
               children: [
                 Icon(Icons.filter_alt_rounded, color: SaoColors.primary),
@@ -666,8 +761,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     items: [
                       const DropdownMenuItem<String>(
                           value: null, child: Text('Todos los frentes')),
-                      ...fronts.map((f) =>
-                          DropdownMenuItem(value: f, child: Text(f))),
+                      ...fronts.map(
+                          (f) => DropdownMenuItem(value: f, child: Text(f))),
                     ],
                     onChanged: (v) => setLocal(() => tempFront = v),
                   ),
@@ -708,8 +803,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                   });
                   Navigator.pop(ctx);
                 },
-                child: Text('Limpiar',
-                    style: TextStyle(color: SaoColors.gray600)),
+                child:
+                    Text('Limpiar', style: TextStyle(color: SaoColors.gray600)),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -848,7 +943,9 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       child: Row(
         children: [
           Icon(
-            conflicts > 0 ? Icons.warning_amber_rounded : Icons.verified_rounded,
+            conflicts > 0
+                ? Icons.warning_amber_rounded
+                : Icons.verified_rounded,
             size: 18,
             color: conflicts > 0 ? SaoColors.warning : SaoColors.success,
           ),
@@ -906,7 +1003,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     final repo = ref.read(activityRepositoryProvider);
     try {
       await repo.approveActivity(previousActivityId, 'usr-admin-001');
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -924,13 +1021,16 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
             ),
             backgroundColor: SaoColors.success,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SaoRadii.sm)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(SaoRadii.sm)),
             duration: Duration(seconds: 2),
           ),
         );
-        
-        // Cargar siguiente actividad
-        _loadNextActivity(previousActivityId);
+
+        await _refreshQueueAfterDecision(
+          processedActivityId: previousActivityId,
+          targetTab: 'PENDING',
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -950,7 +1050,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SaoRadii.xl)),
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(SaoRadii.xl)),
         child: Container(
           width: 550,
           padding: EdgeInsets.all(SaoSpacing.xxl),
@@ -966,7 +1067,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                       color: SaoColors.error.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(SaoRadii.md),
                     ),
-                    child: Icon(Icons.cancel_rounded, color: SaoColors.error, size: 28),
+                    child: Icon(Icons.cancel_rounded,
+                        color: SaoColors.error, size: 28),
                   ),
                   SizedBox(width: SaoSpacing.lg),
                   Expanded(
@@ -998,7 +1100,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                 autofocus: true,
                 decoration: InputDecoration(
                   hintText: 'Ej: La foto está borrosa, tomar de nuevo',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(SaoRadii.md)),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(SaoRadii.md)),
                   filled: true,
                   fillColor: SaoColors.gray50,
                 ),
@@ -1006,34 +1109,37 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
               SizedBox(height: SaoSpacing.lg),
               Text(
                 'Motivos comunes:',
-                style: SaoTypography.caption.copyWith(fontWeight: FontWeight.w600),
+                style:
+                    SaoTypography.caption.copyWith(fontWeight: FontWeight.w600),
               ),
               SizedBox(height: SaoSpacing.md),
               FutureBuilder<List<RejectionPlaybookItem>>(
-                future: repo.getRejectPlaybook(projectId: _selectedActivity?.activity.projectId),
+                future: repo.getRejectPlaybook(
+                    projectId: _selectedActivity?.activity.projectId),
                 builder: (context, snapshot) {
-                  final items = (snapshot.data != null && snapshot.data!.isNotEmpty)
-                      ? snapshot.data!
-                      : const <RejectionPlaybookItem>[
-                          RejectionPlaybookItem(
-                            reasonCode: 'PHOTO_BLUR',
-                            label: 'Foto borrosa',
-                            severity: 'MED',
-                            requiresComment: false,
-                          ),
-                          RejectionPlaybookItem(
-                            reasonCode: 'GPS_MISMATCH',
-                            label: 'GPS no coincide',
-                            severity: 'HIGH',
-                            requiresComment: true,
-                          ),
-                          RejectionPlaybookItem(
-                            reasonCode: 'MISSING_INFO',
-                            label: 'Falta información',
-                            severity: 'MED',
-                            requiresComment: true,
-                          ),
-                        ];
+                  final items =
+                      (snapshot.data != null && snapshot.data!.isNotEmpty)
+                          ? snapshot.data!
+                          : const <RejectionPlaybookItem>[
+                              RejectionPlaybookItem(
+                                reasonCode: 'PHOTO_BLUR',
+                                label: 'Foto borrosa',
+                                severity: 'MED',
+                                requiresComment: false,
+                              ),
+                              RejectionPlaybookItem(
+                                reasonCode: 'GPS_MISMATCH',
+                                label: 'GPS no coincide',
+                                severity: 'HIGH',
+                                requiresComment: true,
+                              ),
+                              RejectionPlaybookItem(
+                                reasonCode: 'MISSING_INFO',
+                                label: 'Falta información',
+                                severity: 'MED',
+                                requiresComment: true,
+                              ),
+                            ];
 
                   return Wrap(
                     spacing: SaoSpacing.sm,
@@ -1067,7 +1173,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                     },
                     style: FilledButton.styleFrom(
                       backgroundColor: SaoColors.error,
-                      padding: EdgeInsets.symmetric(horizontal: SaoSpacing.xxl, vertical: SaoSpacing.md),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: SaoSpacing.xxl, vertical: SaoSpacing.md),
                     ),
                     icon: Icon(Icons.send_rounded, size: 18),
                     label: Text('Enviar Rechazo'),
@@ -1123,7 +1230,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
                 SizedBox(width: SaoSpacing.md),
                 Expanded(
                   child: Text(
-                    'Actividad rechazada correctamente',
+                    'Actividad rechazada y visible en Rechazadas',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -1131,17 +1238,21 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
             ),
             backgroundColor: SaoColors.error,
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SaoRadii.sm)),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(SaoRadii.sm)),
             duration: Duration(seconds: 2),
           ),
         );
 
-        // Cargar siguiente actividad
-        _loadNextActivity(previousActivityId);
-        
         // Limpiar controles
         _reviewCommentsController.clear();
         _selectedRejectReasonCode = null;
+
+        await _refreshQueueAfterDecision(
+          processedActivityId: previousActivityId,
+          targetTab: 'REJECTED',
+          highlightProcessedActivity: true,
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -1251,7 +1362,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
 
       switch (field) {
         case 'subcategoria':
-          final activityId = await _ensureCatalogActivity(catalogRepo, projectId);
+          final activityId =
+              await _ensureCatalogActivity(catalogRepo, projectId);
           await catalogRepo.createSubcategory(
             id: _buildCatalogEntityId('subcat', value),
             activityId: activityId,
@@ -1268,7 +1380,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
           );
           break;
         case 'proposito':
-          final activityId = await _ensureCatalogActivity(catalogRepo, projectId);
+          final activityId =
+              await _ensureCatalogActivity(catalogRepo, projectId);
           await catalogRepo.createPurpose(
             id: _buildCatalogEntityId('purpose', value),
             activityId: activityId,
@@ -1278,8 +1391,9 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
           break;
         case 'municipio':
           final currentDescription = activity.activity.description ?? '';
-          final mergedDescription =
-              _mergeMunicipalityMarker(currentDescription, value, mode: 'validado');
+          final mergedDescription = _mergeMunicipalityMarker(
+              currentDescription, value,
+              mode: 'validado');
           await repo.updateActivityFields(
             activity.activity.id,
             description: mergedDescription,
@@ -1323,7 +1437,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     try {
       switch (field) {
         case 'subcategoria':
-          await repo.updateActivityFields(activity.activity.id, title: selectedValue);
+          await repo.updateActivityFields(activity.activity.id,
+              title: selectedValue);
           break;
         case 'tema':
           await repo.updateActivityFields(
@@ -1332,7 +1447,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
           );
           break;
         case 'proposito':
-          await repo.updateActivityFields(activity.activity.id, description: selectedValue);
+          await repo.updateActivityFields(activity.activity.id,
+              description: selectedValue);
           break;
         case 'municipio':
           final currentDescription = activity.activity.description ?? '';
@@ -1353,7 +1469,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Vinculación aplicada: "$capturedValue" -> "$selectedValue"'),
+          content: Text(
+              'Vinculación aplicada: "$capturedValue" -> "$selectedValue"'),
           backgroundColor: SaoColors.success,
         ),
       );
@@ -1361,7 +1478,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       // Ensure UI reflects persisted backend values after linking.
       final refreshed = await repo.getActivityById(activity.activity.id);
       if (!mounted) return;
-      if (refreshed != null && _selectedActivity?.activity.id == activity.activity.id) {
+      if (refreshed != null &&
+          _selectedActivity?.activity.id == activity.activity.id) {
         setState(() {
           _selectedActivity = refreshed;
         });
@@ -1379,7 +1497,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     }
   }
 
-  Future<void> _handleCatalogCorrection(String field, String capturedValue) async {
+  Future<void> _handleCatalogCorrection(
+      String field, String capturedValue) async {
     final activity = _selectedActivity;
     if (activity == null) return;
     if (!_ensureRealBackendAvailable()) {
@@ -1413,7 +1532,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     }
   }
 
-  Future<String> _ensureCatalogActivity(CatalogRepository catalogRepo, String projectId) async {
+  Future<String> _ensureCatalogActivity(
+      CatalogRepository catalogRepo, String projectId) async {
     final selected = _selectedActivity;
     final candidateName =
         (selected?.activityType?.name ?? selected?.activity.title ?? 'General')
@@ -1446,7 +1566,9 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
         .replaceAll('ú', 'u')
         .replaceAll('ñ', 'n');
     final normalized = source.replaceAll(RegExp(r'[^a-z0-9]+'), '_');
-    final compact = normalized.replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    final compact = normalized
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
     final suffix = DateTime.now().millisecondsSinceEpoch;
     final safe = compact.isEmpty ? 'item' : compact;
     return '${prefix}_${safe}_$suffix';
@@ -1457,9 +1579,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     String municipality, {
     required String mode,
   }) {
-    final markerPrefix = mode == 'validado'
-        ? 'Municipio validado:'
-        : 'Municipio vinculado:';
+    final markerPrefix =
+        mode == 'validado' ? 'Municipio validado:' : 'Municipio vinculado:';
     final cleanMunicipality = municipality.trim();
 
     final keptLines = description
@@ -1487,7 +1608,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Este flujo requiere backend real configurado (SAO_BACKEND_URL).'),
+          content: Text(
+              'Este flujo requiere backend real configurado (SAO_BACKEND_URL).'),
           backgroundColor: SaoColors.error,
         ),
       );
@@ -1495,10 +1617,46 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     return false;
   }
 
+  Future<void> _refreshQueueAfterDecision({
+    required String processedActivityId,
+    required String targetTab,
+    bool highlightProcessedActivity = false,
+  }) async {
+    final repo = ref.read(activityRepositoryProvider);
+    ActivityWithDetails? refreshedActivity;
+
+    if (highlightProcessedActivity) {
+      try {
+        refreshedActivity = await repo.getActivityById(processedActivityId);
+      } catch (_) {
+        refreshedActivity = null;
+      }
+    }
+
+    if (!mounted) return;
+
+    ref.invalidate(pendingActivitiesProvider);
+
+    if (highlightProcessedActivity && refreshedActivity != null) {
+      setState(() {
+        _queueTab = targetTab;
+        _selectedActivity = refreshedActivity;
+        _selectedEvidenceIndex = 0;
+      });
+      _loadTimelineForActivity(processedActivityId);
+      unawaited(_hydrateSelectedActivity(refreshedActivity));
+      return;
+    }
+
+    setState(() => _queueTab = targetTab);
+    _loadNextActivity(processedActivityId);
+  }
+
   /// Carga la siguiente actividad en la cola
   void _loadNextActivity(String processedActivityId) {
     final queue = _visibleActivities;
-    final currentIndex = queue.indexWhere((item) => item.activity.id == processedActivityId);
+    final currentIndex =
+        queue.indexWhere((item) => item.activity.id == processedActivityId);
 
     ActivityWithDetails? next;
     if (queue.length > 1 && currentIndex >= 0) {
@@ -1530,8 +1688,7 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text(
-                'No hay actividades sin conflictos en la selección'),
+            content: Text('No hay actividades sin conflictos en la selección'),
             backgroundColor: SaoColors.warning,
           ),
         );
@@ -1644,7 +1801,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     if (!mounted) return;
     setState(() {
       _bulkSelectedIds.clear();
-      if (_selectedActivity != null && ids.contains(_selectedActivity!.activity.id)) {
+      if (_selectedActivity != null &&
+          ids.contains(_selectedActivity!.activity.id)) {
         _selectedActivity = null;
         _selectedEvidenceIndex = 0;
       }
@@ -1699,7 +1857,8 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
     );
   }
 
-  List<String> _buildProjectOptions(List<String> projects, String selectedProjectId) {
+  List<String> _buildProjectOptions(
+      List<String> projects, String selectedProjectId) {
     final normalized = <String>{
       for (final projectId in projects)
         if (projectId.trim().isNotEmpty) projectId.trim().toUpperCase(),
@@ -1713,9 +1872,11 @@ class _ValidationPageNewDesignState extends ConsumerState<ValidationPageNewDesig
 
   Future<void> _setProjectFilter(String projectId) async {
     final normalizedProjectId = projectId.trim().toUpperCase();
-    final currentProjectId = ref.read(operationsProjectFilterProvider).trim().toUpperCase();
+    final currentProjectId =
+        ref.read(operationsProjectFilterProvider).trim().toUpperCase();
     if (normalizedProjectId == currentProjectId) return;
-    ref.read(operationsProjectFilterProvider.notifier).state = normalizedProjectId;
+    ref.read(operationsProjectFilterProvider.notifier).state =
+        normalizedProjectId;
     await _handleProjectScopeChanged(normalizedProjectId);
   }
 }
@@ -1775,24 +1936,15 @@ class _OperationsHealthStrip extends StatelessWidget {
   const _OperationsHealthStrip({required this.items});
 
   int _pending(List<ActivityWithDetails> values) {
-    return values
-        .where(
-          (a) => ActivityStatus.normalize(a.activity.status) ==
-              ActivityStatus.pendingReview,
-        )
-        .length;
+    return values.where(isPendingQueueBucket).length;
   }
 
   int _observations(List<ActivityWithDetails> values) {
-    return values
-        .where((a) => a.flags.catalogChanged || a.flags.checklistIncomplete)
-        .length;
+    return values.where(isChangesQueueBucket).length;
   }
 
   int _readyToApprove(List<ActivityWithDetails> values) {
-    return values
-        .where((a) => !a.flags.catalogChanged && !a.flags.checklistIncomplete)
-        .length;
+    return values.where(isReadyToApproveQueueBucket).length;
   }
 
   @override
@@ -1801,8 +1953,7 @@ class _OperationsHealthStrip extends StatelessWidget {
     final observations = _observations(items);
     final readyToApprove = _readyToApprove(items);
     final withEvidence = items.where((a) => a.evidences.isNotEmpty).length;
-    final withoutConflicts =
-        items.where((a) => !a.flags.catalogChanged && !a.flags.checklistIncomplete).length;
+    final withoutConflicts = items.where(isReadyToApproveQueueBucket).length;
 
     return Container(
       width: double.infinity,
@@ -1943,9 +2094,12 @@ class _OpsMiniPieChart extends StatelessWidget {
     return CustomPaint(
       painter: _OpsPiePainter(
         segments: [
-          _OpsPieSegment(value: pending / total, color: SaoColors.actionPrimary),
-          _OpsPieSegment(value: observations / total, color: const Color(0xFFD97706)),
-          _OpsPieSegment(value: readyToApprove / total, color: SaoColors.success),
+          _OpsPieSegment(
+              value: pending / total, color: SaoColors.actionPrimary),
+          _OpsPieSegment(
+              value: observations / total, color: const Color(0xFFD97706)),
+          _OpsPieSegment(
+              value: readyToApprove / total, color: SaoColors.success),
         ],
       ),
       child: const Center(
@@ -2175,9 +2329,11 @@ class _BulkActionBar extends StatelessWidget {
 
 final operationsProjectFilterProvider = StateProvider<String>((ref) => '');
 
-final pendingActivitiesProvider = StreamProvider<List<ActivityWithDetails>>((ref) {
+final pendingActivitiesProvider =
+    StreamProvider<List<ActivityWithDetails>>((ref) {
   final repo = ref.watch(activityRepositoryProvider);
-  final projectId = ref.watch(operationsProjectFilterProvider).trim().toUpperCase();
+  final projectId =
+      ref.watch(operationsProjectFilterProvider).trim().toUpperCase();
   return repo.watchPendingReview(
     projectId: projectId.isEmpty ? null : projectId,
   );

@@ -9,6 +9,7 @@ import '../../../core/utils/format_utils.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
 import '../../home/models/today_activity.dart';
+import '../../sync/services/sync_service.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 
@@ -43,8 +44,13 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
 
   Future<void> _loadData() async {
     try {
-      final dbActivity = await _dao.getActivityById(widget.activity.id);
-      final fields = await _dao.getFieldsByKey(widget.activity.id);
+      var dbActivity = await _dao.getActivityById(widget.activity.id);
+      var fields = await _dao.getFieldsByKey(widget.activity.id);
+      if (_shouldRecoverSparseWizardData(fields, dbActivity)) {
+        await _backfillWizardDataFromServer(dbActivity);
+        dbActivity = await _dao.getActivityById(widget.activity.id);
+        fields = await _dao.getFieldsByKey(widget.activity.id);
+      }
       final evidences = await _dao.getEvidencesForActivity(widget.activity.id);
       if (!mounted) return;
       setState(() {
@@ -56,6 +62,52 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
     } catch (_) {
       if (!mounted) return;
       setState(() => _loading = false);
+    }
+  }
+
+  bool _shouldRecoverSparseWizardData(
+    Map<String, ActivityField> fields,
+    Activity? dbActivity,
+  ) {
+    final isRejectedFlow = widget.activity.isRejected ||
+        widget.activity.reviewState.trim().toUpperCase() == 'CHANGES_REQUIRED' ||
+        widget.activity.nextAction.trim().toUpperCase() == 'CORREGIR_Y_REENVIAR';
+    if (!isRejectedFlow) {
+      return false;
+    }
+
+    final hasMeaningfulWizardFields =
+        fields.containsKey('risk_level') ||
+        fields.containsKey('result') ||
+        fields.containsKey('topics') ||
+        fields.containsKey('attendees') ||
+        fields.containsKey('report_notes') ||
+        fields.containsKey('wizard_payload_snapshot');
+    if (hasMeaningfulWizardFields) {
+      return false;
+    }
+
+    return (dbActivity?.serverRevision ?? 0) > 0 ||
+        (dbActivity?.status.trim().toUpperCase() == 'RECHAZADA');
+  }
+
+  Future<void> _backfillWizardDataFromServer(Activity? dbActivity) async {
+    try {
+      if (!GetIt.I.isRegistered<SyncService>()) {
+        return;
+      }
+      final projectId = (dbActivity?.projectId.trim().isNotEmpty ?? false)
+          ? dbActivity!.projectId.trim()
+          : widget.projectCode;
+      if (projectId.trim().isEmpty) {
+        return;
+      }
+      await GetIt.I<SyncService>().pullChanges(
+        projectId: projectId,
+        resetActivityCursor: true,
+      );
+    } catch (_) {
+      // Keep local detail view usable even if backfill fails.
     }
   }
 
@@ -87,6 +139,14 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   ({Color fg, Color bg, String label}) _statusDisplay() {
     final a = widget.activity;
     final db = _dbActivity;
+
+    if (_isRejectedForCorrection()) {
+      return (
+        fg: SaoColors.riskHigh,
+        bg: SaoColors.riskHighBg,
+        label: 'Rechazada · Requiere correccion',
+      );
+    }
 
     // Terminada: wizard completado (finishedAt requerido para no confundir con actividades SYNCED asignadas)
     final isTerminada = a.executionState == ExecutionState.terminada ||
@@ -127,6 +187,48 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
       bg: SaoColors.gray50,
       label: 'Asignada · Pendiente de inicio',
     );
+  }
+
+  bool _isRejectedForCorrection() {
+    final reviewState =
+        (_fields['review_state']?.valueText ?? widget.activity.reviewState)
+            .trim()
+            .toUpperCase();
+    final nextAction =
+        (_fields['next_action']?.valueText ?? widget.activity.nextAction)
+            .trim()
+            .toUpperCase();
+    return widget.activity.isRejected ||
+        reviewState == 'CHANGES_REQUIRED' ||
+        nextAction == 'CORREGIR_Y_REENVIAR';
+  }
+
+  String? _reviewComment() {
+    final direct = _fields['review_comment']?.valueText?.trim();
+    if (direct != null && direct.isNotEmpty) return direct;
+    return null;
+  }
+
+  String? _rejectReasonCode() {
+    final direct = _fields['review_reject_reason_code']?.valueText?.trim();
+    if (direct != null && direct.isNotEmpty) return direct.toUpperCase();
+    return null;
+  }
+
+  String _humanizeRejectReason(String? code) {
+    switch ((code ?? '').trim().toUpperCase()) {
+      case 'MISSING_INFO':
+        return 'Falta informacion obligatoria';
+      case 'PHOTO_BLUR':
+        return 'Foto borrosa o ilegible';
+      case 'GPS_ERROR':
+      case 'GPS_MISMATCH':
+        return 'Ubicacion o GPS inconsistente';
+      case 'CHECKLIST_INCOMPLETE':
+        return 'Checklist incompleto';
+      default:
+        return (code == null || code.trim().isEmpty) ? 'Observacion de coordinacion' : code.trim();
+    }
   }
 
   List<String> _agreements() {
@@ -203,6 +305,8 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
     final reportPairs = _reportPairs(db?.description);
     final startedAt = db?.startedAt ?? a.horaInicio;
     final finishedAt = db?.finishedAt ?? a.horaFin;
+    final reviewComment = _reviewComment();
+    final rejectReasonCode = _rejectReasonCode();
 
     return Scaffold(
       backgroundColor: SaoColors.gray50,
@@ -247,6 +351,71 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                     ],
                   ),
                 ),
+
+                if (_isRejectedForCorrection()) ...[
+                  const SizedBox(height: 16),
+                  _detailCard(
+                    title: 'Que debes corregir',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: SaoColors.riskHighBg,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: SaoColors.riskHigh.withValues(alpha: 0.20),
+                            ),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  const Icon(
+                                    Icons.rule_folder_outlined,
+                                    color: SaoColors.riskHigh,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      _humanizeRejectReason(rejectReasonCode),
+                                      style: SaoTypography.bodyTextSmall.copyWith(
+                                        color: SaoColors.riskHigh,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (reviewComment != null && reviewComment.isNotEmpty) ...[
+                                const SizedBox(height: 10),
+                                Text(
+                                  reviewComment,
+                                  style: SaoTypography.bodyTextSmall.copyWith(
+                                    color: SaoColors.gray800,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 10),
+                        Text(
+                          'Corrige el punto indicado y vuelve a enviar la actividad.',
+                          style: SaoTypography.bodyTextSmall.copyWith(
+                            color: SaoColors.gray600,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 const SizedBox(height: 16),
 
@@ -570,57 +739,151 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   Widget _evidenceTile(Evidence ev) {
     final file = File(ev.filePathLocal);
     final isPhoto = ev.type.toUpperCase() == 'PHOTO';
+    final canOpen = isPhoto && file.existsSync();
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: SaoColors.surface,
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: SaoColors.border),
-      ),
-      child: Row(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: (isPhoto && file.existsSync())
-                ? Image.file(file, width: 56, height: 56, fit: BoxFit.cover)
-                : Container(
-                    width: 56,
-                    height: 56,
-                    color: SaoColors.gray100,
-                    child: Icon(_evidenceIcon(ev.type), size: 28, color: SaoColors.gray500),
-                  ),
+        onTap: () => _openEvidence(ev),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: SaoColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: SaoColors.border),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ev.type.toUpperCase(),
-                  style: SaoTypography.caption.copyWith(
-                    color: SaoColors.gray400,
-                    fontWeight: FontWeight.w700,
-                  ),
+          child: Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: canOpen
+                    ? Image.file(file, width: 56, height: 56, fit: BoxFit.cover)
+                    : Container(
+                        width: 56,
+                        height: 56,
+                        color: SaoColors.gray100,
+                        child: Icon(_evidenceIcon(ev.type), size: 28, color: SaoColors.gray500),
+                      ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      ev.type.toUpperCase(),
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray400,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    if ((ev.caption ?? '').trim().isNotEmpty)
+                      Text(
+                        ev.caption!.trim(),
+                        style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      )
+                    else
+                      Text(
+                        'Sin descripción',
+                        style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray400),
+                      ),
+                  ],
                 ),
-                if ((ev.caption ?? '').trim().isNotEmpty)
-                  Text(
-                    ev.caption!.trim(),
-                    style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray700),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  )
-                else
-                  Text(
-                    'Sin descripción',
-                    style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray400),
-                  ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                canOpen ? Icons.open_in_full_rounded : Icons.info_outline_rounded,
+                size: 18,
+                color: canOpen ? SaoColors.primary : SaoColors.gray400,
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
+  }
+
+  Future<void> _openEvidence(Evidence ev) async {
+    final file = File(ev.filePathLocal);
+    final isPhoto = ev.type.toUpperCase() == 'PHOTO';
+
+    if (!isPhoto) {
+      _showInfoMessage('Solo la apertura de fotos está disponible por ahora.');
+      return;
+    }
+
+    if (!file.existsSync()) {
+      _showInfoMessage('No se encontró el archivo local de la evidencia.');
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      barrierColor: Colors.black87,
+      builder: (dialogContext) {
+        return Dialog.fullscreen(
+          backgroundColor: Colors.black,
+          child: Stack(
+            children: [
+              Center(
+                child: InteractiveViewer(
+                  minScale: 0.8,
+                  maxScale: 4,
+                  child: Image.file(file, fit: BoxFit.contain),
+                ),
+              ),
+              Positioned(
+                top: 16,
+                right: 16,
+                child: SafeArea(
+                  child: IconButton.filled(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white12,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+              ),
+              if ((ev.caption ?? '').trim().isNotEmpty)
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  bottom: 16,
+                  child: SafeArea(
+                    top: false,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.black54,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.white24),
+                      ),
+                      child: Text(
+                        ev.caption!.trim(),
+                        style: SaoTypography.bodyText.copyWith(color: Colors.white),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showInfoMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(content: Text(message)),
+      );
   }
 }

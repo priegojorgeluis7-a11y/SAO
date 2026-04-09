@@ -18,6 +18,7 @@ class DispatcherBottomSheet extends StatefulWidget {
   final List<AgendaItem> existingItems;
   final DateTime selectedDay;
   final String? projectId;
+  final String? currentUserId;
   final ValueChanged<AgendaItem> onCreate;
 
   const DispatcherBottomSheet({
@@ -26,6 +27,7 @@ class DispatcherBottomSheet extends StatefulWidget {
     required this.existingItems,
     required this.selectedDay,
     this.projectId,
+    this.currentUserId,
     required this.onCreate,
   });
 
@@ -70,6 +72,11 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   @override
   void initState() {
     super.initState();
+    final currentUserId = widget.currentUserId;
+    if (currentUserId != null &&
+        widget.resources.any((resource) => resource.id == currentUserId && resource.isActive)) {
+      _selectedResourceId = currentUserId;
+    }
     _loadWizardCatalogOptions();
     _loadProjectsAndFronts();
   }
@@ -313,6 +320,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
               .map((r) {
                 final selected = _selectedResourceId == r.id;
                 final hasConflict = _checkConflict(r.id, null, null);
+                final isCurrentUser = widget.currentUserId == r.id;
 
                 return GestureDetector(
                   onTap: () {
@@ -352,17 +360,45 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                       const SizedBox(height: 6),
                       SizedBox(
                         width: 74,
-                        child: Text(
-                          r.name.split(' ').first,
-                          textAlign: TextAlign.center,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                            color: selected
-                                ? SaoColors.actionPrimary
-                                : SaoColors.primaryLight,
-                          ),
+                        child: Column(
+                          children: [
+                            Text(
+                              r.name.split(' ').first,
+                              textAlign: TextAlign.center,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                                color: selected
+                                    ? SaoColors.actionPrimary
+                                    : SaoColors.primaryLight,
+                              ),
+                            ),
+                            if (isCurrentUser) ...[
+                              const SizedBox(height: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: SaoColors.actionPrimary.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: SaoColors.actionPrimary.withValues(alpha: 0.28),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'Yo',
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: SaoColors.actionPrimary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
                     ],

@@ -72,6 +72,23 @@ class TokenStorage {
 
   TokenStorage(this._storage);
 
+  bool _isSecureStorageCorruption(Object error) {
+    final text = error.toString();
+    return text.contains('AEADBadTagException') ||
+        text.contains('KeyStoreException') ||
+        text.contains('VERIFICATION_FAILED') ||
+        text.contains('EncryptedSharedPreferences initialization failed');
+  }
+
+  Future<void> _resetSecureStorage() async {
+    try {
+      await _storage.deleteAll();
+    } catch (_) {
+      // Best-effort cleanup.
+    }
+    _cachedTokenData = null;
+  }
+
   /// Get cached token data or load from storage
   Future<TokenData?> getTokenData() async {
     if (_cachedTokenData != null) {
@@ -86,8 +103,12 @@ class TokenStorage {
       _cachedTokenData = TokenData.fromJson(json);
       return _cachedTokenData;
     } catch (e) {
-      // If there's an error reading/parsing, clear the corrupted data
-      await clear();
+      // If storage is corrupted (AEAD/keystore), reset and continue logged out.
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      } else {
+        await clear();
+      }
       return null;
     }
   }
@@ -111,6 +132,17 @@ class TokenStorage {
       await _storage.write(key: _tokenDataKey, value: jsonString);
       _cachedTokenData = tokenData;
     } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+        try {
+          final jsonString = jsonEncode(tokenData.toJson());
+          await _storage.write(key: _tokenDataKey, value: jsonString);
+          _cachedTokenData = tokenData;
+          return;
+        } catch (_) {
+          // fall through to throw below
+        }
+      }
       throw Exception('Failed to save token data: $e');
     }
   }
@@ -177,10 +209,16 @@ class TokenStorage {
 
   /// Clear all stored tokens
   Future<void> clear() async {
-    await _storage.delete(key: _tokenDataKey);
-    await _storage.delete(key: _legacyAccessTokenKey);
-    await _storage.delete(key: _legacyRefreshTokenKey);
-    await _storage.delete(key: _legacyCurrentUserKey);
+    try {
+      await _storage.delete(key: _tokenDataKey);
+      await _storage.delete(key: _legacyAccessTokenKey);
+      await _storage.delete(key: _legacyRefreshTokenKey);
+      await _storage.delete(key: _legacyCurrentUserKey);
+    } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      }
+    }
     _cachedTokenData = null;
   }
 

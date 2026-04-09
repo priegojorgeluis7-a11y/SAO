@@ -10,15 +10,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from app.api.v1 import (
     activities,
+    activities_cancel,
+    activities_validate,
     assignments,
     audit,
     auth,
     catalog,
     completed_activities,
     dashboard,
+    dashboard_kpis,
     evidences,
     events,
     me,
+    notifications,
     ocr,
     observations,
     projects,
@@ -141,9 +145,12 @@ if settings.EVIDENCE_STORAGE_BACKEND == "local":
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(catalog.router, prefix=settings.API_V1_STR)
 app.include_router(activities.router, prefix=settings.API_V1_STR)
+app.include_router(activities_validate.router, prefix=settings.API_V1_STR)
+app.include_router(activities_cancel.router, prefix=settings.API_V1_STR)
 app.include_router(sync.router, prefix=settings.API_V1_STR)
 app.include_router(evidences.router, prefix=settings.API_V1_STR)
 app.include_router(events.router, prefix=settings.API_V1_STR)
+app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(me.router, prefix=settings.API_V1_STR)
 app.include_router(users.router, prefix=settings.API_V1_STR)
 app.include_router(assignments.router, prefix=settings.API_V1_STR)
@@ -155,6 +162,7 @@ app.include_router(observations.router, prefix=settings.API_V1_STR)
 app.include_router(ocr.router, prefix=settings.API_V1_STR)
 app.include_router(reports.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard.router, prefix=settings.API_V1_STR)
+app.include_router(dashboard_kpis.router, prefix=settings.API_V1_STR)
 app.include_router(completed_activities.router, prefix=settings.API_V1_STR)
 
 

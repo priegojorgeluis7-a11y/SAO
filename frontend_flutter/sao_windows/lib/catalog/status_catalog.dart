@@ -213,10 +213,18 @@ class StatusCatalog {
     required CatalogData catalog,
   }) {
     final workflowNode = _workflowNodeFor(catalog, activityType: activityType);
-    if (workflowNode == null) return const [];
+    
+    // If workflow not found in catalog, provide safe defaults
+    if (workflowNode == null) {
+      return _defaultTransitionsFor(status, role);
+    }
 
     final transitions = _transitionsFrom(workflowNode);
-    if (transitions.isEmpty) return const [];
+    
+    // If no transitions defined, use safe defaults as fallback
+    if (transitions.isEmpty) {
+      return _defaultTransitionsFor(status, role);
+    }
 
     final from = status.trim().toLowerCase();
     final result = <String>[];
@@ -237,7 +245,57 @@ class StatusCatalog {
       }
     }
 
+    // If no transitions matched the role/permissions, use defaults as fallback
+    if (result.isEmpty) {
+      return _defaultTransitionsFor(status, role);
+    }
+
     return result;
+  }
+
+  /// Default safe transitions when catalog is unavailable or empty
+  /// Ensures UI is never completely blocked
+  static List<String> _defaultTransitionsFor(String status, String role) {
+    final normalizedStatus = status.trim().toLowerCase();
+    
+    // State-specific defaults
+    switch (normalizedStatus) {
+      case 'nuevo':
+      case 'borrador':
+        return ['enProgreso', 'cancelada'];
+      
+      case 'enProgreso':
+      case 'enprogreso':
+        return ['enRevision', 'cancelada'];
+      
+      case 'enrevision':
+      case 'revision_pendiente':
+        // Role-based: only reviewers can approve/reject
+        if (role == 'COORDINATOR' || role == 'SUPERVISOR' || role == 'ADMIN') {
+          return ['aprobado', 'requiereCambios', 'rechazado'];
+        }
+        return ['cancelada'];
+      
+      case 'requierecambios':
+      case 'requires_changes':
+        return ['nuevo', 'enProgreso', 'cancelada'];
+      
+      case 'aprobado':
+      case 'approved':
+        return []; // Terminal (+ universal cancel)
+      
+      case 'rechazado':
+      case 'rejected':
+        return []; // Terminal (+ universal cancel)
+      
+      case 'cancelada':
+      case 'canceled':
+        return []; // Terminal
+      
+      default:
+        // Unknown state: provide safe options
+        return ['nuevo', 'cancelada'];
+    }
   }
 
   static Map<String, dynamic>? _workflowNodeFor(
@@ -299,7 +357,7 @@ class StatusCatalog {
     if (transitions is! List) return const <Map<String, dynamic>>[];
 
     return transitions
-        .whereType<Map>()
+        .whereType<Map<dynamic, dynamic>>()
         .map((m) => m.cast<String, dynamic>())
         .toList(growable: false);
   }

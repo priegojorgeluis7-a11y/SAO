@@ -1,190 +1,196 @@
 # SAO — Workflow de Actividades
-**Versión:** 1.0.0 | **Fecha:** 2026-03-04
+**Version:** 2.0.0 | **Fecha:** 2026-03-24
 
-## Actualizacion 2026-03-10
+## Objetivo
 
-- El flujo base operativo -> review -> pull fue validado en produccion controlada con resultado PASS.
-- `POST /review/activity/{id}/decision` ya opera en modo Firestore para approve/reject/approve_exception.
-- Evidencia del flujo validado:
-     - push status: `CREATED`
-     - estado final en pull: `COMPLETADA`
+Definir el contrato canonico del flujo operativo de actividades para backend, mobile y desktop.
 
----
+Este documento actualiza la semantica del flujo despues del cierre base F0-F5 y se alinea con:
 
-## 1. Estados y Transiciones
-
-### 1.1 Diagrama de Estados
-
-```
-                    ┌─────────┐
-                    │ BORRADOR │  (creado offline, no enviado)
-                    └────┬────┘
-                         │ operativo envía
-                         ▼
-                    ┌─────────┐
-                    │  NUEVO  │  (en servidor, pendiente revisión)
-                    └────┬────┘
-                         │ coordinador inicia revisión
-                         ▼
-                 ┌───────────────┐
-           ┌────►│  EN_REVISION  │◄────────────────┐
-           │     └───────┬───────┘                 │
-           │             │                         │
-           │    ┌────────┼──────────┐              │
-           │    ▼        ▼          ▼              │
-           │ APROBADO  RECHAZADO  REQUIERE_CAMBIOS ─┘
-           │    │        (✗)       operativo corrige
-           │    │
-           │    ▼
-           │ SINCRONIZADO  (terminal exitoso)
-           │
-           │ OFFLINE → SINCRONIZADO | CONFLICTO
-           │               CONFLICTO → EN_REVISION
-```
-
-### 1.2 Estados Definidos
-
-| Estado | Código Backend | Código Mobile | Descripción |
-|--------|---------------|---------------|-------------|
-| Borrador | `PENDIENTE` | `DRAFT` | Creada localmente, no enviada |
-| Nuevo | `EN_CURSO` | `READY_TO_SYNC` | En servidor, en espera de revisión |
-| En revisión | `REVISION_PENDIENTE` | `SYNCED` | Coordinador la está revisando |
-| Requiere cambios | — | — | Coordinador solicitó correcciones |
-| Aprobado | `COMPLETADA` | `SYNCED` | Aprobada por coordinador |
-| Rechazado | — | — | Rechazada (terminal) |
-| Sincronizado | — | `SYNCED` | Confirmada en servidor |
-| Offline | — | `DRAFT` | Pendiente de sync (sin red) |
-| Conflicto | — | `ERROR` | Conflicto detectado en push |
-
-> **Deuda:** Los estados del backend (`ExecutionState`) y del mobile (`SyncStatus`) no están completamente alineados. Ver AUDIT_REPORT.md §3.
-
-### 1.3 Transiciones y Permisos
-
-| Desde | Hacia | Condición | Rol mínimo | Endpoint |
-|-------|-------|-----------|------------|---------|
-| `borrador` | `nuevo` | Formulario completo, al menos 1 evidencia | OPERATIVO | Push sync |
-| `nuevo` | `en_revision` | Coordinador inicia review | COORD | Implícito en review queue |
-| `en_revision` | `aprobado` | Checklist OK, sin observaciones | COORD | `POST /review/activity/{id}/decision` |
-| `en_revision` | `rechazado` | Falla crítica no subsanable | COORD | `POST /review/activity/{id}/decision` |
-| `en_revision` | `requiere_cambios` | Observaciones pendientes | COORD | `POST /review/activity/{id}/decision` |
-| `requiere_cambios` | `en_revision` | Operativo corrige y reenvía | OPERATIVO | Push sync |
-| `requiere_cambios` | `rechazado` | Incumplimiento persistente | COORD | `POST /review/activity/{id}/decision` |
-| `aprobado` | `sincronizado` | Confirmación automática del servidor | SYSTEM | Automático |
-| `conflicto` | `en_revision` | Resolución manual | COORD | Pendiente UI |
-| Cualquier estado | `APPROVE_EXCEPTION` | Circunstancia excepcional | **ADMIN** | `POST /review/activity/{id}/decision` |
-
-Nota operativa 2026-03-10: la transición de decisión ya no depende de SQL en modo `DATA_BACKEND=firestore`.
+- `STATUS.md`
+- `IMPLEMENTATION_PLAN.md` (addendum 2026-03-24)
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
 
 ---
 
-## 2. Checklist de Actividad (por tipo)
+## 1. Modelo de estado canonico
 
-Los checklists son **catalog-driven**. Actualmente definidos en `effective.rules` del bundle:
+Una actividad se interpreta en tres dimensiones independientes.
 
-| Tipo | Checklist obligatorio |
-|------|----------------------|
-| CAM | Mínimo 1 foto, punto GPS |
-| REU | Lista de asistentes, acta |
-| ASP | Acta firmada, quórum documentado |
-| CIN | Intérprete identificado, minutas |
-| SOC | Material de difusión referenciado |
-| AIN | Institución participante registrada |
+## 1.1 Estado operativo
 
-> **FALTA:** Backend no valida checklists por tipo de actividad al momento de revisión. Actualmente el coordinador lo verifica manualmente.
+Describe el avance del trabajo en campo:
 
----
+- `PENDIENTE`
+- `EN_CURSO`
+- `POR_COMPLETAR`
+- `BLOQUEADA`
+- `CANCELADA`
 
-## 3. Cola de Revisión (Desktop)
+## 1.2 Estado de sincronizacion
 
-### 3.1 Tabs de la cola
+Describe la situacion de envio y consistencia con backend:
 
-| Tab | Filtro | Fuente de datos |
-|-----|--------|-----------------|
-| PENDIENTE | `status == PENDING_REVIEW` | `GET /review/queue` |
-| REQUIERE CAMBIOS | `status == CONFLICT` o flag `catalog_changed` | `GET /review/queue` + flags |
-| GPS | Flag `gps_mismatch == true` | `GET /review/queue` + flags |
-| RECHAZADO | `status == REJECTED` | `GET /review/queue` |
-| TODOS | Sin filtro | `GET /review/queue` |
+- `LOCAL_ONLY`
+- `READY_TO_SYNC`
+- `SYNC_IN_PROGRESS`
+- `SYNCED`
+- `SYNC_ERROR`
 
-> **Deuda actual:** GPS y REQUIERE CAMBIOS se detectan por `description.contains('gps')` (text matching). Ver AUDIT_REPORT.md §1.4. **Fix:** agregar campos estructurados `flags.gps_mismatch` y `flags.catalog_changed` en ActivityDTO.
+## 1.3 Estado de revision
 
-### 3.2 Pantalla de detalle (ValidationPage)
+Describe el ciclo de coordinacion:
 
-Paneles:
-- **Evidence Gallery** — fotos con captions, GPS stamp
-- **Activity Details** — datos del formulario dinámico
-- **Minimap** — visualización GPS de la actividad
-- **Review Actions** — botones Aprobar / Rechazar / Solicitar cambios
+- `NOT_APPLICABLE`
+- `PENDING_REVIEW`
+- `CHANGES_REQUIRED`
+- `APPROVED`
+- `REJECTED`
 
-### 3.3 Reject Playbook
+## 1.4 Regla de oro
 
-`GET /review/reject-playbook` devuelve:
-
-| Código | Descripción | Severidad |
-|--------|-------------|-----------|
-| `PHOTO_BLUR` | Foto borrosa o ilegible | MED |
-| `GPS_MISMATCH` | GPS no coincide con PKs declarados | HIGH |
-| `MISSING_INFO` | Información obligatoria ausente | MED |
-
-> **Deuda:** razones hardcoded en backend. Mover a tabla `reject_reasons` en BD.
+La UI debe consumir una proyeccion de flujo y evitar heuristicas locales que mezclen estados crudos de tablas distintas.
 
 ---
 
-## 4. Trazabilidad
+## 2. Ciclo de vida funcional
 
-### 4.1 Audit Log (Backend)
+## 2.1 Flujo base
 
-Cada decisión de workflow genera registro en `audit_logs`:
+1. La actividad entra en `PENDIENTE`.
+2. El operativo inicia y pasa a `EN_CURSO`.
+3. Al terminar ejecucion pasa a `POR_COMPLETAR`.
+4. El wizard consolida captura y evidencia.
+5. El item queda `READY_TO_SYNC`.
+6. Sync actualiza a `SYNCED` o `SYNC_ERROR`.
+7. Si requiere revision, entra a `PENDING_REVIEW`.
+8. Coordinacion decide `APPROVED`, `CHANGES_REQUIRED` o `REJECTED`.
+9. Si hay `CHANGES_REQUIRED`, el operativo corrige y reenvia.
 
-| Acción | Cuando |
-|--------|--------|
-| `REVIEW_APPROVE` | Actividad aprobada |
-| `REVIEW_REJECT` | Actividad rechazada |
-| `REVIEW_APPROVE_EXCEPTION` | Aprobación excepcional (ADMIN) |
-| `REVIEW_EVIDENCE_VALIDATE` | Evidencia validada individualmente |
-| `REVIEW_EVIDENCE_PATCH` | Evidencia modificada (caption, etc.) |
-| `OBSERVATION_CREATED` | Observación creada sobre actividad |
-| `OBSERVATION_RESOLVED` | Observación resuelta |
+## 2.2 Principio de visibilidad
 
-### 4.2 Activity Log (Mobile — local)
-
-`ActivityLog` table en Drift:
-
-| EventType | Cuando |
-|-----------|--------|
-| `CREATED` | Actividad creada |
-| `EDITED` | Formulario editado |
-| `EVIDENCE_ADDED` | Foto/evidencia agregada |
-| `SUBMITTED` | Enviada a revisión |
-| `SYNC_OK` | Sincronizada con servidor |
-
-> **FALTA:** Historial local no se expone al coordinador (no existe `GET /api/v1/activities/{uuid}/timeline`).
+Una actividad no debe desaparecer por cambios de estado interno. Puede cambiar de bandeja, pero debe permanecer visible segun su siguiente accion.
 
 ---
 
-## 5. Observaciones (módulo complementario)
+## 3. Transiciones clave
 
-Las observaciones son notas que el coordinador adjunta a una actividad durante revisión.
-
-**Endpoint:** `POST /observations` (⚠️ falta prefijo `/api/v1` — ver AUDIT_REPORT.md §4)
-
-**Estados:** pendiente → resolved
-
-**Workflow:**
-1. Coordinador crea observación con `severity`, `message`, `due_date`, `tags_json`.
-2. Operativo resuelve con `POST /mobile/observations/{id}/resolve`.
-3. Sistema registra `resolved_at`.
-
-> **Deuda:** Observaciones no tienen pantalla en mobile ni en desktop actualmente.
+| Evento | Estado operativo | Estado sync | Estado revision | Siguiente accion esperada |
+|-------|-------------------|-------------|-----------------|---------------------------|
+| Asignacion recibida | `PENDIENTE` | `SYNCED` o `LOCAL_ONLY` | `NOT_APPLICABLE` | Iniciar actividad |
+| Inicio de actividad | `EN_CURSO` | sin cambio | `NOT_APPLICABLE` | Ejecutar trabajo |
+| Fin de ejecucion | `POR_COMPLETAR` | sin cambio | `NOT_APPLICABLE` | Completar wizard |
+| Guardado valido de wizard | `POR_COMPLETAR` | `READY_TO_SYNC` | `NOT_APPLICABLE` | Enviar/sincronizar |
+| Push/Pull exitoso | sin cambio | `SYNCED` | `PENDING_REVIEW` o `NOT_APPLICABLE` | Esperar decision o continuar |
+| Error de sync | sin cambio | `SYNC_ERROR` | sin cambio | Reintentar o resolver conflicto |
+| Decision APPROVED | sin cambio | `SYNCED` | `APPROVED` | Cierre administrativo |
+| Decision CHANGES_REQUIRED | `POR_COMPLETAR` | `SYNCED` | `CHANGES_REQUIRED` | Corregir observaciones |
+| Decision REJECTED | `CANCELADA` o terminal | `SYNCED` | `REJECTED` | Cierre con trazabilidad |
 
 ---
 
-## 6. Eventos (módulo separado de actividades)
+## 4. Roles y permisos de decision
 
-Los eventos son incidentes operativos (no actividades planificadas).
+| Accion | Rol minimo |
+|-------|------------|
+| Iniciar/terminar/capturar actividad | `OPERATIVO` |
+| Aprobar/rechazar/solicitar cambios | `COORD` |
+| `APPROVE_EXCEPTION` | `ADMIN` |
 
-**Severidad:** LOW / MEDIUM / HIGH / CRITICAL
+Endpoint de decision:
 
-**Workflow actual:** Crear → (opcional) Resolver (`resolved_at != null`)
+- `POST /api/v1/review/activity/{id}/decision`
 
-> **FALTA:** Eventos no tienen cola de revisión. No está claro si deben pasar por el mismo workflow. **Assumption:** eventos con severidad HIGH/CRITICAL deberían tener revisión obligatoria.
+---
+
+## 5. Checklist y validaciones
+
+Los checklists son catalog-driven y deben permanecer alineados con el bundle vigente (`effective.rules`).
+
+Reglas operativas:
+
+1. La app puede guardar parcial en wizard, pero debe informar faltantes.
+2. El envio a revision debe aplicar validacion consistente entre cliente y backend.
+3. La devolucion por checklist debe indicar campo/regla accionable, no solo mensaje generico.
+
+---
+
+## 6. Revision y observaciones
+
+## 6.1 Cola de revision (desktop)
+
+La cola debe usar estados y flags estructurados, no text matching sobre descripcion.
+
+Tabs sugeridos:
+
+- Pendiente
+- Requiere cambios
+- GPS
+- Rechazado
+- Todos
+
+## 6.2 Observaciones estructuradas
+
+Una observacion de revision debe incluir como minimo:
+
+- categoria
+- severidad
+- campo o evidencia afectada
+- accion sugerida
+- fecha objetivo opcional
+
+Endpoints base:
+
+- `POST /api/v1/observations`
+- `GET /api/v1/mobile/observations`
+- `POST /api/v1/mobile/observations/{id}/resolve`
+
+---
+
+## 7. Trazabilidad
+
+Toda decision y correccion relevante debe quedar auditada.
+
+Eventos minimos esperados:
+
+- `REVIEW_APPROVE`
+- `REVIEW_REJECT`
+- `REVIEW_APPROVE_EXCEPTION`
+- `OBSERVATION_CREATED`
+- `OBSERVATION_RESOLVED`
+- eventos de sync asociados al ciclo (`SYNC_OK`, `SYNC_ERROR`, `CONFLICT_RESOLVED`)
+
+---
+
+## 8. Integracion con sync
+
+El workflow depende de sync para completar el ciclo operativo-administrativo.
+
+Regla:
+
+`POR_COMPLETAR` no implica `APPROVED`; la aprobacion es un estado de revision posterior al intercambio con backend.
+
+Referencia tecnica:
+
+- `docs/SYNC.md`
+
+---
+
+## 9. KPIs recomendados del flujo
+
+1. tiempo asignacion -> inicio
+2. tiempo fin -> captura completa
+3. tiempo captura -> sync exitosa
+4. tiempo en revision
+5. tasa de `CHANGES_REQUIRED` por tipo
+6. tasa de `SYNC_ERROR` por causa
+
+---
+
+## 10. Pendientes de mejora
+
+Los items de endurecimiento y roadmap viven en:
+
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
+- `docs/BACKLOG_MEJORA_FLUJO_2026-03-24.md`
+

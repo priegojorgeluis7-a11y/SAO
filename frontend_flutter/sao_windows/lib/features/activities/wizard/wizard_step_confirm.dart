@@ -62,7 +62,11 @@ class WizardStepConfirm extends StatelessWidget {
       ...controller.attendeesLocal,
     ]
         .where((a) => controller.selectedAttendeeIds.contains(a.id))
-        .map((a) => a.name)
+        .map((a) {
+          final representative = controller.attendeeRepresentative(a.id);
+          if (representative == null) return a.name;
+          return '${a.name} ($representative)';
+        })
         .toList();
     final attendeesText = attendeesList.isEmpty
         ? 'Ninguno'

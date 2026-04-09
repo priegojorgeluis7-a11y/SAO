@@ -32,6 +32,9 @@ class AgendaItem {
   final DateTime end;
   final RiskLevel risk;
   final SyncStatus syncStatus;
+  final String operationalState;
+  final String reviewState;
+  final String nextAction;
   final String? activityTypeId;
   final String? notes;
 
@@ -53,6 +56,9 @@ class AgendaItem {
     required this.end,
     this.risk = RiskLevel.bajo,
     this.syncStatus = SyncStatus.pending,
+    this.operationalState = 'PENDIENTE',
+    this.reviewState = 'NOT_APPLICABLE',
+    this.nextAction = 'SIN_ACCION',
     this.activityTypeId,
     this.notes,
   });
@@ -74,6 +80,9 @@ class AgendaItem {
     DateTime? end,
     RiskLevel? risk,
     SyncStatus? syncStatus,
+    String? operationalState,
+    String? reviewState,
+    String? nextAction,
     String? activityTypeId,
     String? notes,
   }) {
@@ -95,6 +104,9 @@ class AgendaItem {
       end: end ?? this.end,
       risk: risk ?? this.risk,
       syncStatus: syncStatus ?? this.syncStatus,
+      operationalState: operationalState ?? this.operationalState,
+      reviewState: reviewState ?? this.reviewState,
+      nextAction: nextAction ?? this.nextAction,
       activityTypeId: activityTypeId ?? this.activityTypeId,
       notes: notes ?? this.notes,
     );

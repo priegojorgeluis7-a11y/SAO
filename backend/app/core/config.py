@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     FIRESTORE_READ_EVENTS: bool = True
     FIRESTORE_READ_ACTIVITIES: bool = True
 
+    # Push notifications (FCM)
+    FCM_ENABLED: bool = False
+    FCM_SERVICE_ACCOUNT_JSON: str | None = None
+
     # JWT
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"

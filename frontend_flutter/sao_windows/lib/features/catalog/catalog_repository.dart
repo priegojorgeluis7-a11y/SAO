@@ -46,9 +46,10 @@ class CatalogRepository {
 
   /// Carga catálogo efectivo desde bundle (API) con fallback local.
   /// También carga items personalizados desde archivo local.
-  Future<void> init({String projectId = 'TMQ'}) async {
+  Future<void> init({String projectId = 'TMQ', bool forceReload = false}) async {
     final normalized = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
-    if (_ready && _projectId == normalized) return;
+    final hasCatalogData = _data.actividades.isNotEmpty;
+    if (!forceReload && _ready && _projectId == normalized && hasCatalogData) return;
 
     _projectId = normalized;
 
@@ -66,20 +67,23 @@ class CatalogRepository {
 
     final cachedBundle = await _readCachedBundle(_projectId);
     if (cachedBundle != null) {
-      _data = CatalogData.fromJson(cachedBundle);
+      final normalizedCached = _normalizeCatalogPayload(cachedBundle) ?? cachedBundle;
+      _data = CatalogData.fromJson(normalizedCached);
       _ready = true;
+      final cachedHasCatalog = _data.actividades.isNotEmpty;
 
-      final localHash = _extractBundleHash(cachedBundle);
+      final localHash = _extractBundleHash(normalizedCached);
       final updateAvailable = await _checkUpdatesWithFallback(
         projectId: _projectId,
         localHash: localHash,
       );
 
-      if (updateAvailable == false) {
+      // Only trust cache as terminal state when it already contains usable catalog.
+      if (cachedHasCatalog && updateAvailable == false) {
         return;
       }
 
-      if (updateAvailable == null) {
+      if (cachedHasCatalog && updateAvailable == null) {
         // Sin red o endpoint no disponible: conservar cache local.
         return;
       }
@@ -92,9 +96,14 @@ class CatalogRepository {
         '/catalog/bundle',
         queryParameters: {'project_id': _projectId},
       );
-      final map = Map<String, dynamic>.from(response.data as Map);
+      final map = _normalizeCatalogPayload(response.data);
+      if (map == null) throw Exception('Invalid catalog payload from /catalog/bundle');
+      final parsed = CatalogData.fromJson(map);
+      if (parsed.actividades.isEmpty) {
+        throw Exception('Empty catalog payload from /catalog/bundle');
+      }
       await _saveCachedBundle(_projectId, map);
-      _data = CatalogData.fromJson(map);
+      _data = parsed;
       _ready = true;
       return;
     } catch (_) {}
@@ -106,9 +115,14 @@ class CatalogRepository {
         '/api/v1/catalog/bundle',
         queryParameters: {'project_id': _projectId},
       );
-      final map = Map<String, dynamic>.from(response.data as Map);
+      final map = _normalizeCatalogPayload(response.data);
+      if (map == null) throw Exception('Invalid catalog payload from /api/v1/catalog/bundle');
+      final parsed = CatalogData.fromJson(map);
+      if (parsed.actividades.isEmpty) {
+        throw Exception('Empty catalog payload from /api/v1/catalog/bundle');
+      }
       await _saveCachedBundle(_projectId, map);
-      _data = CatalogData.fromJson(map);
+      _data = parsed;
       _ready = true;
       return;
     } catch (_) {}
@@ -120,26 +134,140 @@ class CatalogRepository {
         '/catalog/effective',
         queryParameters: {'project_id': _projectId},
       );
-      final map = Map<String, dynamic>.from(response.data as Map);
+      final map = _normalizeCatalogPayload(response.data);
+      if (map == null) throw Exception('Invalid catalog payload from /catalog/effective');
+      final parsed = CatalogData.fromJson(map);
+      if (parsed.actividades.isEmpty) {
+        throw Exception('Empty catalog payload from /catalog/effective');
+      }
       await _saveCachedBundle(_projectId, map);
-      _data = CatalogData.fromJson(map);
+      _data = parsed;
       _ready = true;
       return;
     } catch (_) {}
 
     // 4. Keep cached bundle if available and network fetch failed.
     if (cachedBundle != null) {
-      _data = CatalogData.fromJson(cachedBundle);
+      final normalizedCached = _normalizeCatalogPayload(cachedBundle) ?? cachedBundle;
+      _data = CatalogData.fromJson(normalizedCached);
       _ready = true;
       return;
     }
 
-    // 5. Do not fallback to bundled seed JSON.
-    // Using seed data in production can surface mock activities that do not
-    // belong to the real project catalog.
+    // 5. Last-resort fallback to bundled seed catalog so wizard dropdowns
+    // never degrade to free-text only when remote catalog is unavailable.
+    final seeded = await _loadBundledSeedCatalog();
+    if (seeded != null && seeded.actividades.isNotEmpty) {
+      _data = seeded;
+      _ready = true;
+      return;
+    }
+
+    // 6. Absolute fallback: keep empty model.
     _data = CatalogData.fromJson({});
 
     _ready = true;
+  }
+
+  /// Fuerza recarga remota del bundle (sin confiar en check-updates ni cache local).
+  ///
+  /// Se usa desde acciones manuales de "Actualizar catálogo" para evitar que
+  /// el dispositivo conserve conceptos eliminados en servidor por un cache viejo.
+  Future<void> refreshProjectBundleFromServer(
+    String projectId, {
+    bool purgeLocalCustom = false,
+  }) async {
+    _projectId = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
+
+    final endpoints = <String>[
+      '/catalog/bundle',
+      '/api/v1/catalog/bundle',
+      '/catalog/effective',
+    ];
+
+    final apiClient = GetIt.instance<ApiClient>();
+    for (final endpoint in endpoints) {
+      try {
+        final response = await apiClient.get<dynamic>(
+          endpoint,
+          queryParameters: {'project_id': _projectId},
+        );
+        final map = _normalizeCatalogPayload(response.data);
+        if (map == null) {
+          continue;
+        }
+
+        final parsed = CatalogData.fromJson(map);
+        if (parsed.actividades.isEmpty) {
+          continue;
+        }
+
+        await _saveCachedBundle(_projectId, map);
+        _data = parsed;
+        if (purgeLocalCustom) {
+          _customData = CustomCatalogData.empty();
+          _pendingCandidates = [];
+          await _saveCustomData();
+          await _savePendingCandidates();
+        }
+        _ready = true;
+        return;
+      } catch (_) {
+        // Probar siguiente endpoint.
+      }
+    }
+
+    // Fallback: mantener comportamiento anterior (cache/local seed) si red falla.
+    await loadProjectBundle(_projectId);
+  }
+
+  Map<String, dynamic>? _normalizeCatalogPayload(dynamic payload) {
+    if (payload is! Map) return null;
+
+    final map = Map<String, dynamic>.from(payload.cast<dynamic, dynamic>());
+
+    // Direct catalog payload signatures.
+    if (map.containsKey('schema') ||
+        map.containsKey('effective') ||
+        map.containsKey('activities') ||
+        map.containsKey('actividades')) {
+      return map;
+    }
+
+    // Wrapped payload signatures often used by gateways/backends.
+    const wrappers = <String>['data', 'bundle', 'catalog', 'result', 'payload'];
+    for (final key in wrappers) {
+      final nested = map[key];
+      final normalized = _normalizeCatalogPayload(nested);
+      if (normalized != null) return normalized;
+    }
+
+    return map;
+  }
+
+  Future<CatalogData?> _loadBundledSeedCatalog() async {
+    const assetCandidates = <String>[
+      'assets/base_seed_catalog.bundle.json',
+      'assets/catalogos.json',
+    ];
+
+    for (final assetPath in assetCandidates) {
+      try {
+        final raw = await rootBundle.loadString(assetPath);
+        final decoded = jsonDecode(raw);
+        if (decoded is! Map<String, dynamic>) {
+          continue;
+        }
+        final parsed = CatalogData.fromJson(decoded);
+        if (parsed.actividades.isNotEmpty) {
+          return parsed;
+        }
+      } catch (_) {
+        // Try next asset candidate.
+      }
+    }
+
+    return null;
   }
 
   Future<Map<String, dynamic>?> _readCachedBundle(String projectId) async {

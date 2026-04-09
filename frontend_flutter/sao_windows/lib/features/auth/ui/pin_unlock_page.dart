@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../application/auth_providers.dart';
-import '../application/auth_controller.dart';
 
 /// Pantalla de desbloqueo offline con PIN de 4 dígitos.
 /// Se muestra cuando hay tokens locales pero sin conexión a la red

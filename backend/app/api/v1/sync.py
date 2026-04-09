@@ -12,6 +12,7 @@ from app.core.api_errors import api_error
 from app.core.config import settings
 from app.core.firestore import get_firestore_client
 from app.core.rate_limit import enforce_rate_limit
+from app.core.utils import parse_firestore_dt
 from app.schemas.activity import ActivityDTO
 from app.schemas.sync import (
     SyncPullRequest,
@@ -31,19 +32,8 @@ def _enforce_sync_permission(
     project_id: str,
     db,
 ) -> None:
-    """Validate project-scoped permission for sync in both Firestore and SQL modes."""
+    """Validate project-scoped permission for sync."""
     has_permission = user_has_permission(current_user, permission_code, db, project_id=project_id)
-
-    # Test compatibility: some regression tests override get_current_user with a
-    # SQLAlchemy User instance. In firestore mode that object does not expose
-    # roles/permission_scopes fields expected by firestore permission resolver.
-    # Keep production behavior unchanged for real Firestore principals.
-    if (
-        not has_permission
-        and not hasattr(current_user, "roles")
-        and not hasattr(current_user, "permission_scopes")
-    ):
-        return
 
     if not has_permission:
         logger.warning(
@@ -59,18 +49,8 @@ def _enforce_sync_permission(
         )
 
 
-def _coerce_firestore_datetime(value: object | None) -> datetime | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str):
-        try:
-            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    return None
+# parse_firestore_dt imported from app.core.utils — canonical datetime coercion
+_coerce_firestore_datetime = parse_firestore_dt
 
 
 def _coerce_sync_version(value: object | None) -> int | None:
@@ -103,6 +83,8 @@ def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
     normalized["created_at"] = _coerce_firestore_datetime(normalized.get("created_at")) or now
     normalized["updated_at"] = _coerce_firestore_datetime(normalized.get("updated_at")) or now
     normalized["deleted_at"] = _coerce_firestore_datetime(normalized.get("deleted_at"))
+    if not isinstance(normalized.get("wizard_payload"), dict):
+        normalized["wizard_payload"] = None
     
     # Fallback: if assigned_to_user_id is missing or null, use created_by_user_id
     # This ensures every activity has a responsible user for mobile Home filtering
@@ -118,40 +100,58 @@ def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
 
 def _firestore_pull(request: SyncPullRequest) -> SyncPullResponse:
     client = get_firestore_client()
-    docs = [d.to_dict() or {} for d in client.collection("activities").stream()]
-
-    after_uuid = str(request.after_uuid) if request.after_uuid else None
-    upper = request.until_version
-
-    filtered: list[dict] = []
-    for doc in docs:
-        if doc.get("project_id") != request.project_id:
-            continue
-        sync_version = _coerce_sync_version(doc.get("sync_version"))
-        if sync_version is None:
-            continue
-        if upper is not None and sync_version > upper:
-            continue
-        if request.after_uuid is None:
-            if sync_version <= request.since_version:
-                continue
-        else:
-            doc_uuid = str(doc.get("uuid") or "")
-            if not (
-                sync_version > request.since_version
-                or (sync_version == request.since_version and doc_uuid > (after_uuid or ""))
-            ):
-                continue
-        filtered.append(doc)
-
-    filtered.sort(
-        key=lambda d: (_coerce_sync_version(d.get("sync_version")) or 0, str(d.get("uuid") or ""))
+    # Use indexed cursor-based query to avoid full project scans.
+    # Required index already exists: (project_id ASC, sync_version ASC, uuid ASC).
+    query = (
+        client.collection("activities")
+        .where("project_id", "==", request.project_id)
+        .order_by("sync_version", direction="ASCENDING")
+        .order_by("uuid", direction="ASCENDING")
     )
-    page = filtered[: request.limit]
-    has_more = len(filtered) > request.limit
+    if request.after_uuid is None:
+        query = query.where("sync_version", ">", request.since_version)
+    else:
+        query = query.where("sync_version", ">=", request.since_version)
+        query = query.start_after({"sync_version": request.since_version, "uuid": str(request.after_uuid)})
+    if request.until_version is not None:
+        query = query.where("sync_version", "<=", request.until_version)
+
+    try:
+        docs = list(query.limit(request.limit + 1).stream())
+    except Exception:
+        # Compatibility fallback for lightweight fake clients used in tests.
+        # Mirrors pre-optimization behavior while keeping production path indexed.
+        base_docs = [d.to_dict() or {} for d in client.collection("activities").where("project_id", "==", request.project_id).stream()]
+        filtered: list[dict] = []
+        after_uuid = str(request.after_uuid) if request.after_uuid else None
+        for doc in base_docs:
+            sync_version = _coerce_sync_version(doc.get("sync_version"))
+            if sync_version is None:
+                continue
+            if request.until_version is not None and sync_version > request.until_version:
+                continue
+            if request.after_uuid is None:
+                if sync_version <= request.since_version:
+                    continue
+            else:
+                doc_uuid = str(doc.get("uuid") or "")
+                if not (
+                    sync_version > request.since_version
+                    or (sync_version == request.since_version and doc_uuid > (after_uuid or ""))
+                ):
+                    continue
+            filtered.append(doc)
+        filtered.sort(key=lambda d: (_coerce_sync_version(d.get("sync_version")) or 0, str(d.get("uuid") or "")))
+        docs = filtered[: request.limit + 1]
+    has_more = len(docs) > request.limit
+    page_docs = docs[: request.limit]
 
     activity_dtos: list[ActivityDTO] = []
-    for item in page:
+    for snap in page_docs:
+        if hasattr(snap, "to_dict"):
+            item = snap.to_dict() or {}
+        else:
+            item = dict(snap or {})
         try:
             activity_dtos.append(_activity_dto_from_firestore_payload(item))
         except Exception as exc:
@@ -229,10 +229,58 @@ def _firestore_push(request: SyncPushRequest) -> SyncPushResponse:
     client = get_firestore_client()
     now = _utc_now()
     results: list[SyncPushResultItem] = []
+    supports_batch = hasattr(client, "batch")
+    batch = client.batch() if supports_batch else None
+    pending_result_indexes: list[int] = []
+    pending_write_count = 0
+
+    def _commit_pending_batch() -> None:
+        nonlocal batch, pending_result_indexes, pending_write_count
+        if not supports_batch:
+            pending_result_indexes = []
+            pending_write_count = 0
+            return
+        if pending_write_count == 0:
+            return
+        try:
+            batch.commit()
+        except Exception:
+            logger.exception("SYNC_PUSH_BATCH_COMMIT_FAILED")
+            for result_index in pending_result_indexes:
+                failed = results[result_index]
+                results[result_index] = _result_item(
+                    item_uuid=failed.uuid,
+                    result_status="INVALID",
+                    server_id=failed.server_id,
+                    sync_version=failed.sync_version,
+                    error_code="SERVER_ERROR",
+                    message="Failed to commit sync batch — check server logs",
+                )
+        finally:
+            batch = client.batch()
+            pending_result_indexes = []
+            pending_write_count = 0
+
+    # Cache catalog lookups per (project_id, catalog_version_id) for this request.
+    # A batch of N items sharing the same catalog generates 1 lookup instead of N×5.
+    catalog_cache: dict[tuple[str, str], set[str]] = {}
 
     for item in request.activities:
         try:
-            _firestore_push_item(client, now, request, item, results)
+            result_index, write_count = _firestore_push_item(
+                client,
+                batch,
+                now,
+                request,
+                item,
+                results,
+                catalog_cache,
+            )
+            if result_index is not None:
+                pending_result_indexes.append(result_index)
+            pending_write_count += write_count
+            if pending_write_count >= 450:
+                _commit_pending_batch()
         except Exception as exc:
             logger.exception(
                 "PUSH_ITEM_UNEXPECTED_ERROR uuid=%s project_id=%s error=%s",
@@ -251,16 +299,57 @@ def _firestore_push(request: SyncPushRequest) -> SyncPushResponse:
                 )
             )
 
+    _commit_pending_batch()
+
     return SyncPushResponse(results=results)
+
+
+def _mutable_activity_fields(
+    item: "SyncPushActivityItem",
+    now: datetime,
+    sync_version: int,
+    *,
+    wizard_payload: dict[str, object] | None,
+) -> dict:
+    """Return the mutable activity fields shared across create/update/undelete branches."""
+    return {
+        "project_id": item.project_id,
+        "front_id": str(item.front_id) if item.front_id else None,
+        "pk_start": item.pk_start,
+        "pk_end": item.pk_end,
+        "execution_state": item.execution_state,
+        "assigned_to_user_id": str(item.assigned_to_user_id) if item.assigned_to_user_id else None,
+        "catalog_version_id": str(item.catalog_version_id),
+        "activity_type_code": item.activity_type_code,
+        "latitude": item.latitude,
+        "longitude": item.longitude,
+        "title": item.title,
+        "description": item.description,
+        "wizard_payload": wizard_payload,
+        "updated_at": now,
+        "sync_version": sync_version,
+    }
+
+
+def _should_reset_review_metadata(existing: dict, item: "SyncPushActivityItem") -> bool:
+    """Clear stale coordinator rejection metadata when the operativo re-submits corrections."""
+    existing_decision = str(existing.get("review_decision") or "").strip().upper()
+    if existing_decision not in {"CHANGES_REQUIRED", "REQUEST_CHANGES", "REQUIRES_CHANGES", "REJECT"}:
+        return False
+
+    incoming_state = str(item.execution_state or "").strip().upper()
+    return incoming_state in {"REVISION_PENDIENTE", "COMPLETADA"}
 
 
 def _firestore_push_item(
     client,
+    batch,
     now: datetime,
     request: SyncPushRequest,
     item: SyncPushActivityItem,
     results: list[SyncPushResultItem],
-) -> None:
+    catalog_cache: dict[tuple[str, str], set[str]],
+) -> tuple[int | None, int]:
     """Process a single activity item in a Firestore push, appending to results."""
     if item.project_id != request.project_id:
         results.append(
@@ -276,12 +365,15 @@ def _firestore_push_item(
                 ),
             )
         )
-        return
+        return None, 0
 
-    valid_codes = _firestore_catalog_activity_codes(
-        project_id=item.project_id,
-        catalog_version_id=str(item.catalog_version_id),
-    )
+    cache_key = (item.project_id, str(item.catalog_version_id))
+    if cache_key not in catalog_cache:
+        catalog_cache[cache_key] = _firestore_catalog_activity_codes(
+            project_id=item.project_id,
+            catalog_version_id=str(item.catalog_version_id),
+        )
+    valid_codes = catalog_cache[cache_key]
     if not valid_codes:
         results.append(
             _result_item(
@@ -296,7 +388,7 @@ def _firestore_push_item(
                 ),
             )
         )
-        return
+        return None, 0
     if item.activity_type_code not in valid_codes:
         results.append(
             _result_item(
@@ -311,7 +403,7 @@ def _firestore_push_item(
                 ),
             )
         )
-        return
+        return None, 0
 
     doc_ref = client.collection("activities").document(str(item.uuid))
     snap = doc_ref.get()
@@ -320,30 +412,19 @@ def _firestore_push_item(
         payload = {
             "uuid": str(item.uuid),
             "server_id": None,
-            "project_id": item.project_id,
-            "front_id": str(item.front_id) if item.front_id else None,
-            "pk_start": item.pk_start,
-            "pk_end": item.pk_end,
-            "execution_state": item.execution_state,
-            "assigned_to_user_id": str(item.assigned_to_user_id) if item.assigned_to_user_id else None,
             "created_by_user_id": str(item.created_by_user_id),
-            "catalog_version_id": str(item.catalog_version_id),
-            "activity_type_code": item.activity_type_code,
-            "latitude": item.latitude,
-            "longitude": item.longitude,
-            "title": item.title,
-            "description": item.description,
-            "wizard_payload": item.wizard_payload,
             "gps_mismatch": False,
             "catalog_changed": False,
             "created_at": now,
-            "updated_at": now,
             "deleted_at": item.deleted_at,
-            "sync_version": 1,
+            **_mutable_activity_fields(item, now, 1, wizard_payload=item.wizard_payload),
         }
-        doc_ref.set(payload, merge=True)
+        if batch is None:
+            doc_ref.set(payload, merge=True)
+        else:
+            batch.set(doc_ref, payload, merge=True)
         results.append(_result_item(item.uuid, "CREATED", None, 1))
-        return
+        return len(results) - 1, 1
 
     existing = snap.to_dict() or {}
     existing_sync_version = int(existing.get("sync_version") or 0)
@@ -352,36 +433,36 @@ def _firestore_push_item(
     if existing_deleted_at is not None:
         if item.deleted_at is not None:
             results.append(_result_item(item.uuid, "UNCHANGED", existing.get("server_id"), existing_sync_version))
+            return None, 0
         elif request.force_override:
             next_sync = existing_sync_version + 1
-            doc_ref.set(
-                {
-                    "project_id": item.project_id,
-                    "front_id": str(item.front_id) if item.front_id else None,
-                    "pk_start": item.pk_start,
-                    "pk_end": item.pk_end,
-                    "execution_state": item.execution_state,
-                    "assigned_to_user_id": str(item.assigned_to_user_id) if item.assigned_to_user_id else None,
-                    "catalog_version_id": str(item.catalog_version_id),
-                    "activity_type_code": item.activity_type_code,
-                    "latitude": item.latitude,
-                    "longitude": item.longitude,
-                    "title": item.title,
-                    "description": item.description,
-                    "wizard_payload": item.wizard_payload,
-                    "deleted_at": None,
-                    "updated_at": now,
-                    "sync_version": next_sync,
-                },
-                merge=True,
-            )
+            payload = {
+                **_mutable_activity_fields(
+                    item,
+                    now,
+                    next_sync,
+                    wizard_payload=item.wizard_payload,
+                ),
+                "deleted_at": None,
+            }
+            if batch is None:
+                doc_ref.set(payload, merge=True)
+            else:
+                batch.set(doc_ref, payload, merge=True)
             results.append(_result_item(item.uuid, "UPDATED", existing.get("server_id"), next_sync))
+            return len(results) - 1, 1
         else:
             results.append(_result_item(item.uuid, "CONFLICT", existing.get("server_id"), existing_sync_version))
-        return
+            return None, 0
 
     incoming_sync = item.sync_version
     can_apply = request.force_override or incoming_sync is None or incoming_sync >= existing_sync_version
+
+    effective_wizard_payload = (
+        item.wizard_payload
+        if item.wizard_payload is not None
+        else existing.get("wizard_payload")
+    )
 
     mutable_changed = (
         existing.get("project_id") != item.project_id
@@ -397,39 +478,38 @@ def _firestore_push_item(
         or existing.get("longitude") != item.longitude
         or existing.get("title") != item.title
         or existing.get("description") != item.description
-        or existing.get("wizard_payload") != item.wizard_payload
+        or existing.get("wizard_payload") != effective_wizard_payload
     )
 
     if not mutable_changed:
         results.append(_result_item(item.uuid, "UNCHANGED", existing.get("server_id"), existing_sync_version))
-        return
+        return None, 0
 
     if not can_apply:
         results.append(_result_item(item.uuid, "CONFLICT", existing.get("server_id"), existing_sync_version))
-        return
+        return None, 0
 
     next_sync = existing_sync_version + 1
-    doc_ref.set(
-        {
-            "project_id": item.project_id,
-            "front_id": str(item.front_id) if item.front_id else None,
-            "pk_start": item.pk_start,
-            "pk_end": item.pk_end,
-            "execution_state": item.execution_state,
-            "assigned_to_user_id": str(item.assigned_to_user_id) if item.assigned_to_user_id else None,
-            "catalog_version_id": str(item.catalog_version_id),
-            "activity_type_code": item.activity_type_code,
-            "latitude": item.latitude,
-            "longitude": item.longitude,
-            "title": item.title,
-            "description": item.description,
-            "wizard_payload": item.wizard_payload,
-            "updated_at": now,
-            "sync_version": next_sync,
-        },
-        merge=True,
+    payload = _mutable_activity_fields(
+        item,
+        now,
+        next_sync,
+        wizard_payload=effective_wizard_payload,
     )
+    if _should_reset_review_metadata(existing, item):
+        payload.update(
+            {
+                "review_decision": None,
+                "review_comment": None,
+                "review_reject_reason_code": None,
+            }
+        )
+    if batch is None:
+        doc_ref.set(payload, merge=True)
+    else:
+        batch.set(doc_ref, payload, merge=True)
     results.append(_result_item(item.uuid, "UPDATED", existing.get("server_id"), next_sync))
+    return len(results) - 1, 1
 
 
 def _utc_now() -> datetime:

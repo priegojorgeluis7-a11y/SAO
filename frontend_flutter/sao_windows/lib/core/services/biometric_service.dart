@@ -1,5 +1,28 @@
+import 'package:flutter/services.dart';
 import 'package:local_auth/local_auth.dart';
 import '../utils/logger.dart';
+
+enum BiometricAuthFailure {
+  canceled,
+  notSupported,
+  notAvailable,
+  notEnrolled,
+  lockedOut,
+  permanentLockout,
+  other,
+}
+
+class BiometricAuthResult {
+  final bool authenticated;
+  final BiometricAuthFailure? failure;
+
+  const BiometricAuthResult._({required this.authenticated, this.failure});
+
+  const BiometricAuthResult.success() : this._(authenticated: true);
+
+  const BiometricAuthResult.failure(BiometricAuthFailure reason)
+      : this._(authenticated: false, failure: reason);
+}
 
 /// Servicio para autenticación biométrica (huella digital/Face ID)
 class BiometricService {
@@ -42,31 +65,75 @@ class BiometricService {
     required String localizedReason,
     bool useErrorDialogs = true,
     bool stickyAuth = true,
+    bool biometricOnly = true,
+  }) async {
+    final result = await authenticateWithResult(
+      localizedReason: localizedReason,
+      useErrorDialogs: useErrorDialogs,
+      stickyAuth: stickyAuth,
+      biometricOnly: biometricOnly,
+    );
+    return result.authenticated;
+  }
+
+  Future<BiometricAuthResult> authenticateWithResult({
+    required String localizedReason,
+    bool useErrorDialogs = true,
+    bool stickyAuth = true,
+    bool biometricOnly = true,
   }) async {
     try {
       final isSupported = await isDeviceSupported();
       if (!isSupported) {
         appLogger.w('Dispositivo no soporta biometría');
-        return false;
+        return const BiometricAuthResult.failure(BiometricAuthFailure.notSupported);
       }
 
       final canCheck = await canCheckBiometrics();
       if (!canCheck) {
         appLogger.w('Biometría no disponible');
-        return false;
+        return const BiometricAuthResult.failure(BiometricAuthFailure.notAvailable);
       }
 
-      return await _localAuth.authenticate(
+      final authenticated = await _localAuth.authenticate(
         localizedReason: localizedReason,
         options: AuthenticationOptions(
           useErrorDialogs: useErrorDialogs,
           stickyAuth: stickyAuth,
-          biometricOnly: true,
+          biometricOnly: biometricOnly,
         ),
       );
+      if (authenticated) {
+        return const BiometricAuthResult.success();
+      }
+      return const BiometricAuthResult.failure(BiometricAuthFailure.canceled);
+    } on PlatformException catch (e) {
+      final code = e.code.trim().toLowerCase();
+      appLogger.e('Error en autenticación biométrica ($code): ${e.message}');
+
+      if (code == 'notavailable' || code == 'no_hardware') {
+        return const BiometricAuthResult.failure(BiometricAuthFailure.notSupported);
+      }
+      if (code == 'notenrolled') {
+        return const BiometricAuthResult.failure(BiometricAuthFailure.notEnrolled);
+      }
+      if (code == 'lockedout') {
+        return const BiometricAuthResult.failure(BiometricAuthFailure.lockedOut);
+      }
+      if (code == 'permanentlylockedout') {
+        return const BiometricAuthResult.failure(BiometricAuthFailure.permanentLockout);
+      }
+      if (code == 'usercanceled' || code == 'systemcanceled') {
+        return const BiometricAuthResult.failure(BiometricAuthFailure.canceled);
+      }
+      if (code == 'passcodenotset') {
+        return const BiometricAuthResult.failure(BiometricAuthFailure.notAvailable);
+      }
+
+      return const BiometricAuthResult.failure(BiometricAuthFailure.other);
     } catch (e) {
       appLogger.e('Error en autenticación biométrica: $e');
-      return false;
+      return const BiometricAuthResult.failure(BiometricAuthFailure.other);
     }
   }
 

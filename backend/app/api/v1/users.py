@@ -4,7 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, status
 from app.core.api_errors import api_error
 
-from app.api.deps import get_current_user, require_any_role
+from app.api.deps import get_current_user, require_any_role, user_has_any_role
 from app.core.permission_catalog import CANONICAL_PERMISSION_CODES, DEFAULT_ROLE_PERMISSION_CODES
 from app.core.security import get_password_hash
 from app.core.enums import UserStatus
@@ -23,7 +23,9 @@ from app.services.audit_service import write_firestore_audit_log
 from app.services.firestore_identity_service import (
     list_firestore_users,
     create_firestore_user,
+    get_firestore_user_by_id,
     get_firestore_user_by_email,
+    delete_firestore_user,
     update_firestore_user,
 )
 
@@ -158,8 +160,36 @@ def list_admin_role_permissions(
 def list_users(
     role: Optional[str] = Query(None, description="Role filter, e.g. OPERATIVO"),
     project_id: Optional[str] = Query(None, description="Project scope filter"),
-    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"list_users called: current_user={current_user.full_name} roles={current_user.roles} role_query={role} project={project_id}")
+    
+    # If user is OPERATIVO ONLY (no ADMIN/COORD/SUPERVISOR), only return self
+    has_privileged_role = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
+    is_only_operativo = user_has_any_role(current_user, ["OPERATIVO"], None) and not has_privileged_role
+    
+    logger.info(f"  is_only_operativo={is_only_operativo} has_privileged_role={has_privileged_role}")
+    
+    if is_only_operativo:
+        principal = current_user
+        logger.info(f"  OPERATIVO-ONLY path: returning self {principal.full_name}")
+        if principal.status != UserStatus.ACTIVE:
+            return []
+        return [
+            UserAgendaListItem(
+                id=principal.id,
+                full_name=principal.full_name,
+                email=principal.email,
+                role_name=(principal.roles[0] if principal.roles else ""),
+                project_id=(principal.project_ids[0] if principal.project_ids else None),
+                is_active=principal.status == UserStatus.ACTIVE,
+            )
+        ]
+
+    logger.info(f"  Privileged path: fetching all users with role={role}")
     principals = list_firestore_users(role=role)
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
 
@@ -374,4 +404,38 @@ def update_admin_user(
         permission_codes=_firestore_merge_permission_codes(updated.roles, updated.permission_scopes),
         permission_scopes=_build_firestore_permission_scope_items(updated.permission_scopes),
     )
+
+
+@router.delete("/admin/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_admin_user(
+    user_id: str,
+    _current_user: Any = Depends(require_any_role(["ADMIN"])),
+):
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="USER_INVALID_ID", message="Invalid user id")
+
+    existing = get_firestore_user_by_id(user_uuid)
+    if existing is None:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+    if existing.status != UserStatus.INACTIVE:
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
+            code="USER_DELETE_REQUIRES_INACTIVE",
+            message="User must be inactive before deletion",
+        )
+
+    deleted = delete_firestore_user(user_uuid)
+    if not deleted:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+
+    write_firestore_audit_log(
+        action="USER_DELETED",
+        entity="user",
+        entity_id=str(existing.id),
+        actor=_current_user,
+        details={"email": existing.email, "roles": existing.roles},
+    )
+    return None
 

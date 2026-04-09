@@ -1,4 +1,5 @@
 // lib/ui/widgets/sao_evidence_viewer.dart
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -152,6 +153,68 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
     );
   }
 
+  Widget _buildImageContent({required BoxFit fit}) {
+    final source = widget.imageUrl.trim();
+    if (source.startsWith('asset:')) {
+      return Image.asset(
+        source.replaceFirst('asset:', '').trim(),
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
+      );
+    }
+
+    if (source.startsWith('file://')) {
+      final file = File(Uri.parse(source).toFilePath());
+      return Image.file(
+        file,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
+      );
+    }
+
+    final localFile = File(source);
+    if (!source.startsWith('http://') &&
+        !source.startsWith('https://') &&
+        localFile.existsSync()) {
+      return Image.file(
+        localFile,
+        fit: fit,
+        errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
+      );
+    }
+
+    return Image.network(
+      source,
+      fit: fit,
+      gaplessPlayback: true,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
+      loadingBuilder: (context, child, loadingProgress) {
+        if (loadingProgress == null) return child;
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(
+                value: loadingProgress.expectedTotalBytes != null
+                    ? loadingProgress.cumulativeBytesLoaded /
+                        loadingProgress.expectedTotalBytes!
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                'Cargando evidencia...',
+                style: SaoTypography.bodyText.copyWith(
+                  color: SaoColors.gray700,
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Column(
@@ -252,32 +315,7 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                                 angle: _rotationDegrees * 3.14159 / 180,
                                 child: Transform.scale(
                                   scale: _scale,
-                                  child: widget.imageUrl.startsWith('asset:')
-                                      ? Image.asset(
-                                          widget.imageUrl.replaceFirst('asset:', ''),
-                                          fit: BoxFit.contain,
-                                          errorBuilder: (context, error, stackTrace) {
-                                            return _buildErrorWidget();
-                                          },
-                                        )
-                                      : Image.network(
-                                          widget.imageUrl,
-                                          fit: BoxFit.contain,
-                                          errorBuilder: (context, error, stackTrace) {
-                                            return _buildErrorWidget();
-                                          },
-                                          loadingBuilder: (context, child, loadingProgress) {
-                                            if (loadingProgress == null) return child;
-                                            return Center(
-                                              child: CircularProgressIndicator(
-                                                value: loadingProgress.expectedTotalBytes != null
-                                                    ? loadingProgress.cumulativeBytesLoaded /
-                                                        loadingProgress.expectedTotalBytes!
-                                                    : null,
-                                              ),
-                                            );
-                                          },
-                                        ),
+                                  child: _buildImageContent(fit: BoxFit.contain),
                                 ),
                               ),
                             ),
@@ -309,10 +347,7 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                             ),
                             child: Transform.scale(
                               scale: lensZoom,
-                              child: Image.network(
-                                widget.imageUrl,
-                                fit: BoxFit.cover,
-                              ),
+                              child: _buildImageContent(fit: BoxFit.cover),
                             ),
                           ),
                         ),

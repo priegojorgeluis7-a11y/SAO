@@ -8,7 +8,8 @@ class AttendeesGroup extends StatelessWidget {
   final String title;
   final List<CatItem> items;
   final Set<String> selectedIds;
-  final void Function(String id) onToggle;
+  final Future<void> Function(CatItem attendee, bool willSelect) onToggle;
+  final String? Function(CatItem attendee)? detailBuilder;
   final VoidCallback? onAddNew;
 
   const AttendeesGroup({
@@ -17,6 +18,7 @@ class AttendeesGroup extends StatelessWidget {
     required this.items,
     required this.selectedIds,
     required this.onToggle,
+    this.detailBuilder,
     this.onAddNew,
   });
 
@@ -62,6 +64,7 @@ class AttendeesGroup extends StatelessWidget {
                 icon: const Icon(Icons.add, size: 16),
                 label: const Text('Agregar primero'),
                 style: TextButton.styleFrom(
+                  foregroundColor: AppColors.primary,
                   padding: EdgeInsets.zero,
                   minimumSize: const Size(0, 32),
                 ),
@@ -86,6 +89,7 @@ class AttendeesGroup extends StatelessWidget {
               ),
             ...items.map<Widget>((attendee) {
               final isSelected = selectedIds.contains(attendee.id);
+              final detail = detailBuilder?.call(attendee)?.trim();
               return CheckboxListTile(
                 value: isSelected,
                 dense: true,
@@ -96,7 +100,16 @@ class AttendeesGroup extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: AppTypography.bodyTextBold,
                 ),
-                onChanged: (_) => onToggle(attendee.id),
+                subtitle: detail == null || detail.isEmpty
+                    ? null
+                    : Text(
+                        detail,
+                        style: AppTypography.caption.copyWith(
+                          color: AppColors.gray600,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                onChanged: (_) async => onToggle(attendee, !isSelected),
               );
             }),
           ],

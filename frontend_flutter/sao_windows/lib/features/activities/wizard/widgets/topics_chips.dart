@@ -41,13 +41,14 @@ class TopicsChips extends StatelessWidget {
       children: items.map<Widget>((topic) {
         final isSelected = selectedIds.contains(topic.id);
         return ChoiceChip(
+          showCheckmark: false,
           label: Text(topic.name),
           selected: isSelected,
           onSelected: (_) => onToggle(topic.id),
           backgroundColor: AppColors.gray100,
           selectedColor: AppColors.primary,
           labelStyle: TextStyle(
-            color: isSelected ? AppColors.onPrimary : AppColors.primaryLight,
+            color: isSelected ? AppColors.onPrimary : AppColors.gray800,
             fontWeight: isSelected ? FontWeight.w600 : FontWeight.w500,
           ),
           side: BorderSide(

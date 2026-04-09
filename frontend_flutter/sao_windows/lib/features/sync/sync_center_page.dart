@@ -3,16 +3,18 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/catalog/state/catalog_providers.dart';
-import '../../core/catalog/api/catalog_api.dart';
 import '../../data/local/dao/activity_dao.dart';
+import '../catalog/catalog_repository.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../core/utils/snackbar.dart';
 import '../home/models/today_activity.dart';
 import 'catalog_update_summary.dart';
 import 'data/sync_provider.dart';
 import 'models/sync_models.dart';
+import 'widgets/upload_queue_item_card.dart';
 
 class SyncCenterPage extends ConsumerStatefulWidget {
   const SyncCenterPage({super.key});
@@ -279,10 +281,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
   }
 
   Future<void> _syncCatalogConcepts() async {
-    final projectId =
-        (GoRouterState.of(context).uri.queryParameters['project'] ?? 'TMQ')
-            .trim()
-            .toUpperCase();
+    final projectId = await _resolveCatalogProjectId();
     final versionKey = 'catalog_version:$projectId';
     final kv = ref.read(kvStoreProvider);
     final previousVersion = await kv.getString(versionKey);
@@ -295,6 +294,18 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     try {
       final syncService = ref.read(catalogSyncServiceProvider);
       await syncService.ensureCatalogUpToDate(projectId);
+
+      // Also refresh the wizard/admin bundle cache used by CatalogRepository.
+      // This avoids stale concepts lingering in mobile dropdowns after server removals.
+      try {
+        await GetIt.I<CatalogRepository>().refreshProjectBundleFromServer(
+          projectId,
+          purgeLocalCustom: true,
+        );
+      } catch (_) {
+        // Keep sync success even if bundle refresh fallback fails; Drift catalog is already updated.
+      }
+
       final currentVersion = await kv.getString(versionKey);
 
       if (!mounted) return;
@@ -338,11 +349,30 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
         ),
       );
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _catalogSyncing = false;
-      });
+      if (mounted) {
+        setState(() {
+          _catalogSyncing = false;
+        });
+      }
     }
+  }
+
+  Future<String> _resolveCatalogProjectId() async {
+    final fromRoute = (GoRouterState.of(context).uri.queryParameters['project'] ?? '')
+        .trim()
+        .toUpperCase();
+    if (fromRoute.isNotEmpty) {
+      return fromRoute;
+    }
+
+    final fromKv = (await ref.read(kvStoreProvider).getString('selected_project') ?? '')
+        .trim()
+        .toUpperCase();
+    if (fromKv.isNotEmpty) {
+      return fromKv;
+    }
+
+    return 'TMQ';
   }
 
   Future<void> _checkCatalogUpdateAvailability(String projectId) async {
@@ -1006,16 +1036,16 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
       (Icons.cloud_upload_rounded, SaoColors.info, '${_lastPushed ?? 0} enviados'),
     ];
     if ((_lastCreated ?? 0) > 0) {
-      chips.add((Icons.add_circle_outline_rounded, SaoColors.success, '${_lastCreated} creados'));
+      chips.add((Icons.add_circle_outline_rounded, SaoColors.success, '$_lastCreated creados'));
     }
     if ((_lastUpdated ?? 0) > 0) {
-      chips.add((Icons.edit_outlined, SaoColors.info, '${_lastUpdated} actualizados'));
+      chips.add((Icons.edit_outlined, SaoColors.info, '$_lastUpdated actualizados'));
     }
     if ((_lastConflicts ?? 0) > 0) {
-      chips.add((Icons.merge_type_rounded, SaoColors.warning, '${_lastConflicts} conflictos'));
+      chips.add((Icons.merge_type_rounded, SaoColors.warning, '$_lastConflicts conflictos'));
     }
     if ((_lastErrors ?? 0) > 0) {
-      chips.add((Icons.error_outline_rounded, SaoColors.error, '${_lastErrors} errores'));
+      chips.add((Icons.error_outline_rounded, SaoColors.error, '$_lastErrors errores'));
     }
 
     return Wrap(
@@ -1125,150 +1155,10 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
   }
 
   Widget _buildUploadItem(UploadQueueItem item) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: SaoColors.gray200,
-        ),
-      ),
-      child: Row(
-        children: [
-          // Icono
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: item.color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(
-              item.icon,
-              size: 22,
-              color: item.color,
-            ),
-          ),
-          const SizedBox(width: 14),
-
-          // Info
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  item.subtitle,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    color: SaoColors.gray400,
-                  ),
-                ),
-
-                // Progress bar para uploading
-                if (item.status == UploadItemStatus.uploading && item.progress != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: item.progress,
-                        backgroundColor: SaoColors.gray200,
-                        valueColor: AlwaysStoppedAnimation(item.color),
-                        minHeight: 6,
-                      ),
-                    ),
-                  ),
-
-                // Error message
-                if (item.status == UploadItemStatus.error && item.errorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      item.errorMessage!,
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: SaoColors.error,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          // Estado o botón de retry
-          if (item.status == UploadItemStatus.pending)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: SaoColors.warningBg,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: const Row(
-                children: [
-                  Icon(Icons.hourglass_empty_rounded, size: 14, color: SaoColors.warning),
-                  SizedBox(width: 4),
-                  Text(
-                    'Esperando',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: SaoColors.warning,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (item.status == UploadItemStatus.uploading)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: SaoColors.infoLight,
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      valueColor: AlwaysStoppedAnimation(item.color),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    '${(item.progress! * 100).toInt()}%',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
-                      color: item.color,
-                    ),
-                  ),
-                ],
-              ),
-            )
-          else if (item.status == UploadItemStatus.error)
-            IconButton(
-              icon: Icon(
-                item.isConflict ? Icons.merge_type_rounded : Icons.refresh_rounded,
-                size: 20,
-              ),
-              color: SaoColors.error,
-              onPressed: () => item.isConflict
-                  ? _showConflictDialog(item)
-                  : _retryItem(item),
-              tooltip: item.isConflict ? 'Resolver conflicto' : 'Reintentar',
-            ),
-        ],
-      ),
+    return UploadQueueItemCard(
+      item: item,
+      onRetry: item.retryable ? () => _retryItem(item) : null,
+      onResolveConflict: item.isConflict ? () => _showConflictDialog(item) : null,
     );
   }
 

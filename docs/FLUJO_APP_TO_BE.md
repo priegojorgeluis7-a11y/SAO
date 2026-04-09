@@ -1,140 +1,150 @@
 # Flujo Operativo SAO (TO-BE)
 
 ## Objetivo
-Definir el flujo objetivo para operación real de campo, con asignación remota, captura robusta, cancelación controlada y sincronización completa a nube.
+Definir el siguiente nivel de madurez del flujo, pasando de un sistema funcionalmente cerrado a un sistema con experiencia orientada a tareas, contrato unificado y menor friccion operativa.
 
-## Principios TO-BE
-- Operación **offline-first**: nada se pierde sin conexión.
-- Trazabilidad completa: estados, eventos y evidencias auditables.
-- Validación consistente: reglas iguales entre UI y guardado final.
-- Sincronización automática con reintentos y observabilidad.
+Documento alineado con:
 
-## Visión de tutorial (modo guiado)
-- En la pantalla de acceso, el usuario puede activar un switch: **Entrar en modo tutorial**.
-- Si está activo, entra al tutorial **sin iniciar sesión**.
-- El tutorial muestra una pantalla guiada con pasos operativos:
-    1. Revisar actividades asignadas.
-    2. Iniciar actividad (tiempo/ubicación).
-    3. Terminar y capturar en wizard.
-    4. Guardar y sincronizar.
-    5. Qué pasa si cancela (queda en revisión pendiente).
-- El tutorial se usa como onboarding práctico para personal nuevo o de refuerzo.
-- Desde esa pantalla, el usuario puede salir a operación real con **Comenzar operación real**.
+- `docs/WORKFLOW.md`
+- `docs/SYNC.md`
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
 
 ---
 
-## Diagrama de flujo TO-BE
+## Principios TO-BE
+
+1. Flujo unico: asignacion, ejecucion, captura, sync y revision se entienden como una sola historia.
+2. UX orientada a tareas: el usuario ve que hacer, no estados internos.
+3. Guardado incremental: ningun avance del wizard se pierde.
+4. Errores accionables: todo fallo de sync/revision explica causa y accion.
+5. Observabilidad operativa: dashboard y reportes miden friccion de proceso.
+
+---
+
+## Diagrama TO-BE (flujo objetivo)
 
 ```mermaid
 flowchart TD
-    A[Login + selección de proyecto] --> A1{Switch modo tutorial}
-    A1 -->|ON| A2[Pantalla tutorial guiada\n(sin login)]
-    A1 -->|OFF| B[Bootstrap de catálogos\n(sync versionado)]
-    A2 --> A3[Comenzar operación real]
-    A3 --> B
-    B --> C[Descarga asignaciones del día\npor usuario/rol/frente]
-    C --> D[Home con agenda real\n(Pendiente/En curso/Revisión/Terminada)]
+    A[Login + proyecto activo] --> B[Home orientada a tareas]
+    B --> C{Siguiente accion}
 
-    D --> E{Swipe derecho}
-    E -->|Pendiente| F[Iniciar actividad]
-    F --> F1[Guardar startedAt + geolocalización + auditoría]
-    F1 --> G[En curso]
+    C -->|Por iniciar| D[Iniciar actividad]
+    D --> E[EN_CURSO]
 
-    E -->|En curso| H[Terminar actividad]
-    H --> H1[Guardar finishedAt]
-    H1 --> I[Revisión pendiente]
-    I --> J[Abrir Wizard]
+    C -->|Por completar| F[Abrir wizard]
+    F --> F1[Contexto]
+    F1 --> F2[Clasificacion]
+    F2 --> F3[Evidencias]
+    F3 --> F4[Confirmacion]
 
-    E -->|Revisión pendiente| J
+    F4 --> G{Readiness}
+    G -->|Faltantes| H[Mostrar correcciones puntuales]
+    H --> F
+    G -->|Completo| I[READY_TO_SYNC]
 
-    J --> J1[Paso 1 Contexto]
-    J1 --> J2[Paso 2 Clasificación\n(catálogos relacionales)]
-    J2 --> J3[Paso 3 Evidencias\n(foto/video/PDF + metadata)]
-    J3 --> J4[Paso 4 Confirmación]
+    I --> J{Conectividad}
+    J -->|Online| K[Push + Pull incremental]
+    J -->|Offline| L[Cola local persistente]
+    L --> K
 
-    J4 --> K{Validación Gatekeeper}
-    K -->|Inválido| K1[Resaltar campo y regresar al paso]
-    K1 --> J
-    K -->|Válido| L[Guardar local: Activity + Fields + Evidence]
+    K --> M{Resultado sync}
+    M -->|OK| N[SYNCED]
+    M -->|Error recuperable| O[Retry automatico]
+    M -->|Requiere accion| P[Sync Center con accion sugerida]
 
-    L --> M[Marcar READY_TO_SYNC\ninsertar SyncQueue]
-    M --> N{Conectividad}
-    N -->|Online| O[Sync Worker en background]
-    N -->|Offline| P[Queda en cola local]
-
-    O --> Q{Resultado API}
-    Q -->|OK| R[Marcar SYNCED + SYNC_OK]
-    Q -->|Error temporal| S[Retry exponencial]
-    S --> O
-    Q -->|Error permanente| T[Marcar ERROR + mensaje acción]
-
-    P --> U[Usuario abre Centro Sync\n(forzar sync / retry / limpiar)]
-    U --> O
-
-    D --> V{Swipe izquierdo}
-    V --> W[Incidencia/Bloqueo]
-    W --> X[Estado CANCELED o BLOQUEADA\nsegún política]
+    N --> Q{Requiere revision}
+    Q -->|No| R[Cierre]
+    Q -->|Si| S[Review Queue]
+    S --> T{Decision coordinacion}
+    T -->|APPROVED| U[Cierre administrativo]
+    T -->|CHANGES_REQUIRED| V[Devuelta para correccion guiada]
+    T -->|REJECTED| W[Cierre rechazado con trazabilidad]
+    V --> F
 ```
 
 ---
 
-## Flujo de trabajo TO-BE para personal
+## Vista objetivo por dimensiones de estado
 
-### 1) Inicio de jornada
-1. Inicia sesión.
-2. Se sincronizan catálogos para el proyecto seleccionado.
-3. Se descargan asignaciones reales del día por usuario.
+## 1) Operativo
 
-### 2) Ejecución en campo
-1. Inicia actividad (timestamp + geolocalización).
-2. Realiza trabajo en sitio.
-3. Termina actividad y abre captura (wizard).
+- `PENDIENTE`
+- `EN_CURSO`
+- `POR_COMPLETAR`
+- `BLOQUEADA`
+- `CANCELADA`
 
-### 3) Captura obligatoria y cierre
-1. Completa contexto, clasificación y resultado.
-2. Adjunta evidencias con metadatos mínimos (tipo, fecha, descripción, hash).
-3. Gatekeeper valida y permite cerrar.
-4. Actividad pasa a **READY_TO_SYNC**.
+## 2) Sync
 
-### 4) Sincronización
-1. Si hay conexión, se sube automáticamente.
-2. Si no hay conexión, queda en cola local sin perder información.
-3. Worker procesa cola por prioridad + reintentos.
-4. Resultado final:
-   - **SYNCED** (éxito)
-   - **ERROR** (requiere acción)
+- `LOCAL_ONLY`
+- `READY_TO_SYNC`
+- `SYNC_IN_PROGRESS`
+- `SYNCED`
+- `SYNC_ERROR`
 
-### 5) Cancelación / incidencias
-- Si se abandona wizard antes de guardar: actividad permanece **Revisión pendiente**.
-- Si existe bloqueo real de operación: registrar incidencia y cerrar como **CANCELED/BLOQUEADA** con motivo.
+## 3) Revision
+
+- `NOT_APPLICABLE`
+- `PENDING_REVIEW`
+- `CHANGES_REQUIRED`
+- `APPROVED`
+- `REJECTED`
+
+Regla TO-BE: cada vista debe renderizar la siguiente accion a partir de esta proyeccion canonica, sin heuristicas locales.
 
 ---
 
-## Máquina de estados TO-BE
+## Experiencia objetivo por rol
 
-| Estado | Evento | Próximo estado | Persistencia |
-|---|---|---|---|
-| Pendiente | Iniciar | En curso | startedAt + log CREATED/STARTED |
-| En curso | Terminar | Revisión pendiente | finishedAt + log |
-| Revisión pendiente | Guardar wizard válido | Ready to sync | Activity + fields + evidences + queue |
-| Ready to sync | Sync OK | Synced | serverRevision + log SYNC_OK |
-| Ready to sync | Sync fail temporal | Ready to sync | attempts++ + retry |
-| Ready to sync | Sync fail permanente | Error | lastError + acción usuario |
-| Cualquiera | Incidencia grave | Canceled/Bloqueada | motivo + evidencia opcional |
+## Operativo
+
+1. Home en bandejas de trabajo: por iniciar, en curso, por completar, por corregir, con error de envio.
+2. Wizard recuperable en cualquier paso.
+3. Readiness previo al submit con faltantes claros.
+4. Sync Center con causa de error y accion sugerida.
+
+## Coordinacion (desktop)
+
+1. Cola de revision basada en datos estructurados.
+2. ValidationPage prioriza checklist, GPS, evidencias y observaciones.
+3. Devolucion estructurada por categoria, severidad, campo/evidencia afectada y accion requerida.
 
 ---
 
-## Reglas funcionales sugeridas TO-BE
-- Una sola fuente de verdad para validación (UI y backend alineados).
-- Evidencia mínima configurable por tipo de actividad (catálogo).
-- Reintentos automáticos con backoff exponencial y tope por política.
-- Centro de Sync con acciones: reintentar item, forzar todo, ver errores, limpiar completados.
-- Telemetría: tiempos de ciclo (inicio→fin→sync), tasa de error, backlog de cola.
+## Reglas funcionales TO-BE
+
+1. Una actividad no desaparece: solo cambia de bandeja segun siguiente accion.
+2. Captura parcial permitida, submit final con validacion consistente cliente-backend.
+3. Sync expone errores tipificados (`code`, `retryable`, `suggested_action`).
+4. Asignaciones y reasignaciones incrementan version y mantienen responsable efectivo persistido.
+5. Cierre administrativo solo despues de resultado de revision cuando aplique.
+
+---
+
+## KPIs objetivo
+
+1. tiempo asignacion -> inicio
+2. tiempo fin -> captura completa
+3. tiempo captura -> sync exitosa
+4. tiempo en revision
+5. tasa de cambios requeridos por tipo
+6. tasa de error de sync por categoria
 
 ---
 
 ## Gap principal AS-IS vs TO-BE
-1. Asignación del día: de seed local a agenda real por backend.
-2. Sync de actividades: de parcial/manual a worker completo y automático.
-3. Estados finales: de “terminada visual” a “terminada + sincronizada verificable”.
-4. Incidencias: de retorno simple a Pendiente, a flujo formal cancelado/bloqueado con trazabilidad.
+
+1. Pasar de estados tecnicos visibles a bandejas por tarea.
+2. Pasar de devolucion de revision reactiva a correccion guiada y estructurada.
+3. Pasar de sync centrado en mecanica a sync centrado en accion operativa.
+4. Pasar de monitoreo por volumen a KPIs de friccion de proceso.
+
+---
+
+## Implementacion
+
+El detalle de ejecucion de este TO-BE se encuentra en:
+
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
+- `docs/BACKLOG_MEJORA_FLUJO_2026-03-24.md`
+

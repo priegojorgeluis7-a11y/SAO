@@ -165,7 +165,7 @@ class GpsTaggingService {
         altitude: position.altitude,
         heading: position.heading,
         speed: position.speed,
-        timestampEpochMs: position.timestamp?.millisecondsSinceEpoch,
+        timestampEpochMs: position.timestamp.millisecondsSinceEpoch,
       );
 
       appLogger.i('✅ Location acquired: $location');
@@ -204,7 +204,7 @@ class GpsTaggingService {
         altitude: position.altitude,
         heading: position.heading,
         speed: position.speed,
-        timestampEpochMs: position.timestamp?.millisecondsSinceEpoch,
+        timestampEpochMs: position.timestamp.millisecondsSinceEpoch,
       );
     } catch (e, stack) {
       appLogger.e('❌ Error getting location with accuracy $accuracy', error: e, stackTrace: stack);
@@ -233,7 +233,7 @@ class GpsTaggingService {
         altitude: position.altitude,
         heading: position.heading,
         speed: position.speed,
-        timestampEpochMs: position.timestamp?.millisecondsSinceEpoch,
+        timestampEpochMs: position.timestamp.millisecondsSinceEpoch,
       );
     }).handleError((Object e, StackTrace stack) {
       appLogger.e('❌ Error in location stream', error: e, stackTrace: stack);

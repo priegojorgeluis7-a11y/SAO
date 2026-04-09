@@ -4,11 +4,13 @@ import 'package:intl/intl.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../data/catalog/activity_status.dart';
 import '../../../data/repositories/catalog_repository.dart';
+import '../../../data/repositories/assignments_repository.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../ui/widgets/activity_diff_field.dart';
+import '../activity_queue_projection.dart';
 import 'catalog_substitution_modal.dart';
 
 /// Panel Central PRO con 3 Tabs:
@@ -24,8 +26,10 @@ class ActivityDetailsPanelPro extends ConsumerStatefulWidget {
   final Function(String field)? onAcceptChange;
   final Function(String field)? onRevertChange;
   final Future<void> Function(String field, String capturedValue)? onCatalogAdd;
-  final Future<void> Function(String field, String capturedValue, String selectedValue)? onCatalogLink;
-  final Future<void> Function(String field, String capturedValue)? onCatalogCorrection;
+  final Future<void> Function(
+      String field, String capturedValue, String selectedValue)? onCatalogLink;
+  final Future<void> Function(String field, String capturedValue)?
+      onCatalogCorrection;
 
   const ActivityDetailsPanelPro({
     super.key,
@@ -42,10 +46,12 @@ class ActivityDetailsPanelPro extends ConsumerStatefulWidget {
   });
 
   @override
-  ConsumerState<ActivityDetailsPanelPro> createState() => _ActivityDetailsPanelProState();
+  ConsumerState<ActivityDetailsPanelPro> createState() =>
+      _ActivityDetailsPanelProState();
 }
 
-class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPro>
+class _ActivityDetailsPanelProState
+    extends ConsumerState<ActivityDetailsPanelPro>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
   late TextEditingController _quickTitleController;
@@ -54,6 +60,8 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
   String? _temaLink;
   String? _propositoLink;
   String? _municipioLink;
+  final Set<String> _expandedCatalogFields = <String>{};
+  List<String> _projectCoverageMunicipalities = const [];
 
   @override
   void initState() {
@@ -63,6 +71,7 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     _quickDescriptionController = TextEditingController();
     _syncEditorsWithActivity(widget.activity);
     _ensureCatalogLoaded(widget.activity);
+    _ensureProjectCoverageLoaded(widget.activity);
   }
 
   @override
@@ -71,6 +80,7 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     if (oldWidget.activity?.activity.id != widget.activity?.activity.id) {
       _syncEditorsWithActivity(widget.activity);
       _ensureCatalogLoaded(widget.activity);
+      _ensureProjectCoverageLoaded(widget.activity);
     }
   }
 
@@ -84,6 +94,60 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
         catalogRepo.projectId != projectId.toUpperCase()) {
       await catalogRepo.loadProject(projectId);
       if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _ensureProjectCoverageLoaded(
+      ActivityWithDetails? activity) async {
+    if (activity == null) return;
+    final projectId = activity.activity.projectId.trim();
+    if (projectId.isEmpty) return;
+
+    try {
+      final repo = ref.read(assignmentsRepositoryProvider);
+      final coverageByFront = await repo.getFrontCoverageByFront(projectId);
+
+      final preferredKeys = <String>{
+        activity.front?.id.trim() ?? '',
+        activity.front?.name.trim() ?? '',
+      }..removeWhere((item) => item.isEmpty);
+
+      final normalizedMap = <String, List<AssignmentFrontCoverageOption>>{};
+      coverageByFront.forEach((key, value) {
+        normalizedMap[key.trim().toLowerCase()] = value;
+      });
+
+      final selectedCoverage = <AssignmentFrontCoverageOption>[];
+      for (final key in preferredKeys) {
+        final entries = normalizedMap[key.toLowerCase()] ??
+            const <AssignmentFrontCoverageOption>[];
+        if (entries.isNotEmpty) {
+          selectedCoverage.addAll(entries);
+        }
+      }
+
+      final source = selectedCoverage.isNotEmpty
+          ? selectedCoverage
+          : normalizedMap.values.expand((items) => items);
+
+      final municipalitiesByKey = <String, String>{};
+      for (final entry in source) {
+        final municipio = entry.municipio.trim();
+        if (municipio.isEmpty) continue;
+        municipalitiesByKey.putIfAbsent(
+            municipio.toLowerCase(), () => municipio);
+      }
+
+      final municipalities = municipalitiesByKey.values.toList(growable: false)
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+      if (mounted) {
+        setState(() {
+          _projectCoverageMunicipalities = municipalities;
+        });
+      }
+    } catch (_) {
+      // keep graceful fallback
     }
   }
 
@@ -104,6 +168,7 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     _subcategoriaLink = null;
     _temaLink = null;
     _propositoLink = null;
+    _expandedCatalogFields.clear();
     _municipioLink =
         _extractLinkedMunicipality(description) ?? activity?.municipality?.name;
   }
@@ -151,16 +216,16 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
               indicatorColor: SaoColors.primary,
               labelStyle: SaoTypography.buttonText,
               tabs: const [
-                Tab(text: 'Detalles'),
-                Tab(text: 'Historial'),
-                Tab(text: 'Validación Técnica'),
+                Tab(text: '1. Revisar datos'),
+                Tab(text: '2. Historial'),
+                Tab(text: '3. Resolver técnico'),
               ],
             ),
           ),
           _buildValidationStepper(activity),
-          if (hasBlockers)
-            _buildDecisionPill(decisionIssues),
-          
+          _buildActionGuide(activity, decisionIssues),
+          if (hasBlockers) _buildDecisionPill(decisionIssues),
+
           // Contenido de tabs
           Expanded(
             child: TabBarView(
@@ -168,10 +233,10 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
               children: [
                 // TAB 1: DETALLES
                 _buildDetallesTab(activity),
-                
+
                 // TAB 2: HISTORIAL
                 _buildHistorialTab(activity),
-                
+
                 // TAB 3: VALIDACIÓN TÉCNICA
                 _buildValidacionTecnicaTab(activity),
               ],
@@ -183,7 +248,135 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
   }
 
   Widget _buildStatusRow(ActivityWithDetails activity) {
-    final statusColor = _statusColor(activity.statusColor);
+    final normalizedStatus = ActivityStatus.normalize(
+      deriveActivityQueueStatus(activity),
+    );
+    final statusKey = switch (normalizedStatus) {
+      ActivityStatus.approved => 'success',
+      ActivityStatus.rejected => 'error',
+      ActivityStatus.needsFix => 'info',
+      ActivityStatus.corrected => 'info',
+      ActivityStatus.conflict => 'warning',
+      _ => 'warning',
+    };
+    final statusColor = _statusColor(statusKey);
+    final statusLabel = deriveActivityQueueStatusLabel(activity).toUpperCase();
+    final statusMessage = deriveActivityQueueStatusMessage(activity);
+    final reviewComments = (activity.activity.reviewComments ?? '').trim();
+    final reviewedBy = (activity.activity.reviewedBy ?? '').trim();
+    final reviewedAt = activity.activity.reviewedAt;
+    final reviewedMeta = [
+      if (reviewedBy.isNotEmpty) 'Revisó: $reviewedBy',
+      if (reviewedAt != null)
+        'Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(reviewedAt.toLocal())}',
+    ].join('  ·  ');
+    final statusIcon = switch (normalizedStatus) {
+      ActivityStatus.approved => Icons.check_circle_rounded,
+      ActivityStatus.rejected => Icons.cancel_rounded,
+      ActivityStatus.needsFix => Icons.edit_note_rounded,
+      ActivityStatus.corrected => Icons.autorenew_rounded,
+      ActivityStatus.conflict => Icons.warning_amber_rounded,
+      _ => Icons.pending_actions_rounded,
+    };
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: SaoSpacing.lg,
+        vertical: SaoSpacing.md,
+      ),
+      decoration: BoxDecoration(
+        color: statusColor.withOpacity(0.08),
+        border: Border(
+          bottom: BorderSide(color: SaoColors.border),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: EdgeInsets.all(SaoSpacing.xs),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(SaoRadii.md),
+                ),
+                child: Icon(statusIcon, size: 18, color: statusColor),
+              ),
+              SizedBox(width: SaoSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Validación Técnica',
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray600,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      statusMessage,
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray700,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: SaoSpacing.sm,
+                  vertical: SaoSpacing.xs,
+                ),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(SaoRadii.full),
+                  border: Border.all(color: statusColor),
+                ),
+                child: Text(
+                  statusLabel,
+                  style: SaoTypography.caption.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 0.4,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (reviewComments.isNotEmpty || reviewedMeta.isNotEmpty) ...[
+            SizedBox(height: SaoSpacing.sm),
+            if (reviewComments.isNotEmpty)
+              Text(
+                'Motivo: $reviewComments',
+                style: SaoTypography.caption.copyWith(
+                  color: SaoColors.gray700,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            if (reviewComments.isNotEmpty && reviewedMeta.isNotEmpty)
+              SizedBox(height: 2),
+            if (reviewedMeta.isNotEmpty)
+              Text(
+                reviewedMeta,
+                style: SaoTypography.caption.copyWith(
+                  color: SaoColors.gray500,
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDecisionPill(List<String> issues) {
+    final preview = issues.take(2).join(' · ');
+    final totalIssues = issues.length;
+
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(
@@ -191,37 +384,100 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
         vertical: SaoSpacing.sm,
       ),
       decoration: BoxDecoration(
+        color: SaoColors.error.withOpacity(0.06),
+        border: Border(
+          bottom: BorderSide(color: SaoColors.border),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.warning_amber_rounded, size: 18, color: SaoColors.error),
+          SizedBox(width: SaoSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Atención requerida',
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.error,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                SizedBox(height: SaoSpacing.xs),
+                Text(
+                  totalIssues == 0
+                      ? 'Faltan validaciones técnicas por resolver antes de aprobar.'
+                      : '$totalIssues pendiente(s) antes de validar.${preview.isEmpty ? '' : ' $preview'}',
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.error,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionGuide(ActivityWithDetails activity, List<String> issues) {
+    final hasCatalogChange = _hasCatalogGap(activity);
+    final hasEvidence = activity.evidences.isNotEmpty;
+    final readyToApprove = issues.isEmpty;
+    final accentColor = readyToApprove ? SaoColors.success : SaoColors.primary;
+    final nextAction = readyToApprove
+        ? 'Revisa la evidencia y presiona “Validar y enviar”.'
+        : hasCatalogChange
+            ? 'Primero vincula o corrige los campos de catálogo marcados.'
+            : !hasEvidence
+                ? 'Primero espera o confirma la evidencia técnica.'
+                : 'Revisa la evidencia y luego decide si validas o solicitas corrección.';
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: SaoSpacing.lg,
+        vertical: SaoSpacing.sm,
+      ),
+      decoration: BoxDecoration(
+        color: accentColor.withOpacity(0.05),
         border: Border(
           bottom: BorderSide(color: SaoColors.border),
         ),
       ),
       child: Row(
         children: [
+          Icon(Icons.route_rounded, size: 16, color: accentColor),
+          SizedBox(width: SaoSpacing.sm),
           Expanded(
             child: Text(
-              'Validación Técnica',
+              'Qué hacer ahora: $nextAction',
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
               style: SaoTypography.caption.copyWith(
-                color: SaoColors.gray600,
+                color: SaoColors.gray700,
                 fontWeight: FontWeight.w600,
               ),
             ),
           ),
+          SizedBox(width: SaoSpacing.sm),
           Container(
             padding: EdgeInsets.symmetric(
               horizontal: SaoSpacing.sm,
               vertical: SaoSpacing.xs,
             ),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.15),
+              color: accentColor.withOpacity(0.14),
               borderRadius: BorderRadius.circular(SaoRadii.full),
-              border: Border.all(color: statusColor),
             ),
             child: Text(
-              activity.statusLabel.toUpperCase(),
+              readyToApprove ? 'Lista para aprobar' : '${issues.length} pendiente(s)',
               style: SaoTypography.caption.copyWith(
-                color: statusColor,
+                color: accentColor,
                 fontWeight: FontWeight.w700,
-                letterSpacing: 0.4,
               ),
             ),
           ),
@@ -230,47 +486,63 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     );
   }
 
-  Widget _buildDecisionPill(List<String> issues) {
+  Widget _buildActionChip({
+    required String step,
+    required String title,
+    required String state,
+    required bool done,
+  }) {
+    final color = done ? SaoColors.success : SaoColors.warning;
     return Container(
-      width: double.infinity,
-      padding: EdgeInsets.symmetric(
-        horizontal: SaoSpacing.lg,
-        vertical: SaoSpacing.sm,
-      ),
+      constraints: const BoxConstraints(minWidth: 160),
+      padding: EdgeInsets.all(SaoSpacing.sm),
       decoration: BoxDecoration(
-        color: SaoColors.error.withOpacity(0.08),
-        border: Border(
-          bottom: BorderSide(color: SaoColors.border),
-        ),
+        color: SaoColors.surface,
+        borderRadius: BorderRadius.circular(SaoRadii.md),
+        border: Border.all(color: SaoColors.border),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.warning_rounded, size: 18, color: SaoColors.error),
-          SizedBox(width: SaoSpacing.sm),
-          Expanded(
-            child: Text(
-              'NO APROBABLE: ${issues.join(' · ')}',
-              style: SaoTypography.caption.copyWith(
-                color: SaoColors.error,
-                fontWeight: FontWeight.w600,
-              ),
-              overflow: TextOverflow.ellipsis,
+          Container(
+            width: 24,
+            height: 24,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.14),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: done
+                  ? Icon(Icons.check_rounded, size: 14, color: color)
+                  : Text(
+                      step,
+                      style: SaoTypography.caption.copyWith(
+                        color: color,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
             ),
           ),
-          TextButton.icon(
-            onPressed: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Resolver pendientes - pendiente de flujo'),
-                  backgroundColor: SaoColors.info,
+          SizedBox(width: SaoSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.gray700,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              );
-            },
-            icon: Icon(Icons.playlist_add_check_rounded, size: 16),
-            label: Text('Resolver'),
-            style: TextButton.styleFrom(
-              foregroundColor: SaoColors.error,
-              padding: EdgeInsets.symmetric(horizontal: SaoSpacing.sm),
+                SizedBox(height: 2),
+                Text(
+                  state,
+                  style: SaoTypography.caption.copyWith(
+                    color: done ? SaoColors.success : SaoColors.gray600,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -279,8 +551,7 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
   }
 
   Widget _buildValidationStepper(ActivityWithDetails activity) {
-    final hasOperationalData =
-        activity.activity.title.trim().isNotEmpty &&
+    final hasOperationalData = activity.activity.title.trim().isNotEmpty &&
         activity.activity.description?.trim().isNotEmpty == true;
     final catalogResolved = !_hasCatalogGap(activity);
     final hasEvidence = activity.evidences.isNotEmpty;
@@ -376,24 +647,21 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
   }
 
   List<String> _getDecisionIssues(ActivityWithDetails activity) {
-    final issues = <String>[];
+    final issues = <String>[
+      ...deriveActivityBlockingIssues(activity),
+    ];
 
-    final hasCatalogChange =
-        (activity.activity.description ?? '').trim() != 'Descripción original';
-    final gpsCritical = activity.activity.status == ActivityStatus.needsFix;
-    final checklistPending = activity.activity.status == ActivityStatus.pendingReview;
+    final hasCatalogChange = _hasCatalogGap(activity);
+    final checklistPending = activity.flags.checklistIncomplete;
     final highRisk = (activity.activity.description ?? '')
         .toLowerCase()
         .contains('gasoducto');
 
-    if (gpsCritical) {
-      issues.add('Discrepancia GPS critica');
+    if (hasCatalogChange && !issues.contains('Cambio de catálogo pendiente')) {
+      issues.add('Cambio de catálogo pendiente');
     }
-    if (hasCatalogChange) {
-      issues.add('Cambio de catalogo pendiente');
-    }
-    if (checklistPending) {
-      issues.add('Checklist de calidad incompleto');
+    if (checklistPending && issues.isEmpty) {
+      issues.add('Checklist técnico incompleto o con datos obligatorios faltantes');
     }
     if (highRisk) {
       issues.add('Actividad en riesgo alto');
@@ -421,138 +689,202 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
   // TAB 1: DETALLES
   // ============================================================
   Widget _buildDetallesTab(ActivityWithDetails activity) {
-    return SingleChildScrollView(
-      padding: EdgeInsets.all(SaoSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildCatalogDecisionModule(activity),
-          SizedBox(height: SaoSpacing.lg),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final availableWidth = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.of(context).size.width;
+        final isWide = availableWidth >= 900;
+        final halfWidth = isWide
+            ? (availableWidth - SaoSpacing.md) / 2
+            : availableWidth;
 
-          // SECCIÓN: Información Operativa
-          Text(
-            'INFORMACIÓN OPERATIVA',
-            style: SaoTypography.caption
-                .copyWith(fontWeight: FontWeight.w600, color: SaoColors.gray600),
-          ),
-          SizedBox(height: SaoSpacing.md),
-          Container(
-            padding: EdgeInsets.all(SaoSpacing.md),
-            decoration: BoxDecoration(
-              color: SaoColors.gray50,
-              borderRadius: BorderRadius.circular(SaoRadii.md),
-              border: Border.all(color: SaoColors.border),
-            ),
-            child: Column(
-              children: [
-                _buildReadOnlyField('Tipo', activity.activityType?.name ?? 'N/A',
-                    Icons.category_rounded),
-                SizedBox(height: SaoSpacing.md),
-                _buildQuickEditField(
-                  label: 'Título',
-                  icon: Icons.title_rounded,
-                  controller: _quickTitleController,
-                  onSave: () => widget.onFieldChanged?.call(
-                    'title',
-                    _quickTitleController.text.trim(),
-                  ),
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(SaoSpacing.md),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'RESUMEN OPERATIVO',
+                style: SaoTypography.caption.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: SaoColors.gray600,
                 ),
-                SizedBox(height: SaoSpacing.md),
-                _buildQuickEditField(
-                  label: 'Descripción',
-                  icon: Icons.description_rounded,
-                  controller: _quickDescriptionController,
-                  maxLines: 2,
-                  minLines: 2,
-                  onSave: () => widget.onFieldChanged?.call(
-                    'description',
-                    _quickDescriptionController.text.trim(),
+              ),
+              SizedBox(height: SaoSpacing.sm),
+              Wrap(
+                spacing: SaoSpacing.md,
+                runSpacing: SaoSpacing.md,
+                children: [
+                  SizedBox(
+                    width: halfWidth,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'DATOS EDITABLES',
+                          style: SaoTypography.caption.copyWith(
+                            fontWeight: FontWeight.w700,
+                            color: SaoColors.gray600,
+                          ),
+                        ),
+                        SizedBox(height: SaoSpacing.sm),
+                        _buildSummaryGroup(
+                          title: 'Edición rápida',
+                          subtitle: 'Ajusta el texto capturado y guarda al momento.',
+                          icon: Icons.edit_note_rounded,
+                          accentColor: SaoColors.actionPrimary,
+                          children: [
+                            _buildQuickEditField(
+                              label: 'Título',
+                              icon: Icons.title_rounded,
+                              controller: _quickTitleController,
+                              onSave: () => widget.onFieldChanged?.call(
+                                'title',
+                                _quickTitleController.text.trim(),
+                              ),
+                              dense: true,
+                              toneColor: SaoColors.actionPrimary,
+                            ),
+                            _buildQuickEditField(
+                              label: 'Descripción',
+                              icon: Icons.description_rounded,
+                              controller: _quickDescriptionController,
+                              maxLines: 2,
+                              minLines: 2,
+                              onSave: () => widget.onFieldChanged?.call(
+                                'description',
+                                _quickDescriptionController.text.trim(),
+                              ),
+                              dense: true,
+                              toneColor: SaoColors.actionPrimary,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-              ],
-            ),
-          ),
-
-          SizedBox(height: SaoSpacing.xl),
-
-          // SECCIÓN: Contexto Territorial
-          Text(
-            'CONTEXTO TERRITORIAL',
-            style: SaoTypography.caption
-                .copyWith(fontWeight: FontWeight.w600, color: SaoColors.gray600),
-          ),
-          SizedBox(height: SaoSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: _buildReadOnlyField(
-                    'Proyecto', activity.activity.projectId, Icons.folder_rounded),
+                  SizedBox(
+                    width: halfWidth,
+                    child: _buildSummaryGroup(
+                      title: 'Ubicación operativa',
+                      subtitle: 'Referencia territorial y frente asignado.',
+                      icon: Icons.place_rounded,
+                      accentColor: SaoColors.success,
+                      children: [
+                        _buildReadOnlyField(
+                          'Frente',
+                          activity.front?.name ?? 'N/A',
+                          Icons.account_tree_rounded,
+                          dense: true,
+                          toneColor: SaoColors.success,
+                        ),
+                        _buildReadOnlyField(
+                          'Municipio',
+                          activity.municipality?.name ?? 'N/A',
+                          Icons.map_rounded,
+                          dense: true,
+                          toneColor: SaoColors.success,
+                        ),
+                        _buildReadOnlyField(
+                          'Estado',
+                          _resolveLocationStateLabel(activity),
+                          Icons.public_rounded,
+                          dense: true,
+                          toneColor: SaoColors.success,
+                        ),
+                        _buildReadOnlyField(
+                          'Colonia',
+                          _resolveLocationColonyLabel(activity),
+                          Icons.home_work_rounded,
+                          dense: true,
+                          toneColor: SaoColors.success,
+                          maxLines: 2,
+                        ),
+                        _buildReadOnlyField(
+                          'PK',
+                          activity.pkLabel?.isNotEmpty == true
+                              ? activity.pkLabel!
+                              : 'Sin PK',
+                          Icons.location_on_rounded,
+                          dense: true,
+                          toneColor: SaoColors.success,
+                        ),
+                      ],
+                    ),
+                  ),
+                  SizedBox(
+                    width: halfWidth,
+                    child: _buildSummaryGroup(
+                      title: 'Identidad de actividad',
+                      subtitle: 'Qué se capturó y cómo debe mostrarse.',
+                      icon: Icons.badge_rounded,
+                      accentColor: SaoColors.info,
+                      children: [
+                        _buildReadOnlyField(
+                          'Tipo',
+                          _resolveActivityTypeLabel(activity),
+                          Icons.category_rounded,
+                          dense: true,
+                          toneColor: SaoColors.info,
+                        ),
+                        _buildReadOnlyField(
+                          'Proyecto',
+                          activity.activity.projectId,
+                          Icons.folder_rounded,
+                          dense: true,
+                          toneColor: SaoColors.info,
+                        ),
+                        _buildReadOnlyField(
+                          'Personal',
+                          _resolveAssignedPersonLabel(activity),
+                          Icons.person_rounded,
+                          dense: true,
+                          toneColor: SaoColors.info,
+                          maxLines: 2,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(width: SaoSpacing.lg),
-              Expanded(
-                child: _buildReadOnlyField('Frente', activity.front?.name ?? 'N/A',
-                    Icons.account_tree_rounded),
-              ),
-            ],
-          ),
-          SizedBox(height: SaoSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: _buildReadOnlyField(
-                    'PK',
-                    activity.pkLabel?.isNotEmpty == true
-                        ? activity.pkLabel!
-                        : 'Sin PK',
-                    Icons.location_on_rounded),
-              ),
-              SizedBox(width: SaoSpacing.lg),
-              Expanded(
-                child: _buildReadOnlyField('Municipio',
-                    activity.municipality?.name ?? 'N/A', Icons.map_rounded),
-              ),
-            ],
-          ),
-
-          SizedBox(height: SaoSpacing.xl),
-
-          // SECCIÓN: Responsabilidad
-          Text(
-            'RESPONSABILIDAD',
-            style: SaoTypography.caption
-                .copyWith(fontWeight: FontWeight.w600, color: SaoColors.gray600),
-          ),
-          SizedBox(height: SaoSpacing.md),
-          _buildReadOnlyField('Ingeniero',
-              activity.assignedUser?.fullName ?? 'N/A', Icons.person_rounded),
-          SizedBox(height: SaoSpacing.md),
-          Row(
-            children: [
-              Expanded(
-                child: _buildReadOnlyField(
-                    'Fecha Ejecución',
+              SizedBox(height: SaoSpacing.md),
+              _buildCatalogDecisionModule(activity),
+              SizedBox(height: SaoSpacing.md),
+              _buildSummaryGroup(
+                title: 'Seguimiento y evidencia',
+                subtitle: 'Lo clave para decidir rápido.',
+                icon: Icons.rule_folder_rounded,
+                accentColor: SaoColors.warning,
+                children: [
+                  _buildReadOnlyField(
+                    'Fecha ejecución',
                     activity.activity.executedAt != null
-                        ? DateFormat('dd/MM/yyyy').format(
-                            activity.activity.executedAt!)
+                        ? DateFormat('dd/MM/yyyy')
+                            .format(activity.activity.executedAt!)
                         : 'N/A',
-                    Icons.calendar_today_rounded),
+                    Icons.calendar_today_rounded,
+                    dense: true,
+                    toneColor: SaoColors.warning,
+                  ),
+                  _buildReadOnlyField(
+                    'Evidencias',
+                    '${activity.evidences.length}',
+                    Icons.photo_library_rounded,
+                    dense: true,
+                    toneColor: SaoColors.warning,
+                  ),
+                ],
               ),
-              SizedBox(width: SaoSpacing.lg),
-              Expanded(
-                child: _buildReadOnlyField('Evidencias',
-                    '${activity.evidences.length}', Icons.photo_library_rounded),
-              ),
+              if (activity.activity.latitude != null &&
+                  activity.activity.longitude != null) ...[
+                SizedBox(height: SaoSpacing.md),
+                _buildGPSValidationBanner(activity),
+              ],
             ],
           ),
-
-          SizedBox(height: SaoSpacing.xl),
-
-          // SECCIÓN: GPS vs PK (Validación Crítica)
-          if (activity.activity.latitude != null &&
-              activity.activity.longitude != null)
-            _buildGPSValidationBanner(activity),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -589,7 +921,8 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
         children: [
           for (int i = 0; i < widget.timelineEntries.length; i++) ...[
             _buildTimelineEvent(widget.timelineEntries[i]),
-            if (i < widget.timelineEntries.length - 1) _buildTimelineConnector(),
+            if (i < widget.timelineEntries.length - 1)
+              _buildTimelineConnector(),
           ],
         ],
       ),
@@ -619,7 +952,8 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     if (key.contains('APPROVE')) return Icons.check_circle_rounded;
     if (key.contains('REJECT')) return Icons.cancel_rounded;
     if (key.contains('CREATE')) return Icons.create_rounded;
-    if (key.contains('UPDATE') || key.contains('PATCH')) return Icons.edit_rounded;
+    if (key.contains('UPDATE') || key.contains('PATCH'))
+      return Icons.edit_rounded;
     return Icons.history_rounded;
   }
 
@@ -628,7 +962,8 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     if (key.contains('APPROVE')) return SaoColors.success;
     if (key.contains('REJECT')) return SaoColors.error;
     if (key.contains('CREATE')) return SaoColors.info;
-    if (key.contains('UPDATE') || key.contains('PATCH')) return SaoColors.warning;
+    if (key.contains('UPDATE') || key.contains('PATCH'))
+      return SaoColors.warning;
     return SaoColors.gray500;
   }
 
@@ -638,7 +973,9 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     return key
         .toLowerCase()
         .split('_')
-        .map((part) => part.isEmpty ? part : '${part[0].toUpperCase()}${part.substring(1)}')
+        .map((part) => part.isEmpty
+            ? part
+            : '${part[0].toUpperCase()}${part.substring(1)}')
         .join(' ');
   }
 
@@ -649,7 +986,8 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     final checklist = <({String label, bool ok})>[
       (
         label: '¿Tiene coordenadas GPS?',
-        ok: activity.activity.latitude != null && activity.activity.longitude != null,
+        ok: activity.activity.latitude != null &&
+            activity.activity.longitude != null,
       ),
       (
         label: '¿La descripción tiene más de 20 caracteres?',
@@ -676,11 +1014,12 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
         children: [
           Text(
             'CHECKLIST DE CALIDAD',
-            style: SaoTypography.caption
-                .copyWith(fontWeight: FontWeight.w600, color: SaoColors.gray600),
+            style: SaoTypography.caption.copyWith(
+                fontWeight: FontWeight.w600, color: SaoColors.gray600),
           ),
           SizedBox(height: SaoSpacing.md),
-            ...checklist.map((item) => _buildChecklistItem(item.label, isChecked: item.ok)),
+          ...checklist.map(
+              (item) => _buildChecklistItem(item.label, isChecked: item.ok)),
 
           SizedBox(height: SaoSpacing.xl),
 
@@ -695,7 +1034,229 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
   // HELPERS
   // ============================================================
 
-  Widget _buildReadOnlyField(String label, String value, IconData icon) {
+  Widget _buildSummaryGroup({
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color accentColor,
+    required List<Widget> children,
+  }) {
+    return Container(
+      padding: EdgeInsets.all(SaoSpacing.sm),
+      decoration: BoxDecoration(
+        color: accentColor.withOpacity(0.06),
+        borderRadius: BorderRadius.circular(SaoRadii.lg),
+        border: Border.all(color: accentColor.withOpacity(0.18)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: EdgeInsets.all(SaoSpacing.xs),
+                decoration: BoxDecoration(
+                  color: accentColor.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(SaoRadii.md),
+                ),
+                child: Icon(icon, size: 16, color: accentColor),
+              ),
+              SizedBox(width: SaoSpacing.sm),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: SaoTypography.bodyText.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: SaoColors.gray900,
+                      ),
+                    ),
+                    SizedBox(height: SaoSpacing.xxs),
+                    Text(
+                      subtitle,
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: SaoSpacing.sm),
+          for (int i = 0; i < children.length; i++) ...[
+            children[i],
+            if (i < children.length - 1) SizedBox(height: SaoSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _resolveActivityTypeLabel(ActivityWithDetails activity) {
+    final rawName = (activity.activityType?.name ?? '').trim();
+    final rawCode = (activity.activityType?.code ?? '').trim();
+    final rawId = (activity.activityType?.id ?? '').trim();
+
+    final catalogOptions = ref.read(catalogRepositoryProvider).getActivityTypes();
+    final lookupKeys = _catalogLookupKeys(activity)
+        .map((key) => key.trim().toLowerCase())
+        .where((key) => key.isNotEmpty)
+        .toSet();
+
+    for (final option in catalogOptions) {
+      final optionId = option.id.trim().toLowerCase();
+      final optionName = option.name.trim();
+      if (optionName.isEmpty) continue;
+      if (lookupKeys.contains(optionId) ||
+          lookupKeys.contains(optionName.toLowerCase())) {
+        return optionName;
+      }
+    }
+
+    if (rawName.isNotEmpty &&
+        rawName.toUpperCase() != rawCode.toUpperCase() &&
+        rawName.toUpperCase() != rawId.toUpperCase()) {
+      return rawName;
+    }
+    if (rawCode.isNotEmpty) return rawCode;
+    if (rawId.isNotEmpty) return rawId;
+    return 'N/A';
+  }
+
+  String _resolveAssignedPersonLabel(ActivityWithDetails activity) {
+    final candidates = <String?>[
+      activity.assignedUser?.fullName,
+      activity.assignedUser?.email,
+      activity.activity.assignedTo,
+    ];
+
+    String bestMatch = '';
+    int bestScore = -1;
+
+    for (final candidate in candidates) {
+      final formatted = _formatPersonDisplay(candidate);
+      if (formatted.isEmpty || formatted.toLowerCase() == 'sin responsable') {
+        continue;
+      }
+
+      final wordCount = formatted
+          .split(' ')
+          .where((part) => part.trim().isNotEmpty)
+          .length;
+      final score = (wordCount * 100) + formatted.length;
+      if (score > bestScore) {
+        bestScore = score;
+        bestMatch = formatted;
+      }
+    }
+
+    return bestMatch.isNotEmpty ? bestMatch : 'Sin responsable';
+  }
+
+  String _resolveLocationStateLabel(ActivityWithDetails activity) {
+    return _wizardPayloadText(activity.wizardPayload, const ['location', 'estado']) ??
+        _wizardPayloadText(activity.wizardPayload, const ['location', 'state']) ??
+        _extractLabeledField(activity.activity.description, const ['Estado']) ??
+        ((activity.municipality?.state ?? '').trim().isEmpty
+            ? 'N/A'
+            : activity.municipality!.state.trim());
+  }
+
+  String _resolveLocationColonyLabel(ActivityWithDetails activity) {
+    return _wizardPayloadText(activity.wizardPayload, const ['location', 'colonia']) ??
+        _wizardPayloadText(activity.wizardPayload, const ['location', 'colony']) ??
+        _extractLabeledField(activity.activity.description, const ['Colonia', 'Col.']) ??
+        'N/A';
+  }
+
+  String _formatPersonDisplay(String? raw) {
+    final value = (raw ?? '').trim();
+    if (value.isEmpty || value.toLowerCase() == 'n/a') {
+      return '';
+    }
+
+    final baseValue = value.contains('@') ? value.split('@').first : value;
+    final cleaned = baseValue
+        .replaceAll(RegExp(r'[._-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (cleaned.isEmpty) {
+      return '';
+    }
+
+    final lowered = cleaned.toLowerCase();
+    if (RegExp(r'^[0-9a-f-]{8,}$', caseSensitive: false).hasMatch(cleaned) ||
+        lowered == 'usr backend' ||
+        lowered == 'user backend' ||
+        lowered == 'backend' ||
+        lowered == 'usr' ||
+        lowered == 'user') {
+      return '';
+    }
+
+    return cleaned
+        .split(' ')
+        .map((part) => part.isEmpty
+            ? part
+            : '${part[0].toUpperCase()}${part.substring(1)}')
+        .join(' ');
+  }
+
+  Widget _buildReadOnlyField(
+    String label,
+    String value,
+    IconData icon, {
+    bool dense = false,
+    Color? toneColor,
+    int maxLines = 1,
+  }) {
+    final accent = toneColor ?? SaoColors.gray600;
+    if (dense) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: SaoSpacing.sm,
+          vertical: SaoSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: accent.withOpacity(0.05),
+          border: Border.all(color: accent.withOpacity(0.18)),
+          borderRadius: BorderRadius.circular(SaoRadii.md),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: accent),
+            SizedBox(width: SaoSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    label,
+                    style: SaoTypography.caption.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: SaoSpacing.xxs),
+                  Text(
+                    value,
+                    style: SaoTypography.bodyText,
+                    maxLines: maxLines,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -722,7 +1283,7 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
                 child: Text(
                   value,
                   style: SaoTypography.bodyText,
-                  maxLines: 1,
+                  maxLines: maxLines,
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -740,7 +1301,68 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     required VoidCallback onSave,
     int minLines = 1,
     int maxLines = 1,
+    bool dense = false,
+    Color? toneColor,
   }) {
+    final accent = toneColor ?? SaoColors.gray600;
+    if (dense) {
+      return Container(
+        padding: EdgeInsets.symmetric(
+          horizontal: SaoSpacing.sm,
+          vertical: SaoSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          color: accent.withOpacity(0.05),
+          border: Border.all(color: accent.withOpacity(0.18)),
+          borderRadius: BorderRadius.circular(SaoRadii.md),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(top: 10),
+              child: Icon(icon, size: 16, color: accent),
+            ),
+            SizedBox(width: SaoSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: SaoTypography.caption.copyWith(
+                      color: accent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  SizedBox(height: SaoSpacing.xxs),
+                  TextField(
+                    controller: controller,
+                    minLines: minLines,
+                    maxLines: maxLines,
+                    cursorColor: accent,
+                    decoration: const InputDecoration(
+                      isDense: true,
+                      border: InputBorder.none,
+                      hintText: 'Editar valor...',
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Guardar cambio rápido',
+              onPressed: onSave,
+              icon: Icon(Icons.save_rounded, size: 18, color: accent),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+            ),
+          ],
+        ),
+      );
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -793,42 +1415,88 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
 
   Widget _buildCatalogDecisionModule(ActivityWithDetails activity) {
     final payload = activity.wizardPayload;
-    final payloadSubcategory = _wizardPayloadText(payload, const ['subcategory', 'name']);
-    final payloadTemaPrimary = _wizardPayloadText(payload, const ['topics', '0', 'name']);
-    final payloadPurpose = _wizardPayloadText(payload, const ['purpose', 'name']);
-    final payloadMunicipio = _wizardPayloadText(payload, const ['location', 'municipio']);
+    final payloadSubcategory =
+        _wizardPayloadText(payload, const ['subcategory', 'name']);
+    final payloadTemaPrimary =
+        _wizardPayloadText(payload, const ['topics', '0', 'name']);
+    final payloadPurpose =
+        _wizardPayloadText(payload, const ['purpose', 'name']);
+    final payloadMunicipio =
+        _wizardPayloadText(payload, const ['location', 'municipio']);
 
-    final capturedSubcategoria =
-      (payloadSubcategory ??
-          _extractLabeledField(activity.activity.description, const [
-                  'Subcategoría',
-                  'Subcategoria',
-          ]) ??
-                activity.activity.title)
-            .trim();
-    final capturedTema =
-      (payloadTemaPrimary ??
-          _extractLabeledField(activity.activity.description, const [
-                  'Tema',
-                  'Temas',
-                ]) ??
-                '')
-            .trim();
-    final capturedProposito =
-      (payloadPurpose ?? _extractPurposeFromDescription(activity.activity.description)).trim();
-    final capturedMunicipio =
-      (payloadMunicipio ??
-          _extractLinkedMunicipality(activity.activity.description) ??
-                activity.municipality?.name ??
-                'Sin municipio')
-            .trim();
+    final capturedSubcategoria = (payloadSubcategory ??
+            _extractLabeledField(activity.activity.description, const [
+              'Subcategoría',
+              'Subcategoria',
+            ]) ??
+            activity.activity.title)
+        .trim();
+    final capturedTema = (payloadTemaPrimary ??
+            _extractLabeledField(activity.activity.description, const [
+              'Tema',
+              'Temas',
+            ]) ??
+            '')
+        .trim();
+    final capturedProposito = (payloadPurpose ??
+            _extractPurposeFromDescription(activity.activity.description))
+        .trim();
+    final capturedMunicipio = (payloadMunicipio ??
+            _extractLinkedMunicipality(activity.activity.description) ??
+            activity.municipality?.name ??
+            'Sin municipio')
+        .trim();
 
     // Load real catalog options for current activity type
     final catalogRepo = ref.read(catalogRepositoryProvider);
+    if (!_isCatalogReadyForActivityProject(catalogRepo, activity)) {
+      return Container(
+        padding: EdgeInsets.all(SaoSpacing.md),
+        decoration: BoxDecoration(
+          color: SaoColors.info.withOpacity(0.06),
+          border: Border.all(color: SaoColors.info.withOpacity(0.4)),
+          borderRadius: BorderRadius.circular(SaoRadii.md),
+        ),
+        child: Row(
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: SaoSpacing.sm),
+            Expanded(
+              child: Text(
+                'Cargando catálogo del proyecto ${activity.activity.projectId}...',
+                style:
+                    SaoTypography.bodyText.copyWith(color: SaoColors.gray700),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
     final subcatOptions = _resolveSubcategoryOptions(catalogRepo, activity);
-    final temaOptions   = _resolveTemaOptions(catalogRepo, activity);
-    final propOptions   = _resolvePurposeOptions(catalogRepo, activity);
-    final munOptions    = catalogRepo.getMunicipalities();
+    final effectiveSubcategoryId = _resolveEffectiveSubcategoryId(
+      catalogRepo: catalogRepo,
+      activity: activity,
+      subcategoryOptions: subcatOptions,
+      capturedSubcategory: capturedSubcategoria,
+    );
+    final temaOptions = _resolveTemaOptions(catalogRepo, activity);
+    final propOptions = _resolvePurposeOptions(
+      catalogRepo,
+      activity,
+      subcategoryId: effectiveSubcategoryId,
+    );
+    final munOptions = _resolveMunicipalityOptions(catalogRepo, activity);
+    final pendingFields = <String>[
+      if (_requiresCatalogDecision(capturedSubcategoria, subcatOptions)) 'Subcategoría',
+      if (_requiresCatalogDecision(capturedTema, temaOptions)) 'Tema',
+      if (_requiresCatalogDecision(capturedProposito, propOptions)) 'Propósito',
+      if (_requiresCatalogDecision(capturedMunicipio, munOptions)) 'Municipio',
+    ];
 
     return Container(
       padding: EdgeInsets.all(SaoSpacing.md),
@@ -845,10 +1513,42 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
               Icon(Icons.hub_rounded, color: SaoColors.primary),
               SizedBox(width: SaoSpacing.sm),
               Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Decisión de Catálogo',
+                      style: SaoTypography.bodyTextBold.copyWith(
+                        color: SaoColors.primary,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      pendingFields.isEmpty
+                          ? 'Todos los campos coinciden con catálogo. Solo abre uno si deseas revisar.'
+                          : '${pendingFields.length} campo(s) requieren decisión y ya aparecen desplegados.',
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: EdgeInsets.symmetric(
+                  horizontal: SaoSpacing.sm,
+                  vertical: SaoSpacing.xs,
+                ),
+                decoration: BoxDecoration(
+                  color: (pendingFields.isEmpty ? SaoColors.success : SaoColors.warning)
+                      .withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(SaoRadii.full),
+                ),
                 child: Text(
-                  'Decisión de Catálogo',
-                  style: SaoTypography.bodyTextBold.copyWith(
-                    color: SaoColors.primary,
+                  pendingFields.isEmpty ? 'Sin cambios' : '${pendingFields.length} pendiente(s)',
+                  style: SaoTypography.caption.copyWith(
+                    color: pendingFields.isEmpty ? SaoColors.success : SaoColors.warning,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
@@ -862,21 +1562,23 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
             options: subcatOptions,
             onLinkChanged: (v) => setState(() => _subcategoriaLink = v),
             onLinkToExisting: (selected) async {
-              await widget.onCatalogLink?.call('subcategoria', capturedSubcategoria, selected);
+              await widget.onCatalogLink
+                  ?.call('subcategoria', capturedSubcategoria, selected);
             },
             onAddToCatalog: () async {
-              await widget.onCatalogAdd?.call('subcategoria', capturedSubcategoria);
+              await widget.onCatalogAdd
+                  ?.call('subcategoria', capturedSubcategoria);
             },
             onRequestCorrection: () async {
-              await widget.onCatalogCorrection?.call('subcategoria', capturedSubcategoria);
+              await widget.onCatalogCorrection
+                  ?.call('subcategoria', capturedSubcategoria);
             },
           ),
           SizedBox(height: SaoSpacing.sm),
           _buildCatalogDecisionRow(
             fieldLabel: 'Tema',
-            capturedValue: capturedTema.isEmpty
-                ? 'Sin tema capturado'
-                : capturedTema,
+            capturedValue:
+                capturedTema.isEmpty ? 'Sin tema capturado' : capturedTema,
             linkedValue: _temaLink,
             options: temaOptions,
             onLinkChanged: (v) => setState(() => _temaLink = v),
@@ -893,18 +1595,22 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
           SizedBox(height: SaoSpacing.sm),
           _buildCatalogDecisionRow(
             fieldLabel: 'Propósito',
-            capturedValue: capturedProposito.isEmpty ? 'Sin propósito capturado' : capturedProposito,
+            capturedValue: capturedProposito.isEmpty
+                ? 'Sin propósito capturado'
+                : capturedProposito,
             linkedValue: _propositoLink,
             options: propOptions,
             onLinkChanged: (v) => setState(() => _propositoLink = v),
             onLinkToExisting: (selected) async {
-              await widget.onCatalogLink?.call('proposito', capturedProposito, selected);
+              await widget.onCatalogLink
+                  ?.call('proposito', capturedProposito, selected);
             },
             onAddToCatalog: () async {
               await widget.onCatalogAdd?.call('proposito', capturedProposito);
             },
             onRequestCorrection: () async {
-              await widget.onCatalogCorrection?.call('proposito', capturedProposito);
+              await widget.onCatalogCorrection
+                  ?.call('proposito', capturedProposito);
             },
           ),
           SizedBox(height: SaoSpacing.sm),
@@ -915,25 +1621,29 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
             options: munOptions,
             onLinkChanged: (v) => setState(() => _municipioLink = v),
             onLinkToExisting: (selected) async {
-              await widget.onCatalogLink?.call('municipio', capturedMunicipio, selected);
+              await widget.onCatalogLink
+                  ?.call('municipio', capturedMunicipio, selected);
             },
             onAddToCatalog: () async {
               await widget.onCatalogAdd?.call('municipio', capturedMunicipio);
             },
             onRequestCorrection: () async {
-              await widget.onCatalogCorrection?.call('municipio', capturedMunicipio);
+              await widget.onCatalogCorrection
+                  ?.call('municipio', capturedMunicipio);
             },
           ),
-          SizedBox(height: SaoSpacing.sm),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: const [
-              _HotkeyPill(label: 'A', hint: 'Aceptar'),
-              _HotkeyPill(label: 'C', hint: 'Catálogo'),
-              _HotkeyPill(label: 'R', hint: 'Corrección'),
-            ],
-          ),
+          if (pendingFields.isNotEmpty) ...[
+            SizedBox(height: SaoSpacing.sm),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: const [
+                _HotkeyPill(label: 'A', hint: 'Aceptar'),
+                _HotkeyPill(label: 'C', hint: 'Catálogo'),
+                _HotkeyPill(label: 'R', hint: 'Corrección'),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -949,125 +1659,279 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
     required Future<void> Function() onAddToCatalog,
     required Future<void> Function() onRequestCorrection,
   }) {
-    final normalizedCaptured = capturedValue.trim().toLowerCase();
-    final isNewValue = normalizedCaptured.isNotEmpty &&
-        !options.map((o) => o.toLowerCase()).contains(normalizedCaptured);
+    final optionsByKey = <String, String>{};
+    for (final raw in options) {
+      final option = raw.trim();
+      if (option.isEmpty) continue;
+      optionsByKey.putIfAbsent(_normalizeCatalogValue(option), () => option);
+    }
+    final dedupedOptions = optionsByKey.values.toList(growable: false);
+    final safeLinkedValue =
+        optionsByKey[_normalizeCatalogValue(linkedValue ?? '')];
+    final inferredFromCaptured =
+        _findBestCatalogOption(capturedValue, dedupedOptions);
+    final effectiveLinkedValue = safeLinkedValue ?? inferredFromCaptured;
+    final needsAttention = _requiresCatalogDecision(capturedValue, dedupedOptions);
+    final isExpanded = needsAttention || _expandedCatalogFields.contains(fieldLabel);
+    final statusColor = needsAttention ? SaoColors.warning : SaoColors.success;
+    final statusLabel = needsAttention ? 'Requiere cambio' : 'Correcto';
+    final normalizedCaptured = _normalizeCatalogValue(capturedValue);
+    final summaryText = normalizedCaptured.isEmpty
+        ? 'Sin valor capturado'
+        : (effectiveLinkedValue ?? capturedValue).trim();
 
-    return Container(
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
       padding: EdgeInsets.all(SaoSpacing.sm),
       decoration: BoxDecoration(
-        color: isNewValue
+        color: needsAttention
             ? SaoColors.warning.withOpacity(0.12)
             : SaoColors.surface,
         border: Border.all(
-          color: isNewValue ? SaoColors.warning : SaoColors.border,
+          color: needsAttention ? SaoColors.warning : SaoColors.border,
         ),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            fieldLabel,
-            style: SaoTypography.caption.copyWith(
-              color: SaoColors.gray700,
-              fontWeight: FontWeight.w700,
+          InkWell(
+            borderRadius: BorderRadius.circular(SaoRadii.sm),
+            onTap: needsAttention
+                ? null
+                : () {
+                    setState(() {
+                      if (isExpanded) {
+                        _expandedCatalogFields.remove(fieldLabel);
+                      } else {
+                        _expandedCatalogFields.add(fieldLabel);
+                      }
+                    });
+                  },
+            child: Padding(
+              padding: EdgeInsets.symmetric(
+                horizontal: SaoSpacing.xs,
+                vertical: SaoSpacing.xs,
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    needsAttention
+                        ? Icons.pending_actions_rounded
+                        : Icons.check_circle_rounded,
+                    size: 18,
+                    color: statusColor,
+                  ),
+                  SizedBox(width: SaoSpacing.sm),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          fieldLabel,
+                          style: SaoTypography.caption.copyWith(
+                            color: SaoColors.gray700,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        SizedBox(height: 2),
+                        Text(
+                          summaryText,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: SaoTypography.caption.copyWith(
+                            color: SaoColors.gray600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: SaoSpacing.sm,
+                      vertical: SaoSpacing.xs,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withOpacity(0.14),
+                      borderRadius: BorderRadius.circular(SaoRadii.full),
+                    ),
+                    child: Text(
+                      statusLabel,
+                      style: SaoTypography.caption.copyWith(
+                        color: statusColor,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (!needsAttention) ...[
+                    SizedBox(width: SaoSpacing.xs),
+                    Icon(
+                      isExpanded
+                          ? Icons.expand_less_rounded
+                          : Icons.expand_more_rounded,
+                      color: SaoColors.gray500,
+                    ),
+                  ],
+                ],
+              ),
             ),
           ),
-          SizedBox(height: SaoSpacing.xs),
-          Row(
-            children: [
-              Expanded(
-                child: Container(
-                  padding: EdgeInsets.all(SaoSpacing.sm),
-                  decoration: BoxDecoration(
-                    color: SaoColors.gray50,
-                    borderRadius: BorderRadius.circular(SaoRadii.sm),
-                    border: Border.all(color: SaoColors.border),
-                  ),
-                  child: Text(
-                    'Valor capturado: "$capturedValue"',
-                    style: SaoTypography.caption.copyWith(
-                      color: SaoColors.gray700,
-                    ),
-                  ),
-                ),
-              ),
-              SizedBox(width: SaoSpacing.sm),
-              Expanded(
-                child: DropdownButtonFormField<String>(
-                  value: linkedValue,
-                  isExpanded: true,
-                  decoration: InputDecoration(
-                    isDense: true,
-                    labelText: 'Vincular a existente',
-                    border: OutlineInputBorder(
+          if (isExpanded) ...[
+            SizedBox(height: SaoSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: Container(
+                    padding: EdgeInsets.all(SaoSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: SaoColors.gray50,
                       borderRadius: BorderRadius.circular(SaoRadii.sm),
+                      border: Border.all(color: SaoColors.border),
+                    ),
+                    child: Text(
+                      'Valor capturado: "$capturedValue"',
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.gray700,
+                      ),
                     ),
                   ),
-                  items: options
-                      .map((option) => DropdownMenuItem<String>(
-                            value: option,
-                            child: Text(option),
-                          ))
-                      .toList(growable: false),
-                  onChanged: onLinkChanged,
                 ),
-              ),
-            ],
-          ),
-          SizedBox(height: SaoSpacing.sm),
-          Wrap(
-            spacing: SaoSpacing.sm,
-            runSpacing: SaoSpacing.sm,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () async {
-                  await onAddToCatalog();
-                },
-                icon: const Icon(Icons.add_box_rounded, size: 16),
-                label: const Text('Agregar al catálogo'),
-              ),
-              FilledButton.icon(
-                onPressed: linkedValue == null
-                    ? null
-                    : () async {
-                        await onLinkToExisting(linkedValue);
-                      },
-                icon: const Icon(Icons.link_rounded, size: 16),
-                label: const Text('Vincular existente'),
-              ),
-              OutlinedButton.icon(
-                onPressed: () => _showFieldCatalogModal(
-                  fieldLabel: fieldLabel,
-                  capturedValue: capturedValue,
-                  options: options,
-                  onSelect: onLinkToExisting,
+                SizedBox(width: SaoSpacing.sm),
+                Expanded(
+                  child: DropdownButtonFormField<String>(
+                    value: effectiveLinkedValue,
+                    isExpanded: true,
+                    decoration: InputDecoration(
+                      isDense: true,
+                      labelText: 'Vincular a existente',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(SaoRadii.sm),
+                      ),
+                    ),
+                    items: dedupedOptions
+                        .map((option) => DropdownMenuItem<String>(
+                              value: option,
+                              child: Text(option),
+                            ))
+                        .toList(growable: false),
+                    onChanged: onLinkChanged,
+                  ),
                 ),
-                icon: const Icon(Icons.swap_horiz_rounded, size: 16),
-                label: const Text('Elegir catálogo'),
-              ),
-              TextButton.icon(
-                onPressed: () async {
-                  await onRequestCorrection();
-                },
-                icon: const Icon(Icons.report_gmailerrorred_rounded, size: 16),
-                label: const Text('Solicitar corrección'),
-                style: TextButton.styleFrom(
-                  foregroundColor: SaoColors.error,
+              ],
+            ),
+            SizedBox(height: SaoSpacing.sm),
+            Wrap(
+              spacing: SaoSpacing.sm,
+              runSpacing: SaoSpacing.sm,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await onAddToCatalog();
+                  },
+                  icon: const Icon(Icons.add_box_rounded, size: 16),
+                  label: const Text('Agregar al catálogo'),
                 ),
-              ),
-            ],
-          ),
+                FilledButton.icon(
+                  onPressed: effectiveLinkedValue == null
+                      ? null
+                      : () async {
+                          await onLinkToExisting(effectiveLinkedValue);
+                        },
+                  icon: const Icon(Icons.link_rounded, size: 16),
+                  label: const Text('Vincular existente'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => _showFieldCatalogModal(
+                    fieldLabel: fieldLabel,
+                    capturedValue: capturedValue,
+                    options: options,
+                    onSelect: onLinkToExisting,
+                  ),
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                  label: const Text('Elegir catálogo'),
+                ),
+                TextButton.icon(
+                  onPressed: () async {
+                    await onRequestCorrection();
+                  },
+                  icon: const Icon(Icons.report_gmailerrorred_rounded, size: 16),
+                  label: const Text('Solicitar corrección'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: SaoColors.error,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
+  }
+
+  bool _requiresCatalogDecision(String capturedValue, List<String> options) {
+    final normalizedCaptured = _normalizeCatalogValue(capturedValue);
+    if (normalizedCaptured.isEmpty ||
+        normalizedCaptured == 'n a' ||
+        normalizedCaptured.startsWith('sin ')) {
+      return true;
+    }
+    return _findBestCatalogOption(capturedValue, options) == null;
+  }
+
+  String _normalizeCatalogValue(String value) {
+    var normalized = value
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    if (normalized.startsWith('municipio de ')) {
+      normalized = normalized.substring('municipio de '.length).trim();
+    }
+    if (normalized.startsWith('mpio de ')) {
+      normalized = normalized.substring('mpio de '.length).trim();
+    }
+    return normalized;
+  }
+
+  String? _findBestCatalogOption(String capturedValue, List<String> options) {
+    final captured = _normalizeCatalogValue(capturedValue);
+    if (captured.isEmpty || options.isEmpty) return null;
+
+    for (final option in options) {
+      if (_normalizeCatalogValue(option) == captured) {
+        return option;
+      }
+    }
+
+    if (captured.length >= 4) {
+      for (final option in options) {
+        final normalizedOption = _normalizeCatalogValue(option);
+        if (normalizedOption.contains(captured) ||
+            captured.contains(normalizedOption)) {
+          return option;
+        }
+      }
+    }
+
+    return null;
   }
 
   List<String> _resolveSubcategoryOptions(
     CatalogRepository catalogRepo,
     ActivityWithDetails activity,
   ) {
+    if (!_isCatalogReadyForActivityProject(catalogRepo, activity)) {
+      return const <String>[];
+    }
+
     final optionSet = <String>{};
 
     for (final key in _catalogLookupKeys(activity)) {
@@ -1075,30 +1939,23 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
         final name = item.name.trim();
         if (name.isNotEmpty) optionSet.add(name);
       }
-      if (optionSet.isNotEmpty) {
-        // Keep most relevant match first: stop when a key already resolved options.
-        break;
-      }
     }
 
     if (optionSet.isNotEmpty) {
       return optionSet.toList(growable: false);
     }
 
-    // Fallback: if mapping by activity id/code failed, expose active subcategories
-    // so the reviewer can still resolve the catalog mismatch.
-    return catalogRepo.data.subcategories
-        .where((entry) => entry.isActive)
-        .map((entry) => entry.name.trim())
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList(growable: false);
+    return const <String>[];
   }
 
   List<String> _resolveTemaOptions(
     CatalogRepository catalogRepo,
     ActivityWithDetails activity,
   ) {
+    if (!_isCatalogReadyForActivityProject(catalogRepo, activity)) {
+      return const <String>[];
+    }
+
     final optionSet = <String>{};
 
     for (final key in _catalogLookupKeys(activity)) {
@@ -1106,36 +1963,33 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
         final name = item.name.trim();
         if (name.isNotEmpty) optionSet.add(name);
       }
-      if (optionSet.isNotEmpty) {
-        break;
-      }
     }
 
     if (optionSet.isNotEmpty) {
       return optionSet.toList(growable: false);
     }
 
-    return catalogRepo.data.topics
-        .where((entry) => entry.isActive)
-        .map((entry) => entry.name.trim())
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList(growable: false);
+    return const <String>[];
   }
 
   List<String> _resolvePurposeOptions(
     CatalogRepository catalogRepo,
-    ActivityWithDetails activity,
-  ) {
+    ActivityWithDetails activity, {
+    String? subcategoryId,
+  }) {
+    if (!_isCatalogReadyForActivityProject(catalogRepo, activity)) {
+      return const <String>[];
+    }
+
     final optionSet = <String>{};
 
     for (final key in _catalogLookupKeys(activity)) {
-      for (final item in catalogRepo.purposesFor(activityId: key)) {
+      for (final item in catalogRepo.purposesFor(
+        activityId: key,
+        subcategoryId: subcategoryId,
+      )) {
         final name = item.name.trim();
         if (name.isNotEmpty) optionSet.add(name);
-      }
-      if (optionSet.isNotEmpty) {
-        break;
       }
     }
 
@@ -1143,12 +1997,76 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
       return optionSet.toList(growable: false);
     }
 
-    return catalogRepo.data.purposes
-        .where((entry) => entry.isActive)
-        .map((entry) => entry.name.trim())
-        .where((name) => name.isNotEmpty)
-        .toSet()
-        .toList(growable: false);
+    return const <String>[];
+  }
+
+  List<String> _resolveMunicipalityOptions(
+    CatalogRepository catalogRepo,
+    ActivityWithDetails activity,
+  ) {
+    final valuesByKey = <String, String>{};
+
+    void addValue(String? raw) {
+      final value = (raw ?? '').trim();
+      if (value.isEmpty) return;
+      valuesByKey.putIfAbsent(_normalizeCatalogValue(value), () => value);
+    }
+
+    if (_isCatalogReadyForActivityProject(catalogRepo, activity)) {
+      for (final item in catalogRepo.getMunicipalities()) {
+        addValue(item);
+      }
+    }
+    for (final item in _projectCoverageMunicipalities) {
+      addValue(item);
+    }
+
+    addValue(activity.municipality?.name);
+    addValue(_extractLinkedMunicipality(activity.activity.description));
+    addValue(_wizardPayloadText(
+        activity.wizardPayload, const ['location', 'municipio']));
+
+    final values = valuesByKey.values.toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
+  }
+
+  bool _isCatalogReadyForActivityProject(
+    CatalogRepository catalogRepo,
+    ActivityWithDetails activity,
+  ) {
+    final activityProjectId = activity.activity.projectId.trim().toUpperCase();
+    if (activityProjectId.isEmpty) return false;
+    return catalogRepo.isReady &&
+        catalogRepo.projectId.trim().toUpperCase() == activityProjectId;
+  }
+
+  String? _resolveEffectiveSubcategoryId({
+    required CatalogRepository catalogRepo,
+    required ActivityWithDetails activity,
+    required List<String> subcategoryOptions,
+    required String capturedSubcategory,
+  }) {
+    final effectiveSubcategoryName = _subcategoriaLink ??
+        _findBestCatalogOption(capturedSubcategory, subcategoryOptions);
+    final normalizedTarget =
+        _normalizeCatalogValue(effectiveSubcategoryName ?? '');
+    if (normalizedTarget.isEmpty) {
+      return null;
+    }
+
+    for (final key in _catalogLookupKeys(activity)) {
+      for (final item in catalogRepo.subcategoriesFor(key)) {
+        if (_normalizeCatalogValue(item.name) == normalizedTarget) {
+          final id = item.id.trim();
+          if (id.isNotEmpty) {
+            return id;
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   String _extractPurposeFromDescription(String? description) {
@@ -1289,11 +2207,74 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
 
   bool _hasCatalogGap(ActivityWithDetails activity) {
     final title = activity.activity.title.trim().toLowerCase();
-    final description = (activity.activity.description ?? '').trim().toLowerCase();
+    final description =
+        (activity.activity.description ?? '').trim().toLowerCase();
     return title == 'otro' ||
         description.contains('no existe en catalogo') ||
         activity.flags.catalogChanged ||
-        activity.flags.checklistIncomplete;
+        _hasUnresolvedCatalogDecision(activity);
+  }
+
+  bool _hasUnresolvedCatalogDecision(ActivityWithDetails activity) {
+    final payload = activity.wizardPayload;
+    final payloadSubcategory =
+        _wizardPayloadText(payload, const ['subcategory', 'name']);
+    final payloadTemaPrimary =
+        _wizardPayloadText(payload, const ['topics', '0', 'name']);
+    final payloadPurpose =
+        _wizardPayloadText(payload, const ['purpose', 'name']);
+    final payloadMunicipio =
+        _wizardPayloadText(payload, const ['location', 'municipio']);
+
+    final capturedSubcategoria = (payloadSubcategory ??
+            _extractLabeledField(activity.activity.description, const [
+              'Subcategoría',
+              'Subcategoria',
+            ]) ??
+            activity.activity.title)
+        .trim();
+    final capturedTema = (payloadTemaPrimary ??
+            _extractLabeledField(activity.activity.description, const [
+              'Tema',
+              'Temas',
+            ]) ??
+            '')
+        .trim();
+    final capturedProposito = (payloadPurpose ??
+            _extractPurposeFromDescription(activity.activity.description))
+        .trim();
+    final capturedMunicipio = (payloadMunicipio ??
+            _extractLinkedMunicipality(activity.activity.description) ??
+            activity.municipality?.name ??
+            'Sin municipio')
+        .trim();
+
+    final catalogRepo = ref.read(catalogRepositoryProvider);
+    final subcatOptions = _resolveSubcategoryOptions(catalogRepo, activity);
+    final effectiveSubcategoryId = _resolveEffectiveSubcategoryId(
+      catalogRepo: catalogRepo,
+      activity: activity,
+      subcategoryOptions: subcatOptions,
+      capturedSubcategory: capturedSubcategoria,
+    );
+    final temaOptions = _resolveTemaOptions(catalogRepo, activity);
+    final propOptions = _resolvePurposeOptions(
+      catalogRepo,
+      activity,
+      subcategoryId: effectiveSubcategoryId,
+    );
+    final munOptions = _resolveMunicipalityOptions(catalogRepo, activity);
+
+    bool unresolved(String captured, List<String> options) {
+      final normalized = _normalizeCatalogValue(captured);
+      if (normalized.isEmpty) return false;
+      return _findBestCatalogOption(captured, options) == null;
+    }
+
+    return unresolved(capturedSubcategoria, subcatOptions) ||
+        unresolved(capturedTema, temaOptions) ||
+        unresolved(capturedProposito, propOptions) ||
+        unresolved(capturedMunicipio, munOptions);
   }
 
   Widget _buildGPSValidationBanner(ActivityWithDetails activity) {
@@ -1450,7 +2431,8 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
               SizedBox(height: SaoSpacing.xs),
               Text(
                 timestamp,
-                style: SaoTypography.chipText.copyWith(color: SaoColors.gray500),
+                style:
+                    SaoTypography.chipText.copyWith(color: SaoColors.gray500),
               ),
             ],
           ),
@@ -1476,9 +2458,7 @@ class _ActivityDetailsPanelProState extends ConsumerState<ActivityDetailsPanelPr
       child: Row(
         children: [
           Icon(
-            isChecked
-                ? Icons.check_circle_rounded
-                : Icons.cancel_rounded,
+            isChecked ? Icons.check_circle_rounded : Icons.cancel_rounded,
             color: isChecked ? SaoColors.success : SaoColors.gray400,
           ),
           SizedBox(width: SaoSpacing.sm),
@@ -1556,7 +2536,8 @@ class _HotkeyPill extends StatelessWidget {
             ),
             child: Text(
               label,
-              style: SaoTypography.caption.copyWith(fontWeight: FontWeight.w700),
+              style:
+                  SaoTypography.caption.copyWith(fontWeight: FontWeight.w700),
             ),
           ),
           const SizedBox(width: 6),

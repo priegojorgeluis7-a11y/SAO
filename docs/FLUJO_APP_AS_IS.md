@@ -1,114 +1,124 @@
 # Flujo Operativo SAO (AS-IS)
 
 ## Objetivo
-Documentar el flujo **actual implementado** en la app para personal operativo: asignación, inicio, término, captura en wizard, cancelación y sincronización.
+Documentar el flujo actual implementado y validado del sistema SAO para operación de campo y coordinación.
 
-## Resumen ejecutivo
-- Las actividades del día hoy están cargadas como dataset local (seed/mock en Home).
-- El flujo operativo principal usa swipe derecho por estados: **Pendiente → En curso → Revisión pendiente → Terminada**.
-- El wizard de registro tiene 4 pasos: Contexto, Clasificación, Evidencias y Confirmación.
-- Si el usuario no guarda el wizard, la actividad queda en **Revisión pendiente** para reintento.
-- La sincronización de **catálogos** sí está implementada; la de **actividades/evidencias** está parcialmente implementada (cola local y repositorio, pero sin worker end-to-end final).
+Documento alineado con:
+
+- `STATUS.md`
+- `docs/WORKFLOW.md`
+- `docs/SYNC.md`
 
 ---
 
-## Diagrama de flujo AS-IS
+## Resumen ejecutivo
+
+1. El flujo operativo principal esta activo de punta a punta: asignacion, captura, sync, revision y decision.
+2. La operacion funciona en modo offline-first con cola local y sincronizacion incremental.
+3. La revision por coordinacion opera por cola y decisiones en backend (`APPROVE`, `REJECT`, `CHANGES_REQUIRED`, `APPROVE_EXCEPTION` segun rol).
+4. El ciclo operativo->review->pull ya se ejecuto con evidencia en entorno real.
+5. La principal mejora pendiente no es habilitacion funcional base, sino endurecimiento del contrato y UX orientada a tareas.
+
+---
+
+## Diagrama funcional AS-IS
 
 ```mermaid
 flowchart TD
-    A[Inicio de jornada / Home] --> B[Carga actividades del día\n(Seed local en Home)]
-    B --> C{Usuario hace swipe derecho}
+    A[Inicio de jornada] --> B[Login + proyecto activo]
+    B --> C[Home con actividades asignadas]
+    C --> D{Accion operativa}
 
-    C -->|Estado Pendiente| D[Iniciar actividad]
-    D --> D1[Registrar horaInicio + GPS mock]
-    D1 --> E[Estado En curso]
+    D -->|Iniciar| E[Registrar inicio]
+    E --> F[Estado operativo EN_CURSO]
 
-    C -->|Estado En curso| F[Terminar actividad]
-    F --> F1[Registrar horaFin]
-    F1 --> G[Estado Revisión pendiente]
-    G --> H[Abrir Wizard de registro]
+    D -->|Terminar| G[Registrar fin]
+    G --> H[Estado operativo POR_COMPLETAR]
+    H --> I[Abrir Wizard]
 
-    C -->|Estado Revisión pendiente| H
+    I --> I1[Paso 1 Contexto]
+    I1 --> I2[Paso 2 Clasificacion]
+    I2 --> I3[Paso 3 Evidencias]
+    I3 --> I4[Paso 4 Confirmacion]
 
-    H --> H1[Paso 1: Contexto]
-    H1 --> H2[Paso 2: Clasificación]
-    H2 --> H3[Paso 3: Evidencias]
-    H3 --> H4[Paso 4: Confirmar]
+    I4 --> J{Guardar valido}
+    J -->|No| K[Queda para correccion local]
+    J -->|Si| L[READY_TO_SYNC + enqueue]
 
-    H4 --> I{Guardar exitoso}
-    I -->|Sí| J[Guardar actividad en Drift\nstatus DRAFT]
-    J --> K[Regresar Home con resultado]
-    K --> L[Estado Terminada]
+    L --> M{Conectividad}
+    M -->|Online| N[Push sync]
+    M -->|Offline| O[Pendiente en cola]
 
-    I -->|No o error| M[Se mantiene en Revisión pendiente]
-    H -->|Cancelar/salir| M
+    N --> P[Pull sync incremental]
+    O --> P
+    P --> Q[Actualiza estado en Home/Sync Center]
 
-    B --> N{Swipe izquierdo}
-    N --> O[Reportar incidencia]
-    O --> P[Regresa a Pendiente]
-
-    J --> Q[Posible encolado para sync\n(READY_TO_SYNC + SyncQueue)]
-    Q --> R[Centro de Sincronización\n(estado aún parcial)]
+    Q --> R{Requiere revision}
+    R -->|Si| S[Review Queue Desktop]
+    S --> T{Decision}
+    T -->|APPROVED| U[Cierre administrativo]
+    T -->|CHANGES_REQUIRED| V[Retorna a operativo para correccion]
+    T -->|REJECTED| W[Cierre rechazado]
 ```
 
 ---
 
 ## Flujo por etapa (AS-IS)
 
-### 1) Asignación de actividades
-1. Personal abre Home.
-2. App muestra actividades del día (actualmente mock local por proyecto/frente).
-3. Cada actividad inicia en estado de ejecución **Pendiente**.
+## 1) Asignacion y agenda
 
-### 2) Inicio de actividad
-1. Swipe derecho en actividad pendiente.
-2. Sistema registra hora de inicio y GPS (mock).
-3. Estado cambia a **En curso**.
+1. El usuario inicia sesion y selecciona proyecto activo.
+2. Home y agenda muestran actividades asignadas desde backend.
+3. La visibilidad depende de reglas de asignacion y sync_version del dominio.
 
-### 3) Término de actividad
-1. Swipe derecho en actividad en curso.
-2. Sistema registra hora fin.
-3. Estado cambia a **Revisión pendiente**.
-4. Se abre wizard para captura final.
+## 2) Ejecucion operativa
 
-### 4) Captura en wizard
-Pasos:
-1. Contexto
-2. Clasificación
-3. Evidencias
-4. Confirmación y Guardar
+1. Iniciar actividad cambia estado operativo a `EN_CURSO`.
+2. Terminar actividad la mueve a `POR_COMPLETAR`.
+3. El wizard consolida datos, clasificacion y evidencias.
 
-Reglas relevantes:
-- En paso de evidencias, UI permite continuar sin evidencia.
-- En guardado final, gatekeeper valida consistencia completa y exige evidencia válida para cerrar correctamente.
+## 3) Guardado y cola local
 
-### 5) Cancelación / abandono
-- Si usuario cierra/cancela sin guardar: actividad queda en **Revisión pendiente**.
-- Puede reabrirse con swipe derecho para completar captura.
+1. Al guardar valido, la actividad queda lista para sincronizar.
+2. Se inserta item en cola local de sync.
+3. Si no hay red, el item permanece pendiente sin perder captura.
 
-### 6) Incidencias
-- Swipe izquierdo abre modal de incidencias rápidas.
-- Al registrar incidencia, estado operativo vuelve a **Pendiente**.
+## 4) Sincronizacion
 
-### 7) Sincronización a nube
-- **Catálogos:** sincronización versionada implementada (diff/snapshot/fallback local).
-- **Actividades/Evidencias:** existe estructura de cola (`SyncQueue`) y repositorio, pero flujo end-to-end aún parcial.
+1. Push envia pendientes por lote.
+2. Pull incremental recupera actualizaciones de servidor.
+3. Sync Center expone estado de pendientes, errores y reintentos.
+
+## 5) Revision de coordinacion
+
+1. Actividades en revision aparecen en cola desktop.
+2. Coordinacion decide aprobar, pedir cambios o rechazar.
+3. El resultado vuelve al operativo via pull sync.
 
 ---
 
-## Máquina de estados operativa (AS-IS)
+## Vista actual por dimensiones de estado
 
-| Estado actual | Evento usuario | Estado siguiente | Comentario |
-|---|---|---|---|
-| Pendiente | Swipe derecho (Iniciar) | En curso | Guarda horaInicio |
-| En curso | Swipe derecho (Terminar) | Revisión pendiente | Guarda horaFin + abre wizard |
-| Revisión pendiente | Guardado wizard exitoso | Terminada | Cierre funcional en Home |
-| Revisión pendiente | Cancelar / error en guardado | Revisión pendiente | Reintento posterior |
-| Cualquier estado visible | Swipe izquierdo (incidencia) | Pendiente | Flujo rápido de bloqueo/incidencia |
+La operacion ya usa en la practica tres dimensiones, aunque la UX aun tiene margen para simplificarse:
+
+1. Estado operativo: pendiente, en curso, por completar, bloqueada/cancelada.
+2. Estado de sync: local, listo para sync, sincronizado o error.
+3. Estado de revision: no aplica, pendiente, requiere cambios, aprobado, rechazado.
 
 ---
 
-## Riesgos operativos actuales
-- Asignación diaria aún depende de seed local (no backend real en este flujo).
-- Hay diferencia entre mensajes UX de evidencia y validación final de guardado.
-- Sync de actividades/evidencias todavía no cierra ciclo completo de subida automática.
+## Riesgos actuales del AS-IS
+
+1. Parte de la experiencia aun expone estados tecnicos al usuario final.
+2. La devolucion de revision todavia puede llegar con semantica poco accionable.
+3. La visibilidad de actividades sigue sensible a reglas de asignacion/sync si no se mantiene contrato unico entre capas.
+4. El sistema esta funcionalmente cerrado, pero requiere endurecimiento de flujo para reducir soporte reactivo.
+
+---
+
+## Enlace al siguiente paso
+
+El roadmap de mejora sobre este AS-IS se encuentra en:
+
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
+- `docs/BACKLOG_MEJORA_FLUJO_2026-03-24.md`

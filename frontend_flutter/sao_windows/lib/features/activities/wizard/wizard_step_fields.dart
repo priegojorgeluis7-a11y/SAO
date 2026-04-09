@@ -330,12 +330,21 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
                   avatar: const Icon(Icons.add, size: 18),
                   label: const Text('Agregar tema'),
                   onPressed: () => _addNewTopicDialog(context),
+                  backgroundColor: Colors.white,
+                  side: const BorderSide(color: SaoColors.border),
+                  labelStyle: SaoTypography.buttonText.copyWith(
+                    color: SaoColors.gray800,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  iconTheme: const IconThemeData(color: SaoColors.primary),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => _openAllTopics(context),
                   icon: const Icon(Icons.apps_rounded, size: 18),
                   label: const Text('Ver todos'),
                   style: OutlinedButton.styleFrom(
+                    foregroundColor: SaoColors.primary,
+                    backgroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   ),
                 ),
@@ -369,7 +378,12 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
               title: 'Institucionales',
               items: c.attendeesInstitutional,
               selectedIds: c.selectedAttendeeIds,
-              onToggle: c.toggleAttendee,
+              onToggle: (attendee, willSelect) => _handleInstitutionalAttendeeToggle(attendee, willSelect),
+              detailBuilder: (attendee) {
+                final representative = c.attendeeRepresentative(attendee.id);
+                if (representative == null) return null;
+                return 'Representante: $representative';
+              },
               onAddNew: () => _addNewAttendeeDialog(context, isInstitutional: true),
             ),
 
@@ -380,7 +394,13 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
               title: 'Locales / Sociales',
               items: c.attendeesLocal,
               selectedIds: c.selectedAttendeeIds,
-              onToggle: c.toggleAttendee,
+              onToggle: (attendee, willSelect) async {
+                if (willSelect) {
+                  c.selectAttendee(attendee.id);
+                } else {
+                  c.deselectAttendee(attendee.id);
+                }
+              },
               onAddNew: () => _addNewAttendeeDialog(context, isInstitutional: false),
             ),
 
@@ -925,6 +945,119 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
           ),
         );
       }
+    }
+  }
+
+  Future<void> _handleInstitutionalAttendeeToggle(CatItem attendee, bool willSelect) async {
+    final c = widget.controller;
+    if (!willSelect) {
+      c.deselectAttendee(attendee.id);
+      return;
+    }
+
+    final representative = await _promptInstitutionRepresentative(attendee.name);
+    if (!mounted || representative == null) return;
+
+    c.selectAttendee(attendee.id);
+    c.setAttendeeRepresentative(attendee.id, representative);
+  }
+
+  Future<String?> _promptInstitutionRepresentative(String institutionName) async {
+    final representativeCtrl = TextEditingController();
+    try {
+      final result = await showDialog<String?>(
+        context: context,
+        builder: (dialogContext) {
+          return StatefulBuilder(
+            builder: (context, setStateDialog) {
+              String? inlineError;
+
+              Future<void> confirmRegister() async {
+                final representative = representativeCtrl.text.trim();
+                if (representative.isEmpty) {
+                  setStateDialog(() {
+                    inlineError = 'Escribe el nombre del representante o elige omitir.';
+                  });
+                  return;
+                }
+
+                final confirmed = await showDialog<bool>(
+                  context: dialogContext,
+                  builder: (confirmContext) => AlertDialog(
+                    title: const Text('Confirmar registro'),
+                    content: Text(
+                      'Se registrará a "$representative" como representante de $institutionName desde la app. ¿Deseas continuar?',
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.of(confirmContext).pop(false),
+                        child: const Text('Cancelar'),
+                      ),
+                      FilledButton(
+                        onPressed: () => Navigator.of(confirmContext).pop(true),
+                        child: const Text('Confirmar'),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (confirmed == true && dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop(representative);
+                }
+              }
+
+              return AlertDialog(
+                title: Text('Representante de $institutionName'),
+                content: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Puedes capturar el nombre del representante para registrarlo desde la app.',
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: representativeCtrl,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: InputDecoration(
+                        labelText: 'Nombre del representante',
+                        hintText: 'Ej. Juan Perez',
+                        border: const OutlineInputBorder(),
+                        errorText: inlineError,
+                      ),
+                      onChanged: (_) {
+                        if (inlineError != null) {
+                          setStateDialog(() {
+                            inlineError = null;
+                          });
+                        }
+                      },
+                    ),
+                  ],
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(''),
+                    child: const Text('Omitir'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(null),
+                    child: const Text('Cancelar'),
+                  ),
+                  FilledButton(
+                    onPressed: confirmRegister,
+                    child: const Text('Registrar'),
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      );
+
+      return result;
+    } finally {
+      representativeCtrl.dispose();
     }
   }
 

@@ -196,7 +196,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
     }
   }
 
-  void _handleNext() {
+  Future<void> _handleNext() async {
     final validation = widget.controller.validateContextStep();
     
     if (!validation.isValid) {
@@ -233,6 +233,8 @@ class _WizardStepContextState extends State<WizardStepContext> {
       return;
     }
     
+    await widget.controller.markIncompleteCaptureAfterContextStep();
+
     // Todo válido, continuar
     widget.onNext();
   }
@@ -1207,8 +1209,8 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
 
   Future<void> _handleProjectChanged(ProjectRef project) async {
     widget.controller.setProject(project);
-    await widget.controller.loadFrontOptionsForProject(project.id);
-    await widget.controller.loadLocationOptionsForProject(project.id);
+    await widget.controller.loadFrontOptionsForProject(project.code);
+    await widget.controller.loadLocationOptionsForProject(project.code);
     if (mounted) {
       setState(() {
         _frontNameController.text = widget.controller.selectedFrontName;

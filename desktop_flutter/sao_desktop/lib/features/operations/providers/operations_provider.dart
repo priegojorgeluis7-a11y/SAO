@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/enums/shared_enums.dart';
 import '../../../data/repositories/catalog_repository.dart';
 import '../../../data/repositories/activity_repository.dart';
+import '../../../data/models/activity_model.dart';
 
 final operationsDataProvider = FutureProvider<OperationsData>((ref) async {
   final activityRepo = ref.watch(activityRepositoryProvider);

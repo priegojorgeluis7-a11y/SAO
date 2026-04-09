@@ -754,6 +754,28 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
 
   String _normalizeCoverageKey(String value) => value.trim().toLowerCase();
 
+  List<String> _normalizedUniqueOptions(Iterable<String> values) {
+    final uniqueByKey = <String, String>{};
+    for (final raw in values) {
+      final value = raw.trim();
+      if (value.isEmpty) continue;
+      uniqueByKey.putIfAbsent(value.toLowerCase(), () => value);
+    }
+    final result = uniqueByKey.values.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return result;
+  }
+
+  String? _selectedOptionFromList(String? selected, List<String> options) {
+    final value = (selected ?? '').trim();
+    if (value.isEmpty) return null;
+    final normalized = value.toLowerCase();
+    for (final option in options) {
+      if (option.toLowerCase() == normalized) return option;
+    }
+    return null;
+  }
+
   List<AssignmentFrontCoverageOption> _coverageForFront(String? frontId) {
     if (frontId == null || frontId.trim().isEmpty) {
       return const [];
@@ -794,23 +816,20 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
 
   void _syncCoverageForFront(String? frontId) {
     final coverage = _coverageForFront(frontId);
-    final estados = coverage
-        .map((item) => item.estado.trim())
-        .where((item) => item.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final estados = _normalizedUniqueOptions(
+      coverage.map((item) => item.estado),
+    );
 
-    final estado = estados.contains(_selectedEstado) ? _selectedEstado : null;
-    final municipios = coverage
-        .where((item) => estado != null && item.estado.toLowerCase() == estado.toLowerCase())
-        .map((item) => item.municipio.trim())
-        .where((item) => item.isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    final estado = _selectedOptionFromList(_selectedEstado, estados);
+    final municipios = _normalizedUniqueOptions(
+      coverage
+          .where((item) =>
+              estado != null &&
+              item.estado.trim().toLowerCase() == estado.toLowerCase())
+          .map((item) => item.municipio),
+    );
 
-    final municipio = municipios.contains(_selectedMunicipio) ? _selectedMunicipio : null;
+    final municipio = _selectedOptionFromList(_selectedMunicipio, municipios);
 
     _estadoOptions = estados;
     _municipioOptions = municipios;
@@ -1112,7 +1131,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
           )
         else
           DropdownButtonFormField<String>(
-            initialValue: _selectedEstado,
+            initialValue: _selectedOptionFromList(_selectedEstado, _estadoOptions),
             decoration: const InputDecoration(
               labelText: 'Estado',
               border: OutlineInputBorder(),
@@ -1124,17 +1143,18 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
                 ? null
                 : (value) {
                     setState(() {
-                      _selectedEstado = value;
+                      _selectedEstado = _selectedOptionFromList(value, _estadoOptions);
                       final coverage = _coverageForFront(_frontId);
-                      _municipioOptions = coverage
-                          .where((entry) =>
-                              value != null &&
-                              entry.estado.toLowerCase() == value.toLowerCase())
-                          .map((entry) => entry.municipio)
-                          .toSet()
-                          .toList()
-                        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-                      _selectedMunicipio = _municipioOptions.isNotEmpty ? _municipioOptions.first : null;
+                      _municipioOptions = _normalizedUniqueOptions(
+                        coverage
+                            .where((entry) =>
+                                value != null &&
+                                entry.estado.trim().toLowerCase() == value.toLowerCase())
+                            .map((entry) => entry.municipio),
+                      );
+                      _selectedMunicipio =
+                          _selectedOptionFromList(_selectedMunicipio, _municipioOptions) ??
+                          (_municipioOptions.isNotEmpty ? _municipioOptions.first : null);
                     });
                     _triggerGeocode();
                   },
@@ -1155,7 +1175,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
           )
         else
           DropdownButtonFormField<String>(
-            initialValue: _selectedMunicipio,
+            initialValue: _selectedOptionFromList(_selectedMunicipio, _municipioOptions),
             decoration: const InputDecoration(
               labelText: 'Municipio',
               border: OutlineInputBorder(),

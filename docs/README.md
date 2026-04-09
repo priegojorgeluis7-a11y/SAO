@@ -20,6 +20,7 @@ Este documento organiza toda la documentacion del repositorio en un unico punto 
 - `docs/AUDIT_REPORT.md` - hallazgos y estado de auditoria.
 - `docs/PRODUCTION_READINESS_CHECKLIST.md` - checklist de salida a produccion.
 - `docs/PLAN_CIERRE_100_FUNCIONAL.md` - plan de cierre funcional.
+- `docs/POLITICA_DE_PRIVACIDAD_SAO.md` - politica de privacidad base para revision legal y publicacion.
 
 ## 2) Arquitectura y diseno
 - `ARCHITECTURE.md` - referencia arquitectonica integral.
@@ -58,6 +59,9 @@ Este documento organiza toda la documentacion del repositorio en un unico punto 
 
 ## 7) Planes de trabajo e implementacion
 - `IMPLEMENTATION_PLAN.md` - plan de implementacion transversal.
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md` - plan ejecutivo y tecnico para endurecer el flujo operativo end-to-end.
+- `docs/BACKLOG_MEJORA_FLUJO_2026-03-24.md` - backlog tecnico por backend, mobile, desktop, QA y documentacion.
+- `docs/TICKETS_P0_MEJORA_FLUJO_2026-03-24.md` - tickets P0 listos para ejecucion por equipo.
 - `docs/PLAN_100_LOCAL.md` - plan operativo 100% local.
 - `docs/PLAN_GAPS_PRIORIDAD_MEDIA.md` - cierre de gaps prioridad media.
 - `docs/PLAN_MIGRACION_FIRESTORE.md` - plan de migracion de Cloud SQL a Firestore con estimacion de costos.

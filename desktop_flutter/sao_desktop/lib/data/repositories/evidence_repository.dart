@@ -7,7 +7,9 @@ class EvidenceRepository {
       : _apiClient = apiClient ?? const BackendApiClient();
 
   Future<String> getDownloadSignedUrl(String evidenceId) async {
-    final response = await _apiClient.getJson('/api/v1/evidences/$evidenceId/download-url');
+    final response = await _apiClient
+        .getJson('/api/v1/evidences/$evidenceId/download-url')
+        .timeout(const Duration(seconds: 8));
     if (response is! Map<String, dynamic>) {
       throw StateError('Invalid response while fetching evidence download URL');
     }

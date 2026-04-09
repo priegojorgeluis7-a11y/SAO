@@ -14,6 +14,7 @@ from typing import Any
 from app.core.enums import UserStatus
 from app.services.audit_service import write_firestore_audit_log
 from app.services.firestore_identity_service import get_firestore_user_by_id, list_firestore_users
+from app.core.utils import parse_firestore_dt
 from app.schemas.assignment import (
     AssignmentAssigneeOption,
     AssignmentCancelRequest,
@@ -58,30 +59,43 @@ def _safe_uuid_str(value: object) -> str:
 
 
 def _to_dt(value: object) -> datetime:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str):
-        raw = value.strip()
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            dt = datetime.fromisoformat(raw)
-            return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-        except ValueError:
-            pass
-    return datetime.now(timezone.utc)
+    result = parse_firestore_dt(value)
+    return result if result is not None else datetime.now(timezone.utc)
+
+
+def _assignment_window(payload: dict[str, Any]) -> tuple[datetime, datetime]:
+    start_at = _to_dt(
+        payload.get("assignment_start_at")
+        or payload.get("start_at")
+        or payload.get("created_at")
+    )
+    end_at = _to_dt(
+        payload.get("assignment_end_at")
+        or payload.get("end_at")
+        or payload.get("updated_at")
+    )
+    if end_at <= start_at:
+        end_at = start_at + timedelta(hours=1)
+    return start_at, end_at
 
 
 def _next_project_sync_version(client: Any, project_id: str) -> int:
-    max_sync_version = 0
-    docs = client.collection("activities").where("project_id", "==", project_id).stream()
-    for doc in docs:
-        payload = doc.to_dict() or {}
-        try:
-            max_sync_version = max(max_sync_version, int(payload.get("sync_version") or 0))
-        except (TypeError, ValueError):
-            continue
-    return max_sync_version + 1
+    # Fetch only the single highest sync_version using ORDER BY + LIMIT(1)
+    # to avoid a full project scan.
+    docs = list(
+        client.collection("activities")
+        .where("project_id", "==", project_id)
+        .order_by("sync_version", direction="DESCENDING")
+        .limit(1)
+        .stream()
+    )
+    if not docs:
+        return 1
+    payload = docs[0].to_dict() or {}
+    try:
+        return int(payload.get("sync_version") or 0) + 1
+    except (TypeError, ValueError):
+        return 1
 
 
 def _is_privileged_assignment_manager(current_user: Any) -> bool:
@@ -131,12 +145,7 @@ def _build_assignment_list_item(
     project_id: str,
     assignee_principal: Any | None,
 ) -> AssignmentListItem:
-    created_raw = payload.get("created_at")
-    updated_raw = payload.get("updated_at")
-    start_at = _to_dt(created_raw)
-    end_at = _to_dt(updated_raw)
-    if end_at <= start_at:
-        end_at = start_at + timedelta(hours=1)
+    start_at, end_at = _assignment_window(payload)
     state = str(payload.get("execution_state") or "PENDIENTE")
     raw_front = str(
         payload.get("frente")
@@ -159,7 +168,7 @@ def _build_assignment_list_item(
         assignee_user_id=UUID(str(payload.get("assigned_to_user_id"))),
         assignee_name=(assignee_principal.full_name if assignee_principal else "Sin responsable"),
         assignee_email=(assignee_principal.email if assignee_principal else None),
-        activity_id=str(payload.get("activity_type_code") or ""),
+        activity_id=str(payload.get("uuid") or doc_id),
         title=str(payload.get("title") or payload.get("activity_type_code") or ""),
         frente=raw_front,
         municipio=municipio,
@@ -224,27 +233,7 @@ def list_assignments(
         if not can_view_all and current_user_id and effective_assignee_user_id != current_user_id:
             continue
 
-        created_raw = payload.get("created_at")
-        updated_raw = payload.get("updated_at")
-
-        def _to_dt(v: object) -> datetime:
-            if isinstance(v, datetime):
-                return v if v.tzinfo else v.replace(tzinfo=timezone.utc)
-            if isinstance(v, str):
-                raw = v.strip()
-                if raw.endswith("Z"):
-                    raw = raw[:-1] + "+00:00"
-                try:
-                    dt = datetime.fromisoformat(raw)
-                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
-                except ValueError:
-                    pass
-            return datetime.now(timezone.utc)
-
-        start_at = _to_dt(created_raw)
-        end_at = _to_dt(updated_raw)
-        if end_at <= start_at:
-            end_at = start_at + timedelta(hours=1)
+        start_at, end_at = _assignment_window(payload)
         if end_at < range_start or start_at > range_end:
             continue
         state = str(payload.get("execution_state") or "PENDIENTE")
@@ -271,7 +260,7 @@ def list_assignments(
                 assignee_user_id=effective_assignee_user_id,
                 assignee_name=(principal.full_name if principal else "Sin responsable"),
                 assignee_email=(principal.email if principal else None),
-                activity_id=str(payload.get("activity_type_code") or ""),
+                activity_id=str(payload.get("uuid") or doc.id),
                 title=str(payload.get("title") or payload.get("activity_type_code") or ""),
                 frente=raw_front,
                 municipio=municipio,
@@ -291,9 +280,26 @@ def list_assignments(
 @router.get("/assignees", response_model=list[AssignmentAssigneeOption])
 def list_assignees(
     project_id: str = Query(..., description="Project filter"),
-    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
     _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD", "ADMIN"}
+
+    # If user is OPERATIVO ONLY (no ADMIN/COORD/SUPERVISOR), only return self
+    has_privileged_role = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
+    is_only_operativo = user_has_any_role(current_user, ["OPERATIVO"], None) and not has_privileged_role
+    
+    if is_only_operativo:
+        principal = current_user
+        if principal.status == UserStatus.ACTIVE:
+            return [
+                AssignmentAssigneeOption(
+                    user_id=principal.id,
+                    full_name=principal.full_name,
+                    email=principal.email,
+                    role_name=(principal.roles[0] if principal.roles else ""),
+                )
+            ]
+        return []
 
     principals = list_firestore_users()
     options: list[AssignmentAssigneeOption] = []
@@ -361,6 +367,8 @@ def create_assignment(
         "catalog_changed": False,
         "latitude": str(payload.latitude) if payload.latitude is not None else None,
         "longitude": str(payload.longitude) if payload.longitude is not None else None,
+        "assignment_start_at": payload.start_at.isoformat(),
+        "assignment_end_at": payload.end_at.isoformat(),
         "created_at": payload.start_at.isoformat(),
         "updated_at": payload.end_at.isoformat(),
         "deleted_at": None,
@@ -374,7 +382,7 @@ def create_assignment(
         assignee_user_id=payload.assignee_user_id,
         assignee_name=(assignee_principal.full_name if assignee_principal else "Sin responsable"),
         assignee_email=(assignee_principal.email if assignee_principal else None),
-        activity_id=type_code,
+        activity_id=str(activity_uuid),
         title=title,
         frente=front_ref,
         municipio=municipio,

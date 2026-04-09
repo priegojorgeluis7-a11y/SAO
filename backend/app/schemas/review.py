@@ -27,6 +27,10 @@ class ReviewQueueItemOut(BaseModel):
     conflict_count: int
     lat: float | None = None
     lon: float | None = None
+    operational_state: str = Field("PENDIENTE", description="PENDIENTE | EN_CURSO | POR_COMPLETAR | BLOQUEADA | CANCELADA")
+    sync_state: str = Field("SYNCED", description="LOCAL_ONLY | READY_TO_SYNC | SYNC_IN_PROGRESS | SYNCED | SYNC_ERROR")
+    review_state: str = Field("PENDING_REVIEW", description="NOT_APPLICABLE | PENDING_REVIEW | CHANGES_REQUIRED | APPROVED | REJECTED")
+    next_action: str = Field("ESPERAR_DECISION_COORDINACION", description="Normalized next action for clients")
 
 
 class ReviewQueueCountersOut(BaseModel):

@@ -4,9 +4,11 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 
+import '../../../core/flow/activity_flow_projection.dart';
 import '../../../core/network/exceptions.dart';
 import '../../../core/utils/logger.dart';
 import '../../../data/local/app_db.dart';
+import '../../../features/evidence/data/evidence_upload_retry_worker.dart';
 import '../../../features/events/data/events_api_repository.dart';
 import '../../../features/events/data/events_local_repository.dart';
 import '../../../features/events/models/event_dto.dart';
@@ -97,6 +99,7 @@ class SyncService {
   final SyncApiRepository _apiRepository;
   final AppDb _db;
   final EventsApiRepository? _eventsApiRepository;
+  final EvidenceUploadRetryWorker? _evidenceUploadRetryWorker;
   static final RegExp _uuidPattern = RegExp(
     r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
   );
@@ -105,9 +108,11 @@ class SyncService {
     required SyncApiRepository apiRepository,
     required AppDb db,
     EventsApiRepository? eventsApiRepository,
+    EvidenceUploadRetryWorker? evidenceUploadRetryWorker,
   })  : _apiRepository = apiRepository,
         _db = db,
-        _eventsApiRepository = eventsApiRepository;
+        _eventsApiRepository = eventsApiRepository,
+        _evidenceUploadRetryWorker = evidenceUploadRetryWorker;
 
   Future<PullSyncResult> pullChanges({
     required String projectId,
@@ -190,6 +195,10 @@ class SyncService {
     int pushed = 0, created = 0, updated = 0, unchanged = 0, conflicts = 0, errors = 0;
 
     try {
+      await _evidenceUploadRetryWorker?.processDueUploads(
+        ignoreRetrySchedule: true,
+      );
+
       // 1. Fetch retryable items
       final pendingItems = await (_db.select(_db.syncQueue)
         ..where(
@@ -296,11 +305,14 @@ class SyncService {
                   retryWithOverride.add(match);
                 } else {
                   conflicts++;
-                  await _markError(match.row, 'CONFLICT: item changed on server');
+                  await _markError(match.row, _buildGuidedError(result));
                 }
+              case 'INVALID':
+                errors++;
+                await _markError(match.row, _buildGuidedError(result));
               default:
                 errors++;
-                await _markError(match.row, 'Unexpected server status: ${result.status}');
+                await _markError(match.row, _buildGuidedError(result));
             }
           }
 
@@ -335,12 +347,15 @@ class SyncService {
                     await _markDone(retryMatch.row);
                   case 'CONFLICT':
                     conflicts++;
-                    await _markError(retryMatch.row, 'CONFLICT: item changed on server');
+                    await _markError(retryMatch.row, _buildGuidedError(retryResult));
+                  case 'INVALID':
+                    errors++;
+                    await _markError(retryMatch.row, _buildGuidedError(retryResult));
                   default:
                     errors++;
                     await _markError(
                       retryMatch.row,
-                      'Unexpected retry status: ${retryResult.status}',
+                      _buildGuidedError(retryResult),
                     );
                 }
               }
@@ -437,7 +452,7 @@ class SyncService {
     if (normalizedActivityTypeCode == null) {
       await _markError(
         item.row,
-        'Missing valid activity type code for sync payload',
+        'Missing valid activity type code for sync payload | accion sugerida: REFRESH_CATALOG_AND_RETRY',
       );
       return null;
     }
@@ -538,7 +553,7 @@ class SyncService {
     required String dtoActivityTypeCode,
   }) async {
     final raw = dtoActivityTypeCode.trim();
-    if (raw.isNotEmpty && !_isUuid(raw) && raw.toUpperCase() != 'UNKNOWN') {
+    if (_isValidPushActivityTypeCode(raw)) {
       return raw;
     }
 
@@ -553,11 +568,116 @@ class SyncService {
           ..where((t) => t.id.equals(activity.activityTypeId)))
         .getSingleOrNull();
     final resolved = type?.code.trim();
-    if (resolved == null || resolved.isEmpty || _isUuid(resolved)) {
-      return null;
+    if (_isValidPushActivityTypeCode(resolved)) {
+      return resolved;
     }
 
-    return resolved;
+    final candidates = <String>{
+      if (raw.isNotEmpty) raw,
+      if (activity.activityTypeId.trim().isNotEmpty) activity.activityTypeId.trim(),
+      if (activity.title.trim().isNotEmpty) activity.title.trim(),
+    };
+
+    final fromCatalog = await _resolveCatalogCodeByNormalizedCandidate(candidates);
+    if (_isValidPushActivityTypeCode(fromCatalog)) {
+      return fromCatalog;
+    }
+
+    final fromEffectiveCatalog = await _resolveEffectiveActivityIdByCandidate(candidates);
+    if (_isValidPushActivityTypeCode(fromEffectiveCatalog)) {
+      return fromEffectiveCatalog;
+    }
+
+    return null;
+  }
+
+  Future<String?> _resolveEffectiveActivityIdByCandidate(Set<String> rawCandidates) async {
+    if (rawCandidates.isEmpty) return null;
+
+    final normalizedCandidates = rawCandidates
+        .map(_normalizeActivityTypeKey)
+        .where((v) => v.isNotEmpty)
+        .toSet();
+    if (normalizedCandidates.isEmpty) return null;
+
+    final activities = await (_db.select(_db.catActivities)).get();
+    for (final activity in activities) {
+      final id = activity.id.trim();
+      if (!_isValidPushActivityTypeCode(id)) {
+        continue;
+      }
+
+      final keys = <String>{
+        _normalizeActivityTypeKey(activity.id),
+        _normalizeActivityTypeKey(activity.name),
+      };
+
+      if (keys.any(normalizedCandidates.contains)) {
+        return id;
+      }
+    }
+
+    return null;
+  }
+
+  Future<String?> _resolveCatalogCodeByNormalizedCandidate(Set<String> rawCandidates) async {
+    if (rawCandidates.isEmpty) return null;
+
+    final normalizedCandidates = rawCandidates
+        .map(_normalizeActivityTypeKey)
+        .where((v) => v.isNotEmpty)
+        .toSet();
+    if (normalizedCandidates.isEmpty) return null;
+
+    final types = await (_db.select(_db.catalogActivityTypes)).get();
+    for (final type in types) {
+      final code = type.code.trim();
+      if (!_isValidPushActivityTypeCode(code)) {
+        continue;
+      }
+
+      final keys = <String>{
+        _normalizeActivityTypeKey(type.id),
+        _normalizeActivityTypeKey(type.code),
+        _normalizeActivityTypeKey(type.name),
+      };
+
+      if (keys.any(normalizedCandidates.contains)) {
+        return code;
+      }
+    }
+
+    return null;
+  }
+
+  String _normalizeActivityTypeKey(String? value) {
+    final raw = value?.trim().toUpperCase() ?? '';
+    if (raw.isEmpty) return '';
+    return raw
+        .replaceAll('Á', 'A')
+        .replaceAll('É', 'E')
+        .replaceAll('Í', 'I')
+        .replaceAll('Ó', 'O')
+        .replaceAll('Ú', 'U')
+        .replaceAll(RegExp(r'[_\-]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+  }
+
+  bool _isValidPushActivityTypeCode(String? value) {
+    final raw = value?.trim() ?? '';
+    if (raw.isEmpty || _isUuid(raw)) {
+      return false;
+    }
+
+    final normalized = raw.toUpperCase();
+    if (normalized == 'UNKNOWN' ||
+        normalized == 'UNK' ||
+        normalized == 'UNKNOWN_ACTIVITY_TYPE') {
+      return false;
+    }
+
+    return true;
   }
 
   bool _isUuid(String? value) {
@@ -631,6 +751,9 @@ class SyncService {
       status: const Value('DONE'),
       lastAttemptAt: Value(DateTime.now()),
       attempts: Value(row.attempts + 1),
+      errorCode: const Value(null),
+      retryable: const Value(true),
+      suggestedAction: const Value(null),
       lastError: const Value(null),
     ));
     // Update activity local status so home view reflects "Sincronizada"
@@ -644,13 +767,40 @@ class SyncService {
   }
 
   Future<void> _markError(SyncQueueData row, String error) async {
+    final guidance = _parseGuidanceFromStoredError(error);
     await (_db.update(_db.syncQueue)..where((s) => s.id.equals(row.id)))
         .write(SyncQueueCompanion(
       status: const Value('ERROR'),
+      errorCode: Value(guidance.$1),
+      retryable: Value(guidance.$2),
+      suggestedAction: Value(guidance.$3),
       lastError: Value(error),
       lastAttemptAt: Value(DateTime.now()),
       attempts: Value(row.attempts + 1),
     ));
+  }
+
+  (String?, bool, String?) _parseGuidanceFromStoredError(String error) {
+    final normalized = error.trim();
+    final code = normalized.startsWith('CONFLICT:')
+        ? 'CONFLICT'
+      : normalized.startsWith('INVALID:')
+        ? 'INVALID'
+        : normalized.startsWith('Unexpected server status:')
+            ? 'UNEXPECTED_STATUS'
+            : null;
+    final retryable = normalized.toUpperCase().contains('[RETRYABLE]');
+    const marker = '| accion sugerida:';
+    final lower = normalized.toLowerCase();
+    final idx = lower.indexOf(marker);
+    final suggestedAction = idx == -1
+        ? null
+        : normalized.substring(idx + marker.length).trim();
+    return (
+      code,
+      retryable,
+      suggestedAction?.isEmpty == true ? null : suggestedAction,
+    );
   }
 
   /// Push all pending EVENT items from sync_queue.
@@ -754,7 +904,27 @@ class SyncService {
 
     await _db.transaction(() async {
       for (final dto in activities) {
-        if (dto.deletedAt != null) {
+        final executionState = dto.executionState.trim().toUpperCase();
+        final reviewDecision = dto.reviewDecision?.trim().toUpperCase();
+        final operationalState = dto.operationalState.trim().toUpperCase();
+        final reviewState = dto.reviewState.trim().toUpperCase();
+        final nextAction = dto.nextAction.trim().toUpperCase();
+        final syncState = dto.syncState.trim().toUpperCase();
+        final isRejectedByReview = const {
+          'REJECT',
+          'REJECTED',
+          'CHANGES_REQUIRED',
+          'REQUEST_CHANGES',
+          'REQUIRES_CHANGES',
+        }.contains(reviewDecision);
+        final keepVisibleForCorrection =
+            dto.deletedAt != null &&
+            (executionState == 'REVISION_PENDIENTE' ||
+                reviewState == 'CHANGES_REQUIRED' ||
+                nextAction == 'CORREGIR_Y_REENVIAR' ||
+                isRejectedByReview);
+
+        if (dto.deletedAt != null && !keepVisibleForCorrection) {
           final existing = await (_db.select(_db.activities)
                 ..where((t) => t.id.equals(dto.uuid)))
               .getSingleOrNull();
@@ -785,28 +955,43 @@ class SyncService {
               ..where((t) => t.id.equals(dto.uuid)))
             .getSingleOrNull();
 
-        final executionState = dto.executionState.trim().toUpperCase();
-        final reviewDecision = dto.reviewDecision?.trim().toUpperCase();
-        final isRejectedByReview = reviewDecision == 'REJECT';
-        final startedAt = switch (executionState) {
-          'EN_CURSO' => existing?.startedAt ?? dto.updatedAt.toLocal(),
-          'COMPLETADA' => existing?.startedAt ?? dto.updatedAt.toLocal(),
-          'REVISION_PENDIENTE' => existing?.startedAt ?? dto.updatedAt.toLocal(),
-          _ => null,
-        };
-        final finishedAt = switch (executionState) {
-          'COMPLETADA' => dto.updatedAt.toLocal(),
-          'REVISION_PENDIENTE' => dto.updatedAt.toLocal(),
-          _ => null,
-        };
-        final localStatus = dto.deletedAt != null
-            ? 'CANCELED'
-            : isRejectedByReview
-                ? 'RECHAZADA'
-                : switch (executionState) {
-                    'REVISION_PENDIENTE' => 'REVISION_PENDIENTE',
-                    _ => 'SYNCED',
-                  };
+          // Detectar si el usuario ya modificó localmente esta actividad.
+          // El servidor aún puede reportar PENDIENTE (no sabe del cambio local),
+          // pero NO debemos pisar el estado local con el del server.
+          final existingLocalStatus = (existing?.status ?? '').trim().toUpperCase();
+          final locallyModified = dto.deletedAt == null &&
+              executionState == 'PENDIENTE' &&
+              (existingLocalStatus == 'REVISION_PENDIENTE' ||
+                  existingLocalStatus == 'READY_TO_SYNC' ||
+                  (existingLocalStatus == 'DRAFT' && existing?.startedAt != null));
+
+          final startedAt = locallyModified
+              ? existing?.startedAt
+              : switch (executionState) {
+                  'EN_CURSO' => existing?.startedAt ?? dto.updatedAt.toLocal(),
+                  'COMPLETADA' => existing?.startedAt ?? dto.updatedAt.toLocal(),
+                  'REVISION_PENDIENTE' => existing?.startedAt ?? dto.updatedAt.toLocal(),
+                  _ => null,
+                };
+          final finishedAt = locallyModified
+              ? existing?.finishedAt
+              : switch (executionState) {
+                  'COMPLETADA' => dto.updatedAt.toLocal(),
+                  'REVISION_PENDIENTE' => dto.updatedAt.toLocal(),
+                  _ => null,
+                };
+          final localStatus =
+              dto.deletedAt != null && !keepVisibleForCorrection
+              ? 'CANCELED'
+              : locallyModified
+                  ? existingLocalStatus
+                  : _deriveLocalStatus(
+                      executionState: executionState,
+                      operationalState: operationalState,
+                      reviewState: reviewState,
+                      syncState: syncState,
+                      isRejectedByReview: isRejectedByReview,
+                    );
 
         await _db.into(_db.activities).insertOnConflictUpdate(
               ActivitiesCompanion.insert(
@@ -822,6 +1007,7 @@ class SyncService {
                 startedAt: Value(startedAt),
                 finishedAt: Value(finishedAt),
                 createdByUserId: dto.createdByUserId,
+                assignedToUserId: Value(dto.assignedToUserId?.trim()),
                 status: Value(localStatus),
                 geoLat: Value(_parseNullableDouble(dto.latitude)),
                 geoLon: Value(_parseNullableDouble(dto.longitude)),
@@ -855,6 +1041,40 @@ class SyncService {
                 ),
               );
         }
+
+        // Persist canonical flow projection so Home/Agenda can consume backend truth
+        // and only fallback to local inference when needed.
+        final canonicalFields = <String, String>{
+          'operational_state': operationalState,
+          'review_state': reviewState,
+          'next_action': nextAction,
+          'sync_state': syncState,
+          if ((dto.reviewComment ?? '').trim().isNotEmpty)
+            'review_comment': dto.reviewComment!.trim(),
+          if ((dto.reviewRejectReasonCode ?? '').trim().isNotEmpty)
+            'review_reject_reason_code': dto.reviewRejectReasonCode!
+                .trim()
+                .toUpperCase(),
+          ..._extractWizardTextFieldsFromPayload(dto.wizardPayload),
+        };
+        for (final entry in canonicalFields.entries) {
+          await _upsertActivityField(
+            dto.uuid,
+            entry.key,
+            text: entry.value,
+          );
+        }
+
+        final wizardJsonFields = _extractWizardJsonFieldsFromPayload(
+          dto.wizardPayload,
+        );
+        for (final entry in wizardJsonFields.entries) {
+          await _upsertActivityField(
+            dto.uuid,
+            entry.key,
+            json: entry.value,
+          );
+        }
       }
     });
   }
@@ -864,6 +1084,250 @@ class SyncService {
       return null;
     }
     return double.tryParse(value);
+  }
+
+  Future<void> _upsertActivityField(
+    String activityId,
+    String key, {
+    String? text,
+    String? json,
+  }) async {
+    final normalizedText = text?.trim();
+    final normalizedJson = json?.trim();
+    if ((normalizedText == null || normalizedText.isEmpty) &&
+        (normalizedJson == null || normalizedJson.isEmpty)) {
+      return;
+    }
+
+    final existing = await (_db.select(_db.activityFields)
+          ..where(
+            (t) =>
+                t.activityId.equals(activityId) &
+                t.fieldKey.equals(key),
+          )
+          ..limit(1))
+        .getSingleOrNull();
+
+    await _db.into(_db.activityFields).insertOnConflictUpdate(
+          ActivityFieldsCompanion.insert(
+            id: existing?.id ?? '$activityId:$key',
+            activityId: activityId,
+            fieldKey: key,
+            valueText: Value(normalizedText),
+            valueJson: Value(normalizedJson),
+          ),
+        );
+  }
+
+  String? _normalizeWizardPayloadValue(dynamic raw) {
+    final value = raw?.toString().trim();
+    if (value == null || value.isEmpty || value.toLowerCase() == 'null') {
+      return null;
+    }
+    return value;
+  }
+
+  Map<String, String> _extractWizardTextFieldsFromPayload(
+    Map<String, dynamic>? wizardPayload,
+  ) {
+    if (wizardPayload == null) {
+      return const {};
+    }
+
+    final fields = <String, String>{};
+
+    void putText(String key, dynamic raw, {bool uppercase = false}) {
+      final value = _normalizeWizardPayloadValue(raw);
+      if (value == null) return;
+      fields[key] = uppercase ? value.toUpperCase() : value;
+    }
+
+    putText('risk_level', wizardPayload['risk_level']);
+
+    final activityRaw = wizardPayload['activity'];
+    if (activityRaw is Map) {
+      final activity = Map<String, dynamic>.from(activityRaw);
+      putText('activity_type', activity['id']);
+    }
+
+    final subcategoryRaw = wizardPayload['subcategory'];
+    if (subcategoryRaw is Map) {
+      final subcategory = Map<String, dynamic>.from(subcategoryRaw);
+      putText('subcategory', subcategory['id']);
+      putText('subcategory_other_text', subcategory['other_text']);
+    }
+
+    final purposeRaw = wizardPayload['purpose'];
+    if (purposeRaw is Map) {
+      final purpose = Map<String, dynamic>.from(purposeRaw);
+      putText('purpose', purpose['id']);
+    }
+
+    putText('topic_other_text', wizardPayload['topic_other_text']);
+
+    final resultRaw = wizardPayload['result'];
+    if (resultRaw is Map) {
+      final result = Map<String, dynamic>.from(resultRaw);
+      putText('result', result['id']);
+    }
+
+    putText('report_notes', wizardPayload['notes']);
+
+    final locationRaw = wizardPayload['location'];
+    if (locationRaw is Map) {
+      final location = Map<String, dynamic>.from(locationRaw);
+      putText('draft_tipo_ubicacion', location['tipo_ubicacion']);
+      putText('draft_pk_inicio', location['pk_inicio']);
+      putText('draft_pk_fin', location['pk_fin']);
+      putText('front_id', location['front_id']);
+      putText('front_name', location['front_name']);
+      putText('estado', location['estado']);
+      putText('municipio', location['municipio']);
+      putText('colonia', location['colonia']);
+    }
+
+    final unplannedRaw = wizardPayload['unplanned'];
+    if (unplannedRaw is Map) {
+      final unplanned = Map<String, dynamic>.from(unplannedRaw);
+      final isUnplanned = unplanned['is_unplanned'] == true;
+      if (isUnplanned) {
+        fields['origin'] = 'unplanned';
+      }
+      putText('unplanned_reason', unplanned['reason']);
+      putText('unplanned_reason_other_text', unplanned['reason_other_text']);
+      putText('unplanned_reference', unplanned['reference']);
+    }
+
+    return fields;
+  }
+
+  Map<String, String> _extractWizardJsonFieldsFromPayload(
+    Map<String, dynamic>? wizardPayload,
+  ) {
+    if (wizardPayload == null) {
+      return const {};
+    }
+
+    final fields = <String, String>{
+      'wizard_payload_snapshot': jsonEncode(wizardPayload),
+    };
+
+    final topicsRaw = wizardPayload['topics'];
+    if (topicsRaw is List) {
+      final topicIds = topicsRaw
+          .map((item) {
+            if (item is Map) {
+              final topic = Map<String, dynamic>.from(item);
+              return _normalizeWizardPayloadValue(topic['id']) ??
+                  _normalizeWizardPayloadValue(topic['name']);
+            }
+            return _normalizeWizardPayloadValue(item);
+          })
+          .whereType<String>()
+          .toList(growable: false);
+      if (topicIds.isNotEmpty) {
+        fields['topics'] = jsonEncode(topicIds);
+      }
+    }
+
+    final attendeesRaw = wizardPayload['attendees'];
+    if (attendeesRaw is List) {
+      final attendeeIds = <String>[];
+      final attendeeRepresentatives = <String, String>{};
+      for (final item in attendeesRaw) {
+        if (item is Map) {
+          final attendee = Map<String, dynamic>.from(item);
+          final attendeeId = _normalizeWizardPayloadValue(attendee['id']) ??
+              _normalizeWizardPayloadValue(attendee['name']);
+          if (attendeeId == null) {
+            continue;
+          }
+          attendeeIds.add(attendeeId);
+          final representative = _normalizeWizardPayloadValue(
+            attendee['representative_name'],
+          );
+          if (representative != null) {
+            attendeeRepresentatives[attendeeId] = representative;
+          }
+        } else {
+          final attendeeId = _normalizeWizardPayloadValue(item);
+          if (attendeeId != null) {
+            attendeeIds.add(attendeeId);
+          }
+        }
+      }
+      if (attendeeIds.isNotEmpty) {
+        fields['attendees'] = jsonEncode(attendeeIds);
+      }
+      if (attendeeRepresentatives.isNotEmpty) {
+        fields['attendee_representatives'] = jsonEncode(
+          attendeeRepresentatives,
+        );
+      }
+    }
+
+    final agreementsRaw = wizardPayload['agreements'];
+    if (agreementsRaw is List) {
+      final agreements = agreementsRaw
+          .map(_normalizeWizardPayloadValue)
+          .whereType<String>()
+          .toList(growable: false);
+      if (agreements.isNotEmpty) {
+        fields['report_agreements'] = jsonEncode(agreements);
+      }
+    }
+
+    return fields;
+  }
+
+  /// Derives a local status for database persistence.
+  /// 
+  /// IMPORTANT: The backend already provides derived states (operationalState, reviewState, syncState).
+  /// This function creates a composite "status" field for quick filtering/display.
+  /// Trust backend-provided values first; only use local logic for edge cases.
+  String _deriveLocalStatus({
+    required String executionState,
+    required String operationalState,
+    required String reviewState,
+    required String syncState,
+    required bool isRejectedByReview,
+  }) {
+    return deriveLocalStatusFromCanonicalFlow(
+      executionState: executionState,
+      operationalState: operationalState,
+      reviewState: reviewState,
+      syncState: syncState,
+      isRejectedByReview: isRejectedByReview,
+    );
+  }
+
+  String _buildGuidedError(SyncPushResultItem result) {
+    final status = result.status.trim().toUpperCase();
+    final base = switch (status) {
+      'CONFLICT' => 'CONFLICT: item changed on server',
+      'INVALID' => _buildInvalidStatusMessage(result),
+      _ => 'Unexpected server status: ${result.status}',
+    };
+    final action = result.suggestedAction?.trim();
+    if (action == null || action.isEmpty) {
+      return base;
+    }
+    final retryHint = result.retryable ? ' [retryable]' : '';
+    return '$base$retryHint | accion sugerida: $action';
+  }
+
+  String _buildInvalidStatusMessage(SyncPushResultItem result) {
+    final detail = result.message?.trim();
+    if (detail != null && detail.isNotEmpty) {
+      return 'INVALID: $detail';
+    }
+
+    final errorCode = result.errorCode?.trim();
+    if (errorCode != null && errorCode.isNotEmpty) {
+      return 'INVALID: $errorCode';
+    }
+
+    return 'INVALID: server validation failed';
   }
 
   String _maskIdForLog(String value) {

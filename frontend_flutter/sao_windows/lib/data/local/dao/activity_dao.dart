@@ -128,6 +128,12 @@ class HomeActivityRecord {
   final String? estado;
   final String? assignedToUserId;
   final String? assignedToName;
+  final String? operationalState;
+  final String? reviewState;
+  final String? nextAction;
+  final String? syncState;
+  final String? reviewComment;
+  final String? reviewRejectReasonCode;
   final bool isUnplanned;
 
   const HomeActivityRecord({
@@ -139,6 +145,12 @@ class HomeActivityRecord {
     this.estado,
     this.assignedToUserId,
     this.assignedToName,
+    this.operationalState,
+    this.reviewState,
+    this.nextAction,
+    this.syncState,
+    this.reviewComment,
+    this.reviewRejectReasonCode,
     required this.isUnplanned,
   });
 }
@@ -198,10 +210,253 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
   }
 
   Future<Map<String, ActivityField>> getFieldsByKey(String activityId) async {
-    final rows = await (select(activityFields)..where((t) => t.activityId.equals(activityId))).get();
-    return {
+    var rows = await (select(activityFields)..where((t) => t.activityId.equals(activityId))).get();
+    var byKey = {
       for (final row in rows) row.fieldKey: row,
     };
+
+    if (_needsWizardFieldRecovery(byKey)) {
+      final recovered = await _recoverMissingWizardFields(
+        activityId,
+        existingKeys: byKey.keys.toSet(),
+        snapshotJson: byKey['wizard_payload_snapshot']?.valueJson,
+      );
+      if (recovered.isNotEmpty) {
+        for (final field in recovered) {
+          await into(activityFields).insertOnConflictUpdate(field);
+        }
+        rows = await (select(activityFields)..where((t) => t.activityId.equals(activityId))).get();
+        byKey = {
+          for (final row in rows) row.fieldKey: row,
+        };
+      }
+    }
+
+    return byKey;
+  }
+
+  bool _needsWizardFieldRecovery(Map<String, ActivityField> fieldsByKey) {
+    if (fieldsByKey.isEmpty) return true;
+
+    const criticalKeys = {
+      'risk_level',
+      'activity_type',
+      'result',
+      'report_notes',
+      'report_agreements',
+      'topics',
+      'attendees',
+      'wizard_payload_snapshot',
+    };
+
+    final present = criticalKeys.where(fieldsByKey.containsKey).length;
+    return present <= 1;
+  }
+
+  Future<List<ActivityFieldsCompanion>> _recoverMissingWizardFields(
+    String activityId, {
+    required Set<String> existingKeys,
+    String? snapshotJson,
+  }) async {
+    Map<String, dynamic>? wizardPayload = _parseWizardPayload(snapshotJson);
+    wizardPayload ??= await _loadWizardPayloadFromSyncQueue(activityId);
+    if (wizardPayload == null || wizardPayload.isEmpty) {
+      return const [];
+    }
+
+    final recovered = <ActivityFieldsCompanion>[];
+
+    void addText(String key, dynamic raw) {
+      if (existingKeys.contains(key)) return;
+      final value = _normalizePayloadText(raw);
+      if (value == null) return;
+      recovered.add(ActivityFieldsCompanion.insert(
+        id: '$activityId:$key',
+        activityId: activityId,
+        fieldKey: key,
+        valueText: Value(value),
+      ));
+    }
+
+    void addJson(String key, Object? raw) {
+      if (existingKeys.contains(key) || raw == null) return;
+      final encoded = jsonEncode(raw);
+      if (encoded.trim().isEmpty) return;
+      recovered.add(ActivityFieldsCompanion.insert(
+        id: '$activityId:$key',
+        activityId: activityId,
+        fieldKey: key,
+        valueJson: Value(encoded),
+      ));
+    }
+
+    addJson('wizard_payload_snapshot', wizardPayload);
+    addText('risk_level', wizardPayload['risk_level']);
+    addText('topic_other_text', wizardPayload['topic_other_text']);
+    addText('report_notes', wizardPayload['notes']);
+
+    final activityRaw = wizardPayload['activity'];
+    if (activityRaw is Map) {
+      final activityMap = Map<String, dynamic>.from(activityRaw);
+      addText('activity_type', activityMap['id']);
+    }
+
+    final subcategoryRaw = wizardPayload['subcategory'];
+    if (subcategoryRaw is Map) {
+      final subcategoryMap = Map<String, dynamic>.from(subcategoryRaw);
+      addText('subcategory', subcategoryMap['id']);
+      addText('subcategory_other_text', subcategoryMap['other_text']);
+    }
+
+    final purposeRaw = wizardPayload['purpose'];
+    if (purposeRaw is Map) {
+      final purposeMap = Map<String, dynamic>.from(purposeRaw);
+      addText('purpose', purposeMap['id']);
+    }
+
+    final resultRaw = wizardPayload['result'];
+    if (resultRaw is Map) {
+      final resultMap = Map<String, dynamic>.from(resultRaw);
+      addText('result', resultMap['id']);
+    }
+
+    final topicsRaw = wizardPayload['topics'];
+    if (topicsRaw is List) {
+      final topicIds = topicsRaw
+          .map((item) {
+            if (item is Map) {
+              final topicMap = Map<String, dynamic>.from(item);
+              return _normalizePayloadText(topicMap['id']) ??
+                  _normalizePayloadText(topicMap['name']);
+            }
+            return _normalizePayloadText(item);
+          })
+          .whereType<String>()
+          .toList(growable: false);
+      if (topicIds.isNotEmpty) {
+        addJson('topics', topicIds);
+      }
+    }
+
+    final attendeesRaw = wizardPayload['attendees'];
+    if (attendeesRaw is List) {
+      final attendeeIds = <String>[];
+      final representatives = <String, String>{};
+      for (final item in attendeesRaw) {
+        if (item is Map) {
+          final attendeeMap = Map<String, dynamic>.from(item);
+          final attendeeId = _normalizePayloadText(attendeeMap['id']) ??
+              _normalizePayloadText(attendeeMap['name']);
+          if (attendeeId == null) continue;
+          attendeeIds.add(attendeeId);
+          final representative = _normalizePayloadText(
+            attendeeMap['representative_name'],
+          );
+          if (representative != null) {
+            representatives[attendeeId] = representative;
+          }
+        } else {
+          final attendeeId = _normalizePayloadText(item);
+          if (attendeeId != null) {
+            attendeeIds.add(attendeeId);
+          }
+        }
+      }
+      if (attendeeIds.isNotEmpty) {
+        addJson('attendees', attendeeIds);
+      }
+      if (representatives.isNotEmpty) {
+        addJson('attendee_representatives', representatives);
+      }
+    }
+
+    final agreementsRaw = wizardPayload['agreements'];
+    if (agreementsRaw is List) {
+      final agreements = agreementsRaw
+          .map(_normalizePayloadText)
+          .whereType<String>()
+          .toList(growable: false);
+      if (agreements.isNotEmpty) {
+        addJson('report_agreements', agreements);
+      }
+    }
+
+    final locationRaw = wizardPayload['location'];
+    if (locationRaw is Map) {
+      final locationMap = Map<String, dynamic>.from(locationRaw);
+      addText('draft_tipo_ubicacion', locationMap['tipo_ubicacion']);
+      addText('draft_pk_inicio', locationMap['pk_inicio']);
+      addText('draft_pk_fin', locationMap['pk_fin']);
+      addText('front_id', locationMap['front_id']);
+      addText('front_name', locationMap['front_name']);
+      addText('estado', locationMap['estado']);
+      addText('municipio', locationMap['municipio']);
+      addText('colonia', locationMap['colonia']);
+    }
+
+    final unplannedRaw = wizardPayload['unplanned'];
+    if (unplannedRaw is Map) {
+      final unplannedMap = Map<String, dynamic>.from(unplannedRaw);
+      if (unplannedMap['is_unplanned'] == true) {
+        addText('origin', 'unplanned');
+      }
+      addText('unplanned_reason', unplannedMap['reason']);
+      addText('unplanned_reason_other_text', unplannedMap['reason_other_text']);
+      addText('unplanned_reference', unplannedMap['reference']);
+    }
+
+    return recovered;
+  }
+
+  Map<String, dynamic>? _parseWizardPayload(String? rawJson) {
+    final raw = rawJson?.trim();
+    if (raw == null || raw.isEmpty) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _loadWizardPayloadFromSyncQueue(
+    String activityId,
+  ) async {
+    final queueRows = await (select(syncQueue)
+          ..where(
+            (t) => t.entity.equals('ACTIVITY') & t.entityId.equals(activityId),
+          )
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.lastAttemptAt),
+            (t) => OrderingTerm.desc(t.priority),
+            (t) => OrderingTerm.desc(t.attempts),
+          ]))
+        .get();
+
+    for (final row in queueRows) {
+      try {
+        final decoded = jsonDecode(row.payloadJson);
+        if (decoded is! Map) continue;
+        final payload = Map<String, dynamic>.from(decoded);
+        final rawWizardPayload = payload['wizard_payload'] ?? payload['wizardPayload'];
+        if (rawWizardPayload is Map) {
+          return Map<String, dynamic>.from(rawWizardPayload);
+        }
+      } catch (_) {
+        // Ignore malformed cached payloads.
+      }
+    }
+
+    return null;
+  }
+
+  String? _normalizePayloadText(dynamic raw) {
+    final value = raw?.toString().trim();
+    if (value == null || value.isEmpty || value.toLowerCase() == 'null') {
+      return null;
+    }
+    return value;
   }
 
   Future<List<HomeActivityRecord>> listHomeActivitiesByProject(String projectCodeOrId) async {
@@ -241,17 +496,19 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     final projectIds = rows.map((row) => row.projectId).toSet().toList();
 
     final assignmentRows = await (select(attachedDatabase.agendaAssignments)
-          ..where((t) => t.activityId.isIn(activityIds)))
+          ..where((t) => t.activityId.isIn(activityIds) | t.id.isIn(activityIds)))
         .get();
     final assignmentByActivityId = <String, AgendaAssignment>{};
     for (final assignment in assignmentRows) {
-      final activityId = assignment.activityId?.trim();
-      if (activityId == null || activityId.isEmpty) {
-        continue;
-      }
-      final existing = assignmentByActivityId[activityId];
-      if (existing == null || assignment.updatedAt.isAfter(existing.updatedAt)) {
-        assignmentByActivityId[activityId] = assignment;
+      final directIds = <String>{
+        if (assignment.activityId?.trim().isNotEmpty ?? false) assignment.activityId!.trim(),
+        if (assignment.id.trim().isNotEmpty) assignment.id.trim(),
+      };
+      for (final activityId in directIds) {
+        final existing = assignmentByActivityId[activityId];
+        if (existing == null || assignment.updatedAt.isAfter(existing.updatedAt)) {
+          assignmentByActivityId[activityId] = assignment;
+        }
       }
     }
 
@@ -314,12 +571,32 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     final fieldRows = await (select(activityFields)
           ..where((t) =>
               t.activityId.isIn(activityIds) &
-              t.fieldKey.isIn(const ['front_name', 'origin', 'assignee_user_id'])))
+              t.fieldKey.isIn(const [
+                'front_name',
+                'origin',
+                'assignee_user_id',
+                'operational_state',
+                'review_state',
+                'next_action',
+                'sync_state',
+                'review_comment',
+                'review_reject_reason_code',
+                'estado',
+                'municipio',
+              ])))
         .get();
 
     final frontNameByActivityId = <String, String>{};
     final isUnplannedByActivityId = <String, bool>{};
-      final assigneeUserIdByActivityId = <String, String>{};
+    final assigneeUserIdByActivityId = <String, String>{};
+    final operationalStateByActivityId = <String, String>{};
+    final reviewStateByActivityId = <String, String>{};
+    final nextActionByActivityId = <String, String>{};
+    final syncStateByActivityId = <String, String>{};
+    final reviewCommentByActivityId = <String, String>{};
+    final reviewRejectReasonCodeByActivityId = <String, String>{};
+    final estadoByActivityId = <String, String>{};
+    final municipioByActivityId = <String, String>{};
 
     for (final field in fieldRows) {
       if (field.fieldKey == 'front_name' && (field.valueText?.trim().isNotEmpty ?? false)) {
@@ -330,6 +607,30 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
       }
       if (field.fieldKey == 'assignee_user_id' && (field.valueText?.trim().isNotEmpty ?? false)) {
         assigneeUserIdByActivityId[field.activityId] = field.valueText!.trim();
+      }
+      if (field.fieldKey == 'operational_state' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        operationalStateByActivityId[field.activityId] = field.valueText!.trim().toUpperCase();
+      }
+      if (field.fieldKey == 'review_state' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        reviewStateByActivityId[field.activityId] = field.valueText!.trim().toUpperCase();
+      }
+      if (field.fieldKey == 'next_action' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        nextActionByActivityId[field.activityId] = field.valueText!.trim().toUpperCase();
+      }
+      if (field.fieldKey == 'sync_state' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        syncStateByActivityId[field.activityId] = field.valueText!.trim().toUpperCase();
+      }
+      if (field.fieldKey == 'review_comment' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        reviewCommentByActivityId[field.activityId] = field.valueText!.trim();
+      }
+      if (field.fieldKey == 'review_reject_reason_code' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        reviewRejectReasonCodeByActivityId[field.activityId] = field.valueText!.trim().toUpperCase();
+      }
+      if (field.fieldKey == 'estado' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        estadoByActivityId[field.activityId] = field.valueText!.trim();
+      }
+      if (field.fieldKey == 'municipio' && (field.valueText?.trim().isNotEmpty ?? false)) {
+        municipioByActivityId[field.activityId] = field.valueText!.trim();
       }
     }
 
@@ -362,6 +663,7 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
             final inferredAssignment = assignment ?? inferredByFingerprint ?? inferredByPkAndTitle;
 
             final assignedToUserId =
+              _normalizeAssigneeId(row.assignedToUserId) ??
               _normalizeAssigneeId(assigneeUserIdByActivityId[row.id]) ??
               _normalizeAssigneeId(inferredAssignment?.resourceId);
             final assignedToName =
@@ -381,12 +683,18 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
                   : null,
               municipio: (inferredAssignment?.municipio.trim().isNotEmpty ?? false)
                 ? inferredAssignment!.municipio.trim()
-                : null,
+                : municipioByActivityId[row.id],
               estado: (inferredAssignment?.estado.trim().isNotEmpty ?? false)
                 ? inferredAssignment!.estado.trim()
-                : null,
+                : estadoByActivityId[row.id],
               assignedToUserId: assignedToUserId,
               assignedToName: assignedToName,
+              operationalState: operationalStateByActivityId[row.id],
+              reviewState: reviewStateByActivityId[row.id],
+              nextAction: nextActionByActivityId[row.id],
+              syncState: syncStateByActivityId[row.id],
+              reviewComment: reviewCommentByActivityId[row.id],
+              reviewRejectReasonCode: reviewRejectReasonCodeByActivityId[row.id],
               isUnplanned: isUnplannedByActivityId[row.id] ?? false,
             );
           },
@@ -549,6 +857,17 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
       ActivitiesCompanion(
         status: const Value('REVISION_PENDIENTE'),
         finishedAt: Value(finishedAt),
+      ),
+    );
+  }
+
+  Future<void> markActivityCaptureIncomplete({
+    required String activityId,
+    required DateTime startedAt,
+  }) async {
+    await (update(activities)..where((t) => t.id.equals(activityId))).write(
+      ActivitiesCompanion(
+        startedAt: Value(startedAt),
       ),
     );
   }

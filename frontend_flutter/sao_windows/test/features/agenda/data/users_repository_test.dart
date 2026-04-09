@@ -19,6 +19,15 @@ class _FakeUsersLocalStore implements UsersLocalStore {
     upsertCalls++;
     _users = users;
   }
+
+  @override
+  Future<void> replaceUsersByRole(int roleId, List<AgendaCachedUser> users) async {
+    upsertCalls++;
+    _users = [
+      ..._users.where((user) => user.roleId != roleId),
+      ...users,
+    ];
+  }
 }
 
 void main() {

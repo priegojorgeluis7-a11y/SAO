@@ -4,7 +4,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage
 
 from app.api.deps import require_any_role, user_has_permission, verify_project_access
@@ -43,6 +45,13 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _normalized_bucket_name() -> str:
+    bucket = str(settings.GCS_BUCKET or "").strip()
+    if bucket.startswith("gs://"):
+        bucket = bucket[len("gs://") :]
+    return bucket.strip().strip("/")
+
+
 def _sanitize_suffix(file_name: str) -> str:
     from pathlib import PurePosixPath
     import re
@@ -53,17 +62,42 @@ def _sanitize_suffix(file_name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9.]", "", suffix)[:15]
 
 
+def _generate_gcs_signed_url(blob, *, method: str, content_type: str | None = None) -> str:
+    signed_url_kwargs: dict[str, Any] = {
+        "version": "v4",
+        "expiration": timedelta(minutes=settings.SIGNED_URL_EXPIRE_MINUTES),
+        "method": method,
+    }
+    if content_type:
+        signed_url_kwargs["content_type"] = content_type
+
+    try:
+        return blob.generate_signed_url(**signed_url_kwargs)
+    except AttributeError as exc:
+        if "private key" not in str(exc).lower():
+            raise
+
+        credentials, _ = google.auth.default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+        refresh = getattr(credentials, "refresh", None)
+        if callable(refresh):
+            refresh(GoogleAuthRequest())
+
+        service_account_email = str(getattr(credentials, "service_account_email", "") or "").strip()
+        access_token = str(getattr(credentials, "token", "") or "").strip()
+        if not service_account_email or not access_token:
+            raise
+
+        signed_url_kwargs["service_account_email"] = service_account_email
+        signed_url_kwargs["access_token"] = access_token
+        return blob.generate_signed_url(**signed_url_kwargs)
+
+
 def _generate_signed_upload_url(object_path: str, mime_type: str, evidence_id: str) -> tuple[str, datetime]:
     expires_at = _utc_now() + timedelta(minutes=settings.SIGNED_URL_EXPIRE_MINUTES)
     if _is_local_backend():
         return f"{settings.LOCAL_BASE_URL}/api/v1/evidences/local-upload/{evidence_id}", expires_at
-    blob = storage.Client().bucket(settings.GCS_BUCKET).blob(object_path)
-    url = blob.generate_signed_url(
-        version="v4",
-        expiration=timedelta(minutes=settings.SIGNED_URL_EXPIRE_MINUTES),
-        method="PUT",
-        content_type=mime_type,
-    )
+    blob = storage.Client().bucket(_normalized_bucket_name()).blob(object_path)
+    url = _generate_gcs_signed_url(blob, method="PUT", content_type=mime_type)
     return url, expires_at
 
 
@@ -71,19 +105,15 @@ def _generate_signed_download_url(object_path: str) -> tuple[str, datetime]:
     expires_at = _utc_now() + timedelta(minutes=settings.SIGNED_URL_EXPIRE_MINUTES)
     if _is_local_backend():
         return f"{settings.LOCAL_BASE_URL}/uploads/{object_path}", expires_at
-    blob = storage.Client().bucket(settings.GCS_BUCKET).blob(object_path)
-    url = blob.generate_signed_url(
-        version="v4",
-        expiration=timedelta(minutes=settings.SIGNED_URL_EXPIRE_MINUTES),
-        method="GET",
-    )
+    blob = storage.Client().bucket(_normalized_bucket_name()).blob(object_path)
+    url = _generate_gcs_signed_url(blob, method="GET")
     return url, expires_at
 
 
 def _object_exists(object_path: str) -> bool:
     if _is_local_backend():
         return (Path(settings.LOCAL_UPLOADS_DIR) / object_path).exists()
-    blob = storage.Client().bucket(settings.GCS_BUCKET).blob(object_path)
+    blob = storage.Client().bucket(_normalized_bucket_name()).blob(object_path)
     return blob.exists(client=storage.Client())
 
 

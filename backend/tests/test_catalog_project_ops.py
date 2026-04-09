@@ -119,6 +119,9 @@ def test_apply_project_ops_updates_current_bundle_version_metadata(monkeypatch):
         "_resolve_current_version_id_firestore",
         lambda project_id=None: current_version_id,
     )
+    # Bypass auth for this unit test: permission enforcement is covered by
+    # test_users_security.py and the HTTP integration tests.
+    monkeypatch.setattr(catalog_api, "_enforce_catalog_permission", lambda *_a, **_kw: None)
 
     updated_bundle = catalog_api.apply_project_ops(
         project_id=project_id,

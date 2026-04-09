@@ -5,6 +5,7 @@ class FakeTransport implements AdminApiTransport {
   dynamic getResponse;
   dynamic postResponse;
   dynamic putResponse;
+  dynamic deleteResponse;
   String? lastPath;
   Object? lastBody;
   Map<String, String>? lastQuery;
@@ -35,6 +36,12 @@ class FakeTransport implements AdminApiTransport {
     lastPath = path;
     lastBody = body;
     return putResponse;
+  }
+
+  @override
+  Future<void> delete(String path, {String? token}) async {
+    lastPath = path;
+    return deleteResponse;
   }
 }
 

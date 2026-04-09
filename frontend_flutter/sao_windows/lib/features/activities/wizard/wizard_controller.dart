@@ -1,6 +1,8 @@
 // lib/features/activities/wizard/wizard_controller.dart
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:get_it/get_it.dart';
@@ -8,6 +10,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
+import '../../../core/constants.dart';
 import '../../../core/catalog/sync/catalog_sync_service.dart';
 import '../../../core/services/connectivity_service.dart';
 import '../../../core/utils/logger.dart';
@@ -21,7 +24,9 @@ import 'validation/unplanned_validation.dart' as unplanned_val;
 import 'models/evidence_draft.dart';
 
 enum RiskLevel { bajo, medio, alto, prioritario }
+
 enum TipoUbicacion { puntual, tramo, general }
+
 enum WizardLocationSource { assignment, operative, manual }
 
 const _uuid = Uuid();
@@ -31,21 +36,14 @@ class ProjectRef {
   final String code;
   final String name;
 
-  const ProjectRef({
-    required this.id,
-    required this.code,
-    required this.name,
-  });
+  const ProjectRef({required this.id, required this.code, required this.name});
 }
 
 class FrontRef {
   final String id;
   final String name;
 
-  const FrontRef({
-    required this.id,
-    required this.name,
-  });
+  const FrontRef({required this.id, required this.name});
 }
 
 class WizardController extends ChangeNotifier {
@@ -72,12 +70,18 @@ class WizardController extends ChangeNotifier {
   }
 
   bool _loading = true;
+  bool _draftHydrationReady = false;
   bool get loading => _loading;
+
+  /// Verdadero cuando el usuario pasó el paso 1 en esta sesión del wizard.
+  bool _hasPassedStep1 = false;
+
+  static bool _hasMeaningfulPk(int? value) => value != null && value > 0;
 
   // =========================
   // Estado (form)
   // =========================
-  
+
   // Paso 1: Contexto
   TimeOfDay? horaInicio;
   TimeOfDay? horaFin;
@@ -104,12 +108,12 @@ class WizardController extends ChangeNotifier {
   List<FrontRef> _availableFronts = const [];
   List<String> _availableStates = const [];
   List<String> _availableMunicipios = const [];
-  
+
   // PK editable
   TipoUbicacion tipoUbicacion = TipoUbicacion.puntual;
   int? pkInicio; // Guardado como entero (ej: 142050 para 142+050)
-  int? pkFin;    // Solo para tramos
-  
+  int? pkFin; // Solo para tramos
+
   RiskLevel? risk;
 
   // Paso 2: Clasificación
@@ -121,6 +125,7 @@ class WizardController extends ChangeNotifier {
   final Set<String> selectedTopicIds = {};
   String otherTopicText = '';
   final Set<String> selectedAttendeeIds = {};
+  final Map<String, String> attendeeRepresentatives = {};
 
   CatItem? selectedResult;
 
@@ -141,19 +146,30 @@ class WizardController extends ChangeNotifier {
   // Init
   // =========================
   Future<void> init() async {
-    await _refreshCatalogIfOnline(selectedProjectId ?? projectCode);
+    _draftHydrationReady = false;
+    final initialProjectCode = await _resolveInitialProjectCode();
+
+    await _refreshCatalogIfOnline(initialProjectCode);
     _loading = true;
     notifyListeners();
 
     // Always initialize against the current project code.
     // The shared singleton can already be ready for a different project.
-    await catalogRepo.init(projectId: selectedProjectId ?? projectCode);
+    await catalogRepo.init(projectId: initialProjectCode, forceReload: true);
+    appLogger.i(
+      'Wizard catalog init project=$initialProjectCode '
+      'activities=${catalogRepo.activities.length} '
+      'topics=${catalogRepo.temas.length} '
+      'results=${catalogRepo.resultados.length} '
+      'version=${catalogRepo.currentVersionId ?? 'n/a'}',
+    );
 
-    _postInitPreselect();
+    _postInitPreselect(initialProjectCode);
     await _loadContextOptions();
     await _prefillContextFromAssignment();
     await _rehydrateContextFields();
     await _rehydrateReportFields();
+    await _recoverWizardStateFromServerIfNeeded(initialProjectCode);
     await _ensureDraftActivity();
 
     // Auto-fill horaInicio with current time if not already set from startedAt or draft
@@ -162,8 +178,68 @@ class WizardController extends ChangeNotifier {
       horaInicio = TimeOfDay(hour: initNow.hour, minute: initNow.minute);
     }
 
+    _draftHydrationReady = true;
     _loading = false;
     notifyListeners();
+  }
+
+  Future<String> _resolveInitialProjectCode() async {
+    final normalized = projectCode.trim().toUpperCase();
+    if (normalized.isNotEmpty && normalized != kAllProjects) {
+      try {
+        final projects = await _dao.listActiveProjects();
+        final byCode = projects.cast<Project?>().firstWhere(
+          (p) => p?.code.trim().toUpperCase() == normalized,
+          orElse: () => null,
+        );
+        if (byCode != null) {
+          return byCode.code.trim().toUpperCase();
+        }
+
+        final byId = projects.cast<Project?>().firstWhere(
+          (p) => p?.id == projectCode.trim(),
+          orElse: () => null,
+        );
+        if (byId != null) {
+          return byId.code.trim().toUpperCase();
+        }
+      } catch (_) {
+        // Continue with normalized fallback.
+      }
+      return normalized;
+    }
+
+    try {
+      final activityRow = await _dao.getActivityById(activity.id);
+      final activityProjectId = activityRow?.projectId.trim() ?? '';
+      if (activityProjectId.isNotEmpty) {
+        final projects = await _dao.listActiveProjects();
+        final match = projects.cast<Project?>().firstWhere(
+          (p) => p?.id == activityProjectId,
+          orElse: () => null,
+        );
+        final resolved = (match?.code ?? activityProjectId)
+            .trim()
+            .toUpperCase();
+        if (resolved.isNotEmpty && resolved != kAllProjects) {
+          return resolved;
+        }
+      }
+    } catch (e, st) {
+      appLogger.w(
+        'resolveInitialProjectCode: fallback to TMQ — $e',
+        stackTrace: st,
+      );
+    }
+
+    // Fallback seguro para no inicializar catálogo con el centinela TODOS.
+    try {
+      final projects = await _dao.listActiveProjects();
+      if (projects.isNotEmpty) {
+        return projects.first.code.trim().toUpperCase();
+      }
+    } catch (_) {}
+    return 'TMQ';
   }
 
   Future<void> _refreshCatalogIfOnline(String projectId) async {
@@ -179,12 +255,71 @@ class WizardController extends ChangeNotifier {
     }
   }
 
-  void _postInitPreselect() {
+  Future<void> _recoverWizardStateFromServerIfNeeded(
+    String initialProjectCode,
+  ) async {
+    if (_hasMeaningfulWizardState()) {
+      return;
+    }
+
+    try {
+      final existing = await _dao.getActivityById(activity.id);
+      if (existing == null) {
+        return;
+      }
+
+      final hasServerBackedState =
+          (existing.serverRevision ?? 0) > 0 ||
+          {
+            'SYNCED',
+            'RECHAZADA',
+            'READY_TO_SYNC',
+          }.contains((existing.status).trim().toUpperCase()) ||
+          activity.isRejected ||
+          activity.reviewState.trim().toUpperCase() == 'CHANGES_REQUIRED' ||
+          activity.nextAction.trim().toUpperCase() == 'CORREGIR_Y_REENVIAR';
+      if (!hasServerBackedState) {
+        return;
+      }
+
+      if (!GetIt.I.isRegistered<SyncService>()) {
+        return;
+      }
+
+      var projectId = existing.projectId.trim();
+      if (projectId.isEmpty) {
+        projectId = (selectedProjectId?.trim().isNotEmpty ?? false)
+            ? selectedProjectId!.trim()
+            : initialProjectCode;
+      }
+      if (projectId.isEmpty) {
+        return;
+      }
+
+      appLogger.i(
+        'Attempting wizard backfill from server for sparse activity ${activity.id} (project=$projectId)',
+      );
+      await GetIt.I<SyncService>().pullChanges(
+        projectId: projectId,
+        resetActivityCursor: true,
+      );
+      await _rehydrateContextFields();
+      await _rehydrateReportFields();
+    } catch (e, st) {
+      appLogger.w(
+        'Wizard backfill from server skipped: $e',
+        error: e,
+        stackTrace: st,
+      );
+    }
+  }
+
+  void _postInitPreselect(String initialProjectCode) {
     // Preselección Activity por título (si hay catálogo)
     _selectedActivity = _inferActivityFromTitle(activity.title);
     _selectedSubcategory = null;
     _selectedPurpose = null;
-    
+
     // Pre-cargar horas de inicio/fin desde la actividad (si ya se iniciaron)
     if (activity.horaInicio != null) {
       horaInicio = TimeOfDay(
@@ -198,7 +333,7 @@ class WizardController extends ChangeNotifier {
         minute: activity.horaFin!.minute,
       );
     }
-    
+
     if (activity.estado.trim().isNotEmpty) {
       estadoId = activity.estado.trim();
     }
@@ -206,9 +341,9 @@ class WizardController extends ChangeNotifier {
     if (activity.municipio.trim().isNotEmpty) {
       municipioId = activity.municipio.trim();
     }
-    
+
     // Pre-cargar PK desde la actividad
-    if (activity.pk != null) {
+    if (_hasMeaningfulPk(activity.pk)) {
       pkInicio = activity.pk;
       tipoUbicacion = TipoUbicacion.puntual;
     }
@@ -222,9 +357,9 @@ class WizardController extends ChangeNotifier {
       locationSource = WizardLocationSource.operative;
     }
 
-    selectedProjectId = projectCode;
-    selectedProjectCode = projectCode;
-    selectedProjectName = projectCode;
+    selectedProjectId = initialProjectCode;
+    selectedProjectCode = initialProjectCode;
+    selectedProjectName = initialProjectCode;
     selectedFrontName = activity.frente;
   }
 
@@ -235,14 +370,18 @@ class WizardController extends ChangeNotifier {
     ProjectRef(id: 'TSNL', code: 'TSNL', name: 'Tren Saltillo–Nuevo Laredo'),
   ];
 
-  List<ProjectRef> get availableProjects => List.unmodifiable(_availableProjects);
+  List<ProjectRef> get availableProjects =>
+      List.unmodifiable(_availableProjects);
   List<FrontRef> get availableFronts => List.unmodifiable(_availableFronts);
   List<String> get availableStates => List.unmodifiable(_availableStates);
-  List<String> get availableMunicipios => List.unmodifiable(_availableMunicipios);
+  List<String> get availableMunicipios =>
+      List.unmodifiable(_availableMunicipios);
 
   String get contextProjectLabel {
-    if (selectedProjectName.trim().isNotEmpty) return selectedProjectName.trim();
-    if (selectedProjectCode.trim().isNotEmpty) return selectedProjectCode.trim();
+    if (selectedProjectName.trim().isNotEmpty)
+      return selectedProjectName.trim();
+    if (selectedProjectCode.trim().isNotEmpty)
+      return selectedProjectCode.trim();
     return projectCode;
   }
 
@@ -279,8 +418,8 @@ class WizardController extends ChangeNotifier {
       final projects = await dao.listActiveProjects();
       _availableProjects = projects.isNotEmpty
           ? projects
-              .map((p) => ProjectRef(id: p.id, code: p.code, name: p.name))
-              .toList()
+                .map((p) => ProjectRef(id: p.id, code: p.code, name: p.name))
+                .toList()
           : _fallbackProjects;
     } catch (e) {
       appLogger.w('loadProjectOptions: falling back to local projects — $e');
@@ -288,9 +427,9 @@ class WizardController extends ChangeNotifier {
     }
 
     final selected = _availableProjects.cast<ProjectRef?>().firstWhere(
-          (p) => p!.id == selectedProjectId || p.code == projectCode,
-          orElse: () => null,
-        );
+      (p) => p!.id == selectedProjectId || p.code == projectCode,
+      orElse: () => null,
+    );
 
     if (selected != null) {
       selectedProjectId = selected.id;
@@ -298,8 +437,8 @@ class WizardController extends ChangeNotifier {
       selectedProjectName = selected.name;
     }
 
-    await loadFrontOptionsForProject(selectedProjectId ?? projectCode, notify: false);
-    await loadLocationOptionsForProject(selectedProjectId ?? projectCode, notify: false);
+    await loadFrontOptionsForProject(selectedProjectCode, notify: false);
+    await loadLocationOptionsForProject(selectedProjectCode, notify: false);
   }
 
   bool _isEmptyOrUnknown(String? value) {
@@ -310,7 +449,11 @@ class WizardController extends ChangeNotifier {
         normalized == 'sin ubicacion';
   }
 
-  String _parseTitlePart(String title, String marker, List<String> stopMarkers) {
+  String _parseTitlePart(
+    String title,
+    String marker,
+    List<String> stopMarkers,
+  ) {
     final source = title.trim();
     final markerIndex = source.toLowerCase().indexOf(marker.toLowerCase());
     if (markerIndex == -1) return '';
@@ -335,29 +478,36 @@ class WizardController extends ChangeNotifier {
       final assignment = await _resolveBestAssignmentForWizard();
 
       if (assignment != null) {
-        if (_isEmptyOrUnknown(selectedFrontName) && assignment.frente.trim().isNotEmpty) {
+        if (_isEmptyOrUnknown(selectedFrontName) &&
+            assignment.frente.trim().isNotEmpty) {
           selectedFrontName = assignment.frente.trim();
           final matchingFront = _availableFronts.cast<FrontRef?>().firstWhere(
-                (front) => front?.name.trim().toLowerCase() == selectedFrontName.toLowerCase(),
-                orElse: () => null,
-              );
+            (front) =>
+                front?.name.trim().toLowerCase() ==
+                selectedFrontName.toLowerCase(),
+            orElse: () => null,
+          );
           if (matchingFront != null) {
             selectedFrontId = matchingFront.id;
           }
         }
 
-        if ((municipioId ?? '').trim().isEmpty && assignment.municipio.trim().isNotEmpty) {
+        if ((municipioId ?? '').trim().isEmpty &&
+            assignment.municipio.trim().isNotEmpty) {
           municipioId = assignment.municipio.trim();
         }
-        if ((estadoId ?? '').trim().isEmpty && assignment.estado.trim().isNotEmpty) {
+        if ((estadoId ?? '').trim().isEmpty &&
+            assignment.estado.trim().isNotEmpty) {
           estadoId = assignment.estado.trim();
         }
-        if (pkInicio == null && assignment.pk != null) {
+        if (!_hasMeaningfulPk(pkInicio) && _hasMeaningfulPk(assignment.pk)) {
           pkInicio = assignment.pk;
           tipoUbicacion = TipoUbicacion.puntual;
         }
 
-        final assignmentCoords = await _resolveAssignmentCoordinatesForActivity(activity.id);
+        final assignmentCoords = await _resolveAssignmentCoordinatesForActivity(
+          activity.id,
+        );
         if (assignmentCoords != null) {
           assignmentGeoLat = assignmentCoords.$1;
           assignmentGeoLon = assignmentCoords.$2;
@@ -367,25 +517,34 @@ class WizardController extends ChangeNotifier {
             locationSource = WizardLocationSource.assignment;
           }
         }
+
+        final resolvedProject = selectedProjectCode.trim().isNotEmpty
+            ? selectedProjectCode
+            : projectCode;
+        final currentEstado = (estadoId ?? '').trim();
+        if (currentEstado.isNotEmpty) {
+          await loadMunicipiosForCurrentState(
+            resolvedProject,
+            currentEstado,
+            notify: false,
+          );
+        }
       }
 
       if (_isEmptyOrUnknown(selectedFrontName)) {
-        final parsedFront = _parseTitlePart(
-          activity.title,
-          'Frente:',
-          const ['Estado:', 'Municipio:'],
-        );
+        final parsedFront = _parseTitlePart(activity.title, 'Frente:', const [
+          'Estado:',
+          'Municipio:',
+        ]);
         if (parsedFront.isNotEmpty) {
           selectedFrontName = parsedFront;
         }
       }
 
       if ((estadoId ?? '').trim().isEmpty) {
-        final parsedEstado = _parseTitlePart(
-          activity.title,
-          'Estado:',
-          const ['Municipio:'],
-        );
+        final parsedEstado = _parseTitlePart(activity.title, 'Estado:', const [
+          'Municipio:',
+        ]);
         if (parsedEstado.isNotEmpty) {
           estadoId = parsedEstado;
         }
@@ -406,7 +565,9 @@ class WizardController extends ChangeNotifier {
     }
   }
 
-  Future<(double, double)?> _resolveAssignmentCoordinatesForActivity(String activityId) async {
+  Future<(double, double)?> _resolveAssignmentCoordinatesForActivity(
+    String activityId,
+  ) async {
     final fields = await _dao.getFieldsByKey(activityId);
 
     final fromNumbers = (
@@ -430,24 +591,43 @@ class WizardController extends ChangeNotifier {
 
   Future<AgendaAssignment?> _resolveBestAssignmentForWizard() async {
     // 1) Match directo por id (algunas rutas usan el id de asignación como id de actividad local)
-    final direct = await ((database.select(database.agendaAssignments)
-          ..where((t) => t.id.equals(activity.id) | t.activityId.equals(activity.id))
-          ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
-          ..limit(1))
-        .getSingleOrNull());
+    final direct =
+        await ((database.select(database.agendaAssignments)
+              ..where(
+                (t) =>
+                    t.id.equals(activity.id) | t.activityId.equals(activity.id),
+              )
+              ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+              ..limit(1))
+            .getSingleOrNull());
     if (direct != null) return direct;
 
-    final projectId = (selectedProjectId ?? projectCode).trim();
-    if (projectId.isEmpty) return null;
+    final projectCandidates = <String>{
+      projectCode.trim(),
+      selectedProjectId?.trim() ?? '',
+      selectedProjectCode.trim(),
+    }..removeWhere((value) => value.isEmpty);
 
-    final candidates = await ((database.select(database.agendaAssignments)
-          ..where((t) => t.projectId.equals(projectId))
-          ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
-          ..limit(200))
-        .get());
+    final resolvedProjectId = await _dao.resolveProjectId(
+      selectedProjectId ?? selectedProjectCode,
+    );
+    if (resolvedProjectId.trim().isNotEmpty) {
+      projectCandidates.add(resolvedProjectId.trim());
+    }
+
+    if (projectCandidates.isEmpty) return null;
+
+    final candidates =
+        await ((database.select(database.agendaAssignments)
+              ..where((t) => t.projectId.isIn(projectCandidates.toList()))
+              ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+              ..limit(200))
+            .get());
     if (candidates.isEmpty) return null;
 
-    final activityPk = activity.pk;
+    final activityPk = _hasMeaningfulPk(activity.pk)
+        ? activity.pk
+        : (_hasMeaningfulPk(pkInicio) ? pkInicio : null);
     final expectedName = _normalizeActivityNameForMatch(activity.title);
 
     AgendaAssignment? best;
@@ -456,7 +636,7 @@ class WizardController extends ChangeNotifier {
     for (final item in candidates) {
       var score = 0;
 
-      if (activityPk != null && item.pk == activityPk) {
+      if (_hasMeaningfulPk(activityPk) && item.pk == activityPk) {
         score += 5;
       }
 
@@ -468,7 +648,8 @@ class WizardController extends ChangeNotifier {
       if (!_isEmptyOrUnknown(item.frente)) {
         score += 1;
       }
-      if ((item.municipio).trim().isNotEmpty || (item.estado).trim().isNotEmpty) {
+      if ((item.municipio).trim().isNotEmpty ||
+          (item.estado).trim().isNotEmpty) {
         score += 1;
       }
 
@@ -506,10 +687,15 @@ class WizardController extends ChangeNotifier {
         .trim();
   }
 
-  Future<void> loadFrontOptionsForProject(String projectCodeOrId, {bool notify = true}) async {
+  Future<void> loadFrontOptionsForProject(
+    String projectCodeOrId, {
+    bool notify = true,
+  }) async {
     final dao = _dao;
     try {
-      final remoteFronts = await catalogRepo.fetchFrontsForProject(projectCodeOrId);
+      final remoteFronts = await catalogRepo.fetchFrontsForProject(
+        projectCodeOrId,
+      );
       if (remoteFronts.isNotEmpty) {
         _availableFronts = remoteFronts
             .map((s) => FrontRef(id: s.id, name: s.name))
@@ -525,7 +711,8 @@ class WizardController extends ChangeNotifier {
       _availableFronts = const [];
     }
 
-    final currentFrontExists = selectedFrontId != null &&
+    final currentFrontExists =
+        selectedFrontId != null &&
         _availableFronts.any((front) => front.id == selectedFrontId);
     if (!currentFrontExists) {
       selectedFrontId = null;
@@ -537,9 +724,14 @@ class WizardController extends ChangeNotifier {
     if (notify) notifyListeners();
   }
 
-  Future<void> loadLocationOptionsForProject(String projectCodeOrId, {bool notify = true}) async {
+  Future<void> loadLocationOptionsForProject(
+    String projectCodeOrId, {
+    bool notify = true,
+  }) async {
     try {
-      _availableStates = await catalogRepo.fetchStatesForProject(projectCodeOrId);
+      _availableStates = await catalogRepo.fetchStatesForProject(
+        projectCodeOrId,
+      );
     } catch (e) {
       appLogger.w('loadLocationOptionsForProject: no states loaded — $e');
       _availableStates = const [];
@@ -547,7 +739,11 @@ class WizardController extends ChangeNotifier {
 
     final currentEstado = (estadoId ?? '').trim();
     if (currentEstado.isNotEmpty && _availableStates.contains(currentEstado)) {
-      await loadMunicipiosForCurrentState(projectCodeOrId, currentEstado, notify: false);
+      await loadMunicipiosForCurrentState(
+        projectCodeOrId,
+        currentEstado,
+        notify: false,
+      );
     } else {
       _availableMunicipios = const [];
       if (currentEstado.isNotEmpty) {
@@ -565,14 +761,18 @@ class WizardController extends ChangeNotifier {
     bool notify = true,
   }) async {
     try {
-      _availableMunicipios = await catalogRepo.fetchMunicipiosForProject(projectCodeOrId, estado);
+      _availableMunicipios = await catalogRepo.fetchMunicipiosForProject(
+        projectCodeOrId,
+        estado,
+      );
     } catch (e) {
       appLogger.w('loadMunicipiosForCurrentState: no municipios loaded — $e');
       _availableMunicipios = const [];
     }
 
     final currentMunicipio = (municipioId ?? '').trim();
-    if (currentMunicipio.isNotEmpty && !_availableMunicipios.contains(currentMunicipio)) {
+    if (currentMunicipio.isNotEmpty &&
+        !_availableMunicipios.contains(currentMunicipio)) {
       municipioId = null;
     }
 
@@ -609,7 +809,8 @@ class WizardController extends ChangeNotifier {
     return catalogRepo.temasSugeridosFor(a);
   }
 
-  List<CatItem> get attendeesInstitutional => catalogRepo.asistentesInstitucionales;
+  List<CatItem> get attendeesInstitutional =>
+      catalogRepo.asistentesInstitucionales;
   List<CatItem> get attendeesLocal => catalogRepo.asistentesLocales;
 
   CatItem? attendeeById(String id) {
@@ -675,10 +876,43 @@ class WizardController extends ChangeNotifier {
   void toggleAttendee(String id) {
     if (selectedAttendeeIds.contains(id)) {
       selectedAttendeeIds.remove(id);
+      attendeeRepresentatives.remove(id);
     } else {
       selectedAttendeeIds.add(id);
     }
     notifyListeners();
+  }
+
+  void selectAttendee(String id) {
+    if (selectedAttendeeIds.add(id)) {
+      notifyListeners();
+    }
+  }
+
+  void deselectAttendee(String id) {
+    final removedAttendee = selectedAttendeeIds.remove(id);
+    final removedRepresentative = attendeeRepresentatives.remove(id);
+    if (removedAttendee || removedRepresentative != null) {
+      notifyListeners();
+    }
+  }
+
+  void setAttendeeRepresentative(String attendeeId, String representativeName) {
+    final normalizedId = attendeeId.trim();
+    final normalizedName = representativeName.trim();
+    if (normalizedId.isEmpty) return;
+
+    if (normalizedName.isEmpty) {
+      attendeeRepresentatives.remove(normalizedId);
+    } else {
+      attendeeRepresentatives[normalizedId] = normalizedName;
+    }
+    notifyListeners();
+  }
+
+  String? attendeeRepresentative(String attendeeId) {
+    final value = attendeeRepresentatives[attendeeId]?.trim() ?? '';
+    return value.isEmpty ? null : value;
   }
 
   void setResult(CatItem? r) {
@@ -741,7 +975,8 @@ class WizardController extends ChangeNotifier {
 
   String getReportNotes() => reportNotes.trim();
 
-  List<String> getReportAgreements() => sanitizeReportAgreements(reportAgreements);
+  List<String> getReportAgreements() =>
+      sanitizeReportAgreements(reportAgreements);
 
   static List<String> sanitizeReportAgreements(List<String> rawItems) {
     return rawItems
@@ -754,24 +989,24 @@ class WizardController extends ChangeNotifier {
   void addPhoto(String path) {
     evidencias.add(EvidenceDraft(localPath: path));
     notifyListeners();
-    unawaited(_saveEvidencesToDb(activity.id));
+    unawaited(_persistEvidenceDraftsForCurrentActivity());
   }
 
-  void addPhotoWithMetadata(
-    String path, {
-    double? lat,
-    double? lng,
-  }) {
+  void addPhotoWithMetadata(String path, {double? lat, double? lng}) {
     evidencias.add(EvidenceDraft(localPath: path, lat: lat, lng: lng));
     notifyListeners();
-    unawaited(_saveEvidencesToDb(activity.id));
+    unawaited(_persistEvidenceDraftsForCurrentActivity());
   }
 
   void removePhotoAt(int index) {
     if (index < 0 || index >= evidencias.length) return;
     evidencias.removeAt(index);
     notifyListeners();
-    unawaited(_saveEvidencesToDb(activity.id));
+    unawaited(
+      _persistEvidenceDraftsForCurrentActivity(
+        preserveExistingIfCurrentEmpty: false,
+      ),
+    );
   }
 
   void updateDescripcion(int index, String descripcion) {
@@ -810,7 +1045,11 @@ class WizardController extends ChangeNotifier {
       notifyListeners();
       return;
     }
-    await loadMunicipiosForCurrentState(selectedProjectId ?? projectCode, current, notify: true);
+    await loadMunicipiosForCurrentState(
+      selectedProjectCode,
+      current,
+      notify: true,
+    );
   }
 
   void setMunicipio(String? municipio) {
@@ -835,8 +1074,10 @@ class WizardController extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool get hasAssignmentCoordinates => assignmentGeoLat != null && assignmentGeoLon != null;
-  bool get hasOperativeCoordinates => operativeGeoLat != null && operativeGeoLon != null;
+  bool get hasAssignmentCoordinates =>
+      assignmentGeoLat != null && assignmentGeoLon != null;
+  bool get hasOperativeCoordinates =>
+      operativeGeoLat != null && operativeGeoLon != null;
 
   void setOperativeCoordinates({
     required double latitude,
@@ -885,10 +1126,12 @@ class WizardController extends ChangeNotifier {
     municipioId = null;
     _availableStates = const [];
     _availableMunicipios = const [];
-    unawaited(_refreshCatalogIfOnline(project.id));
-    unawaited(catalogRepo.loadProjectBundle(project.id).then((_) {
-      notifyListeners();
-    }));
+    unawaited(_refreshCatalogIfOnline(project.code));
+    unawaited(
+      catalogRepo.loadProjectBundle(project.code).then((_) {
+        notifyListeners();
+      }),
+    );
     notifyListeners();
   }
 
@@ -913,7 +1156,9 @@ class WizardController extends ChangeNotifier {
 
   void setUnplannedReason(String? v) {
     final normalized = v?.trim();
-    unplannedReason = (normalized == null || normalized.isEmpty) ? null : normalized;
+    unplannedReason = (normalized == null || normalized.isEmpty)
+        ? null
+        : normalized;
     unplannedReasonOtherText = '';
     notifyListeners();
   }
@@ -930,9 +1175,9 @@ class WizardController extends ChangeNotifier {
 
   /// Etiqueta legible para el motivo no planeado (usada en la pantalla de confirmación)
   String get unplannedReasonLabel => unplanned_val.labelForUnplannedReason(
-        unplannedReason: unplannedReason,
-        unplannedReasonOtherText: unplannedReasonOtherText,
-      );
+    unplannedReason: unplannedReason,
+    unplannedReasonOtherText: unplannedReasonOtherText,
+  );
 
   // =========================
   // Validación
@@ -958,7 +1203,8 @@ class WizardController extends ChangeNotifier {
   }
 
   bool get canSave => canContinueFromFields;
-  bool get selectedActivityRequiresGeo => _selectedActivity?.requiresGeo ?? false;
+  bool get selectedActivityRequiresGeo =>
+      _selectedActivity?.requiresGeo ?? false;
   bool get hasValidGpsCoordinates => geoLat != null && geoLon != null;
   int get minimumEvidencePhotosRequired {
     final configured = _selectedActivity?.minimumEvidencePhotos ?? 0;
@@ -969,43 +1215,51 @@ class WizardController extends ChangeNotifier {
   // =========================
   // Validación Reactiva ("Encuéntralo por mí")
   // =========================
-  
+
   /// Valida los campos exclusivos de actividad no planeada.
   /// Retorna valid() si isUnplanned == false.
   /// Delega a la función pura [unplanned_val.validateUnplannedFields] para
   /// permitir testeo sin instanciar el controller completo.
   ValidationResult validateUnplanned() => unplanned_val.validateUnplannedFields(
-        isUnplanned: isUnplanned,
-        unplannedReason: unplannedReason,
-        unplannedReasonOtherText: unplannedReasonOtherText,
-      );
+    isUnplanned: isUnplanned,
+    unplannedReason: unplannedReason,
+    unplannedReasonOtherText: unplannedReasonOtherText,
+  );
 
   /// Valida el paso de contexto y retorna errores específicos
   ValidationResult validateContextStep() {
     final errors = <ValidationError>[];
 
-    if (isUnplanned && (selectedProjectId == null || selectedProjectId!.trim().isEmpty)) {
-      errors.add(ValidationError(
-        fieldKey: 'project',
-        message: 'Selecciona el proyecto para la actividad no planeada',
-        step: 'context',
-      ));
+    if (isUnplanned &&
+        (selectedProjectId == null || selectedProjectId!.trim().isEmpty)) {
+      errors.add(
+        ValidationError(
+          fieldKey: 'project',
+          message: 'Selecciona el proyecto para la actividad no planeada',
+          step: 'context',
+        ),
+      );
     }
 
     if (risk == null) {
-      errors.add(ValidationError(
-        fieldKey: 'risk',
-        message: 'Selecciona el nivel de riesgo',
-        step: 'context',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'risk',
+          message: 'Selecciona el nivel de riesgo',
+          step: 'context',
+        ),
+      );
     }
 
     if (selectedActivityRequiresGeo && !hasValidGpsCoordinates) {
-      errors.add(ValidationError(
-        fieldKey: 'gps_required',
-        message: 'No se pudo obtener ubicación GPS. Activa el GPS y vuelve a intentar.',
-        step: 'context',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'gps_required',
+          message:
+              'No se pudo obtener ubicación GPS. Activa el GPS y vuelve a intentar.',
+          step: 'context',
+        ),
+      );
     }
 
     // Incluir validación de campos no planeados
@@ -1025,75 +1279,91 @@ class WizardController extends ChangeNotifier {
 
     // Riesgo (también se valida aquí por si vienen desde paso 1 sin seleccionar)
     if (risk == null) {
-      errors.add(ValidationError(
-        fieldKey: 'risk',
-        message: 'Selecciona el nivel de riesgo',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'risk',
+          message: 'Selecciona el nivel de riesgo',
+          step: 'fields',
+        ),
+      );
     }
 
     // Actividad
     if (_selectedActivity == null) {
-      errors.add(ValidationError(
-        fieldKey: 'activity',
-        message: 'Selecciona una actividad principal',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'activity',
+          message: 'Selecciona una actividad principal',
+          step: 'fields',
+        ),
+      );
     }
 
     // Subcategoría
     if (_selectedSubcategory == null) {
-      errors.add(ValidationError(
-        fieldKey: 'subcategory',
-        message: 'Selecciona una subcategoría',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'subcategory',
+          message: 'Selecciona una subcategoría',
+          step: 'fields',
+        ),
+      );
     } else if (isOtherSubcategory && otherSubcategoryText.trim().isEmpty) {
-      errors.add(ValidationError(
-        fieldKey: 'subcategory_other',
-        message: 'Escribe el nombre de la nueva subcategoría',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'subcategory_other',
+          message: 'Escribe el nombre de la nueva subcategoría',
+          step: 'fields',
+        ),
+      );
     }
 
     // Propósito (solo si hay propósitos disponibles)
     final purposes = availablePurposes;
     if (purposes.isNotEmpty && _selectedPurpose == null) {
-      errors.add(ValidationError(
-        fieldKey: 'purpose',
-        message: 'Selecciona un propósito',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'purpose',
+          message: 'Selecciona un propósito',
+          step: 'fields',
+        ),
+      );
     }
 
     // Temas (validar si se seleccionó "Otro tema" pero no escribió)
     if (isOtherTopicSelected && otherTopicText.trim().isEmpty) {
-      errors.add(ValidationError(
-        fieldKey: 'topic_other',
-        message: 'Escribe el nombre del tema personalizado',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'topic_other',
+          message: 'Escribe el nombre del tema personalizado',
+          step: 'fields',
+        ),
+      );
     }
 
     // Resultado
     if (selectedResult == null) {
-      errors.add(ValidationError(
-        fieldKey: 'result',
-        message: 'Selecciona un resultado',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'result',
+          message: 'Selecciona un resultado',
+          step: 'fields',
+        ),
+      );
     }
 
     if (reportAgreements.any((item) => item.trim().isEmpty)) {
-      errors.add(ValidationError(
-        fieldKey: 'report_agreements',
-        message: 'Completa o elimina acuerdos vacíos',
-        step: 'fields',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'report_agreements',
+          message: 'Completa o elimina acuerdos vacíos',
+          step: 'fields',
+        ),
+      );
     }
 
-    return errors.isEmpty 
-        ? ValidationResult.valid() 
+    return errors.isEmpty
+        ? ValidationResult.valid()
         : ValidationResult.invalid(errors);
   }
 
@@ -1102,40 +1372,45 @@ class WizardController extends ChangeNotifier {
     final errors = <ValidationError>[];
 
     if (evidencias.length < minimumEvidencePhotosRequired) {
-      errors.add(ValidationError(
-        fieldKey: 'evidence',
-        message: 'Agrega al menos $minimumEvidencePhotosRequired evidencia(s).',
-        step: 'evidence',
-      ));
+      errors.add(
+        ValidationError(
+          fieldKey: 'evidence',
+          message:
+              'Agrega al menos $minimumEvidencePhotosRequired evidencia(s).',
+          step: 'evidence',
+        ),
+      );
     }
 
-    return errors.isEmpty 
-        ? ValidationResult.valid() 
+    return errors.isEmpty
+        ? ValidationResult.valid()
         : ValidationResult.invalid(errors);
   }
 
   // =========================
   // GATEKEEPER - Validación Final Estricta
   // =========================
-  
+
   /// Validación completa antes de guardar (Gatekeeper)
   /// Prioriza evidencia, luego resto de campos
   /// Retorna el índice de evidencia sin descripción si aplica
   GatekeeperResult validateBeforeSave() {
-        if (isUnplanned && (selectedProjectId == null || selectedProjectId!.trim().isEmpty)) {
-          return GatekeeperResult(
-            isValid: false,
-            errorMessage: 'Selecciona el proyecto para la actividad no planeada.',
-            errorFieldKey: 'project',
-            step: 0,
-          );
-        }
+    if (isUnplanned &&
+        (selectedProjectId == null || selectedProjectId!.trim().isEmpty)) {
+      return GatekeeperResult(
+        isValid: false,
+        errorMessage: 'Selecciona el proyecto para la actividad no planeada.',
+        errorFieldKey: 'project',
+        step: 0,
+      );
+    }
 
     // PRIORIDAD 1: Evidencia
     if (evidencias.length < minimumEvidencePhotosRequired) {
       return GatekeeperResult(
         isValid: false,
-        errorMessage: 'Debes adjuntar al menos $minimumEvidencePhotosRequired foto(s) de evidencia.',
+        errorMessage:
+            'Debes adjuntar al menos $minimumEvidencePhotosRequired foto(s) de evidencia.',
         errorFieldKey: 'btn_agregar_foto',
         step: 2, // Paso de evidencia (0-indexed)
       );
@@ -1146,7 +1421,8 @@ class WizardController extends ChangeNotifier {
     if (indexSinDescripcion != -1) {
       return GatekeeperResult(
         isValid: false,
-        errorMessage: 'Falta descripción en la foto ${indexSinDescripcion + 1}.',
+        errorMessage:
+            'Falta descripción en la foto ${indexSinDescripcion + 1}.',
         errorFieldKey: 'input_descripcion_$indexSinDescripcion',
         step: 2,
         evidenceIndex: indexSinDescripcion,
@@ -1188,7 +1464,8 @@ class WizardController extends ChangeNotifier {
     if (selectedActivityRequiresGeo && !hasValidGpsCoordinates) {
       return GatekeeperResult(
         isValid: false,
-        errorMessage: 'No se pudo obtener ubicación GPS. Activa el GPS y vuelve a intentar.',
+        errorMessage:
+            'No se pudo obtener ubicación GPS. Activa el GPS y vuelve a intentar.',
         errorFieldKey: 'gps_required',
         step: 0,
       );
@@ -1291,7 +1568,8 @@ class WizardController extends ChangeNotifier {
     }
 
     if (t.contains('asamblea')) return find('ASA') ?? list.first;
-    if (t.contains('reunión') || t.contains('reunion')) return find('REU') ?? list.first;
+    if (t.contains('reunión') || t.contains('reunion'))
+      return find('REU') ?? list.first;
     if (t.contains('camin')) return find('CAM') ?? list.first;
 
     return find('CAM') ?? list.first;
@@ -1300,7 +1578,7 @@ class WizardController extends ChangeNotifier {
   // =========================
   // Guardado en Drift
   // =========================
-  
+
   /// Guarda la actividad completa en la base de datos local
   Future<String> saveToDatabase({
     String? projectId,
@@ -1312,6 +1590,7 @@ class WizardController extends ChangeNotifier {
   }) async {
     try {
       final dao = _dao;
+      await _ensureDraftActivity();
       final hasExistingActivity = await dao.activityExists(activity.id);
       final existingActivity = hasExistingActivity
           ? await dao.getActivityById(activity.id)
@@ -1320,13 +1599,31 @@ class WizardController extends ChangeNotifier {
       final now = DateTime.now();
       // Derive start/end timestamps from time pickers for accurate recording
       final DateTime resolvedStartedAt = horaInicio != null
-          ? DateTime(now.year, now.month, now.day, horaInicio!.hour, horaInicio!.minute)
+          ? DateTime(
+              now.year,
+              now.month,
+              now.day,
+              horaInicio!.hour,
+              horaInicio!.minute,
+            )
           : (activity.horaInicio ?? now);
       final DateTime resolvedFinishedAt = horaFin != null
-          ? DateTime(now.year, now.month, now.day, horaFin!.hour, horaFin!.minute)
+          ? DateTime(
+              now.year,
+              now.month,
+              now.day,
+              horaFin!.hour,
+              horaFin!.minute,
+            )
           : now;
       final cleanedNotes = getReportNotes();
       final cleanedAgreements = getReportAgreements();
+      final existingSnapshot = await _loadExistingWizardPayloadSnapshot(
+        activity.id,
+      );
+      final wizardPayloadSnapshot = _buildWizardPayloadForSync(
+        existingSnapshot: existingSnapshot,
+      );
 
       final selectedActivityId = _selectedActivity?.id;
       if (selectedActivityId == null || selectedActivityId.trim().isEmpty) {
@@ -1334,29 +1631,34 @@ class WizardController extends ChangeNotifier {
       }
 
       final selectedActivityName = _selectedActivity?.name.trim();
-      final resolvedTitle = (selectedActivityName != null && selectedActivityName.isNotEmpty)
+      final resolvedTitle =
+          (selectedActivityName != null && selectedActivityName.isNotEmpty)
           ? selectedActivityName
           : activity.title.trim();
 
       final requestedProjectId = (projectId?.trim().isNotEmpty ?? false)
           ? projectId!.trim()
           : ((selectedProjectId?.trim().isNotEmpty ?? false)
-            ? selectedProjectId!.trim()
-            : projectCode);
-      final requestedActivityTypeId = (activityTypeId?.trim().isNotEmpty ?? false)
+                ? selectedProjectId!.trim()
+                : projectCode);
+      final requestedActivityTypeId =
+          (activityTypeId?.trim().isNotEmpty ?? false)
           ? activityTypeId!.trim()
           : selectedActivityId.trim();
-        final selectedSegmentId = (selectedFrontId?.trim().isNotEmpty ?? false)
+      final selectedSegmentId = (selectedFrontId?.trim().isNotEmpty ?? false)
           ? selectedFrontId!.trim()
           : null;
-        final requestedSegmentId = (segmentId?.trim().isNotEmpty ?? false)
+      final requestedSegmentId = (segmentId?.trim().isNotEmpty ?? false)
           ? segmentId!.trim()
           : selectedSegmentId;
 
       var resolvedProjectId = await dao.resolveProjectId(requestedProjectId);
-      var resolvedActivityTypeId = await dao.resolveActivityTypeId(requestedActivityTypeId);
+      var resolvedActivityTypeId = await dao.resolveActivityTypeId(
+        requestedActivityTypeId,
+      );
       final effectivePk = pk ?? pkInicio ?? existingActivity?.pk ?? activity.pk;
-      final effectivePkRefType = pkRefType ??
+      final effectivePkRefType =
+          pkRefType ??
           existingActivity?.pkRefType ??
           switch (tipoUbicacion) {
             TipoUbicacion.puntual => 'PK',
@@ -1364,7 +1666,7 @@ class WizardController extends ChangeNotifier {
             TipoUbicacion.general => 'GENERAL',
           };
 
-        if (hasExistingActivity && !isUnplanned) {
+      if (hasExistingActivity && !isUnplanned) {
         final existing = await dao.getActivityById(activity.id);
         if (existing != null) {
           resolvedProjectId = existing.projectId;
@@ -1372,8 +1674,9 @@ class WizardController extends ChangeNotifier {
         }
       }
 
-        final saveAsPending = !isUnplanned && !hasEvidence && allowPendingWithoutEvidence;
-        final activityStatus = isUnplanned
+      final saveAsPending =
+          !isUnplanned && !hasEvidence && allowPendingWithoutEvidence;
+      final activityStatus = isUnplanned
           ? 'REVISION_PENDIENTE'
           : (saveAsPending ? 'DRAFT' : 'READY_TO_SYNC');
 
@@ -1391,7 +1694,9 @@ class WizardController extends ChangeNotifier {
         createdByUserId: currentUserId,
         status: drift.Value(activityStatus),
         startedAt: drift.Value(resolvedStartedAt),
-        finishedAt: (isUnplanned || saveAsPending) ? const drift.Value(null) : drift.Value(resolvedFinishedAt),
+        finishedAt: (isUnplanned || saveAsPending)
+            ? const drift.Value(null)
+            : drift.Value(resolvedFinishedAt),
         geoLat: drift.Value(geoLat),
         geoLon: drift.Value(geoLon),
         geoAccuracy: drift.Value(geoAccuracy),
@@ -1407,7 +1712,7 @@ class WizardController extends ChangeNotifier {
           fieldKey: 'risk_level',
           valueText: drift.Value(risk?.name),
         ),
-        
+
         // Actividad
         if (_selectedActivity != null)
           ActivityFieldsCompanion.insert(
@@ -1416,7 +1721,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'activity_type',
             valueText: drift.Value(_selectedActivity!.id),
           ),
-          
+
         // Subcategoría
         if (_selectedSubcategory != null)
           ActivityFieldsCompanion.insert(
@@ -1440,7 +1745,31 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'front_name',
             valueText: drift.Value(selectedFrontName.trim()),
           ),
-          
+
+        if (estadoId?.trim().isNotEmpty ?? false)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'estado',
+            valueText: drift.Value(estadoId!.trim()),
+          ),
+
+        if (municipioId?.trim().isNotEmpty ?? false)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'municipio',
+            valueText: drift.Value(municipioId!.trim()),
+          ),
+
+        if (colonia.trim().isNotEmpty)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'colonia',
+            valueText: drift.Value(colonia.trim()),
+          ),
+
         // Subcategoría otro (texto)
         if (isOtherSubcategory && otherSubcategoryText.trim().isNotEmpty)
           ActivityFieldsCompanion.insert(
@@ -1449,7 +1778,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'subcategory_other_text',
             valueText: drift.Value(otherSubcategoryText.trim()),
           ),
-          
+
         // Propósito
         if (_selectedPurpose != null)
           ActivityFieldsCompanion.insert(
@@ -1458,7 +1787,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'purpose',
             valueText: drift.Value(_selectedPurpose!.id),
           ),
-          
+
         // Temas (JSON array de IDs)
         if (selectedTopicIds.isNotEmpty)
           ActivityFieldsCompanion.insert(
@@ -1467,7 +1796,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'topics',
             valueJson: drift.Value(jsonEncode(selectedTopicIds.toList())),
           ),
-          
+
         // Tema otro (texto)
         if (isOtherTopicSelected && otherTopicText.trim().isNotEmpty)
           ActivityFieldsCompanion.insert(
@@ -1476,7 +1805,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'topic_other_text',
             valueText: drift.Value(otherTopicText.trim()),
           ),
-          
+
         // Asistentes (JSON array de IDs)
         if (selectedAttendeeIds.isNotEmpty)
           ActivityFieldsCompanion.insert(
@@ -1484,6 +1813,14 @@ class WizardController extends ChangeNotifier {
             activityId: activityId,
             fieldKey: 'attendees',
             valueJson: drift.Value(jsonEncode(selectedAttendeeIds.toList())),
+          ),
+
+        if (attendeeRepresentatives.isNotEmpty)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'attendee_representatives',
+            valueJson: drift.Value(jsonEncode(attendeeRepresentatives)),
           ),
 
         // Resultado
@@ -1494,7 +1831,7 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'result',
             valueText: drift.Value(selectedResult!.id),
           ),
-          
+
         // Ha evidencia flag
         ActivityFieldsCompanion.insert(
           id: _uuid.v4(),
@@ -1528,6 +1865,13 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'report_agreements',
             valueJson: drift.Value(jsonEncode(cleanedAgreements)),
           ),
+
+        ActivityFieldsCompanion.insert(
+          id: '$activityId:wizard_payload_snapshot',
+          activityId: activityId,
+          fieldKey: 'wizard_payload_snapshot',
+          valueJson: drift.Value(jsonEncode(wizardPayloadSnapshot)),
+        ),
 
         // ── Actividad no planeada ──────────────────────────
         if (isUnplanned)
@@ -1564,13 +1908,11 @@ class WizardController extends ChangeNotifier {
       ];
 
       // Guardar en DB usando el DAO
-      await dao.upsertDraft(
-        activity: activityCompanion,
-        fields: fields,
-      );
+      await dao.upsertDraft(activity: activityCompanion, fields: fields);
 
-      // Guardar evidencias en DB
+      // Guardar evidencias en DB y encolar su subida al backend
       await _saveEvidencesToDb(activityId);
+      await _queuePendingEvidenceUploads(activityId);
 
       // Encolar para sincronización (solo actividades completadas)
       if (activityStatus == 'READY_TO_SYNC') {
@@ -1580,7 +1922,6 @@ class WizardController extends ChangeNotifier {
 
       appLogger.i('Actividad guardada exitosamente: $activityId');
       return activityId;
-
     } catch (e, stack) {
       appLogger.e('Error guardando actividad', error: e, stackTrace: stack);
       rethrow;
@@ -1597,7 +1938,8 @@ class WizardController extends ChangeNotifier {
     }
 
     final agreementsField = fields['report_agreements'];
-    if (agreementsField?.valueJson != null && agreementsField!.valueJson!.trim().isNotEmpty) {
+    if (agreementsField?.valueJson != null &&
+        agreementsField!.valueJson!.trim().isNotEmpty) {
       try {
         final decoded = jsonDecode(agreementsField.valueJson!);
         if (decoded is List) {
@@ -1626,7 +1968,9 @@ class WizardController extends ChangeNotifier {
       }
     }
 
-    final assignmentCoords = await _resolveAssignmentCoordinatesForActivity(activity.id);
+    final assignmentCoords = await _resolveAssignmentCoordinatesForActivity(
+      activity.id,
+    );
     if (assignmentCoords != null) {
       assignmentGeoLat = assignmentCoords.$1;
       assignmentGeoLon = assignmentCoords.$2;
@@ -1639,27 +1983,108 @@ class WizardController extends ChangeNotifier {
 
     // Frente
     final frontIdField = fields['front_id'];
-    if (frontIdField?.valueText != null && frontIdField!.valueText!.trim().isNotEmpty) {
+    if (frontIdField?.valueText != null &&
+        frontIdField!.valueText!.trim().isNotEmpty) {
       selectedFrontId = frontIdField.valueText!.trim();
       final match = _availableFronts.cast<FrontRef?>().firstWhere(
-            (front) => front!.id == selectedFrontId,
-            orElse: () => null,
-          );
+        (front) => front!.id == selectedFrontId,
+        orElse: () => null,
+      );
       if (match != null) {
         selectedFrontName = match.name;
       }
     }
 
     final frontNameField = fields['front_name'];
-    if (frontNameField?.valueText != null && frontNameField!.valueText!.trim().isNotEmpty) {
+    if (frontNameField?.valueText != null &&
+        frontNameField!.valueText!.trim().isNotEmpty) {
       selectedFrontName = frontNameField.valueText!.trim();
+    }
+
+    final draftProjectIdField = fields['draft_project_id'];
+    if (draftProjectIdField?.valueText != null &&
+        draftProjectIdField!.valueText!.trim().isNotEmpty) {
+      selectedProjectId = draftProjectIdField.valueText!.trim();
+    }
+    final draftProjectCodeField = fields['draft_project_code'];
+    if (draftProjectCodeField?.valueText != null &&
+        draftProjectCodeField!.valueText!.trim().isNotEmpty) {
+      selectedProjectCode = draftProjectCodeField.valueText!.trim();
+    }
+    final draftProjectNameField = fields['draft_project_name'];
+    if (draftProjectNameField?.valueText != null &&
+        draftProjectNameField!.valueText!.trim().isNotEmpty) {
+      selectedProjectName = draftProjectNameField.valueText!.trim();
+    }
+
+    final draftEstadoField = fields['draft_estado'];
+    if (draftEstadoField?.valueText != null &&
+        draftEstadoField!.valueText!.trim().isNotEmpty) {
+      estadoId = draftEstadoField.valueText!.trim();
+    }
+    if ((estadoId ?? '').trim().isEmpty) {
+      final estadoField = fields['estado'];
+      if (estadoField?.valueText != null &&
+          estadoField!.valueText!.trim().isNotEmpty) {
+        estadoId = estadoField.valueText!.trim();
+      }
+    }
+    final draftMunicipioField = fields['draft_municipio'];
+    if (draftMunicipioField?.valueText != null &&
+        draftMunicipioField!.valueText!.trim().isNotEmpty) {
+      municipioId = draftMunicipioField.valueText!.trim();
+    }
+    if ((municipioId ?? '').trim().isEmpty) {
+      final municipioField = fields['municipio'];
+      if (municipioField?.valueText != null &&
+          municipioField!.valueText!.trim().isNotEmpty) {
+        municipioId = municipioField.valueText!.trim();
+      }
+    }
+    final draftColoniaField = fields['draft_colonia'];
+    if (draftColoniaField?.valueText != null &&
+        draftColoniaField!.valueText!.trim().isNotEmpty) {
+      colonia = draftColoniaField.valueText!.trim();
+    }
+    if (colonia.trim().isEmpty) {
+      final coloniaField = fields['colonia'];
+      if (coloniaField?.valueText != null &&
+          coloniaField!.valueText!.trim().isNotEmpty) {
+        colonia = coloniaField.valueText!.trim();
+      }
+    }
+
+    final draftTipoUbicacionField = fields['draft_tipo_ubicacion'];
+    if (draftTipoUbicacionField?.valueText != null &&
+        draftTipoUbicacionField!.valueText!.trim().isNotEmpty) {
+      final value = draftTipoUbicacionField.valueText!.trim();
+      final match = TipoUbicacion.values.cast<TipoUbicacion?>().firstWhere(
+        (item) => item?.name == value,
+        orElse: () => null,
+      );
+      if (match != null) {
+        tipoUbicacion = match;
+      }
+    }
+
+    final draftPkInicioField = fields['draft_pk_inicio'];
+    if (draftPkInicioField?.valueText != null &&
+        draftPkInicioField!.valueText!.trim().isNotEmpty) {
+      pkInicio ??= int.tryParse(draftPkInicioField.valueText!.trim());
+    }
+    final draftPkFinField = fields['draft_pk_fin'];
+    if (draftPkFinField?.valueText != null &&
+        draftPkFinField!.valueText!.trim().isNotEmpty) {
+      pkFin ??= int.tryParse(draftPkFinField.valueText!.trim());
     }
 
     // Nivel de riesgo
     final riskField = fields['risk_level'];
     if (riskField?.valueText != null) {
       try {
-        risk = RiskLevel.values.firstWhere((r) => r.name == riskField!.valueText);
+        risk = RiskLevel.values.firstWhere(
+          (r) => r.name == riskField!.valueText,
+        );
       } catch (_) {}
     }
 
@@ -1677,10 +2102,13 @@ class WizardController extends ChangeNotifier {
     if (_selectedActivity != null) {
       final subcatField = fields['subcategory'];
       if (subcatField?.valueText != null) {
-        final found = catalogRepo.subcatsFor(_selectedActivity!.id).cast<CatItem?>().firstWhere(
-          (s) => s?.id == subcatField!.valueText,
-          orElse: () => null,
-        );
+        final found = catalogRepo
+            .subcatsFor(_selectedActivity!.id)
+            .cast<CatItem?>()
+            .firstWhere(
+              (s) => s?.id == subcatField!.valueText,
+              orElse: () => null,
+            );
         if (found != null) _selectedSubcategory = found;
       }
 
@@ -1688,13 +2116,16 @@ class WizardController extends ChangeNotifier {
       if (_selectedSubcategory != null) {
         final purposeField = fields['purpose'];
         if (purposeField?.valueText != null) {
-          final found = catalogRepo.purposesForCascade(
-            activityId: _selectedActivity!.id,
-            subcategoryId: _selectedSubcategory!.id,
-          ).cast<CatItem?>().firstWhere(
-            (p) => p?.id == purposeField!.valueText,
-            orElse: () => null,
-          );
+          final found = catalogRepo
+              .purposesForCascade(
+                activityId: _selectedActivity!.id,
+                subcategoryId: _selectedSubcategory!.id,
+              )
+              .cast<CatItem?>()
+              .firstWhere(
+                (p) => p?.id == purposeField!.valueText,
+                orElse: () => null,
+              );
           if (found != null) _selectedPurpose = found;
         }
       }
@@ -1712,7 +2143,8 @@ class WizardController extends ChangeNotifier {
       if (topicsField?.valueJson != null) {
         try {
           final decoded = jsonDecode(topicsField!.valueJson!);
-          if (decoded is List) selectedTopicIds.addAll(decoded.map((e) => e.toString()));
+          if (decoded is List)
+            selectedTopicIds.addAll(decoded.map((e) => e.toString()));
         } catch (_) {}
       }
     }
@@ -1728,9 +2160,28 @@ class WizardController extends ChangeNotifier {
       if (attendeesField?.valueJson != null) {
         try {
           final decoded = jsonDecode(attendeesField!.valueJson!);
-          if (decoded is List) selectedAttendeeIds.addAll(decoded.map((e) => e.toString()));
+          if (decoded is List)
+            selectedAttendeeIds.addAll(decoded.map((e) => e.toString()));
         } catch (_) {}
       }
+    }
+
+    final representativesField = fields['attendee_representatives'];
+    if (representativesField?.valueJson != null &&
+        representativesField!.valueJson!.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(representativesField.valueJson!);
+        if (decoded is Map) {
+          attendeeRepresentatives
+            ..clear()
+            ..addAll(
+              decoded.map(
+                (key, value) =>
+                    MapEntry(key.toString(), value.toString().trim()),
+              )..removeWhere((_, value) => value.isEmpty),
+            );
+        }
+      } catch (_) {}
     }
 
     // Resultado
@@ -1746,7 +2197,7 @@ class WizardController extends ChangeNotifier {
     }
 
     // PK desde actividad existente
-    if (existingActivity?.pk != null && pkInicio == null) {
+    if (_hasMeaningfulPk(existingActivity?.pk) && !_hasMeaningfulPk(pkInicio)) {
       pkInicio = existingActivity!.pk;
     }
 
@@ -1774,7 +2225,8 @@ class WizardController extends ChangeNotifier {
     // Motivo actividad no planeada
     if (isUnplanned && unplannedReason == null) {
       final reasonField = fields['unplanned_reason'];
-      if (reasonField?.valueText != null) unplannedReason = reasonField!.valueText;
+      if (reasonField?.valueText != null)
+        unplannedReason = reasonField!.valueText;
 
       final reasonOtherField = fields['unplanned_reason_other_text'];
       if (reasonOtherField?.valueText != null) {
@@ -1782,7 +2234,8 @@ class WizardController extends ChangeNotifier {
       }
 
       final refField = fields['unplanned_reference'];
-      if (refField?.valueText != null) unplannedReference = refField!.valueText!;
+      if (refField?.valueText != null)
+        unplannedReference = refField!.valueText!;
     }
 
     // Evidencias guardadas en DB
@@ -1794,17 +2247,114 @@ class WizardController extends ChangeNotifier {
     try {
       final dao = _dao;
       final dbEvidences = await dao.getEvidencesForActivity(activity.id);
-      if (dbEvidences.isEmpty) return;
-      for (final ev in dbEvidences) {
-        evidencias.add(EvidenceDraft(
-          localPath: ev.filePathLocal,
-          descripcion: ev.caption ?? '',
-          createdAt: ev.takenAt ?? DateTime.now(),
-          lat: ev.geoLat,
-          lng: ev.geoLon,
-        ));
+      if (dbEvidences.isNotEmpty) {
+        for (final ev in dbEvidences) {
+          evidencias.add(
+            EvidenceDraft(
+              localPath: ev.filePathLocal,
+              descripcion: ev.caption ?? '',
+              createdAt: ev.takenAt ?? DateTime.now(),
+              lat: ev.geoLat,
+              lng: ev.geoLon,
+            ),
+          );
+        }
+        return;
       }
+
+      final recovered = await _loadEvidenceDraftsFromPersistedSources(
+        activity.id,
+      );
+      if (recovered.isEmpty) return;
+
+      evidencias.addAll(recovered);
+      await _saveEvidencesToDb(
+        activity.id,
+        preserveExistingIfCurrentEmpty: false,
+      );
+      await _queuePendingEvidenceUploads(activity.id);
     } catch (_) {}
+  }
+
+  Future<Map<String, dynamic>?> _loadExistingWizardPayloadSnapshot(
+    String activityId,
+  ) async {
+    final row =
+        await ((database.select(database.activityFields)
+              ..where(
+                (t) =>
+                    t.activityId.equals(activityId) &
+                    t.fieldKey.equals('wizard_payload_snapshot'),
+              )
+              ..limit(1))
+            .getSingleOrNull());
+    final raw = row?.valueJson?.trim();
+    if (raw == null || raw.isEmpty) {
+      return null;
+    }
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      // Ignore malformed local snapshot and keep current in-memory state.
+    }
+    return null;
+  }
+
+  Future<List<EvidenceDraft>> _loadEvidenceDraftsFromPersistedSources(
+    String activityId,
+  ) async {
+    Map<String, dynamic>? payload = await _loadExistingWizardPayloadSnapshot(
+      activityId,
+    );
+
+    if (payload == null || payload.isEmpty) {
+      final queueRow =
+          await ((database.select(database.syncQueue)
+                ..where(
+                  (t) =>
+                      t.entity.equals('ACTIVITY') &
+                      t.entityId.equals(activityId),
+                )
+                ..orderBy([(t) => drift.OrderingTerm.desc(t.priority)])
+                ..limit(1))
+              .getSingleOrNull());
+      final raw = queueRow?.payloadJson?.trim();
+      if (raw != null && raw.isNotEmpty) {
+        try {
+          final decoded = jsonDecode(raw);
+          if (decoded is Map && decoded['wizard_payload'] is Map) {
+            payload = Map<String, dynamic>.from(
+              decoded['wizard_payload'] as Map,
+            );
+          }
+        } catch (_) {
+          // Ignore malformed queue payloads.
+        }
+      }
+    }
+
+    final rawItems = payload?['evidences'];
+    if (rawItems is! List) {
+      return const [];
+    }
+
+    final recovered = <EvidenceDraft>[];
+    for (final item in rawItems) {
+      if (item is! Map) continue;
+      try {
+        final draft = EvidenceDraft.fromJson(Map<String, dynamic>.from(item));
+        if (draft.localPath.trim().isNotEmpty) {
+          recovered.add(draft);
+        }
+      } catch (_) {
+        // Skip malformed persisted evidence entries.
+      }
+    }
+    return recovered;
   }
 
   // =========================
@@ -1818,21 +2368,42 @@ class WizardController extends ChangeNotifier {
       final dao = _dao;
       if (await dao.activityExists(activity.id)) return;
 
-      final resolvedProjectId = await dao.resolveProjectId(selectedProjectId ?? projectCode);
+      final preferredProject = selectedProjectId?.trim().isNotEmpty == true
+          ? selectedProjectId!.trim()
+          : projectCode.trim();
+      var resolvedProjectId = await dao.resolveProjectId(preferredProject);
+      if (resolvedProjectId.trim() == preferredProject) {
+        final fromAssignment = await _resolveProjectIdFromAssignment(
+          activity.id,
+        );
+        if (fromAssignment != null && fromAssignment.isNotEmpty) {
+          resolvedProjectId = fromAssignment;
+        }
+      }
       final typeId = _selectedActivity?.id ?? activity.title;
       final resolvedTypeId = await dao.resolveActivityTypeId(typeId);
+      final resolvedAssignedToUserId = await _resolveAssignedUserIdForSync(
+        activity.id,
+      );
 
-      await dao.upsertActivityRow(ActivitiesCompanion.insert(
-        id: activity.id,
-        projectId: resolvedProjectId,
-        activityTypeId: resolvedTypeId,
-        segmentId: drift.Value(selectedFrontId?.trim().isNotEmpty == true ? selectedFrontId!.trim() : null),
-        title: activity.title.isNotEmpty ? activity.title : 'Actividad',
-        createdAt: DateTime.now(),
-        createdByUserId: currentUserId,
-        pk: drift.Value(pkInicio ?? activity.pk),
-        catalogVersionId: drift.Value(catalogRepo.currentVersionId),
-      ));
+      await dao.upsertActivityRow(
+        ActivitiesCompanion.insert(
+          id: activity.id,
+          projectId: resolvedProjectId,
+          activityTypeId: resolvedTypeId,
+          segmentId: drift.Value(
+            selectedFrontId?.trim().isNotEmpty == true
+                ? selectedFrontId!.trim()
+                : null,
+          ),
+          title: activity.title.isNotEmpty ? activity.title : 'Actividad',
+          createdAt: DateTime.now(),
+          createdByUserId: currentUserId,
+          assignedToUserId: drift.Value(resolvedAssignedToUserId),
+          pk: drift.Value(pkInicio ?? activity.pk),
+          catalogVersionId: drift.Value(catalogRepo.currentVersionId),
+        ),
+      );
     } catch (e) {
       appLogger.w('_ensureDraftActivity failed silently: $e');
     }
@@ -1841,29 +2412,103 @@ class WizardController extends ChangeNotifier {
   /// Saves all current form fields and evidences to DB as a draft.
   /// Safe to call on exit — never throws.
   Future<void> saveDraftSilently() async {
+    if (_loading || !_draftHydrationReady) {
+      appLogger.d(
+        'Skipping draft autosave while wizard is still hydrating: ${activity.id}',
+      );
+      return;
+    }
+
     try {
       final dao = _dao;
       final activityId = activity.id;
       final existing = await dao.getActivityById(activityId);
 
-      final resolvedProjectId = await dao.resolveProjectId(selectedProjectId ?? projectCode);
-      final typeId = _selectedActivity?.id ?? existing?.activityTypeId ?? activity.title;
+      // Usar siempre el projectId de la fila existente para evitar corrupción por FK
+      // cuando el usuario tiene "todos los proyectos" seleccionado (__all__).
+      final String resolvedProjectId;
+      if (selectedProjectId?.trim().isNotEmpty == true) {
+        resolvedProjectId = await dao.resolveProjectId(
+          selectedProjectId!.trim(),
+        );
+      } else if (existing != null) {
+        resolvedProjectId =
+            existing.projectId; // Preservar el proyecto del servidor
+      } else {
+        final preferredProject = projectCode.trim();
+        var candidate = await dao.resolveProjectId(preferredProject);
+        if (candidate.trim() == preferredProject) {
+          final fromAssignment = await _resolveProjectIdFromAssignment(
+            activityId,
+          );
+          if (fromAssignment != null && fromAssignment.isNotEmpty) {
+            candidate = fromAssignment;
+          }
+        }
+        resolvedProjectId = candidate;
+      }
+
+      final typeId =
+          _selectedActivity?.id ?? existing?.activityTypeId ?? activity.title;
       final resolvedTypeId = await dao.resolveActivityTypeId(typeId);
+      final resolvedAssignedToUserId = await _resolveAssignedUserIdForSync(
+        activityId,
+      );
 
       final now = DateTime.now();
       final descText = _buildDescription();
 
-      // Preserve existing status unless it's still a plain DRAFT
-      final existingStatus = existing?.status;
-      final saveStatus = (existingStatus == 'READY_TO_SYNC' || existingStatus == 'SYNCED')
-          ? existingStatus!
-          : 'DRAFT';
+      // Si el usuario pasó el paso 1 (_hasPassedStep1) o si la actividad ya
+      // tenía startedAt (de sesión anterior), usar esa hora; si no hay ninguna,
+      // usar now como fallback para no dejar startedAt nulo al promover.
+      final resolvedStartedAt = horaInicio != null
+          ? DateTime(
+              now.year,
+              now.month,
+              now.day,
+              horaInicio!.hour,
+              horaInicio!.minute,
+            )
+          : (existing?.startedAt ??
+                activity.horaInicio ??
+                (_hasPassedStep1 ? now : null));
+      final resolvedFinishedAt = horaFin != null
+          ? DateTime(
+              now.year,
+              now.month,
+              now.day,
+              horaFin!.hour,
+              horaFin!.minute,
+            )
+          : (existing?.finishedAt ?? activity.horaFin);
+
+      // Preserve terminal/in-progress lifecycle states during autosave.
+      final existingStatus = (existing?.status ?? '').trim().toUpperCase();
+      // Promover SYNCED → REVISION_PENDIENTE si:
+      // - el usuario pasó la validación del paso 1 en esta sesión, O
+      // - la actividad ya tenía startedAt (sesión anterior o swipe previo)
+      // pero NO si ya está terminada (finishedAt != null).
+      final shouldPromoteSynced =
+          (_hasPassedStep1 ||
+              (existing != null && existing.startedAt != null)) &&
+          (existing?.finishedAt == null);
+      final saveStatus = switch (existingStatus) {
+        'READY_TO_SYNC' => 'READY_TO_SYNC',
+        'SYNCED' => shouldPromoteSynced ? 'REVISION_PENDIENTE' : 'SYNCED',
+        'REVISION_PENDIENTE' => 'REVISION_PENDIENTE',
+        'ERROR' => 'ERROR',
+        _ => 'DRAFT',
+      };
 
       final companion = ActivitiesCompanion.insert(
         id: activityId,
         projectId: resolvedProjectId,
         activityTypeId: resolvedTypeId,
-        segmentId: drift.Value(selectedFrontId?.trim().isNotEmpty == true ? selectedFrontId!.trim() : null),
+        segmentId: drift.Value(
+          selectedFrontId?.trim().isNotEmpty == true
+              ? selectedFrontId!.trim()
+              : null,
+        ),
         title: activity.title.isNotEmpty ? activity.title : 'Actividad',
         description: drift.Value(descText.isNotEmpty ? descText : null),
         pk: drift.Value(pkInicio ?? existing?.pk ?? activity.pk),
@@ -1877,42 +2522,207 @@ class WizardController extends ChangeNotifier {
         ),
         createdAt: existing?.createdAt ?? now,
         createdByUserId: currentUserId,
+        assignedToUserId: drift.Value(resolvedAssignedToUserId),
         status: drift.Value(saveStatus),
+        startedAt: drift.Value(resolvedStartedAt),
+        finishedAt: drift.Value(resolvedFinishedAt),
         geoLat: drift.Value(geoLat),
         geoLon: drift.Value(geoLon),
         geoAccuracy: drift.Value(geoAccuracy),
         catalogVersionId: drift.Value(catalogRepo.currentVersionId),
       );
 
-      final fields = _buildDraftFields(activityId);
+      final existingSnapshot = await _loadExistingWizardPayloadSnapshot(
+        activityId,
+      );
+      final fields = _buildDraftFields(
+        activityId,
+        existingSnapshot: existingSnapshot,
+      );
+      if (resolvedAssignedToUserId != null &&
+          resolvedAssignedToUserId.trim().isNotEmpty) {
+        final alreadyPresent = fields.any(
+          (c) => c.fieldKey.value == 'assignee_user_id',
+        );
+        if (!alreadyPresent) {
+          fields.add(
+            ActivityFieldsCompanion.insert(
+              id: '$activityId:assignee_user_id',
+              activityId: activityId,
+              fieldKey: 'assignee_user_id',
+              valueText: drift.Value(resolvedAssignedToUserId.trim()),
+            ),
+          );
+        }
+      }
 
       await dao.upsertActivityRow(companion);
+
+      // Preservar verdad del servidor y, si el controller aún no trae estado útil,
+      // también conservar el snapshot/datos previos del wizard para no vaciarlos.
+      const _serverTruthKeys = {
+        'assignee_user_id',
+        'operational_state',
+        'review_state',
+        'next_action',
+        'sync_state',
+        'review_comment',
+        'review_reject_reason_code',
+        'wizard_payload_snapshot',
+      };
+      const _wizardDataKeys = {
+        'risk_level',
+        'activity_type',
+        'subcategory',
+        'subcategory_other_text',
+        'purpose',
+        'topics',
+        'topic_other_text',
+        'attendees',
+        'attendee_representatives',
+        'result',
+        'report_notes',
+        'report_agreements',
+        'front_id',
+        'front_name',
+        'draft_project_id',
+        'draft_project_code',
+        'draft_project_name',
+        'draft_estado',
+        'draft_municipio',
+        'draft_colonia',
+        'draft_tipo_ubicacion',
+        'draft_pk_inicio',
+        'draft_pk_fin',
+        'draft_hora_inicio',
+        'draft_hora_fin',
+        'origin',
+        'unplanned_reason',
+        'unplanned_reason_other_text',
+        'unplanned_reference',
+        'has_evidence',
+      };
+      final preserveWizardData = !_hasMeaningfulWizardState();
+      final keysToPreserve = <String>{
+        ..._serverTruthKeys,
+        if (preserveWizardData) ..._wizardDataKeys,
+      }.toList();
+      final existingPreservedFields =
+          await (database.select(database.activityFields)..where(
+                (t) =>
+                    t.activityId.equals(activityId) &
+                    t.fieldKey.isIn(keysToPreserve),
+              ))
+              .get();
+      for (final f in existingPreservedFields) {
+        final alreadyPresent = fields.any(
+          (c) => c.fieldKey.value == f.fieldKey,
+        );
+        if (!alreadyPresent) {
+          fields.add(
+            ActivityFieldsCompanion.insert(
+              id: f.id,
+              activityId: activityId,
+              fieldKey: f.fieldKey,
+              valueText: drift.Value(f.valueText),
+              valueJson: drift.Value(f.valueJson),
+            ),
+          );
+        }
+      }
+
       await dao.replaceActivityFields(activityId, fields);
       await _saveEvidencesToDb(activityId);
+      await _queuePendingEvidenceUploads(activityId);
 
-      appLogger.d('Draft saved: $activityId (${fields.length} fields, ${evidencias.length} evidencias)');
+      appLogger.d(
+        'Draft saved: $activityId (${fields.length} fields, ${evidencias.length} evidencias)',
+      );
     } catch (e, st) {
       appLogger.w('saveDraftSilently failed: $e', stackTrace: st);
     }
   }
 
-  List<ActivityFieldsCompanion> _buildDraftFields(String activityId) {
+  /// Marks the activity as incomplete capture after step 1 is completed,
+  /// even when it was not explicitly started from Home.
+  Future<void> markIncompleteCaptureAfterContextStep() async {
+    try {
+      await _ensureDraftActivity();
+
+      final existing = await _dao.getActivityById(activity.id);
+      if (existing == null) return;
+
+      // Do not downgrade activities that were already finished.
+      if (existing.finishedAt != null ||
+          activity.executionState == ExecutionState.terminada) {
+        return;
+      }
+
+      // Activar flag ANTES del await para que saveDraftSilently lo vea
+      // incluso si la escritura en BD falla por algún motivo.
+      _hasPassedStep1 = true;
+
+      final now = DateTime.now();
+      final resolvedStartedAt = horaInicio != null
+          ? DateTime(
+              now.year,
+              now.month,
+              now.day,
+              horaInicio!.hour,
+              horaInicio!.minute,
+            )
+          : (existing.startedAt ?? activity.horaInicio ?? now);
+
+      await _dao.markActivityCaptureIncomplete(
+        activityId: activity.id,
+        startedAt: resolvedStartedAt,
+      );
+    } catch (e, st) {
+      appLogger.w(
+        'markIncompleteCaptureAfterContextStep failed: $e',
+        stackTrace: st,
+      );
+    }
+  }
+
+  bool _hasMeaningfulWizardState() {
+    return risk != null ||
+        _selectedSubcategory != null ||
+        _selectedPurpose != null ||
+        selectedTopicIds.isNotEmpty ||
+        selectedAttendeeIds.isNotEmpty ||
+        selectedResult != null ||
+        reportNotes.trim().isNotEmpty ||
+        reportAgreements.any((item) => item.trim().isNotEmpty) ||
+        otherSubcategoryText.trim().isNotEmpty ||
+        otherTopicText.trim().isNotEmpty ||
+        evidencias.isNotEmpty;
+  }
+
+  List<ActivityFieldsCompanion> _buildDraftFields(
+    String activityId, {
+    Map<String, dynamic>? existingSnapshot,
+  }) {
     final fields = <ActivityFieldsCompanion>[];
 
     void add(String key, {String? text, String? json}) {
       if (text == null && json == null) return;
-      fields.add(ActivityFieldsCompanion.insert(
-        id: _uuid.v4(),
-        activityId: activityId,
-        fieldKey: key,
-        valueText: drift.Value(text),
-        valueJson: drift.Value(json),
-      ));
+      fields.add(
+        ActivityFieldsCompanion.insert(
+          id: _uuid.v4(),
+          activityId: activityId,
+          fieldKey: key,
+          valueText: drift.Value(text),
+          valueJson: drift.Value(json),
+        ),
+      );
     }
 
     if (risk != null) add('risk_level', text: risk!.name);
-    if (_selectedActivity != null) add('activity_type', text: _selectedActivity!.id);
-    if (_selectedSubcategory != null) add('subcategory', text: _selectedSubcategory!.id);
+    if (_selectedActivity != null)
+      add('activity_type', text: _selectedActivity!.id);
+    if (_selectedSubcategory != null)
+      add('subcategory', text: _selectedSubcategory!.id);
     if (isOtherSubcategory && otherSubcategoryText.trim().isNotEmpty) {
       add('subcategory_other_text', text: otherSubcategoryText.trim());
     }
@@ -1921,6 +2731,31 @@ class WizardController extends ChangeNotifier {
       add('front_id', text: selectedFrontId!.trim());
     } else if (selectedFrontName.trim().isNotEmpty) {
       add('front_name', text: selectedFrontName.trim());
+    }
+    if (selectedProjectId?.trim().isNotEmpty == true) {
+      add('draft_project_id', text: selectedProjectId!.trim());
+    }
+    if (selectedProjectCode.trim().isNotEmpty) {
+      add('draft_project_code', text: selectedProjectCode.trim());
+    }
+    if (selectedProjectName.trim().isNotEmpty) {
+      add('draft_project_name', text: selectedProjectName.trim());
+    }
+    if (estadoId?.trim().isNotEmpty == true) {
+      add('draft_estado', text: estadoId!.trim());
+    }
+    if (municipioId?.trim().isNotEmpty == true) {
+      add('draft_municipio', text: municipioId!.trim());
+    }
+    if (colonia.trim().isNotEmpty) {
+      add('draft_colonia', text: colonia.trim());
+    }
+    add('draft_tipo_ubicacion', text: tipoUbicacion.name);
+    if (pkInicio != null) {
+      add('draft_pk_inicio', text: pkInicio.toString());
+    }
+    if (pkFin != null) {
+      add('draft_pk_fin', text: pkFin.toString());
     }
     if (selectedTopicIds.isNotEmpty) {
       add('topics', json: jsonEncode(selectedTopicIds.toList()));
@@ -1931,42 +2766,91 @@ class WizardController extends ChangeNotifier {
     if (selectedAttendeeIds.isNotEmpty) {
       add('attendees', json: jsonEncode(selectedAttendeeIds.toList()));
     }
+    if (attendeeRepresentatives.isNotEmpty) {
+      add(
+        'attendee_representatives',
+        json: jsonEncode(attendeeRepresentatives),
+      );
+    }
     if (selectedResult != null) add('result', text: selectedResult!.id);
-    if (reportNotes.trim().isNotEmpty) add('report_notes', text: reportNotes.trim());
+    if (reportNotes.trim().isNotEmpty)
+      add('report_notes', text: reportNotes.trim());
     final cleanedAgreements = getReportAgreements();
     if (cleanedAgreements.isNotEmpty) {
       add('report_agreements', json: jsonEncode(cleanedAgreements));
     }
     if (horaInicio != null) {
-      add('draft_hora_inicio',
-          text: '${horaInicio!.hour.toString().padLeft(2, '0')}:${horaInicio!.minute.toString().padLeft(2, '0')}');
+      add(
+        'draft_hora_inicio',
+        text:
+            '${horaInicio!.hour.toString().padLeft(2, '0')}:${horaInicio!.minute.toString().padLeft(2, '0')}',
+      );
     }
     if (horaFin != null) {
-      add('draft_hora_fin',
-          text: '${horaFin!.hour.toString().padLeft(2, '0')}:${horaFin!.minute.toString().padLeft(2, '0')}');
+      add(
+        'draft_hora_fin',
+        text:
+            '${horaFin!.hour.toString().padLeft(2, '0')}:${horaFin!.minute.toString().padLeft(2, '0')}',
+      );
     }
     if (isUnplanned) {
       add('origin', text: 'unplanned');
-      if (unplannedReason != null) add('unplanned_reason', text: unplannedReason);
+      if (unplannedReason != null)
+        add('unplanned_reason', text: unplannedReason);
       if (unplannedReasonOtherText.trim().isNotEmpty) {
-        add('unplanned_reason_other_text', text: unplannedReasonOtherText.trim());
+        add(
+          'unplanned_reason_other_text',
+          text: unplannedReasonOtherText.trim(),
+        );
       }
       if (unplannedReference.trim().isNotEmpty) {
         add('unplanned_reference', text: unplannedReference.trim());
       }
     }
+    add(
+      'wizard_payload_snapshot',
+      json: jsonEncode(
+        _buildWizardPayloadForSync(existingSnapshot: existingSnapshot),
+      ),
+    );
     add('has_evidence', text: hasEvidence ? 'true' : 'false');
     return fields;
   }
 
-  /// Saves (or replaces) all in-memory evidencias to the evidences table.
-  Future<void> _saveEvidencesToDb(String activityId) async {
+  Future<void> _persistEvidenceDraftsForCurrentActivity({
+    bool preserveExistingIfCurrentEmpty = true,
+  }) async {
     try {
-      await (database.delete(database.evidences)
-            ..where((t) => t.activityId.equals(activityId)))
-          .go();
+      await _ensureDraftActivity();
+      await _saveEvidencesToDb(
+        activity.id,
+        preserveExistingIfCurrentEmpty: preserveExistingIfCurrentEmpty,
+      );
+    } catch (e, st) {
+      appLogger.w('persistEvidenceDrafts failed: $e', stackTrace: st);
+    }
+  }
+
+  /// Saves (or replaces) all in-memory evidencias to the evidences table.
+  Future<void> _saveEvidencesToDb(
+    String activityId, {
+    bool preserveExistingIfCurrentEmpty = true,
+  }) async {
+    try {
+      if (evidencias.isEmpty && preserveExistingIfCurrentEmpty) {
+        final existingRows = await _dao.getEvidencesForActivity(activityId);
+        if (existingRows.isNotEmpty) {
+          return;
+        }
+      }
+
+      await (database.delete(
+        database.evidences,
+      )..where((t) => t.activityId.equals(activityId))).go();
       for (final draft in evidencias) {
-        await database.into(database.evidences).insertOnConflictUpdate(
+        await database
+            .into(database.evidences)
+            .insertOnConflictUpdate(
               EvidencesCompanion.insert(
                 id: _uuid.v4(),
                 activityId: activityId,
@@ -1976,7 +2860,10 @@ class WizardController extends ChangeNotifier {
                 geoLat: drift.Value(draft.lat),
                 geoLon: drift.Value(draft.lng),
                 caption: drift.Value(
-                    draft.descripcion.trim().isNotEmpty ? draft.descripcion.trim() : null),
+                  draft.descripcion.trim().isNotEmpty
+                      ? draft.descripcion.trim()
+                      : null,
+                ),
               ),
             );
       }
@@ -1985,16 +2872,92 @@ class WizardController extends ChangeNotifier {
     }
   }
 
+  Future<void> _queuePendingEvidenceUploads(String activityId) async {
+    try {
+      final evidenceRows = await _dao.getEvidencesForActivity(activityId);
+      if (evidenceRows.isEmpty) {
+        return;
+      }
+
+      final existingQueueRows = await ((database.select(
+        database.pendingUploads,
+      )..where((t) => t.activityId.equals(activityId))).get());
+      final queuedPaths = existingQueueRows
+          .map((row) => row.localPath.trim().toLowerCase())
+          .toSet();
+
+      for (final evidence in evidenceRows) {
+        final localPath = evidence.filePathLocal.trim();
+        if (localPath.isEmpty) continue;
+
+        final normalizedPath = localPath.toLowerCase();
+        if (queuedPaths.contains(normalizedPath)) {
+          continue;
+        }
+
+        final file = File(localPath);
+        if (!await file.exists()) {
+          appLogger.w(
+            'Skipping pending upload; local evidence file is missing: $localPath',
+          );
+          continue;
+        }
+
+        final fileName = file.uri.pathSegments.isNotEmpty
+            ? file.uri.pathSegments.last
+            : 'evidence.jpg';
+        final lowerPath = localPath.toLowerCase();
+        final mimeType = lowerPath.endsWith('.png')
+            ? 'image/png'
+            : lowerPath.endsWith('.pdf')
+            ? 'application/pdf'
+            : 'image/jpeg';
+
+        await database
+            .into(database.pendingUploads)
+            .insert(
+              PendingUploadsCompanion.insert(
+                id: _uuid.v4(),
+                activityId: activityId,
+                localPath: localPath,
+                fileName: fileName,
+                mimeType: mimeType,
+                sizeBytes: await file.length(),
+                status: const drift.Value('PENDING_INIT'),
+              ),
+            );
+
+        await (database.update(database.evidences)
+              ..where((t) => t.id.equals(evidence.id)))
+            .write(const EvidencesCompanion(status: drift.Value('QUEUED')));
+
+        queuedPaths.add(normalizedPath);
+      }
+    } catch (e, st) {
+      appLogger.w('queuePendingEvidenceUploads failed: $e', stackTrace: st);
+    }
+  }
+
   /// Adds the activity to sync_queue so SyncService can push it to the server.
-  Future<void> _enqueueForSync(String activityId, ActivitiesCompanion companion) async {
+  Future<void> _enqueueForSync(
+    String activityId,
+    ActivitiesCompanion companion,
+  ) async {
     try {
       final dao = _dao;
-      final activityTypeCode = companion.activityTypeId.value;
+      final activityTypeCode = await _resolveActivityTypeCodeForSync(
+        companion.activityTypeId.value,
+      );
       final now = DateTime.now();
       final assignedToUserId = await _resolveAssignedUserIdForSync(activityId);
       final pkStartForSync = companion.pk.value ?? pkInicio ?? activity.pk ?? 0;
       final pkEndForSync = tipoUbicacion == TipoUbicacion.tramo ? pkFin : null;
-      final wizardPayload = _buildWizardPayloadForSync();
+      final existingSnapshot = await _loadExistingWizardPayloadSnapshot(
+        activityId,
+      );
+      final wizardPayload = _buildWizardPayloadForSync(
+        existingSnapshot: existingSnapshot,
+      );
 
       final dto = ActivityDTO(
         uuid: activityId,
@@ -2027,18 +2990,35 @@ class WizardController extends ChangeNotifier {
     }
   }
 
-  Map<String, dynamic> _buildWizardPayloadForSync() {
+  Future<String> _resolveActivityTypeCodeForSync(String activityTypeId) async {
+    final normalizedId = activityTypeId.trim();
+    if (normalizedId.isEmpty) {
+      return activityTypeId;
+    }
+
+    final row = await (database.select(
+      database.catalogActivityTypes,
+    )..where((t) => t.id.equals(normalizedId))).getSingleOrNull();
+    final code = row?.code.trim();
+    if (code != null && code.isNotEmpty) {
+      return code;
+    }
+
+    // Fallback keeps prior behavior for legacy rows if catalog lookup is unavailable.
+    return activityTypeId;
+  }
+
+  Map<String, dynamic> _buildWizardPayloadForSync({
+    Map<String, dynamic>? existingSnapshot,
+  }) {
     final topicItems = <Map<String, String>>[];
     for (final topicId in selectedTopicIds) {
       if (topicId == 'OTRO_TEMA') continue;
       final match = topics.cast<CatItem?>().firstWhere(
-            (item) => item?.id == topicId,
-            orElse: () => null,
-          );
-      topicItems.add({
-        'id': topicId,
-        'name': (match?.name ?? topicId).trim(),
-      });
+        (item) => item?.id == topicId,
+        orElse: () => null,
+      );
+      topicItems.add({'id': topicId, 'name': (match?.name ?? topicId).trim()});
     }
 
     final attendeeItems = selectedAttendeeIds
@@ -2047,18 +3027,25 @@ class WizardController extends ChangeNotifier {
           return {
             'id': id,
             'name': (attendee?.name ?? id).trim(),
+            'representative_name': attendeeRepresentative(id),
           };
         })
         .toList(growable: false);
+
+    final evidenceItems = evidencias
+        .where((draft) => draft.localPath.trim().isNotEmpty)
+        .map((draft) => draft.toJson())
+        .toList(growable: false);
+    final persistedEvidenceItems =
+        existingSnapshot == null || existingSnapshot['evidences'] is! List
+        ? const <dynamic>[]
+        : List<dynamic>.from(existingSnapshot['evidences'] as List);
 
     return {
       'risk_level': risk?.name,
       'activity': _selectedActivity == null
           ? null
-          : {
-              'id': _selectedActivity!.id,
-              'name': _selectedActivity!.name,
-            },
+          : {'id': _selectedActivity!.id, 'name': _selectedActivity!.name},
       'subcategory': _selectedSubcategory == null
           ? null
           : {
@@ -2070,21 +3057,18 @@ class WizardController extends ChangeNotifier {
             },
       'purpose': _selectedPurpose == null
           ? null
-          : {
-              'id': _selectedPurpose!.id,
-              'name': _selectedPurpose!.name,
-            },
+          : {'id': _selectedPurpose!.id, 'name': _selectedPurpose!.name},
       'topics': topicItems,
       'topic_other_text': otherTopicText.trim().isEmpty
           ? null
           : otherTopicText.trim(),
       'attendees': attendeeItems,
+      'evidences': evidenceItems.isNotEmpty
+          ? evidenceItems
+          : persistedEvidenceItems,
       'result': selectedResult == null
           ? null
-          : {
-              'id': selectedResult!.id,
-              'name': selectedResult!.name,
-            },
+          : {'id': selectedResult!.id, 'name': selectedResult!.name},
       'notes': reportNotes.trim().isEmpty ? null : reportNotes.trim(),
       'agreements': getReportAgreements(),
       'location': {
@@ -2100,14 +3084,19 @@ class WizardController extends ChangeNotifier {
         'municipio': municipioId,
         'colonia': colonia.trim().isEmpty ? null : colonia.trim(),
         'front_id': selectedFrontId,
-        'front_name': selectedFrontName.trim().isEmpty ? null : selectedFrontName.trim(),
+        'front_name': selectedFrontName.trim().isEmpty
+            ? null
+            : selectedFrontName.trim(),
       },
       'unplanned': {
         'is_unplanned': isUnplanned,
         'reason': unplannedReason,
-        'reason_other_text':
-            unplannedReasonOtherText.trim().isEmpty ? null : unplannedReasonOtherText.trim(),
-        'reference': unplannedReference.trim().isEmpty ? null : unplannedReference.trim(),
+        'reason_other_text': unplannedReasonOtherText.trim().isEmpty
+            ? null
+            : unplannedReasonOtherText.trim(),
+        'reference': unplannedReference.trim().isEmpty
+            ? null
+            : unplannedReference.trim(),
       },
     };
   }
@@ -2118,11 +3107,15 @@ class WizardController extends ChangeNotifier {
       return fromActivity;
     }
 
-    final assignment = await ((database.select(database.agendaAssignments)
-          ..where((t) => t.activityId.equals(activityId) | t.id.equals(activityId))
-          ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
-          ..limit(1))
-        .getSingleOrNull());
+    final assignment =
+        await ((database.select(database.agendaAssignments)
+              ..where(
+                (t) =>
+                    t.activityId.equals(activityId) | t.id.equals(activityId),
+              )
+              ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+              ..limit(1))
+            .getSingleOrNull());
 
     final fromAssignment = assignment?.resourceId.trim();
     if (fromAssignment != null && fromAssignment.isNotEmpty) {
@@ -2130,6 +3123,23 @@ class WizardController extends ChangeNotifier {
     }
 
     return null;
+  }
+
+  Future<String?> _resolveProjectIdFromAssignment(String activityId) async {
+    final assignment =
+        await ((database.select(database.agendaAssignments)
+              ..where(
+                (t) =>
+                    t.activityId.equals(activityId) | t.id.equals(activityId),
+              )
+              ..orderBy([(t) => drift.OrderingTerm.desc(t.updatedAt)])
+              ..limit(1))
+            .getSingleOrNull());
+    final projectId = assignment?.projectId.trim();
+    if (projectId == null || projectId.isEmpty) {
+      return null;
+    }
+    return projectId;
   }
 
   /// Triggers a background sync push. Fire-and-forget — never throws.
@@ -2144,7 +3154,7 @@ class WizardController extends ChangeNotifier {
 
   String _buildDescription() {
     final parts = <String>[];
-    
+
     if (_selectedActivity != null) {
       parts.add('Actividad: ${_selectedActivity!.name}');
     }
@@ -2159,9 +3169,9 @@ class WizardController extends ChangeNotifier {
     for (final topicId in selectedTopicIds) {
       if (topicId == 'OTRO_TEMA') continue;
       final match = topics.cast<CatItem?>().firstWhere(
-            (item) => item?.id == topicId,
-            orElse: () => null,
-          );
+        (item) => item?.id == topicId,
+        orElse: () => null,
+      );
       final topicName = (match?.name ?? topicId).trim();
       if (topicName.isNotEmpty) {
         topicNames.add(topicName);
@@ -2177,7 +3187,7 @@ class WizardController extends ChangeNotifier {
     if (selectedResult != null) {
       parts.add('Resultado: ${selectedResult!.name}');
     }
-    
+
     return parts.join(' | ');
   }
 

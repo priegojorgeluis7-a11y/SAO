@@ -23,6 +23,7 @@ import '../storage/kv_store.dart';
 import '../auth/token_storage.dart';
 import '../network/api_client.dart';
 import '../network/api_config.dart';
+import '../notifications/push_notifications_service.dart';
 
 final getIt = GetIt.instance;
 
@@ -34,7 +35,10 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
 
   // Secure Storage (singleton)
   const secureStorage = FlutterSecureStorage(
-    aOptions: AndroidOptions(encryptedSharedPreferences: true),
+    aOptions: AndroidOptions(
+      encryptedSharedPreferences: true,
+      resetOnError: true,
+    ),
   );
   getIt.registerLazySingleton<FlutterSecureStorage>(() => secureStorage);
 
@@ -60,6 +64,11 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
       tokenStorage: getIt<TokenStorage>(),
       config: getIt<ApiConfig>(),
     ),
+  );
+
+  // Push notifications (FCM)
+  getIt.registerLazySingleton<PushNotificationsService>(
+    () => PushNotificationsService(apiClient: getIt<ApiClient>()),
   );
 
   // Connectivity Service (singleton)
@@ -141,6 +150,7 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
       apiRepository: getIt<SyncApiRepository>(),
       db: getIt<AppDb>(),
       eventsApiRepository: getIt<EventsApiRepository>(),
+      evidenceUploadRetryWorker: getIt<EvidenceUploadRetryWorker>(),
     ),
   );
   getIt.registerLazySingleton<AutoSyncService>(

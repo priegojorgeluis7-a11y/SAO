@@ -34,6 +34,9 @@ class TodayActivity {
   final bool isUnplanned; // true when saved with origin==unplanned
   final bool isRejected;
   final ActivitySyncState syncState;
+  final String operationalState;
+  final String reviewState;
+  final String nextAction;
   final String? assignedToUserId;
   final String? assignedToName;
 
@@ -53,6 +56,9 @@ class TodayActivity {
     this.isUnplanned = false,
     this.isRejected = false,
     this.syncState = ActivitySyncState.unknown,
+    this.operationalState = 'PENDIENTE',
+    this.reviewState = 'NOT_APPLICABLE',
+    this.nextAction = 'SIN_ACCION',
     this.assignedToUserId,
     this.assignedToName,
   });
@@ -65,6 +71,9 @@ class TodayActivity {
     bool? isUnplanned,
     bool? isRejected,
     ActivitySyncState? syncState,
+    String? operationalState,
+    String? reviewState,
+    String? nextAction,
     String? assignedToUserId,
     String? assignedToName,
   }) {
@@ -84,6 +93,9 @@ class TodayActivity {
       isUnplanned: isUnplanned ?? this.isUnplanned,
       isRejected: isRejected ?? this.isRejected,
       syncState: syncState ?? this.syncState,
+      operationalState: operationalState ?? this.operationalState,
+      reviewState: reviewState ?? this.reviewState,
+      nextAction: nextAction ?? this.nextAction,
       assignedToUserId: assignedToUserId ?? this.assignedToUserId,
       assignedToName: assignedToName ?? this.assignedToName,
     );

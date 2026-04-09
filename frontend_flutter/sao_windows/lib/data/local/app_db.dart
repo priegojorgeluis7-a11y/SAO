@@ -26,6 +26,7 @@ LazyDatabase _openConnection() {
     CatRelActivityTopics, CatResults, CatAttendees,
     CatalogIndex, CatalogBundleCache,
     Activities, ActivityFields, ActivityLog,
+    LocalAssignments,
     Evidences,
     PendingUploads,
     SyncQueue, SyncState,
@@ -37,7 +38,7 @@ class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 9;
+  int get schemaVersion => 12;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -87,11 +88,46 @@ class AppDb extends _$AppDb {
             // Catálogo local de colonias por municipio
             await _createColoniasTable();
           }
+          if (from < 10) {
+            // Local assignments table para flujo de asignación desde mobile
+            await m.createTable(localAssignments);
+            await _createLocalAssignmentsIndexes();
+          }
+          if (from < 11) {
+            await m.addColumn(syncQueue, syncQueue.errorCode);
+            await m.addColumn(syncQueue, syncQueue.retryable);
+            await m.addColumn(syncQueue, syncQueue.suggestedAction);
+          }
+          if (from < 12) {
+            await _ensureActivitiesAssignedToUserIdColumn();
+          }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON;');
+          await _ensureActivitiesAssignedToUserIdColumn();
         },
       );
+
+  Future<void> _ensureActivitiesAssignedToUserIdColumn() async {
+    final columnRows = await customSelect(
+      "PRAGMA table_info('activities');",
+    ).get();
+    final hasAssignedToUserId = columnRows.any(
+      (row) => row.data['name'] == 'assigned_to_user_id',
+    );
+
+    if (!hasAssignedToUserId) {
+      await customStatement(
+        'ALTER TABLE activities '
+        'ADD COLUMN assigned_to_user_id TEXT NULL REFERENCES users(id);',
+      );
+    }
+
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_activities_assigned_to_user '
+      'ON activities(assigned_to_user_id);',
+    );
+  }
 
   // ----------------------------
   // Seeds iniciales
@@ -261,6 +297,21 @@ class AppDb extends _$AppDb {
     await customStatement(
       'CREATE INDEX IF NOT EXISTS idx_agenda_assignments_sync_status '
       'ON agenda_assignments(sync_status);',
+    );
+  }
+
+  Future<void> _createLocalAssignmentsIndexes() async {
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_local_assignments_project_assignee '
+      'ON local_assignments(project_id, assignee_user_id);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_local_assignments_sync_status '
+      'ON local_assignments(sync_status);',
+    );
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS idx_local_assignments_created_at '
+      'ON local_assignments(created_at);',
     );
   }
 

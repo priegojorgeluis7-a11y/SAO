@@ -3,14 +3,21 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:drift/drift.dart' as drift;
 
 import '../../core/connectivity/offline_mode_controller.dart';
 import '../../core/utils/logger.dart';
 import '../../core/utils/snackbar.dart';
-import '../../ui/theme/sao_colors.dart';
+import '../../data/local/app_db.dart' show AppDb, ActivitiesCompanion;
+import '../../data/local/dao/activity_dao.dart';
+import '../auth/application/auth_providers.dart';
+import '../auth/data/models/user.dart';
+import '../home/models/today_activity.dart';
 import 'application/agenda_controller.dart';
 import 'models/resource.dart';
+import '../../ui/theme/sao_colors.dart';
 import 'models/agenda_item.dart';
 import 'widgets/week_strip.dart';
 import 'widgets/filter_chips_row.dart';
@@ -25,22 +32,46 @@ class AgendaEquipoPage extends ConsumerStatefulWidget {
 }
 
 class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
+  late final ActivityDao _activityDao;
+
   @override
   void initState() {
     super.initState();
+    _activityDao = ActivityDao(GetIt.I<AppDb>());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final uri = GoRouterState.of(context).uri;
       final projectId = uri.queryParameters['project'];
       final isOffline = ref.read(offlineModeProvider);
+      final authUser = ref.read(currentUserProvider);
+      final selfResource = _toSelfResource(authUser);
       ref.read(agendaControllerProvider.notifier).initialize(
             projectId: projectId,
             isOffline: isOffline,
+            selfResource: selfResource,
           );
     });
   }
 
+  Resource? _toSelfResource(User? authUser) {
+    if (authUser == null) return null;
+    return Resource(
+      id: authUser.id,
+      name: authUser.fullName,
+      email: authUser.email,
+      role: ResourceRole.tecnico,
+      // Must be selectable for self-assignment even if backend status varies.
+      isActive: true,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    ref.listen<User?>(currentUserProvider, (previous, next) {
+      final selfResource = _toSelfResource(next);
+      ref.read(agendaControllerProvider.notifier).ensureSelfResource(selfResource);
+    });
+
+    final authUser = ref.watch(currentUserProvider);
     final state = ref.watch(agendaControllerProvider);
     final controller = ref.read(agendaControllerProvider.notifier);
     final isOffline = ref.watch(offlineModeProvider);
@@ -191,6 +222,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
             child: TimelineList(
               resources: state.resources,
               items: filtered,
+              onAdvanceState: _advanceActivityStateFromAgenda,
               onCancelItem: (item) async {
                 await controller.cancelAssignment(item);
                 if (context.mounted) {
@@ -208,6 +240,89 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _advanceActivityStateFromAgenda(AgendaItem item) async {
+    final controller = ref.read(agendaControllerProvider.notifier);
+    final activityId = (item.activityId?.trim().isNotEmpty ?? false)
+        ? item.activityId!.trim()
+        : item.id.trim();
+    final now = DateTime.now();
+
+    try {
+      final existing = await _activityDao.getActivityById(activityId);
+      final typeSeed = (item.activityTypeId?.trim().isNotEmpty ?? false)
+          ? item.activityTypeId!.trim()
+          : item.title;
+      final activityTypeId = await _activityDao.resolveActivityTypeId(typeSeed);
+      final createdBy = ref.read(currentUserProvider)?.id ?? item.resourceId;
+
+      if (existing == null) {
+        await _activityDao.upsertActivityRow(
+          ActivitiesCompanion.insert(
+            id: activityId,
+            projectId: item.projectCode,
+            activityTypeId: activityTypeId,
+            title: item.title,
+            createdAt: item.start,
+            createdByUserId: createdBy,
+            assignedToUserId: drift.Value(item.resourceId.trim().isNotEmpty ? item.resourceId.trim() : null),
+            status: const drift.Value('SYNCED'),
+            pk: drift.Value(item.pk),
+          ),
+        );
+      }
+
+      final nextAction = item.nextAction.trim().toUpperCase();
+      if (nextAction == 'INICIAR_ACTIVIDAD') {
+        await _activityDao.markActivityStarted(activityId: activityId, startedAt: now);
+        if (!mounted) return;
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Actividad iniciada desde Agenda.',
+            backgroundColor: SaoColors.success,
+          ),
+        );
+      } else {
+        final startedAt = existing?.startedAt ?? item.start;
+        await _activityDao.markActivityStarted(activityId: activityId, startedAt: startedAt);
+        await _activityDao.markActivityRevisionPendiente(
+          activityId: activityId,
+          finishedAt: now,
+        );
+        if (!mounted) return;
+        await context.push(
+          '/activity/$activityId/wizard?project=${item.projectCode}',
+          extra: TodayActivity(
+            id: activityId,
+            title: item.title,
+            frente: item.frente,
+            municipio: item.municipio,
+            estado: item.estado,
+            pk: item.pk,
+            status: ActivityStatus.hoy,
+            createdAt: item.start,
+            executionState: ExecutionState.revisionPendiente,
+            horaInicio: startedAt,
+            horaFin: now,
+            assignedToUserId: item.resourceId,
+          ),
+        );
+      }
+
+      await controller.refresh();
+    } catch (e, st) {
+      appLogger.w('Agenda advance state failed activity=$activityId: $e\n$st');
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo actualizar el estado de la actividad en Agenda.',
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
   }
 
   List<AgendaItem> _filterItems(AgendaState state) {
@@ -235,6 +350,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     HapticFeedback.mediumImpact();
     final controller = ref.read(agendaControllerProvider.notifier);
     final projectId = GoRouterState.of(context).uri.queryParameters['project'];
+    final authUser = ref.read(currentUserProvider);
 
     await controller.ensureResourcesReady(projectId: projectId);
     if (!context.mounted) return;
@@ -265,6 +381,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
       builder: (_) => DispatcherBottomSheet(
         selectedDay: state.selectedDay,
         projectId: projectId,
+        currentUserId: authUser?.id,
         resources: state.resources,
         existingItems: state.items,
         onCreate: (newItem) {

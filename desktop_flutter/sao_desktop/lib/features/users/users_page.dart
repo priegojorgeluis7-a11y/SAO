@@ -131,11 +131,11 @@ class _AdminUser {
     final fallbackProject = (json['project_id'] ?? '').toString().trim();
     final permissionScopesJson = json['permission_scopes'];
     final permissionScopes = permissionScopesJson is List
-      ? permissionScopesJson
-        .whereType<Map<String, dynamic>>()
-        .map(_UserPermissionScope.fromJson)
-        .toList()
-      : <_UserPermissionScope>[];
+        ? permissionScopesJson
+            .whereType<Map<String, dynamic>>()
+            .map(_UserPermissionScope.fromJson)
+            .toList()
+        : <_UserPermissionScope>[];
 
     return _AdminUser(
       id: (json['id'] ?? '').toString(),
@@ -153,7 +153,6 @@ class _AdminUser {
       permissionScopes: permissionScopes,
     );
   }
-
 }
 
 class _UserScope {
@@ -214,8 +213,9 @@ class _UserPermissionScope {
   factory _UserPermissionScope.fromJson(Map<String, dynamic> json) {
     final projectRaw = (json['project_id'] ?? '').toString().trim();
     return _UserPermissionScope(
-      permissionCode:
-          (json['permission_code'] ?? json['permission'] ?? '').toString().trim(),
+      permissionCode: (json['permission_code'] ?? json['permission'] ?? '')
+          .toString()
+          .trim(),
       projectId: projectRaw.isEmpty ? null : projectRaw,
       effect: (json['effect'] ?? 'allow').toString().trim().toLowerCase(),
     );
@@ -388,7 +388,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   _AdminUser? _selectedUser;
   String? _selectedUserId;
   String _activityViewFilter = 'Todas';
-  int _activityRangeDays = 30;
+  int _activityRangeDays = 0;
   final Map<String, Future<_UserActivitySummary>> _activitySummaryCache =
       <String, Future<_UserActivitySummary>>{};
   final _searchCtrl = TextEditingController();
@@ -425,7 +425,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   }
 
   bool get _hasActiveFilters =>
-      _roleFilter != 'Todos' || _statusFilter != 'Todos' || _projectFilter != 'Todos' || _search.isNotEmpty;
+      _roleFilter != 'Todos' ||
+      _statusFilter != 'Todos' ||
+      _projectFilter != 'Todos' ||
+      _search.isNotEmpty;
 
   void _onSearchChanged() {
     _searchDebounce?.cancel();
@@ -470,7 +473,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     return _localPermissionCatalog;
   }
 
-  _RolePermissionsMap _resolveRolePermissions(_RolePermissionsMap remoteRolePermissions) {
+  _RolePermissionsMap _resolveRolePermissions(
+      _RolePermissionsMap remoteRolePermissions) {
     if (remoteRolePermissions.isNotEmpty) {
       return remoteRolePermissions;
     }
@@ -522,7 +526,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 220),
                         curve: Curves.easeOutCubic,
-                        margin: EdgeInsets.only(right: resolvedSelectedUser == null ? 0 : 14),
+                        margin: EdgeInsets.only(
+                            right: resolvedSelectedUser == null ? 0 : 14),
                         child: _UsersTable(
                           users: filtered,
                           processingStatusIds: _processingStatusIds,
@@ -541,8 +546,12 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             _selectedUser = user;
                             _selectedUserId = user.id;
                           }),
-                          onEdit: (u) =>
-                              _openEditDialog(context, u, availablePermissions, rolePermissions, availableProjects),
+                          onEdit: (u) => _openEditDialog(
+                              context,
+                              u,
+                              availablePermissions,
+                              rolePermissions,
+                              availableProjects),
                           onManagePermissions: (u) => _openPermissionsDialog(
                             context,
                             u,
@@ -581,20 +590,27 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                           : Column(
                               children: [
                                 Container(
-                                  padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
+                                  padding:
+                                      const EdgeInsets.fromLTRB(18, 14, 14, 14),
                                   decoration: BoxDecoration(
                                     color: SaoColors.gray50,
-                                    border: Border(bottom: BorderSide(color: SaoColors.gray200)),
+                                    border: Border(
+                                        bottom: BorderSide(
+                                            color: SaoColors.gray200)),
                                   ),
                                   child: Row(
-                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    mainAxisAlignment:
+                                        MainAxisAlignment.spaceBetween,
                                     children: [
                                       const Text(
                                         'Detalle de usuario',
-                                        style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                                        style: TextStyle(
+                                            fontSize: 14,
+                                            fontWeight: FontWeight.w700),
                                       ),
                                       IconButton(
-                                        icon: const Icon(Icons.close_rounded, size: 18),
+                                        icon: const Icon(Icons.close_rounded,
+                                            size: 18),
                                         tooltip: 'Cerrar',
                                         onPressed: () => setState(() {
                                           _selectedUser = null;
@@ -631,7 +647,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final stats = _computeRoleStats(allUsers);
     final total = allUsers.length;
     final selectedRole = _roleFilter.toUpperCase();
-    
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
@@ -773,8 +789,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: SaoColors.gray200),
       ),
-      child: Row(
-      children: [
+      child: Row(children: [
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -955,7 +970,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       ref.read(_adminPermissionsProvider).valueOrNull ?? const <String>[],
     );
     final rolePermissions = _resolveRolePermissions(
-      ref.read(_adminRolePermissionsProvider).valueOrNull ?? const <String, List<String>>{},
+      ref.read(_adminRolePermissionsProvider).valueOrNull ??
+          const <String, List<String>>{},
     );
     final availableProjects =
         ref.read(availableProjectsProvider).valueOrNull ?? const <String>[];
@@ -1093,9 +1109,14 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('¿Eliminar usuario?'),
+        title:
+            Text(user.isActive ? '¿Desactivar usuario?' : '¿Eliminar usuario?'),
         content: Text(
-          '${user.fullName} (${user.email}) será eliminado permanentemente.\n\nEsta acción no se puede deshacer.',
+          user.isActive
+              ? '${user.fullName} (${user.email}) se marcará como inactivo.\n\n'
+                  'No se eliminará permanentemente para mantener trazabilidad y auditoría.'
+              : '${user.fullName} (${user.email}) se eliminará permanentemente.\n\n'
+                  'Esta acción no se puede deshacer.',
         ),
         actions: [
           TextButton(
@@ -1105,7 +1126,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: SaoColors.error),
-            child: const Text('Eliminar'),
+            child: Text(user.isActive ? 'Desactivar' : 'Eliminar'),
           ),
         ],
       ),
@@ -1115,13 +1136,31 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     setState(() => _processingStatusIds.add(user.id));
 
     try {
-      await const BackendApiClient().deleteJson(
-        '/api/v1/users/admin/${user.id}',
-      );
+      if (user.isActive) {
+        await const BackendApiClient().patchJson(
+          '/api/v1/users/admin/${user.id}',
+          {'status': 'inactive'},
+        );
+      } else {
+        await const BackendApiClient()
+            .deleteJson('/api/v1/users/admin/${user.id}');
+      }
       ref.invalidate(_adminUsersProvider);
+      if (!user.isActive && mounted && _selectedUserId == user.id) {
+        setState(() {
+          _selectedUser = null;
+          _selectedUserId = null;
+        });
+      }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Usuario eliminado exitosamente')),
+          SnackBar(
+            content: Text(
+              user.isActive
+                  ? 'Usuario desactivado exitosamente'
+                  : 'Usuario eliminado exitosamente',
+            ),
+          ),
         );
       }
     } catch (e) {
@@ -1145,7 +1184,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     );
   }
 
-  Future<_UserActivitySummary> _fetchUserActivitySummary(_AdminUser user) async {
+  Future<_UserActivitySummary> _fetchUserActivitySummary(
+      _AdminUser user) async {
     final userId = user.id.trim().toLowerCase();
     if (userId.isEmpty) return _UserActivitySummary.empty;
 
@@ -1154,66 +1194,98 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final createdIds = <String>{};
     final collected = <_UserActivityItem>[];
     final stateCounters = <String, int>{};
+    final partialErrors = <String>{};
 
     final projects = <String>{
-      ...user.projectIds.map((p) => p.trim().toUpperCase()).where((p) => p.isNotEmpty),
+      ...user.projectIds
+          .map((p) => p.trim().toUpperCase())
+          .where((p) => p.isNotEmpty),
       ...user.scopes
           .map((s) => (s.projectId ?? '').trim().toUpperCase())
           .where((p) => p.isNotEmpty),
       ...user.permissionScopes
           .map((s) => (s.projectId ?? '').trim().toUpperCase())
           .where((p) => p.isNotEmpty),
-    }.toList();
+    }.toList()
+      ..sort();
 
-    try {
-      final roleFilters = <Map<String, String>>[
-        {'assigned_to_user_id': user.id},
-        {'created_by_user_id': user.id},
-      ];
+    Future<void> collectFromActivitiesEndpoint(
+      Map<String, String> roleFilter, {
+      String? projectId,
+      int maxPages = 20,
+    }) async {
+      var page = 1;
+      var hasNext = true;
+      while (hasNext && page <= maxPages) {
+        final qp = <String>[
+          'page=$page',
+          'page_size=100',
+          if (projectId != null && projectId.isNotEmpty)
+            'project_id=${Uri.encodeQueryComponent(projectId)}',
+        ];
+        roleFilter.forEach((key, value) {
+          final normalizedValue = value.trim();
+          if (normalizedValue.isEmpty) return;
+          qp.add('$key=${Uri.encodeQueryComponent(normalizedValue)}');
+        });
 
-      for (final roleFilter in roleFilters) {
-        var page = 1;
-        var hasNext = true;
-        while (hasNext && page <= 20) {
-          final qp = <String>[
-            'page=$page',
-            'page_size=100',
-          ];
-          roleFilter.forEach((key, value) {
-            qp.add('$key=${Uri.encodeQueryComponent(value)}');
-          });
+        final path = '/api/v1/activities?${qp.join('&')}';
+        final decoded = await const BackendApiClient().getJson(path);
+        if (decoded is! Map<String, dynamic>) break;
 
-          final path = '/api/v1/activities?${qp.join('&')}';
-          final decoded = await const BackendApiClient().getJson(path);
-          if (decoded is! Map<String, dynamic>) break;
+        final rawItems = decoded['items'];
+        if (rawItems is! List) break;
 
-          final rawItems = decoded['items'];
-          if (rawItems is! List) break;
-
-          for (final raw in rawItems.whereType<Map<String, dynamic>>()) {
-            _collectUserActivityFromRaw(
-              raw,
-              userId: userId,
-              seenIds: seenIds,
-              assignedIds: assignedIds,
-              createdIds: createdIds,
-              stateCounters: stateCounters,
-              collected: collected,
-            );
-          }
-
-          hasNext = decoded['has_next'] == true;
-          page++;
+        for (final raw in rawItems.whereType<Map<String, dynamic>>()) {
+          _collectUserActivityFromRaw(
+            raw,
+            userId: userId,
+            seenIds: seenIds,
+            assignedIds: assignedIds,
+            createdIds: createdIds,
+            stateCounters: stateCounters,
+            collected: collected,
+          );
         }
+
+        hasNext = decoded['has_next'] == true;
+        page++;
       }
+    }
 
-      final lowerEmail = user.email.trim().toLowerCase();
-      final lowerName = user.fullName.trim().toLowerCase();
+    Future<void> collectSafely(Future<void> Function() action) async {
+      try {
+        await action();
+      } catch (e) {
+        partialErrors.add(e.toString());
+      }
+    }
 
-      // Fallback: assignments endpoint already applies effective assignee
-      // semantics and returns stable assignee identity fields.
-      if (assignedIds.isEmpty && projects.isNotEmpty) {
-        await _collectUserActivitiesFromAssignments(
+    final roleFilters = <Map<String, String>>[
+      {'assigned_to_user_id': user.id},
+      {'created_by_user_id': user.id},
+    ];
+
+    for (final roleFilter in roleFilters) {
+      if (projects.isEmpty) {
+        await collectSafely(() => collectFromActivitiesEndpoint(roleFilter));
+        continue;
+      }
+      for (final projectId in projects) {
+        await collectSafely(
+          () => collectFromActivitiesEndpoint(roleFilter, projectId: projectId),
+        );
+      }
+    }
+
+    final lowerEmail = user.email.trim().toLowerCase();
+    final lowerName = user.fullName.trim().toLowerCase();
+
+    // Complement with assignments data because some historical activities rely on
+    // effective assignee semantics (assigned_to_user_id can be null in legacy rows).
+    if (projects.isNotEmpty) {
+      await collectSafely(
+        () => _collectUserActivitiesFromAssignments(
           projects: projects,
           userId: userId,
           lowerEmail: lowerEmail,
@@ -1223,12 +1295,14 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           createdIds: createdIds,
           stateCounters: stateCounters,
           collected: collected,
-        );
-      }
+        ),
+      );
+    }
 
-      // Fallback for mixed identity sources where IDs don't match exactly.
-      if (collected.isEmpty && projects.isNotEmpty) {
-        for (final projectId in projects) {
+    // Fallback for mixed identity sources where IDs don't match exactly.
+    if (collected.isEmpty && projects.isNotEmpty) {
+      for (final projectId in projects) {
+        await collectSafely(() async {
           var page = 1;
           var hasNext = true;
           while (hasNext && page <= 10) {
@@ -1241,8 +1315,14 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             if (rawItems is! List) break;
 
             for (final raw in rawItems.whereType<Map<String, dynamic>>()) {
-              final assignedName = (raw['assigned_to_user_name'] ?? '').toString().trim().toLowerCase();
-              final assignedEmail = (raw['assigned_to_user_email'] ?? '').toString().trim().toLowerCase();
+              final assignedName = (raw['assigned_to_user_name'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
+              final assignedEmail = (raw['assigned_to_user_email'] ?? '')
+                  .toString()
+                  .trim()
+                  .toLowerCase();
               if (assignedName != lowerName && assignedEmail != lowerEmail) {
                 continue;
               }
@@ -1262,33 +1342,26 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             hasNext = decoded['has_next'] == true;
             page++;
           }
-        }
+        });
       }
-
-      collected.sort((a, b) {
-        final ad = a.createdAt;
-        final bd = b.createdAt;
-        if (ad == null && bd == null) return 0;
-        if (ad == null) return 1;
-        if (bd == null) return -1;
-        return bd.compareTo(ad);
-      });
-
-      return _UserActivitySummary(
-        assignedCount: assignedIds.length,
-        createdCount: createdIds.length,
-        byState: stateCounters,
-        recentItems: collected.take(24).toList(),
-      );
-    } catch (e) {
-      return _UserActivitySummary(
-        assignedCount: assignedIds.length,
-        createdCount: createdIds.length,
-        byState: stateCounters,
-        recentItems: collected.take(24).toList(),
-        error: e.toString(),
-      );
     }
+
+    collected.sort((a, b) {
+      final ad = a.createdAt;
+      final bd = b.createdAt;
+      if (ad == null && bd == null) return 0;
+      if (ad == null) return 1;
+      if (bd == null) return -1;
+      return bd.compareTo(ad);
+    });
+
+    return _UserActivitySummary(
+      assignedCount: assignedIds.length,
+      createdCount: createdIds.length,
+      byState: stateCounters,
+      recentItems: List<_UserActivityItem>.unmodifiable(collected),
+      error: partialErrors.isEmpty ? null : partialErrors.first,
+    );
   }
 
   Future<void> _collectUserActivitiesFromAssignments({
@@ -1303,7 +1376,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     required List<_UserActivityItem> collected,
   }) async {
     final nowUtc = DateTime.now().toUtc();
-    final fromUtc = nowUtc.subtract(const Duration(days: 365));
+    final fromUtc = nowUtc.subtract(const Duration(days: 3650));
     final toUtc = nowUtc.add(const Duration(days: 365));
 
     for (final projectId in projects) {
@@ -1362,8 +1435,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     required List<_UserActivityItem> collected,
     bool forceAssigned = false,
   }) {
-    final assignedTo = (raw['assigned_to_user_id'] ?? '').toString().trim().toLowerCase();
-    final createdBy = (raw['created_by_user_id'] ?? '').toString().trim().toLowerCase();
+    final assignedTo =
+        (raw['assigned_to_user_id'] ?? '').toString().trim().toLowerCase();
+    final createdBy =
+        (raw['created_by_user_id'] ?? '').toString().trim().toLowerCase();
     final isAssigned = forceAssigned || assignedTo == userId;
     final isCreated = createdBy == userId;
     if (!isAssigned && !isCreated) return;
@@ -1464,15 +1539,18 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   }
 
   List<_UserActivityItem> _applyActivityFilters(_UserActivitySummary summary) {
-    final now = DateTime.now();
-    final cutoff = now.subtract(Duration(days: _activityRangeDays));
+    final hasRangeLimit = _activityRangeDays > 0;
+    final cutoff = hasRangeLimit
+        ? DateTime.now().subtract(Duration(days: _activityRangeDays))
+        : null;
 
     return summary.recentItems.where((item) {
       if (_activityViewFilter == 'Asignadas' && !item.assigned) return false;
       if (_activityViewFilter == 'Creadas' && !item.created) return false;
+      if (!hasRangeLimit) return true;
       final createdAt = item.createdAt;
       if (createdAt == null) return false;
-      return !createdAt.isBefore(cutoff);
+      return !createdAt.isBefore(cutoff!);
     }).toList();
   }
 
@@ -1511,8 +1589,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   }
 
   String _extractTaggedValue(String source, String label) {
-    final match =
-        RegExp('$label\\s*:\\s*([^·|,;]+)', caseSensitive: false).firstMatch(source);
+    final match = RegExp('$label\\s*:\\s*([^·|,;]+)', caseSensitive: false)
+        .firstMatch(source);
     if (match == null) return '';
     return (match.group(1) ?? '').trim();
   }
@@ -1681,8 +1759,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                 spacing: 10,
                 runSpacing: 8,
                 children: [
-                  _quickDetailCell('Proyecto', item.projectId.isEmpty ? 'N/A' : item.projectId),
-                  _quickDetailCellWidget('Estado', _ExecutionStateBadge(state: item.executionState)),
+                  _quickDetailCell('Proyecto',
+                      item.projectId.isEmpty ? 'N/A' : item.projectId),
+                  _quickDetailCellWidget('Estado',
+                      _ExecutionStateBadge(state: item.executionState)),
                   _quickDetailCell(
                     'Rol en actividad',
                     item.assigned && item.created
@@ -1691,7 +1771,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             ? 'Asignada a este usuario'
                             : 'Creada por este usuario',
                   ),
-                  _quickDetailCell('Fecha', _formatActivityDate(item.createdAt)),
+                  _quickDetailCell(
+                      'Fecha', _formatActivityDate(item.createdAt)),
                 ],
               ),
             ],
@@ -1728,49 +1809,58 @@ class _UsersPageState extends ConsumerState<UsersPage> {
         title: Text('Actividades de ${user.fullName}'),
         content: SizedBox(
           width: 560,
+          height: 420,
           child: filtered.isEmpty
               ? Text(_activityEmptyMessage(summary))
-              : ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const Divider(height: 16),
-                  itemBuilder: (context, index) {
-                    final item = filtered[index];
-                    final dateText = _formatActivityDate(item.createdAt);
-                    return InkWell(
-                      onTap: () => _showActivityQuickDetail(
-                        context,
-                        item,
-                        onOpenActivity: () => _showUserActivitiesDialog(context, user, summary),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              _activityDisplayTitle(item),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w600,
-                                color: SaoColors.gray900,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              '[${item.projectId.isEmpty ? 'N/A' : item.projectId}] '
-                              '${_formatExecutionStateLabel(item.executionState)}',
-                              style: const TextStyle(fontSize: 12, color: SaoColors.gray700),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              dateText,
-                              style: const TextStyle(fontSize: 12, color: SaoColors.gray600),
-                            ),
-                          ],
+              : Scrollbar(
+                  child: ListView.separated(
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, __) => const Divider(height: 16),
+                    itemBuilder: (context, index) {
+                      final item = filtered[index];
+                      final dateText = _formatActivityDate(item.createdAt);
+                      return InkWell(
+                        onTap: () => _showActivityQuickDetail(
+                          context,
+                          item,
+                          onOpenActivity: () =>
+                              _showUserActivitiesDialog(context, user, summary),
                         ),
-                      ),
-                    );
-                  },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _activityDisplayTitle(item),
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  color: SaoColors.gray900,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                '[${item.projectId.isEmpty ? 'N/A' : item.projectId}] '
+                                '${_formatExecutionStateLabel(item.executionState)}',
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: SaoColors.gray700,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                dateText,
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: SaoColors.gray600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
                 ),
         ),
         actions: [
@@ -1842,11 +1932,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   ) {
     final resolvedScopes = _resolvedScopesForView(user);
     final resolvedProjectIds = _resolvedProjectIdsForView(user, resolvedScopes);
-    final resolvedPermissionLabels = _resolvedPermissionLabelsForView(user, rolePermissions);
+    final resolvedPermissionLabels =
+        _resolvedPermissionLabelsForView(user, rolePermissions);
     // Build initials avatar color from name hash
-    final avatarColor = user.isActive
-        ? _avatarColor(user.fullName)
-        : SaoColors.gray400;
+    final avatarColor =
+        user.isActive ? _avatarColor(user.fullName) : SaoColors.gray400;
     final initials = _initials(user.fullName);
     final effectivePerms = resolvedPermissionLabels.length;
 
@@ -1924,7 +2014,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                   icon: Icons.edit_rounded,
                   label: 'Editar',
                   onPressed: () => _openEditDialog(
-                    context, user, availablePermissions, rolePermissions, availableProjects,
+                    context,
+                    user,
+                    availablePermissions,
+                    rolePermissions,
+                    availableProjects,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1934,14 +2028,20 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                   icon: Icons.security_rounded,
                   label: 'Permisos',
                   onPressed: () => _openPermissionsDialog(
-                    context, user, availablePermissions, rolePermissions, availableProjects,
+                    context,
+                    user,
+                    availablePermissions,
+                    rolePermissions,
+                    availableProjects,
                   ),
                 ),
                 const SizedBox(width: 8),
                 Container(width: 1, height: 24, color: SaoColors.gray300),
                 const SizedBox(width: 8),
                 _ActionIconBtn(
-                  icon: user.isActive ? Icons.person_off_rounded : Icons.person_rounded,
+                  icon: user.isActive
+                      ? Icons.person_off_rounded
+                      : Icons.person_rounded,
                   label: user.isActive ? 'Desactivar' : 'Activar',
                   color: user.isActive ? SaoColors.warning : SaoColors.success,
                   emphasized: true,
@@ -1952,7 +2052,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                 const SizedBox(width: 8),
                 _ActionIconBtn(
                   icon: Icons.delete_rounded,
-                  label: 'Eliminar',
+                  label: user.isActive ? 'Desactivar' : 'Eliminar',
                   color: SaoColors.error,
                   onPressed: () => _deleteUser(context, user),
                 ),
@@ -1988,7 +2088,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       _InfoRow(
                         label: 'Rol',
                         child: user.roles.isEmpty
-                            ? const Text('—', style: TextStyle(fontSize: 13, color: SaoColors.gray500))
+                            ? const Text('—',
+                                style: TextStyle(
+                                    fontSize: 13, color: SaoColors.gray500))
                             : Wrap(
                                 spacing: 5,
                                 runSpacing: 4,
@@ -2002,18 +2104,23 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                         label: 'Proyecto',
                         key: _projectsSectionKey,
                         child: resolvedProjectIds.isEmpty
-                            ? const Text('—', style: TextStyle(fontSize: 13, color: SaoColors.gray500))
+                            ? const Text('—',
+                                style: TextStyle(
+                                    fontSize: 13, color: SaoColors.gray500))
                             : Wrap(
                                 spacing: 6,
                                 runSpacing: 4,
                                 children: resolvedProjectIds
                                     .map(
                                       (p) => Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
                                           color: SaoColors.gray100,
-                                          borderRadius: BorderRadius.circular(999),
-                                          border: Border.all(color: SaoColors.gray300),
+                                          borderRadius:
+                                              BorderRadius.circular(999),
+                                          border: Border.all(
+                                              color: SaoColors.gray300),
                                         ),
                                         child: Text(
                                           p,
@@ -2045,9 +2152,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                               ),
                             ),
                             TextButton(
-                              onPressed: () => _showPermissionsSummaryDialog(context, resolvedPermissionLabels),
+                              onPressed: () => _showPermissionsSummaryDialog(
+                                  context, resolvedPermissionLabels),
                               style: TextButton.styleFrom(
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                               ),
@@ -2071,15 +2180,19 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       children: resolvedScopes
                           .map(
                             (s) => Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 3),
                               decoration: BoxDecoration(
                                 color: SaoColors.gray100,
                                 borderRadius: BorderRadius.circular(4),
                                 border: Border.all(color: SaoColors.gray300),
                               ),
                               child: Text(
-                                s.projectId == null ? '${s.role} · Global' : '${s.role} · ${s.projectId}',
-                                style: const TextStyle(fontSize: 11, color: SaoColors.gray700),
+                                s.projectId == null
+                                    ? '${s.role} · Global'
+                                    : '${s.role} · ${s.projectId}',
+                                style: const TextStyle(
+                                    fontSize: 11, color: SaoColors.gray700),
                               ),
                             ),
                           )
@@ -2109,10 +2222,12 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       future: _loadUserActivitySummary(user),
                       builder: (context, snapshot) {
                         final summary = snapshot.data;
-                        final lastActivity = summary == null || summary.recentItems.isEmpty
-                            ? null
-                            : summary.recentItems.first.createdAt;
-                        if (lastActivity == null) return const SizedBox.shrink();
+                        final lastActivity =
+                            summary == null || summary.recentItems.isEmpty
+                                ? null
+                                : summary.recentItems.first.createdAt;
+                        if (lastActivity == null)
+                          return const SizedBox.shrink();
                         return Text(
                           'Última: ${DateFormat('dd/MM HH:mm').format(lastActivity)}',
                           style: const TextStyle(
@@ -2139,7 +2254,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     const SizedBox(width: 4),
                     TextButton.icon(
                       style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
                         minimumSize: Size.zero,
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
@@ -2173,7 +2289,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             SizedBox(width: 10),
                             Text(
                               'Cargando actividades…',
-                              style: TextStyle(fontSize: 12, color: SaoColors.gray500),
+                              style: TextStyle(
+                                  fontSize: 12, color: SaoColors.gray500),
                             ),
                           ],
                         ),
@@ -2184,7 +2301,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     if (summary == null) {
                       return const Text(
                         'No se pudo cargar el historial.',
-                        style: TextStyle(fontSize: 13, color: SaoColors.gray500),
+                        style:
+                            TextStyle(fontSize: 13, color: SaoColors.gray500),
                       );
                     }
 
@@ -2194,7 +2312,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 6),
                           decoration: BoxDecoration(
                             color: SaoColors.gray100,
                             borderRadius: BorderRadius.circular(8),
@@ -2223,13 +2342,16 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                                   label: 'Periodo',
                                   value: _activityRangeDays.toString(),
                                   items: const [
+                                    ('0', 'Todo el historial'),
                                     ('7', 'Últimos 7 días'),
                                     ('30', 'Últimos 30 días'),
                                     ('90', 'Últimos 90 días'),
+                                    ('365', 'Últimos 12 meses'),
                                   ],
                                   onChanged: (v) {
                                     if (v == null) return;
-                                    setState(() => _activityRangeDays = int.parse(v));
+                                    setState(() =>
+                                        _activityRangeDays = int.parse(v));
                                   },
                                 ),
                               ),
@@ -2261,7 +2383,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                         if (filteredItems.isEmpty)
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 12),
+                            padding: const EdgeInsets.symmetric(
+                                vertical: 18, horizontal: 12),
                             decoration: BoxDecoration(
                               color: SaoColors.gray50,
                               borderRadius: BorderRadius.circular(10),
@@ -2288,84 +2411,97 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                           )
                         else
                           ...filteredItems.take(6).map(
-                            (item) => InkWell(
-                              borderRadius: BorderRadius.circular(6),
-                              onTap: () => _showActivityQuickDetail(
-                                context,
-                                item,
-                                onOpenActivity: () =>
-                                    _showUserActivitiesDialog(context, user, summary),
-                              ),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                    vertical: 7, horizontal: 2),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Container(
-                                      width: 4,
-                                      height: 32,
-                                      margin: const EdgeInsets.only(right: 10, top: 2),
-                                      decoration: BoxDecoration(
-                                        color: _stateColor(item.executionState),
-                                        borderRadius: BorderRadius.circular(2),
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            _activityDisplayTitle(item),
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              fontSize: 12,
-                                              fontWeight: FontWeight.w600,
-                                              color: SaoColors.gray800,
-                                            ),
+                                (item) => InkWell(
+                                  borderRadius: BorderRadius.circular(6),
+                                  onTap: () => _showActivityQuickDetail(
+                                    context,
+                                    item,
+                                    onOpenActivity: () =>
+                                        _showUserActivitiesDialog(
+                                            context, user, summary),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                        vertical: 7, horizontal: 2),
+                                    child: Row(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Container(
+                                          width: 4,
+                                          height: 32,
+                                          margin: const EdgeInsets.only(
+                                              right: 10, top: 2),
+                                          decoration: BoxDecoration(
+                                            color: _stateColor(
+                                                item.executionState),
+                                            borderRadius:
+                                                BorderRadius.circular(2),
                                           ),
-                                          const SizedBox(height: 2),
-                                          Row(
+                                        ),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment:
+                                                CrossAxisAlignment.start,
                                             children: [
                                               Text(
-                                                item.projectId.isEmpty ? 'N/A' : item.projectId,
+                                                _activityDisplayTitle(item),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
                                                 style: const TextStyle(
-                                                  fontSize: 11,
-                                                  color: SaoColors.gray600,
-                                                  fontWeight: FontWeight.w500,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: SaoColors.gray800,
                                                 ),
                                               ),
-                                              const SizedBox(width: 8),
-                                              _ExecutionStateBadge(state: item.executionState),
+                                              const SizedBox(height: 2),
+                                              Row(
+                                                children: [
+                                                  Text(
+                                                    item.projectId.isEmpty
+                                                        ? 'N/A'
+                                                        : item.projectId,
+                                                    style: const TextStyle(
+                                                      fontSize: 11,
+                                                      color: SaoColors.gray600,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  _ExecutionStateBadge(
+                                                      state:
+                                                          item.executionState),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                _formatActivityDate(
+                                                    item.createdAt),
+                                                style: const TextStyle(
+                                                  fontSize: 11,
+                                                  color: SaoColors.gray500,
+                                                ),
+                                              ),
                                             ],
                                           ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            _formatActivityDate(item.createdAt),
-                                            style: const TextStyle(
-                                              fontSize: 11,
-                                              color: SaoColors.gray500,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
+                                        ),
+                                        const Icon(
+                                          Icons.chevron_right_rounded,
+                                          size: 16,
+                                          color: SaoColors.gray400,
+                                        ),
+                                      ],
                                     ),
-                                    const Icon(
-                                      Icons.chevron_right_rounded,
-                                      size: 16,
-                                      color: SaoColors.gray400,
-                                    ),
-                                  ],
+                                  ),
                                 ),
                               ),
-                            ),
-                          ),
                         if (summary.error != null) ...[
                           const SizedBox(height: 6),
                           const Text(
                             '⚠ Historial parcial — no se pudo obtener todo.',
-                            style: TextStyle(fontSize: 11, color: SaoColors.warning),
+                            style: TextStyle(
+                                fontSize: 11, color: SaoColors.warning),
                           ),
                         ],
                       ],
@@ -2446,7 +2582,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       return _dedupeScopes(generated);
     }
 
-    final limit = roles.length < projects.length ? roles.length : projects.length;
+    final limit =
+        roles.length < projects.length ? roles.length : projects.length;
     for (var i = 0; i < limit; i++) {
       generated.add(_UserScope(role: roles[i], projectId: projects[i]));
     }
@@ -2537,7 +2674,6 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       ),
     );
   }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -2573,7 +2709,8 @@ class _ActionIconBtn extends StatelessWidget {
             color: emphasized ? fg.withValues(alpha: 0.14) : SaoColors.surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: emphasized ? fg.withValues(alpha: 0.45) : SaoColors.gray300,
+              color:
+                  emphasized ? fg.withValues(alpha: 0.45) : SaoColors.gray300,
             ),
           ),
           child: Column(
@@ -2583,7 +2720,8 @@ class _ActionIconBtn extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 label,
-                style: TextStyle(fontSize: 10, color: fg, fontWeight: FontWeight.w600),
+                style: TextStyle(
+                    fontSize: 10, color: fg, fontWeight: FontWeight.w600),
               ),
             ],
           ),
@@ -2680,7 +2818,8 @@ class _CountBadge extends StatelessWidget {
   final int count;
   final Color color;
 
-  const _CountBadge({required this.label, required this.count, required this.color});
+  const _CountBadge(
+      {required this.label, required this.count, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -2772,7 +2911,11 @@ class _ExecutionStateBadge extends StatelessWidget {
     final normalized = state.trim().toUpperCase();
     final baseColor = switch (normalized) {
       'COMPLETADA' || 'APROBADA' => SaoColors.success,
-      'EN_CURSO' || 'EN_PROGRESO' || 'EN_REVISION' || 'REVISION_PENDIENTE' => SaoColors.warning,
+      'EN_CURSO' ||
+      'EN_PROGRESO' ||
+      'EN_REVISION' ||
+      'REVISION_PENDIENTE' =>
+        SaoColors.warning,
       'RECHAZADA' || 'CANCELADA' => SaoColors.error,
       _ => SaoColors.gray500,
     };
@@ -2819,12 +2962,20 @@ class _StateCountBadge extends StatelessWidget {
     final normalized = state.toUpperCase();
     final color = switch (normalized) {
       'COMPLETADA' || 'APROBADA' => SaoColors.success,
-      'EN_CURSO' || 'EN_PROGRESO' || 'EN_REVISION' || 'REVISION_PENDIENTE' => const Color(0xFFB45309),
+      'EN_CURSO' ||
+      'EN_PROGRESO' ||
+      'EN_REVISION' ||
+      'REVISION_PENDIENTE' =>
+        const Color(0xFFB45309),
       'RECHAZADA' || 'CANCELADA' => SaoColors.error,
       _ => SaoColors.gray500,
     };
     final backgroundColor = switch (normalized) {
-      'EN_CURSO' || 'EN_PROGRESO' || 'EN_REVISION' || 'REVISION_PENDIENTE' => const Color(0xFFFDE68A),
+      'EN_CURSO' ||
+      'EN_PROGRESO' ||
+      'EN_REVISION' ||
+      'REVISION_PENDIENTE' =>
+        const Color(0xFFFDE68A),
       _ => color.withValues(alpha: 0.1),
     };
     return Container(
@@ -2894,7 +3045,8 @@ class _UsersTable extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final tableWidth = constraints.maxWidth < 920 ? 920.0 : constraints.maxWidth;
+        final tableWidth =
+            constraints.maxWidth < 920 ? 920.0 : constraints.maxWidth;
         final nameWidth = tableWidth * 0.24;
         final emailWidth = tableWidth * 0.28;
         final roleWidth = tableWidth * 0.14;
@@ -2927,12 +3079,16 @@ class _UsersTable extends StatelessWidget {
                   dataRowMinHeight: 58,
                   dataRowMaxHeight: 62,
                   headingRowHeight: 50,
-                  headingRowColor: WidgetStateProperty.all(const Color(0xFFF8FAFC)),
+                  headingRowColor:
+                      WidgetStateProperty.all(const Color(0xFFF8FAFC)),
                   columns: [
                     _sortableColumn('Nombre', 'nombre', width: nameWidth),
                     _sortableColumn('Correo', 'correo', width: emailWidth),
                     _sortableColumn('Rol', 'rol', width: roleWidth),
-                    DataColumn(label: SizedBox(width: projectWidth, child: const Text('Proyecto'))),
+                    DataColumn(
+                        label: SizedBox(
+                            width: projectWidth,
+                            child: const Text('Proyecto'))),
                     _sortableColumn('Estado', 'estado', width: statusWidth),
                     DataColumn(
                       label: SizedBox(
@@ -2945,15 +3101,17 @@ class _UsersTable extends StatelessWidget {
                       numeric: true,
                     ),
                   ],
-                  rows: users.map((u) => _buildRow(
-                    u,
-                    nameWidth: nameWidth,
-                    emailWidth: emailWidth,
-                    roleWidth: roleWidth,
-                    projectWidth: projectWidth,
-                    statusWidth: statusWidth,
-                    actionsWidth: actionsWidth,
-                  )).toList(),
+                  rows: users
+                      .map((u) => _buildRow(
+                            u,
+                            nameWidth: nameWidth,
+                            emailWidth: emailWidth,
+                            roleWidth: roleWidth,
+                            projectWidth: projectWidth,
+                            statusWidth: statusWidth,
+                            actionsWidth: actionsWidth,
+                          ))
+                      .toList(),
                 ),
               ),
             ),
@@ -2963,7 +3121,8 @@ class _UsersTable extends StatelessWidget {
     );
   }
 
-  DataColumn _sortableColumn(String label, String column, {required double width}) {
+  DataColumn _sortableColumn(String label, String column,
+      {required double width}) {
     final isActive = sortBy == column;
     final arrow = !isActive ? '' : (sortAscending ? ' ↑' : ' ↓');
     return DataColumn(
@@ -3046,7 +3205,8 @@ class _UsersTable extends StatelessWidget {
               width: roleWidth,
               child: Align(
                 alignment: Alignment.centerLeft,
-                child: _RoleBadge(role: u.primaryRole.isEmpty ? '—' : u.primaryRole),
+                child: _RoleBadge(
+                    role: u.primaryRole.isEmpty ? '—' : u.primaryRole),
               ),
             ),
             onTapRow != null,
@@ -3102,7 +3262,8 @@ class _UsersTable extends StatelessWidget {
                       icon: Icon(
                         Icons.more_horiz_rounded,
                         size: 18,
-                        color: isSelected ? SaoColors.primary : SaoColors.gray600,
+                        color:
+                            isSelected ? SaoColors.primary : SaoColors.gray600,
                       ),
                       tooltip: 'Acciones',
                       shape: RoundedRectangleBorder(
@@ -3153,9 +3314,13 @@ class _UsersTable extends StatelessWidget {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
-                                u.isActive ? Icons.person_off_rounded : Icons.person_rounded,
+                                u.isActive
+                                    ? Icons.person_off_rounded
+                                    : Icons.person_rounded,
                                 size: 16,
-                                color: u.isActive ? SaoColors.error : SaoColors.success,
+                                color: u.isActive
+                                    ? SaoColors.error
+                                    : SaoColors.success,
                               ),
                               const SizedBox(width: 8),
                               Text(u.isActive ? 'Desactivar' : 'Activar'),
@@ -3163,14 +3328,18 @@ class _UsersTable extends StatelessWidget {
                           ),
                         ),
                         const PopupMenuDivider(),
-                        const PopupMenuItem(
+                        PopupMenuItem(
                           value: 'eliminar',
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.delete_rounded, size: 16, color: SaoColors.error),
+                              Icon(Icons.delete_rounded,
+                                  size: 16, color: SaoColors.error),
                               SizedBox(width: 8),
-                              Text('Eliminar', style: TextStyle(color: SaoColors.error)),
+                              Text(
+                                u.isActive ? 'Desactivar' : 'Eliminar',
+                                style: const TextStyle(color: SaoColors.error),
+                              ),
                             ],
                           ),
                         ),
@@ -3207,7 +3376,8 @@ class _UserFormDialog extends StatefulWidget {
     required this.rolePermissions,
     required this.availableProjects,
   }) : user = null;
-  const _UserFormDialog.edit(this.user, {
+  const _UserFormDialog.edit(
+    this.user, {
     required this.availablePermissions,
     required this.rolePermissions,
     required this.availableProjects,
@@ -3572,7 +3742,8 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                         child: TextFormField(
                           controller: _nameCtrl,
                           textCapitalization: TextCapitalization.words,
-                          onChanged: (value) => _handleNameChanged(_nameCtrl, value),
+                          onChanged: (value) =>
+                              _handleNameChanged(_nameCtrl, value),
                           decoration: const InputDecoration(
                             labelText: 'Nombre completo *',
                             border: OutlineInputBorder(),
@@ -3585,8 +3756,9 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                               semanticLabel: 'Icono de nombre completo',
                             ),
                           ),
-                          validator: (v) =>
-                              (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                          validator: (v) => (v == null || v.trim().isEmpty)
+                              ? 'Requerido'
+                              : null,
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -3600,14 +3772,16 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                             child: TextFormField(
                               controller: _firstNameCtrl,
                               textCapitalization: TextCapitalization.words,
-                              onChanged: (value) => _handleNameChanged(_firstNameCtrl, value),
+                              onChanged: (value) =>
+                                  _handleNameChanged(_firstNameCtrl, value),
                               decoration: const InputDecoration(
                                 labelText: 'Nombre *',
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.person_outline),
                               ),
-                              validator: (v) =>
-                                  (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Requerido'
+                                  : null,
                             ),
                           ),
                           SizedBox(
@@ -3615,14 +3789,16 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                             child: TextFormField(
                               controller: _lastNameCtrl,
                               textCapitalization: TextCapitalization.words,
-                              onChanged: (value) => _handleNameChanged(_lastNameCtrl, value),
+                              onChanged: (value) =>
+                                  _handleNameChanged(_lastNameCtrl, value),
                               decoration: const InputDecoration(
                                 labelText: 'Apellido paterno *',
                                 border: OutlineInputBorder(),
                                 prefixIcon: Icon(Icons.person_outline),
                               ),
-                              validator: (v) =>
-                                  (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Requerido'
+                                  : null,
                             ),
                           ),
                           SizedBox(
@@ -3630,8 +3806,8 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                             child: TextFormField(
                               controller: _secondLastNameCtrl,
                               textCapitalization: TextCapitalization.words,
-                              onChanged: (value) =>
-                                  _handleNameChanged(_secondLastNameCtrl, value),
+                              onChanged: (value) => _handleNameChanged(
+                                  _secondLastNameCtrl, value),
                               decoration: const InputDecoration(
                                 labelText: 'Segundo apellido',
                                 border: OutlineInputBorder(),
@@ -3651,12 +3827,15 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                                 prefixIcon: const Icon(Icons.cake_outlined),
                                 suffixIcon: IconButton(
                                   tooltip: 'Seleccionar fecha',
-                                  icon: const Icon(Icons.calendar_month_rounded),
-                                  onPressed: _submitting ? null : _pickBirthDate,
+                                  icon:
+                                      const Icon(Icons.calendar_month_rounded),
+                                  onPressed:
+                                      _submitting ? null : _pickBirthDate,
                                 ),
                               ),
-                              validator: (v) =>
-                                  (v == null || v.trim().isEmpty) ? 'Requerido' : null,
+                              validator: (v) => (v == null || v.trim().isEmpty)
+                                  ? 'Requerido'
+                                  : null,
                               onTap: _submitting ? null : _pickBirthDate,
                             ),
                           ),
@@ -3682,8 +3861,9 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                                   controller: _emailCtrl,
                                   readOnly: _isEdit,
                                   style: TextStyle(
-                                    color:
-                                        _isEdit ? SaoColors.gray800 : SaoColors.gray900,
+                                    color: _isEdit
+                                        ? SaoColors.gray800
+                                        : SaoColors.gray900,
                                   ),
                                   decoration: InputDecoration(
                                     labelText: 'Correo electrónico *',
@@ -3694,7 +3874,8 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                                     ),
                                     prefixIcon: const Icon(
                                       Icons.alternate_email_rounded,
-                                      semanticLabel: 'Icono de correo electrónico',
+                                      semanticLabel:
+                                          'Icono de correo electrónico',
                                     ),
                                     suffixIcon: _isEdit
                                         ? const Icon(
@@ -3705,9 +3886,8 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                                           )
                                         : null,
                                     filled: _isEdit,
-                                    fillColor: _isEdit
-                                        ? SaoColors.gray100
-                                        : null,
+                                    fillColor:
+                                        _isEdit ? SaoColors.gray100 : null,
                                   ),
                                   keyboardType: TextInputType.emailAddress,
                                   autovalidateMode:
@@ -3779,8 +3959,7 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                                         : Icons.visibility_rounded,
                                   ),
                                   onPressed: () => setState(
-                                    () => _obscurePassword =
-                                        !_obscurePassword,
+                                    () => _obscurePassword = !_obscurePassword,
                                   ),
                                 ),
                               ),
@@ -3871,11 +4050,11 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                             child: OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: SaoColors.actionPrimary,
-                                backgroundColor:
-                                    SaoColors.actionPrimary.withValues(alpha: 0.05),
+                                backgroundColor: SaoColors.actionPrimary
+                                    .withValues(alpha: 0.05),
                                 side: BorderSide(
-                                  color:
-                                      SaoColors.actionPrimary.withValues(alpha: 0.3),
+                                  color: SaoColors.actionPrimary
+                                      .withValues(alpha: 0.3),
                                 ),
                               ),
                               onPressed: _submitting
@@ -4072,16 +4251,19 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     // multi-project changes when `roles` / `project_ids` are also present.
     final primaryScope = normalizedScopes.first;
     final primaryRole = primaryScope.role.trim().toUpperCase();
-    final primaryProjectId = (primaryScope.projectId ?? '').trim().toUpperCase();
+    final primaryProjectId =
+        (primaryScope.projectId ?? '').trim().toUpperCase();
     final requestedRoles = <String>[];
     final requestedProjectIds = <String>[];
     for (final scope in normalizedScopes) {
       final normalizedRole = scope.role.trim().toUpperCase();
       final normalizedProject = (scope.projectId ?? '').trim().toUpperCase();
-      if (normalizedRole.isNotEmpty && !requestedRoles.contains(normalizedRole)) {
+      if (normalizedRole.isNotEmpty &&
+          !requestedRoles.contains(normalizedRole)) {
         requestedRoles.add(normalizedRole);
       }
-      if (normalizedProject.isNotEmpty && !requestedProjectIds.contains(normalizedProject)) {
+      if (normalizedProject.isNotEmpty &&
+          !requestedProjectIds.contains(normalizedProject)) {
         requestedProjectIds.add(normalizedProject);
       }
     }
@@ -4094,11 +4276,11 @@ class _UserFormDialogState extends State<_UserFormDialog> {
     };
 
     final fullName = _isEdit
-      ? _normalizePersonName(_nameCtrl.text)
+        ? _normalizePersonName(_nameCtrl.text)
         : [
-        _normalizePersonName(_firstNameCtrl.text),
-        _normalizePersonName(_lastNameCtrl.text),
-        _normalizePersonName(_secondLastNameCtrl.text),
+            _normalizePersonName(_firstNameCtrl.text),
+            _normalizePersonName(_lastNameCtrl.text),
+            _normalizePersonName(_secondLastNameCtrl.text),
           ].where((part) => part.isNotEmpty).join(' ');
     final normalizedEmail = _emailCtrl.text.trim().toLowerCase();
     final birthDateIso = _birthDate == null
@@ -4138,11 +4320,11 @@ class _UserFormDialogState extends State<_UserFormDialog> {
       setState(() {
         _error = msg.contains('Permission not configured:')
             ? 'El backend no tiene configurado uno de los permisos enviados. Aplica el catálogo SQL de permisos antes de guardar permisos directos.'
-          : msg.contains('409')
-                    ? 'Ya existe un usuario con ese correo.'
-                    : msg.contains('400')
-                        ? 'Datos inválidos. Verifica el rol, proyecto o permiso seleccionado.'
-                        : 'Error al guardar: $msg';
+            : msg.contains('409')
+                ? 'Ya existe un usuario con ese correo.'
+                : msg.contains('400')
+                    ? 'Datos inválidos. Verifica el rol, proyecto o permiso seleccionado.'
+                    : 'Error al guardar: $msg';
         _submitting = false;
       });
     }
@@ -4172,7 +4354,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   bool _submitting = false;
   String? _error;
 
-  bool get _hasDirectPermissionCatalog => widget.availablePermissions.isNotEmpty;
+  bool get _hasDirectPermissionCatalog =>
+      widget.availablePermissions.isNotEmpty;
   bool get _hasRolePermissionCatalog => widget.rolePermissions.isNotEmpty;
 
   ButtonStyle get _addDirectPermissionButtonStyle {
@@ -4201,8 +4384,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
   @override
   void initState() {
     super.initState();
-    _permissionScopes =
-        widget.user.permissionScopes.map(_PermissionScopeDraft.fromScope).toList();
+    _permissionScopes = widget.user.permissionScopes
+        .map(_PermissionScopeDraft.fromScope)
+        .toList();
     if (!_hasDirectPermissionCatalog) {
       _permissionsView = _hasRolePermissionCatalog ? 'role' : 'effective';
     }
@@ -4224,11 +4408,15 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                   decoration: BoxDecoration(
                     color: SaoColors.error.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: SaoColors.error.withValues(alpha: 0.6)),
+                    border: Border.all(
+                        color: SaoColors.error.withValues(alpha: 0.6)),
                   ),
                   child: Text(
                     _error!,
-                    style: const TextStyle(fontSize: 13, color: SaoColors.error, fontWeight: FontWeight.w600),
+                    style: const TextStyle(
+                        fontSize: 13,
+                        color: SaoColors.error,
+                        fontWeight: FontWeight.w600),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -4242,20 +4430,23 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                       label: const Text('Rol base'),
                       selected: _permissionsView == 'role',
                       showCheckmark: false,
-                      onSelected: (_) => setState(() => _permissionsView = 'role'),
+                      onSelected: (_) =>
+                          setState(() => _permissionsView = 'role'),
                     ),
                   if (_hasDirectPermissionCatalog)
                     ChoiceChip(
                       label: const Text('Permisos directos'),
                       selected: _permissionsView == 'direct',
                       showCheckmark: false,
-                      onSelected: (_) => setState(() => _permissionsView = 'direct'),
+                      onSelected: (_) =>
+                          setState(() => _permissionsView = 'direct'),
                     ),
                   ChoiceChip(
                     label: const Text('Permisos efectivos'),
                     selected: _permissionsView == 'effective',
                     showCheckmark: false,
-                    onSelected: (_) => setState(() => _permissionsView = 'effective'),
+                    onSelected: (_) =>
+                        setState(() => _permissionsView = 'effective'),
                   ),
                 ],
               ),
@@ -4281,7 +4472,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                             setState(() {
                               _permissionScopes.add(
                                 _PermissionScopeDraft(
-                                  permissionCode: widget.availablePermissions.first,
+                                  permissionCode:
+                                      widget.availablePermissions.first,
                                   projectId: '',
                                   effect: 'allow',
                                 ),
@@ -4347,8 +4539,9 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
               : 'OPERATIVO',
           'project_id': widget.user.primaryProjectId ?? '',
           'scopes': scopePayload,
-          'permission_scopes':
-              normalizedPermissionScopes.map((scope) => scope.toJson()).toList(),
+          'permission_scopes': normalizedPermissionScopes
+              .map((scope) => scope.toJson())
+              .toList(),
         },
       );
       if (mounted) Navigator.pop(context, true);
@@ -4372,7 +4565,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
               : (widget.availablePermissions.isNotEmpty
                   ? widget.availablePermissions.first
                   : null);
-      if (selectedPermission != null && selectedPermission != scope.permissionCode) {
+      if (selectedPermission != null &&
+          selectedPermission != scope.permissionCode) {
         scope.permissionCode = selectedPermission;
       }
 
@@ -4393,7 +4587,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                 items: widget.availablePermissions
                     .map((permission) => DropdownMenuItem(
                           value: permission,
-                          child: Text(permission, overflow: TextOverflow.ellipsis),
+                          child:
+                              Text(permission, overflow: TextOverflow.ellipsis),
                         ))
                     .toList(),
                 onChanged: _submitting
@@ -4415,7 +4610,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
                   isDense: true,
                 ),
                 items: [
-                  const DropdownMenuItem(value: '', child: Text('Global (sin proyecto)')),
+                  const DropdownMenuItem(
+                      value: '', child: Text('Global (sin proyecto)')),
                   ...widget.availableProjects.map(
                     (id) => DropdownMenuItem(value: id, child: Text(id)),
                   ),
@@ -4494,7 +4690,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
             children: [
               Text(
                 '$role · ${projectId.isEmpty ? 'Global' : 'Proyecto $projectId'}',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
               ),
               const SizedBox(height: 6),
               if (permissions.isEmpty)
@@ -4540,7 +4737,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
       final projectId = (scope.projectId ?? '').trim().toUpperCase();
       final label = projectId.isEmpty ? 'Global' : 'Proyecto $projectId';
       ensureScope(label);
-      effectiveByScope[label]!.addAll(widget.rolePermissions[role] ?? const <String>[]);
+      effectiveByScope[label]!
+          .addAll(widget.rolePermissions[role] ?? const <String>[]);
     }
 
     for (final scope in widget.user.permissionScopes) {
@@ -4574,7 +4772,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: labels.map((label) {
-        final granted = (effectiveByScope[label] ?? <String>{}).toList()..sort();
+        final granted = (effectiveByScope[label] ?? <String>{}).toList()
+          ..sort();
         final denied = (deniedByScope[label] ?? <String>{}).toList()..sort();
 
         return Padding(
@@ -4584,7 +4783,8 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
             children: [
               Text(
                 '$label · ${granted.length} permisos activos',
-                style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                style:
+                    const TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
               ),
               const SizedBox(height: 6),
               if (granted.isEmpty)
@@ -4642,7 +4842,6 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
           .toList(),
     );
   }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -4704,13 +4903,13 @@ class _RoleBadge extends StatelessWidget {
 
   const _RoleBadge({required this.role});
 
-    static Color _colorFor(String role) => switch (role.toUpperCase()) {
-      'ADMIN' => const Color(0xFF6366F1),
-      'SUPERVISOR' => const Color(0xFF2563EB),
-      'COORD' => const Color(0xFF64748B),
-      'OPERATIVO' => const Color(0xFF0F766E),
-      'LECTOR' => const Color(0xFF475569),
-      _ => SaoColors.gray500,
+  static Color _colorFor(String role) => switch (role.toUpperCase()) {
+        'ADMIN' => const Color(0xFF6366F1),
+        'SUPERVISOR' => const Color(0xFF2563EB),
+        'COORD' => const Color(0xFF64748B),
+        'OPERATIVO' => const Color(0xFF0F766E),
+        'LECTOR' => const Color(0xFF475569),
+        _ => SaoColors.gray500,
       };
 
   static Color _foregroundFor(String role) {
@@ -4720,10 +4919,10 @@ class _RoleBadge extends StatelessWidget {
   }
 
   static Color _backgroundFor(String role) => switch (role.toUpperCase()) {
-      'ADMIN' => const Color(0xFFEEF2FF),
+        'ADMIN' => const Color(0xFFEEF2FF),
         'SUPERVISOR' => const Color(0xFFDBEAFE),
-      'COORD' => const Color(0xFFF1F5F9),
-      'OPERATIVO' => const Color(0xFFCCFBF1),
+        'COORD' => const Color(0xFFF1F5F9),
+        'OPERATIVO' => const Color(0xFFCCFBF1),
         'LECTOR' => const Color(0xFFF1F5F9),
         _ => SaoColors.gray500.withValues(alpha: 0.16),
       };

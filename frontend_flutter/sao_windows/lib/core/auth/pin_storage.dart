@@ -17,6 +17,22 @@ class PinStorage {
 
   const PinStorage(this._storage);
 
+  bool _isSecureStorageCorruption(Object error) {
+    final text = error.toString();
+    return text.contains('AEADBadTagException') ||
+        text.contains('KeyStoreException') ||
+        text.contains('VERIFICATION_FAILED') ||
+        text.contains('EncryptedSharedPreferences initialization failed');
+  }
+
+  Future<void> _resetSecureStorage() async {
+    try {
+      await _storage.deleteAll();
+    } catch (_) {
+      // Best-effort cleanup.
+    }
+  }
+
   // ----------------------------------------------------------------
   // PIN management
   // ----------------------------------------------------------------
@@ -25,9 +41,20 @@ class PinStorage {
   Future<void> savePin(String pin) async {
     final salt = _generateSalt();
     final hash = _hashPin(pin, salt);
-    await _storage.write(key: _pinSaltKey, value: salt);
-    await _storage.write(key: _pinHashKey, value: hash);
-    appLogger.d('PinStorage: PIN guardado');
+    try {
+      await _storage.write(key: _pinSaltKey, value: salt);
+      await _storage.write(key: _pinHashKey, value: hash);
+      appLogger.d('PinStorage: PIN guardado');
+    } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+        await _storage.write(key: _pinSaltKey, value: salt);
+        await _storage.write(key: _pinHashKey, value: hash);
+        appLogger.w('PinStorage: secure storage was reset due to corruption');
+        return;
+      }
+      rethrow;
+    }
   }
 
   /// Verifica si el PIN ingresado coincide con el almacenado.
@@ -38,6 +65,9 @@ class PinStorage {
       if (salt == null || storedHash == null) return false;
       return _hashPin(pin, salt) == storedHash;
     } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      }
       appLogger.e('PinStorage.verifyPin error: $e');
       return false;
     }
@@ -49,6 +79,9 @@ class PinStorage {
       final hash = await _storage.read(key: _pinHashKey);
       return hash != null && hash.isNotEmpty;
     } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      }
       appLogger.e('PinStorage.hasPin error: $e');
       return false;
     }
@@ -56,9 +89,15 @@ class PinStorage {
 
   /// Elimina el PIN y el usuario cacheado (al cerrar sesión o cambiar cuenta).
   Future<void> clearAll() async {
-    await _storage.delete(key: _pinHashKey);
-    await _storage.delete(key: _pinSaltKey);
-    await _storage.delete(key: _cachedUserKey);
+    try {
+      await _storage.delete(key: _pinHashKey);
+      await _storage.delete(key: _pinSaltKey);
+      await _storage.delete(key: _cachedUserKey);
+    } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      }
+    }
     appLogger.d('PinStorage: datos limpiados');
   }
 
@@ -71,6 +110,9 @@ class PinStorage {
     try {
       await _storage.write(key: _cachedUserKey, value: jsonEncode(userJson));
     } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      }
       appLogger.e('PinStorage.saveCachedUser error: $e');
     }
   }
@@ -82,6 +124,9 @@ class PinStorage {
       if (raw == null || raw.isEmpty) return null;
       return jsonDecode(raw) as Map<String, dynamic>;
     } catch (e) {
+      if (_isSecureStorageCorruption(e)) {
+        await _resetSecureStorage();
+      }
       appLogger.e('PinStorage.getCachedUser error: $e');
       return null;
     }

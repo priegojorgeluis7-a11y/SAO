@@ -1,4 +1,4 @@
-"""Completed Activities endpoint — read-only view of APROBADO activities with full traceability."""
+"""Completed Activities endpoint — read-only view of approved activities with full traceability."""
 
 import logging
 from datetime import datetime, timezone
@@ -41,16 +41,179 @@ def _iso(val: Any) -> str:
     return str(val) if val else ""
 
 
-def _build_users_map(client) -> dict[str, str]:
+def _effective_assignee_user_id(activity_payload: dict[str, Any]) -> str:
+    return str(
+        activity_payload.get("assigned_to_user_id")
+        or activity_payload.get("created_by_user_id")
+        or ""
+    ).strip()
+
+
+def _build_users_map(client, user_ids: set[str]) -> dict[str, str]:
     result: dict[str, str] = {}
-    for doc in client.collection("users").stream():
+    for user_id in user_ids:
+        if not user_id:
+            continue
+        doc = client.collection("users").document(user_id).get()
+        if not doc.exists:
+            continue
         u = doc.to_dict() or {}
         name = str(
-            u.get("display_name") or u.get("name") or u.get("email") or ""
+            u.get("full_name")
+            or u.get("fullName")
+            or u.get("display_name")
+            or u.get("name")
+            or u.get("email")
+            or ""
         ).strip()
         if name:
-            result[str(doc.id)] = name
+            result[str(user_id)] = name
     return result
+
+
+def _build_fronts_map(client, front_ids: set[str]) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    for front_id in front_ids:
+        if not front_id:
+            continue
+        doc = client.collection("fronts").document(front_id).get()
+        if not doc.exists:
+            continue
+        payload = doc.to_dict() or {}
+        result[front_id] = {
+            "name": str(payload.get("name") or ""),
+            "code": str(payload.get("code") or ""),
+        }
+    return result
+
+
+def _normalize_lookup_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _load_project_front_scope_map(client, project_ids: set[str]) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    normalized_ids = [str(project_id or "").strip() for project_id in project_ids if str(project_id or "").strip()]
+    if not normalized_ids:
+        return result
+
+    refs = [client.collection("projects").document(project_id) for project_id in normalized_ids]
+    snapshots = client.get_all(refs) if hasattr(client, "get_all") else [ref.get() for ref in refs]
+    for snap in snapshots:
+        if not snap.exists:
+            continue
+        payload = snap.to_dict() or {}
+        raw_scope = payload.get("front_location_scope") or payload.get("front_location_scopes") or []
+        if not isinstance(raw_scope, list):
+            continue
+
+        project_scope: dict[str, str] = {}
+        for row in raw_scope:
+            if not isinstance(row, dict):
+                continue
+            municipality = str(row.get("municipio") or row.get("municipality") or "").strip()
+            front_name = str(row.get("front_name") or row.get("frontName") or row.get("name") or "").strip()
+            if municipality and front_name:
+                project_scope[_normalize_lookup_key(municipality)] = front_name
+
+        if project_scope:
+            result[str(snap.id)] = project_scope
+    return result
+
+
+def _extract_activity_municipality(activity_payload: dict[str, Any]) -> str | None:
+    municipality = str(
+        activity_payload.get("municipio")
+        or activity_payload.get("municipality")
+        or ""
+    ).strip()
+    if municipality:
+        return municipality
+
+    wizard_payload = activity_payload.get("wizard_payload")
+    if isinstance(wizard_payload, dict):
+        location_payload = wizard_payload.get("location")
+        if isinstance(location_payload, dict):
+            municipality = str(
+                location_payload.get("municipio")
+                or location_payload.get("municipality")
+                or ""
+            ).strip()
+            if municipality:
+                return municipality
+    return None
+
+
+def _resolve_activity_front_name(
+    activity_payload: dict[str, Any],
+    front_names: dict[str, str],
+    project_front_scope_map: dict[str, dict[str, str]],
+) -> str | None:
+    explicit_front = str(activity_payload.get("front") or activity_payload.get("front_name") or "").strip()
+    if explicit_front:
+        return explicit_front
+
+    front_id = str(activity_payload.get("front_id") or "").strip()
+    if front_id:
+        front_name = str(front_names.get(front_id) or "").strip()
+        if front_name:
+            return front_name
+
+    municipality = _extract_activity_municipality(activity_payload)
+    project_id = str(activity_payload.get("project_id") or "").strip()
+    if project_id and municipality:
+        inferred_front = project_front_scope_map.get(project_id, {}).get(_normalize_lookup_key(municipality), "")
+        if inferred_front:
+            return inferred_front
+    return None
+
+
+def _evidence_count_map(client, activity_ids: set[str]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for activity_id in activity_ids:
+        if not activity_id:
+            continue
+        result[activity_id] = sum(
+            1
+            for _ in client.collection("evidences")
+            .where("activity_id", "==", activity_id)
+            .stream()
+        )
+    return result
+
+
+def _fetch_audit_logs_for_entity_ids(client, entity_ids: set[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for entity_id in entity_ids:
+        if not entity_id:
+            continue
+        for log_doc in (
+            client.collection("audit_logs")
+            .where("entity_id", "==", entity_id)
+            .order_by("created_at", "DESCENDING")
+            .limit(50)
+            .stream()
+        ):
+            if log_doc.id in seen:
+                continue
+            seen.add(log_doc.id)
+            rows.append({"id": str(log_doc.id), "payload": log_doc.to_dict() or {}})
+    return rows
+
+
+def _fetch_evidence_rows(client, activity_ids: set[str]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for activity_id in activity_ids:
+        if not activity_id:
+            continue
+        for ev_doc in client.collection("evidences").where("activity_id", "==", activity_id).stream():
+            if ev_doc.id in seen:
+                continue
+            seen.add(ev_doc.id)
+            rows.append({"id": str(ev_doc.id), "payload": ev_doc.to_dict() or {}})
+    return rows
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -66,29 +229,12 @@ def list_completed_activities(
     municipio: str | None = Query(None),
     usuario: str | None = Query(None, description="Filtrar por nombre del responsable (búsqueda parcial)"),
     q: str | None = Query(None, description="Búsqueda libre en título, PK y frente"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     _current_user: Any = Depends(require_any_role(_VIEWER_ROLES)),
 ):
     """Returns approved activities with optional filters including responsible user."""
     client = get_firestore_client()
-
-    # ── Build lookup maps ─────────────────────────────────────────────────────
-    fronts_map: dict[str, dict] = {}
-    for doc in client.collection("fronts").stream():
-        d = doc.to_dict() or {}
-        fid = str(d.get("id") or doc.id)
-        fronts_map[fid] = {
-            "name": str(d.get("name") or ""),
-            "code": str(d.get("code") or ""),
-        }
-
-    users_map = _build_users_map(client)
-
-    evidence_count_map: dict[str, int] = {}
-    for doc in client.collection("evidences").stream():
-        ev = doc.to_dict() or {}
-        aid = str(ev.get("activity_id") or "")
-        if aid:
-            evidence_count_map[aid] = evidence_count_map.get(aid, 0) + 1
 
     # ── Normalise filters ─────────────────────────────────────────────────────
     project_filter  = project_id.strip().upper() if project_id and project_id.strip() else None
@@ -105,9 +251,10 @@ def list_completed_activities(
         query = query.where("project_id", "==", project_filter)
     raw_docs = [d.to_dict() or {} for d in query.stream()]
 
-    items: list[dict] = []
-    now = datetime.now(timezone.utc)
-
+    candidate_docs: list[dict[str, Any]] = []
+    front_ids: set[str] = set()
+    project_ids: set[str] = set()
+    user_ids: set[str] = set()
     for doc in raw_docs:
         if doc.get("deleted_at") is not None:
             continue
@@ -118,12 +265,41 @@ def list_completed_activities(
         if not activity_id:
             continue
 
-        # Resolve lookup values before filtering on them
-        front_id    = str(doc.get("front_id") or "")
-        front_info  = fronts_map.get(front_id, {})
-        front_name  = front_info.get("name", "")
+        estado_val = str(doc.get("estado") or doc.get("state") or "")
+        municipio_val = str(doc.get("municipio") or doc.get("municipality") or "")
+        activity_type = str(doc.get("activity_type_code") or "")
 
-        assigned_uid  = str(doc.get("assigned_to_user_id") or "").strip()
+        if tema_filter and activity_type.upper() != tema_filter:
+            continue
+        if estado_filter and estado_filter not in estado_val.lower():
+            continue
+        if municipio_filter and municipio_filter not in municipio_val.lower():
+            continue
+
+        candidate_docs.append(doc)
+        front_ids.add(str(doc.get("front_id") or "").strip())
+        project_ids.add(str(doc.get("project_id") or "").strip())
+        user_ids.add(_effective_assignee_user_id(doc))
+        user_ids.add(str(doc.get("last_reviewed_by") or "").strip())
+
+    fronts_map = _build_fronts_map(client, front_ids)
+    front_names = {
+        front_id: str(payload.get("name") or "").strip()
+        for front_id, payload in fronts_map.items()
+    }
+    project_front_scope_map = _load_project_front_scope_map(client, project_ids)
+    users_map = _build_users_map(client, user_ids)
+
+    items: list[dict] = []
+    now = datetime.now(timezone.utc)
+
+    for doc in candidate_docs:
+        activity_id = str(doc.get("uuid") or "")
+
+        # Resolve lookup values before filtering on them
+        front_name = _resolve_activity_front_name(doc, front_names, project_front_scope_map) or ""
+
+        assigned_uid  = _effective_assignee_user_id(doc)
         assigned_name = users_map.get(assigned_uid, "")
 
         estado_val   = str(doc.get("estado") or doc.get("state") or "")
@@ -134,9 +310,6 @@ def list_completed_activities(
 
         # Apply filters
         if frente_filter   and frente_filter   not in front_name.lower():        continue
-        if tema_filter     and activity_type.upper() != tema_filter:             continue
-        if estado_filter   and estado_filter   not in estado_val.lower():        continue
-        if municipio_filter and municipio_filter not in municipio_val.lower():   continue
         if usuario_filter  and usuario_filter  not in assigned_name.lower():     continue
 
         searchable = f"{pk_label} {title} {front_name} {activity_type}".lower()
@@ -156,17 +329,26 @@ def list_completed_activities(
             "has_report":       bool(doc.get("report_generated_at")),
             "reviewed_at":      _iso(doc.get("last_reviewed_at")),
             "created_at":       _iso(doc.get("created_at")),
-            "evidence_count":   evidence_count_map.get(activity_id, 0),
+            "evidence_count":   0,
             "assigned_name":    assigned_name,
             "reviewed_by_name": users_map.get(reviewer_uid, ""),
             "review_decision":  decision,
         })
 
     items.sort(key=lambda x: x["reviewed_at"] or x["created_at"], reverse=True)
+    total = len(items)
+    start = (page - 1) * page_size
+    paged_items = items[start : start + page_size]
+    counts = _evidence_count_map(client, {str(item["id"]) for item in paged_items})
+    for item in paged_items:
+        item["evidence_count"] = counts.get(str(item["id"]), 0)
 
     return {
-        "items":        items[:2000],
-        "total":        len(items),
+        "items":        paged_items,
+        "total":        total,
+        "page":         page,
+        "page_size":    page_size,
+        "has_next":     start + len(paged_items) < total,
         "generated_at": now.isoformat(),
     }
 
@@ -184,16 +366,6 @@ def get_filter_options(
     from approved activities — scoped to project_id if provided."""
     client = get_firestore_client()
 
-    users_map = _build_users_map(client)
-
-    fronts_map: dict[str, str] = {}
-    for doc in client.collection("fronts").stream():
-        d = doc.to_dict() or {}
-        fid = str(d.get("id") or doc.id)
-        name = str(d.get("name") or "").strip()
-        if name:
-            fronts_map[fid] = name
-
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
 
     query = client.collection("activities")
@@ -206,6 +378,11 @@ def get_filter_options(
     municipios: set[str] = set()
     usuarios: set[str] = set()
 
+    docs: list[dict[str, Any]] = []
+    front_ids: set[str] = set()
+    project_ids: set[str] = set()
+    user_ids: set[str] = set()
+
     for doc_snap in query.stream():
         doc = doc_snap.to_dict() or {}
         if doc.get("deleted_at") is not None:
@@ -214,9 +391,23 @@ def get_filter_options(
         if decision not in _APPROVED_DECISIONS:
             continue
 
-        front_id = str(doc.get("front_id") or "")
-        if front_id and fronts_map.get(front_id):
-            frentes.add(fronts_map[front_id])
+        docs.append(doc)
+        front_ids.add(str(doc.get("front_id") or "").strip())
+        project_ids.add(str(doc.get("project_id") or "").strip())
+        user_ids.add(_effective_assignee_user_id(doc))
+
+    users_map = _build_users_map(client, user_ids)
+    fronts_map = {
+        front_id: str(payload.get("name") or "").strip()
+        for front_id, payload in _build_fronts_map(client, front_ids).items()
+    }
+    project_front_scope_map = _load_project_front_scope_map(client, project_ids)
+
+    for doc in docs:
+
+        front_name = _resolve_activity_front_name(doc, fronts_map, project_front_scope_map)
+        if front_name:
+            frentes.add(front_name)
 
         tipo = str(doc.get("activity_type_code") or "").strip()
         if tipo:
@@ -230,7 +421,7 @@ def get_filter_options(
         if municipio:
             municipios.add(municipio)
 
-        assigned_uid = str(doc.get("assigned_to_user_id") or "").strip()
+        assigned_uid = _effective_assignee_user_id(doc)
         name = users_map.get(assigned_uid, "").strip()
         if name:
             usuarios.add(name)
@@ -274,26 +465,26 @@ def get_completed_activity_detail(
     resolved_id = str(doc.get("uuid") or snap.id)
 
     # ── Lookup maps ───────────────────────────────────────────────────────────
-    users_map = _build_users_map(client)
-
-    front_name = ""
+    front_lookup: dict[str, str] = {}
     front_id = str(doc.get("front_id") or "")
     if front_id:
         f_snap = client.collection("fronts").document(front_id).get()
         if f_snap.exists:
             f = f_snap.to_dict() or {}
-            front_name = str(f.get("name") or "")
+            front_name = str(f.get("name") or "").strip()
+            if front_name:
+                front_lookup[front_id] = front_name
+    project_id = str(doc.get("project_id") or "").strip()
+    project_front_scope_map = _load_project_front_scope_map(client, {project_id} if project_id else set())
+    front_name = _resolve_activity_front_name(doc, front_lookup, project_front_scope_map) or ""
 
     # ── Audit trail ───────────────────────────────────────────────────────────
     audit_trail: list[dict] = []
-    for log_doc in client.collection("audit_logs").stream():
-        log = log_doc.to_dict() or {}
-        entity_id = str(log.get("entity_id") or "")
-        if entity_id != resolved_id and entity_id != snap.id:
-            continue
+    for row in _fetch_audit_logs_for_entity_ids(client, {resolved_id, snap.id}):
+        log = row["payload"]
         ts = log.get("timestamp") or log.get("created_at")
         audit_trail.append({
-            "id":          str(log_doc.id),
+            "id":          row["id"],
             "action":      str(log.get("action") or ""),
             "actor_email": str(log.get("actor_email") or ""),
             "actor_name":  str(log.get("actor_name") or ""),
@@ -305,26 +496,29 @@ def get_completed_activity_detail(
 
     # ── Evidences ─────────────────────────────────────────────────────────────
     evidences: list[dict] = []
-    for ev_doc in client.collection("evidences").stream():
-        ev = ev_doc.to_dict() or {}
-        aid = str(ev.get("activity_id") or "")
-        if aid not in (resolved_id, snap.id):
-            continue
+    evidence_rows = _fetch_evidence_rows(client, {resolved_id, snap.id})
+    uploader_ids = {
+        str(row["payload"].get("uploaded_by") or row["payload"].get("user_id") or "").strip()
+        for row in evidence_rows
+    }
+    assigned_uid  = _effective_assignee_user_id(doc)
+    reviewer_uid  = str(doc.get("last_reviewed_by") or "").strip()
+    users_map = _build_users_map(client, uploader_ids | {assigned_uid, reviewer_uid})
+    for row in evidence_rows:
+        ev = row["payload"]
         ts = ev.get("uploaded_at") or ev.get("created_at")
         uploader_uid = str(ev.get("uploaded_by") or ev.get("user_id") or "")
         evidences.append({
-            "id":            str(ev_doc.id),
+            "id":            row["id"],
             "type":          str(ev.get("evidence_type") or ev.get("type") or "PHOTO"),
-            "description":   str(ev.get("description") or ""),
-            "gcs_path":      str(ev.get("gcs_path") or ev.get("storage_path") or ""),
+            "description":   str(ev.get("description") or ev.get("caption") or ev.get("notes") or ""),
+            "gcs_path":      str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or ""),
             "uploaded_at":   _iso(ts),
             "uploader_name": users_map.get(uploader_uid, ""),
         })
     evidences.sort(key=lambda x: x["uploaded_at"], reverse=True)
 
     # ── Build response ────────────────────────────────────────────────────────
-    assigned_uid  = str(doc.get("assigned_to_user_id") or "").strip()
-    reviewer_uid  = str(doc.get("last_reviewed_by") or "").strip()
     decision      = str(doc.get("review_decision") or "").upper()
     activity_type = str(doc.get("activity_type_code") or "")
     title         = str(doc.get("title") or activity_type or "")

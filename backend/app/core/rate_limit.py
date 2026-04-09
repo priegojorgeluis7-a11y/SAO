@@ -54,7 +54,11 @@ rate_limiter = InMemoryRateLimiter()
 def _client_id(request: Request) -> str:
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
-        client = forwarded_for.split(",")[0].strip()
+        # Cloud Run appends the connecting IP to X-Forwarded-For.
+        # The first hop is attacker-controlled; use the second-to-last value
+        # (the real client as seen by Google's load balancer) when available.
+        hops = [h.strip() for h in forwarded_for.split(",") if h.strip()]
+        client = hops[-2] if len(hops) >= 2 else hops[-1] if hops else ""
         if client:
             return client
 
@@ -107,7 +111,14 @@ def _shared_consume(client_key: str, *, scope: str, limit: int, window_seconds: 
     try:
         return _consume_in_transaction(transaction)
     except Exception:
-        logger.warning("Shared rate limiter fallback to in-memory storage", exc_info=True)
+        logger.warning(
+            "Shared rate limiter unavailable — falling back to per-instance in-memory limiter."
+            " Rate limiting will NOT be coordinated across Cloud Run replicas until Firestore recovers.",
+            exc_info=True,
+        )
+        # Return None so enforce_rate_limit falls through to the in-memory limiter.
+        # The in-memory limiter still applies per-instance limits; however brute-force
+        # attacks spread across instances will not be fully blocked during degradation.
         return None
 
 

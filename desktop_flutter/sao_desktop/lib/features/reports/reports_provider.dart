@@ -13,6 +13,7 @@ import '../../core/providers/project_providers.dart';
 import '../../data/catalog/activity_status.dart';
 import '../../data/database/app_database.dart';
 import '../../data/repositories/backend_api_client.dart';
+import '../../data/repositories/evidence_repository.dart';
 
 // ---------------------------------------------------------------------------
 // Date range helper
@@ -81,6 +82,8 @@ class ReportActivityItem {
   final String pk;
   final String frontName;
   final String status;
+  final String? reviewDecision;
+  final String? reviewStatus;
   final String createdAt;
   final String? assignedName;
   final String? projectId;
@@ -118,6 +121,8 @@ class ReportActivityItem {
     required this.pk,
     required this.frontName,
     required this.status,
+    this.reviewDecision,
+    this.reviewStatus,
     required this.createdAt,
     this.assignedName,
     this.projectId,
@@ -157,46 +162,74 @@ class ReportActivityItem {
       id: (json['id'] ?? '').toString(),
       activityType: (json['activity_type'] ?? 'Actividad').toString(),
       pk: (json['pk'] ?? '-').toString(),
-      frontName: (json['front'] ?? json['front_name'] ?? 'Sin frente').toString(),
+      frontName: (json['front'] ?? json['front_name'] ?? json['frente'] ?? 'Sin frente').toString(),
       status: (json['status'] ?? 'PENDIENTE_REVISION').toString(),
-      createdAt: (json['created_at'] ?? '').toString(),
+      reviewDecision: json['review_decision']?.toString(),
+      reviewStatus: json['review_status']?.toString(),
+      createdAt: (json['reviewed_at'] ?? json['last_reviewed_at'] ?? json['created_at'] ?? '').toString(),
       assignedName: (json['assignedName'] ?? json['assigned_name'])?.toString(),
       projectId: (json['project_id'])?.toString(),
       title: (json['title'] ?? json['activity_title'])?.toString(),
-      purpose: (json['purpose'] ?? json['proposito'])?.toString(),
-      detail: (json['detail'] ?? json['description'] ?? json['descripcion'])?.toString(),
-      agreements: (json['agreements'] ?? json['acuerdos'])?.toString(),
-      municipality: (json['municipality'] ?? json['municipio'])?.toString(),
-      state: (json['state'] ?? json['estado'])?.toString(),
-        colony: (json['colony'] ?? json['colonia'])?.toString(),
-        riskLevel: (json['risk_level'] ?? json['risk'] ?? json['riesgo'])?.toString(),
-        locationType:
-          (json['location_type'] ?? json['ubicacion_tipo'] ?? json['locationScope'])
-            ?.toString(),
-        pkStart: (json['pk_start'] ?? json['pk_inicio'])?.toString(),
-        pkEnd: (json['pk_end'] ?? json['pk_fin'])?.toString(),
-        startTime: (json['start_time'] ?? json['hora_inicio'])?.toString(),
-        endTime: (json['end_time'] ?? json['hora_fin'])?.toString(),
-        technicalLatitude:
-          (json['latitude'] ?? json['latitud'] ?? json['tech_latitude'])?.toString(),
-        technicalLongitude:
-          (json['longitude'] ?? json['longitud'] ?? json['tech_longitude'])?.toString(),
-        gpsPrecision:
-          (json['gps_precision'] ?? json['precision'] ?? json['precission'])?.toString(),
-        isUnplanned: _parseBool(json['is_unplanned'] ?? json['no_planeada']),
-        unplannedReason: (json['unplanned_reason'] ?? json['motivo'])?.toString(),
-        referenceFolio: (json['reference_folio'] ?? json['folio_referencia'])?.toString(),
-        subcategory: (json['subcategory'] ?? json['subcategoria'])?.toString(),
-        topics: _parseStringList(json['topics'] ?? json['temas']),
-        attendees: _parseStringList(
-          json['attendees'] ?? json['assistants'] ?? json['involucrados']),
-        result: (json['result'] ?? json['resultado'])?.toString(),
-        notes: (json['notes'] ?? json['notas'])?.toString(),
-        pendingEvidence: _parseBool(
-        json['pending_evidence'] ?? json['evidence_pending'] ?? json['requires_evidence'],
+      purpose: _extractNestedString(json, const ['purpose', 'proposito', 'objetivo']),
+      detail: _extractNestedString(
+        json,
+        const ['detail', 'description', 'descripcion', 'minuta', 'comments', 'comentarios'],
+      ),
+      agreements: _extractNestedString(
+        json,
+        const ['agreements', 'acuerdos', 'commitments', 'compromisos'],
+      ),
+      municipality: _extractNestedString(json, const ['municipality', 'municipio', 'localidad']),
+      state: _extractNestedString(json, const ['state', 'estado']),
+        colony: _extractNestedString(json, const ['colony', 'colonia']),
+        riskLevel: _extractNestedString(json, const ['risk_level', 'risk', 'riesgo']),
+        locationType: _extractNestedString(
+          json,
+          const ['location_type', 'ubicacion_tipo', 'locationScope'],
         ),
-        evidenceDueAt:
-          (json['evidence_due_at'] ?? json['fecha_limite_evidencia'])?.toString(),
+        pkStart: _extractNestedString(json, const ['pk_start', 'pk_inicio']),
+        pkEnd: _extractNestedString(json, const ['pk_end', 'pk_fin']),
+        startTime: _extractNestedString(
+          json,
+          const ['start_time', 'hora_inicio', 'horario_inicio', 'horaatencioninicio'],
+        ),
+        endTime: _extractNestedString(
+          json,
+          const ['end_time', 'hora_fin', 'horario_fin', 'horaatencionfin'],
+        ),
+        technicalLatitude: _extractNestedString(
+          json,
+          const ['latitude', 'latitud', 'tech_latitude'],
+        ),
+        technicalLongitude: _extractNestedString(
+          json,
+          const ['longitude', 'longitud', 'tech_longitude'],
+        ),
+        gpsPrecision: _extractNestedString(
+          json,
+          const ['gps_precision', 'precision', 'precission'],
+        ),
+        isUnplanned: _parseBool(_extractNestedValue(json, const ['is_unplanned', 'no_planeada'])),
+        unplannedReason: _extractNestedString(json, const ['unplanned_reason', 'motivo']),
+        referenceFolio: _extractNestedString(json, const ['reference_folio', 'folio_referencia']),
+        subcategory: _extractNestedString(json, const ['subcategory', 'subcategoria']),
+        topics: _extractStringListFromJson(json, const ['topics', 'temas', 'temas_tratados']),
+        attendees: _extractStringListFromJson(
+          json,
+          const ['attendees', 'assistants', 'involucrados', 'asistentes', 'autoridades'],
+        ),
+        result: _extractNestedString(json, const ['result', 'resultado', 'resultado_final']),
+        notes: _extractNestedString(json, const ['notes', 'notas', 'review_notes', 'comentarios']),
+        pendingEvidence: _parseBool(
+          _extractNestedValue(
+            json,
+            const ['pending_evidence', 'evidence_pending', 'requires_evidence'],
+          ),
+        ),
+        evidenceDueAt: _extractNestedString(
+          json,
+          const ['evidence_due_at', 'fecha_limite_evidencia'],
+        ),
       evidences: (evidencesRaw ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(ReportEvidenceItem.fromJson)
@@ -204,13 +237,50 @@ class ReportActivityItem {
     );
   }
 
-  String get statusLabel => switch (status.toUpperCase()) {
-        'APPROVED' => 'Aprobado',
-        'APROBADO' => 'Aprobado',
-        'RECHAZADO' => 'Rechazado',
-        'PENDIENTE_REVISION' => 'Pendiente revisión',
-        _ => status,
-      };
+  bool get isApprovedForReport {
+    final normalizedDecision = (reviewDecision ?? '').trim().toUpperCase();
+    if (normalizedDecision == 'APPROVE' ||
+        normalizedDecision == 'APPROVE_EXCEPTION') {
+      return true;
+    }
+
+    final normalizedReview = (reviewStatus ?? '').trim().toUpperCase();
+    if (normalizedReview == 'APPROVED' ||
+        normalizedReview == 'APROBADO' ||
+        normalizedReview == 'APROBADA') {
+      return true;
+    }
+
+    final normalizedStatus = status.trim().toUpperCase();
+    return normalizedStatus == 'APPROVED' ||
+        normalizedStatus == 'APROBADO' ||
+        normalizedStatus == 'APROBADA' ||
+        normalizedStatus == 'VALIDATED' ||
+        normalizedStatus == 'VALIDADO';
+  }
+
+  String get statusLabel {
+    if (isApprovedForReport) {
+      return 'Aprobado';
+    }
+
+    final normalizedReview = (reviewStatus ?? '').trim().toUpperCase();
+    if (normalizedReview == 'REJECTED' || status.toUpperCase() == 'RECHAZADO') {
+      return 'Rechazado';
+    }
+    if (normalizedReview == 'CHANGES_REQUIRED') {
+      return 'Requiere cambios';
+    }
+
+    return switch (status.toUpperCase()) {
+      'COMPLETADA' => 'Completada',
+      'APPROVED' => 'Aprobado',
+      'APROBADO' => 'Aprobado',
+      'RECHAZADO' => 'Rechazado',
+      'PENDIENTE_REVISION' => 'Pendiente revisión',
+      _ => status,
+    };
+  }
 }
 
 class ReportEvidenceItem {
@@ -235,7 +305,13 @@ class ReportEvidenceItem {
   factory ReportEvidenceItem.fromJson(Map<String, dynamic> json) {
     return ReportEvidenceItem(
       id: (json['id'] ?? '').toString(),
-      filePath: (json['file_path'] ?? json['url'] ?? json['path'] ?? '').toString(),
+      filePath: (json['file_path'] ??
+              json['url'] ??
+              json['path'] ??
+              json['gcs_path'] ??
+              json['storage_path'] ??
+              '')
+          .toString(),
       fileType: (json['file_type'] ?? json['type'] ?? 'IMAGE').toString(),
       caption: (json['caption'] ?? json['description'])?.toString(),
       latitude: json['latitude']?.toString(),
@@ -249,50 +325,196 @@ final reportActivitiesProvider =
     FutureProvider.autoDispose<List<ReportActivityItem>>((ref) async {
   final filters = ref.watch(reportFiltersProvider);
 
-  final local = await _loadFromLocalDb(ref, filters);
-  if (local.isNotEmpty) {
-    return local;
+  final backend = await _loadFromBackend(filters);
+  if (backend.isNotEmpty) {
+    return backend;
   }
 
-  return _loadFromBackend(filters);
+  return _loadFromLocalDb(ref, filters);
 });
 
-bool _isReportApprovedStatus(String rawStatus) {
-  final s = rawStatus.trim().toUpperCase();
-  return s == 'APPROVED' ||
-      s == 'APROBADO' ||
-      s == 'APROBADA';
+bool _isAllFrontsFilter(String rawFront) {
+  final normalized = rawFront.trim().toLowerCase();
+  return normalized.isEmpty ||
+      normalized == 'todos' ||
+      normalized == 'todo' ||
+      normalized == 'all' ||
+      normalized == '*';
+}
+
+bool _isWithinSelectedRange(String rawDate, ReportDateRange range) {
+  final dt = _tryParseDate(rawDate);
+  if (dt == null) return true;
+
+  final start = DateTime(range.start.year, range.start.month, range.start.day);
+  final end = DateTime(
+    range.end.year,
+    range.end.month,
+    range.end.day,
+    23,
+    59,
+    59,
+    999,
+  );
+  return !dt.isBefore(start) && !dt.isAfter(end);
 }
 
 Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
   const client = BackendApiClient();
 
   try {
-  final path =
-    '/api/v1/reports/activities?project_id=${Uri.encodeQueryComponent(filters.projectId)}'
-    '&date_from=${Uri.encodeQueryComponent(filters.dateRange.start.toUtc().toIso8601String())}'
-    '&date_to=${Uri.encodeQueryComponent(filters.dateRange.end.toUtc().toIso8601String())}'
-    '&front=${Uri.encodeQueryComponent(filters.frontName)}';
+    final queryParams = <String>[
+      'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
+      'date_from=${Uri.encodeQueryComponent(filters.dateRange.start.toUtc().toIso8601String())}',
+      'date_to=${Uri.encodeQueryComponent(filters.dateRange.end.toUtc().toIso8601String())}',
+    ];
+    if (!_isAllFrontsFilter(filters.frontName)) {
+      queryParams.add('front=${Uri.encodeQueryComponent(filters.frontName)}');
+    }
 
-  final decoded = await client.getJson(path);
-    if (decoded is! Map<String, dynamic>) return [];
-  final items = decoded['items'] as List<dynamic>? ?? const [];
+    final path = '/api/v1/reports/activities?${queryParams.join('&')}';
+    final decoded = await client.getJson(path);
+    if (decoded is! Map<String, dynamic>) {
+      return _loadFromCompletedActivities(client, filters);
+    }
+    final items = decoded['items'] as List<dynamic>? ?? const [];
 
-    return items
+    final reportItems = items
         .whereType<Map<String, dynamic>>()
         .map((e) => ReportActivityItem.fromJson(e))
-        .where((item) => _isReportApprovedStatus(item.status))
+        .where((item) => item.isApprovedForReport)
+        .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
         .where((item) {
-          if (filters.frontName != 'Todos' && filters.frontName.isNotEmpty) {
+          if (!_isAllFrontsFilter(filters.frontName)) {
             return item.frontName
                 .toLowerCase()
                 .contains(filters.frontName.toLowerCase());
           }
           return true;
         })
-        .toList();
+        .toList(growable: false);
+
+    if (reportItems.isNotEmpty) {
+      return _hydrateReportItems(client, reportItems);
+    }
+
+    return _loadFromCompletedActivities(client, filters);
   } catch (_) {
     return [];
+  }
+}
+
+Future<List<ReportActivityItem>> _loadFromCompletedActivities(
+  BackendApiClient client,
+  ReportFilters filters,
+) async {
+  try {
+    final queryParams = <String>[
+      'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
+      'page=1',
+      'page_size=200',
+    ];
+    if (!_isAllFrontsFilter(filters.frontName)) {
+      queryParams.add('frente=${Uri.encodeQueryComponent(filters.frontName)}');
+    }
+
+    final decoded = await client.getJson(
+      '/api/v1/completed-activities?${queryParams.join('&')}',
+    );
+    if (decoded is! Map<String, dynamic>) return [];
+    final items = decoded['items'] as List<dynamic>? ?? const [];
+
+    final baseItems = items
+        .whereType<Map<String, dynamic>>()
+        .map((raw) {
+          final normalized = Map<String, dynamic>.from(raw);
+          normalized['status'] ??= 'APROBADO';
+          normalized['review_status'] ??= 'APPROVED';
+          normalized['front_name'] ??= normalized['front'];
+          normalized['activity_title'] ??= normalized['title'];
+          normalized['created_at'] =
+              normalized['reviewed_at'] ?? normalized['created_at'] ?? '';
+          return ReportActivityItem.fromJson(normalized);
+        })
+        .where((item) => item.isApprovedForReport)
+        .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
+        .toList(growable: false);
+
+    return _hydrateReportItems(client, baseItems);
+  } catch (_) {
+    return [];
+  }
+}
+
+Future<List<ReportActivityItem>> _hydrateReportItems(
+  BackendApiClient client,
+  List<ReportActivityItem> items,
+) async {
+  if (items.isEmpty) return const [];
+
+  final enriched = await Future.wait(
+    items.map((item) => _hydrateReportItem(client, item)),
+  );
+
+  enriched.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return enriched;
+}
+
+Future<ReportActivityItem> _hydrateReportItem(
+  BackendApiClient client,
+  ReportActivityItem item,
+) async {
+  final needsDetails =
+      (item.purpose?.trim().isNotEmpty != true) ||
+      (item.detail?.trim().isNotEmpty != true) ||
+      (item.agreements?.trim().isNotEmpty != true) ||
+      item.topics.isEmpty ||
+      item.attendees.isEmpty ||
+      item.evidences.isEmpty;
+
+  if (!needsDetails) {
+    return item;
+  }
+
+  try {
+    final decoded = await client.getJson(
+      '/api/v1/completed-activities/${Uri.encodeComponent(item.id)}',
+    );
+    if (decoded is! Map<String, dynamic>) return item;
+
+    final normalized = Map<String, dynamic>.from(decoded);
+    final detailEvidences = (normalized['evidences'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map((evidence) => <String, dynamic>{
+              'id': evidence['id'],
+              'file_path': evidence['gcs_path'] ?? '',
+              'file_type': evidence['type'] ?? 'PHOTO',
+              'caption': evidence['description'] ?? '',
+              'created_at': evidence['uploaded_at'] ?? '',
+            })
+        .toList(growable: false);
+
+    normalized['status'] ??= item.status;
+    normalized['review_decision'] ??= item.reviewDecision;
+    normalized['review_status'] ??=
+        item.reviewStatus ?? (item.isApprovedForReport ? 'APPROVED' : null);
+    normalized['project_id'] ??= item.projectId;
+    normalized['activity_type'] ??= item.activityType;
+    normalized['title'] ??= item.title ?? item.activityType;
+    normalized['pk'] ??= item.pk;
+    normalized['front'] ??= item.frontName;
+    normalized['assigned_name'] ??= item.assignedName;
+    normalized['municipality'] ??= item.municipality;
+    normalized['state'] ??= item.state;
+    normalized['created_at'] ??= item.createdAt;
+    if (detailEvidences.isNotEmpty) {
+      normalized['evidences'] = detailEvidences;
+    }
+
+    final enriched = ReportActivityItem.fromJson(normalized);
+    return enriched.isApprovedForReport ? enriched : item;
+  } catch (_) {
+    return item;
   }
 }
 
@@ -429,7 +651,7 @@ Future<File> generateActivitiesPdf(
 
   final hasTemplate = page1Background != null;
 
-  final approvedItems = items.where((item) => _isApprovedStatus(item.status)).toList();
+  final approvedItems = items.where((item) => item.isApprovedForReport).toList();
   final itemsToRender = approvedItems.isEmpty ? items : approvedItems;
 
   if (itemsToRender.isEmpty) {
@@ -483,7 +705,7 @@ Future<File> generateActivitiesPdf(
           });
         final evidenceLimit = shouldUseTwoPages ? 5 : 2;
         for (final evidence in sortedEvidences.take(evidenceLimit)) {
-          final bytes = await _loadEvidenceBytes(evidence.filePath);
+          final bytes = await _loadEvidenceBytes(evidence);
           resolvedEvidences.add(
             _ResolvedEvidence(
               evidence: evidence,
@@ -495,8 +717,6 @@ Future<File> generateActivitiesPdf(
 
       pdf.addPage(
         pw.MultiPage(
-          pageFormat: PdfPageFormat.a4,
-          margin: firstPageMargin,
           pageTheme: _buildPageTheme(page1Background, firstPageMargin),
           footer: (_) => pw.SizedBox(),
           build: (_) => [
@@ -542,8 +762,6 @@ Future<File> generateActivitiesPdf(
       if (includeAttachments && resolvedEvidences.isNotEmpty && shouldUseTwoPages) {
         pdf.addPage(
           pw.MultiPage(
-            pageFormat: PdfPageFormat.a4,
-            margin: annexPageMargin,
             pageTheme:
               _buildPageTheme(page2Background ?? page1Background, annexPageMargin),
             footer: (_) => pw.SizedBox(),
@@ -552,7 +770,7 @@ Future<File> generateActivitiesPdf(
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    'Anexo Fotográfico - Folio: ${item.id}',
+                    'Anexo fotográfico',
                     style: pw.TextStyle(fontSize: 9, color: _textGray),
                   ),
                   pw.Text(
@@ -718,8 +936,6 @@ pw.Widget _buildTitleRow(ReportActivityItem item, DateTime activityDate) {
                   fontWeight: pw.FontWeight.bold,
                 ),
               ),
-              pw.SizedBox(height: 2),
-              pw.Text('Folio: ${item.id}', style: pw.TextStyle(fontSize: 9, color: _textGray)),
             ],
           ),
         ),
@@ -734,7 +950,6 @@ pw.Widget _buildExecutiveHeader(
   DateTime activityDate,
 ) {
   final dateFmt = DateFormat('dd/MM/yyyy HH:mm', 'es_MX');
-  final risk = _normalizeRisk(item.riskLevel);
 
   return pw.Container(
     padding: const pw.EdgeInsets.all(8),
@@ -775,7 +990,6 @@ pw.Widget _buildExecutiveHeader(
                 ],
               ),
             ),
-            _buildRiskBadge(risk),
           ],
         ),
         pw.SizedBox(height: 6),
@@ -786,7 +1000,7 @@ pw.Widget _buildExecutiveHeader(
             child: pw.Align(
               alignment: pw.Alignment.centerLeft,
               child: pw.Text(
-                'No planeada: ${item.unplannedReason?.trim().isNotEmpty == true ? item.unplannedReason : 'Sin motivo capturado'} · Referencia: ${item.referenceFolio ?? 'N/D'}',
+                'No planeada: ${item.unplannedReason?.trim().isNotEmpty == true ? item.unplannedReason : 'Sin motivo capturado'}',
                 style: pw.TextStyle(fontSize: 8, color: _textDark),
               ),
             ),
@@ -800,7 +1014,9 @@ pw.Widget _buildGeneralData(ReportActivityItem item) {
   final location = [item.municipality, item.state, item.colony]
       .where((v) => (v ?? '').trim().isNotEmpty)
       .join(', ');
-  final cadenamiento = _buildCadenamiento(item);
+  final responsible = item.assignedName?.trim().isNotEmpty == true
+      ? item.assignedName!.trim()
+      : 'Personal operativo';
 
   return pw.Container(
     padding: const pw.EdgeInsets.all(8),
@@ -816,7 +1032,7 @@ pw.Widget _buildGeneralData(ReportActivityItem item) {
         pw.SizedBox(height: 8),
         pw.Row(
           children: [
-            _dataCell('Cadenamiento', cadenamiento),
+            _dataCell('Responsable', responsible),
             _dataCell('Horario atención', _formatTimeRange(item.startTime, item.endTime)),
           ],
         ),
@@ -1104,8 +1320,46 @@ pw.Widget _buildRiskBadge(String risk) {
   );
 }
 
-Future<Uint8List?> _loadEvidenceBytes(String path) async {
-  if (path.trim().isEmpty || path.startsWith('backend://')) return null;
+final _evidenceRepository = EvidenceRepository();
+final Map<String, Future<String?>> _evidenceSourceCache = {};
+
+Future<String?> _resolveEvidenceSource(ReportEvidenceItem evidence) {
+  final rawPath = evidence.filePath.trim();
+  final cacheKey = '${evidence.id}|$rawPath';
+
+  return _evidenceSourceCache.putIfAbsent(cacheKey, () async {
+    if (rawPath.isEmpty) {
+      return null;
+    }
+
+    if (rawPath.startsWith('http://') ||
+        rawPath.startsWith('https://') ||
+        rawPath.startsWith('file://')) {
+      return rawPath;
+    }
+
+    final localFile = File(rawPath);
+    if (await localFile.exists()) {
+      return localFile.path;
+    }
+
+    if (evidence.id.trim().isEmpty) {
+      return null;
+    }
+
+    try {
+      return await _evidenceRepository.getDownloadSignedUrl(evidence.id);
+    } catch (_) {
+      return null;
+    }
+  });
+}
+
+Future<Uint8List?> _loadEvidenceBytes(ReportEvidenceItem evidence) async {
+  final path = await _resolveEvidenceSource(evidence);
+  if (path == null || path.trim().isEmpty) {
+    return null;
+  }
 
   try {
     if (path.startsWith('http://') || path.startsWith('https://')) {
@@ -1125,7 +1379,9 @@ Future<Uint8List?> _loadEvidenceBytes(String path) async {
       return null;
     }
 
-    final file = File(path);
+    final file = path.startsWith('file://')
+        ? File(Uri.parse(path).toFilePath())
+        : File(path);
     if (await file.exists()) {
       return file.readAsBytes();
     }
@@ -1162,10 +1418,14 @@ pw.PageTheme _buildPageTheme(
   pw.EdgeInsetsGeometry margin,
 ) {
   if (background == null) {
-    return pw.PageTheme(margin: margin);
+    return pw.PageTheme(
+      pageFormat: PdfPageFormat.a4,
+      margin: margin,
+    );
   }
 
   return pw.PageTheme(
+    pageFormat: PdfPageFormat.a4,
     margin: margin,
     buildBackground: (_) => pw.FullPage(
       ignoreMargins: true,
@@ -1177,6 +1437,79 @@ pw.PageTheme _buildPageTheme(
 bool _isApprovedStatus(String status) {
   final normalized = status.toUpperCase();
   return normalized == 'APROBADO' || normalized == 'APPROVED';
+}
+
+String _normalizeFieldKey(String key) =>
+    key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+bool _hasMeaningfulValue(dynamic value) {
+  if (value == null) return false;
+  if (value is String) return value.trim().isNotEmpty;
+  if (value is List) return value.isNotEmpty;
+  if (value is Map) return value.isNotEmpty;
+  return true;
+}
+
+dynamic _findInMap(Map<String, dynamic> source, List<String> candidates) {
+  final normalized = <String, dynamic>{};
+  source.forEach((key, value) {
+    normalized[_normalizeFieldKey(key)] = value;
+  });
+
+  for (final candidate in candidates) {
+    final value = normalized[_normalizeFieldKey(candidate)];
+    if (_hasMeaningfulValue(value)) {
+      return value;
+    }
+  }
+  return null;
+}
+
+dynamic _extractNestedValue(Map<String, dynamic> json, List<String> candidates) {
+  final topLevel = _findInMap(json, candidates);
+  if (_hasMeaningfulValue(topLevel)) {
+    return topLevel;
+  }
+
+  final dataFields = json['data_fields'];
+  if (dataFields is Map) {
+    final nested = dataFields.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+    return _findInMap(nested, candidates);
+  }
+  return null;
+}
+
+String _stringifyValue(dynamic value) {
+  if (value == null) return '';
+  if (value is List) {
+    return value
+        .map(_stringifyValue)
+        .where((entry) => entry.isNotEmpty)
+        .join(', ');
+  }
+  if (value is Map) {
+    return value.values
+        .map(_stringifyValue)
+        .where((entry) => entry.isNotEmpty)
+        .join(', ');
+  }
+  final text = value.toString().trim();
+  return text == 'null' ? '' : text;
+}
+
+String? _extractNestedString(Map<String, dynamic> json, List<String> candidates) {
+  final value = _extractNestedValue(json, candidates);
+  final text = _stringifyValue(value);
+  return text.isEmpty ? null : text;
+}
+
+List<String> _extractStringListFromJson(
+  Map<String, dynamic> json,
+  List<String> candidates,
+) {
+  return _parseStringList(_extractNestedValue(json, candidates));
 }
 
 bool _parseBool(dynamic value) {
@@ -1193,9 +1526,15 @@ List<String> _parseStringList(dynamic raw) {
         .where((e) => e.isNotEmpty)
         .toList(growable: false);
   }
+  if (raw is Map) {
+    return raw.values
+        .map((e) => e.toString().trim())
+        .where((e) => e.isNotEmpty)
+        .toList(growable: false);
+  }
   if (raw is String) {
     return raw
-        .split(RegExp(r'[;,|]'))
+        .split(RegExp(r'[\n;,|•]+'))
         .map((e) => e.trim())
         .where((e) => e.isNotEmpty)
         .toList(growable: false);

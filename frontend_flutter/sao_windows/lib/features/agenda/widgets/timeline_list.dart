@@ -1,6 +1,8 @@
 // lib/features/agenda/widgets/timeline_list.dart
 
 import 'package:flutter/material.dart';
+import '../../../core/flow/activity_flow_projection.dart';
+import '../../../core/utils/logger.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../models/agenda_item.dart';
@@ -14,6 +16,8 @@ class TimelineList extends StatefulWidget {
   final int endHour;
   /// Invocado cuando el usuario confirma cancelar una asignación pendiente.
   final void Function(AgendaItem)? onCancelItem;
+  /// Invocado para avanzar estado operativo desde Agenda.
+  final Future<void> Function(AgendaItem)? onAdvanceState;
 
   const TimelineList({
     super.key,
@@ -22,6 +26,7 @@ class TimelineList extends StatefulWidget {
     this.startHour = 7,
     this.endHour = 19,
     this.onCancelItem,
+    this.onAdvanceState,
   });
 
   @override
@@ -141,12 +146,19 @@ class _TimelineListState extends State<TimelineList> {
                         (it) {
                           final resource = widget.resources.firstWhere(
                             (r) => r.id == it.resourceId,
-                            orElse: () => const Resource(
-                              id: 'unknown',
-                              name: 'Desconocido',
-                              role: ResourceRole.tecnico,
-                              isActive: true,
-                            ),
+                            orElse: () {
+                              appLogger.w(
+                                'Timeline: Resource not found for assignment. '
+                                'Searched resourceId="${it.resourceId}" in ${widget.resources.length} available resources. '
+                                'Available IDs: ${widget.resources.map((r) => r.id).toList()}'
+                              );
+                              return const Resource(
+                                id: 'unknown',
+                                name: 'Desconocido',
+                                role: ResourceRole.tecnico,
+                                isActive: true,
+                              );
+                            },
                           );
                           return Padding(
                             padding: const EdgeInsets.fromLTRB(8, 0, 12, 8),
@@ -203,6 +215,7 @@ class _TimelineListState extends State<TimelineList> {
         item: item,
         resource: resource,
         onCancelItem: widget.onCancelItem,
+        onAdvanceState: widget.onAdvanceState,
       ),
     );
   }
@@ -217,11 +230,13 @@ class _ItemDetailSheet extends StatelessWidget {
     required this.item,
     required this.resource,
     this.onCancelItem,
+    this.onAdvanceState,
   });
 
   final AgendaItem item;
   final Resource resource;
   final void Function(AgendaItem)? onCancelItem;
+  final Future<void> Function(AgendaItem)? onAdvanceState;
 
   @override
   Widget build(BuildContext context) {
@@ -299,6 +314,11 @@ class _ItemDetailSheet extends StatelessWidget {
             label:
                 '${item.start.day}/${item.start.month}/${item.start.year}',
           ),
+          const SizedBox(height: 4),
+          _DetailRow(
+            icon: Icons.playlist_add_check_circle_rounded,
+            label: nextActionLabel(item.nextAction),
+          ),
           if (item.notes != null && item.notes!.isNotEmpty) ...[
             const SizedBox(height: 4),
             _DetailRow(
@@ -309,6 +329,21 @@ class _ItemDetailSheet extends StatelessWidget {
           const SizedBox(height: 20),
 
           // Acciones
+          if (onAdvanceState != null) ...[
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                icon: Icon(_agendaActionIconFor(item.nextAction)),
+                label: Text(_agendaActionLabelFor(item.nextAction)),
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await onAdvanceState!(item);
+                },
+              ),
+            ),
+            const SizedBox(height: 8),
+          ],
+
           if (onCancelItem != null) ...[
             if (canCancel)
               SizedBox(
@@ -424,6 +459,33 @@ class _SyncBadge extends StatelessWidget {
         ],
       ),
     );
+  }
+
+}
+
+IconData _agendaActionIconFor(String nextAction) {
+  switch (nextAction.trim().toUpperCase()) {
+    case 'INICIAR_ACTIVIDAD':
+      return Icons.play_arrow_rounded;
+    case 'TERMINAR_ACTIVIDAD':
+    case 'COMPLETAR_WIZARD':
+    case 'CORREGIR_Y_REENVIAR':
+      return Icons.assignment_turned_in_rounded;
+    default:
+      return Icons.open_in_new_rounded;
+  }
+}
+
+String _agendaActionLabelFor(String nextAction) {
+  switch (nextAction.trim().toUpperCase()) {
+    case 'INICIAR_ACTIVIDAD':
+      return 'Iniciar actividad';
+    case 'TERMINAR_ACTIVIDAD':
+    case 'COMPLETAR_WIZARD':
+    case 'CORREGIR_Y_REENVIAR':
+      return 'Abrir captura';
+    default:
+      return 'Abrir actividad';
   }
 }
 

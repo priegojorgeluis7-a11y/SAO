@@ -33,4 +33,8 @@ venv/
 
 # Local artifacts
 *.db
+*.sqlite
+*.sqlite3
 **/cloud-sql-proxy*
+desktop_flutter/sao_desktop/dist/
+sao_desktop_release/

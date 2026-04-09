@@ -7,7 +7,122 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
-VALID_EXECUTION_STATES = ["PENDIENTE", "EN_CURSO", "REVISION_PENDIENTE", "COMPLETADA"]
+VALID_EXECUTION_STATES = ["PENDIENTE", "EN_CURSO", "REVISION_PENDIENTE", "COMPLETADA", "CANCELED"]
+
+VALID_OPERATIONAL_STATES = ["PENDIENTE", "EN_CURSO", "POR_COMPLETAR", "BLOQUEADA", "CANCELADA"]
+VALID_SYNC_STATES = ["LOCAL_ONLY", "READY_TO_SYNC", "SYNC_IN_PROGRESS", "SYNCED", "SYNC_ERROR"]
+VALID_REVIEW_STATES = ["NOT_APPLICABLE", "PENDING_REVIEW", "CHANGES_REQUIRED", "APPROVED", "REJECTED"]
+
+
+def infer_sync_state(
+    sync_state: str | None,
+    *,
+    has_local_changes: bool | None = None,
+    has_sync_error: bool | None = None,
+    sync_in_progress: bool | None = None,
+) -> str:
+    state = str(sync_state or "").strip().upper()
+    if state in VALID_SYNC_STATES:
+        return state
+
+    if has_sync_error:
+        return "SYNC_ERROR"
+    if sync_in_progress:
+        return "SYNC_IN_PROGRESS"
+    if has_local_changes:
+        return "READY_TO_SYNC"
+
+    if state in {"ERROR", "FAILED", "FAILURE"}:
+        return "SYNC_ERROR"
+    if state in {"SYNCING", "IN_PROGRESS"}:
+        return "SYNC_IN_PROGRESS"
+    if state in {"PENDING", "QUEUED", "READY", "LOCAL"}:
+        return "READY_TO_SYNC"
+    return "SYNCED"
+
+
+def infer_review_state(execution_state: str | None, review_decision: str | None) -> str:
+    decision = str(review_decision or "").strip().upper()
+    if decision in {"APPROVE", "APPROVE_EXCEPTION"}:
+        return "APPROVED"
+    if decision == "REJECT":
+        return "REJECTED"
+    if decision in {"CHANGES_REQUIRED", "REQUEST_CHANGES", "REQUIRES_CHANGES"}:
+        return "CHANGES_REQUIRED"
+    if str(execution_state or "").upper() in {"REVISION_PENDIENTE", "COMPLETADA"}:
+        return "PENDING_REVIEW"
+    return "NOT_APPLICABLE"
+
+
+def infer_operational_state(execution_state: str | None) -> str:
+    state = str(execution_state or "").strip().upper()
+    if state == "PENDIENTE":
+        return "PENDIENTE"
+    if state == "EN_CURSO":
+        return "EN_CURSO"
+    if state == "CANCELED":
+        return "CANCELADA"
+    if state in {"REVISION_PENDIENTE", "COMPLETADA"}:
+        return "POR_COMPLETAR"
+    return "PENDIENTE"
+
+
+def infer_next_action(
+    operational_state: str,
+    sync_state: str,
+    review_state: str,
+) -> str:
+    if review_state == "CHANGES_REQUIRED":
+        return "CORREGIR_Y_REENVIAR"
+    if review_state == "PENDING_REVIEW":
+        return "ESPERAR_DECISION_COORDINACION"
+    if review_state == "APPROVED":
+        return "CERRADA_APROBADA"
+    if review_state == "REJECTED":
+        return "CERRADA_RECHAZADA"
+    if sync_state == "SYNC_ERROR":
+        return "REVISAR_ERROR_SYNC"
+    if sync_state == "READY_TO_SYNC":
+        return "SINCRONIZAR_PENDIENTE"
+    if operational_state == "PENDIENTE":
+        return "INICIAR_ACTIVIDAD"
+    if operational_state == "EN_CURSO":
+        return "TERMINAR_ACTIVIDAD"
+    if operational_state == "POR_COMPLETAR":
+        return "COMPLETAR_WIZARD"
+    if operational_state == "CANCELADA":
+        return "CERRADA_CANCELADA"
+    return "SIN_ACCION"
+
+
+def build_canonical_flow_projection(
+    *,
+    execution_state: str | None,
+    review_decision: str | None,
+    sync_state: str | None,
+    has_local_changes: bool | None = None,
+    has_sync_error: bool | None = None,
+    sync_in_progress: bool | None = None,
+) -> dict[str, str]:
+    operational_state = infer_operational_state(execution_state)
+    normalized_sync_state = infer_sync_state(
+        sync_state,
+        has_local_changes=has_local_changes,
+        has_sync_error=has_sync_error,
+        sync_in_progress=sync_in_progress,
+    )
+    review_state = infer_review_state(execution_state, review_decision)
+    next_action = infer_next_action(
+        operational_state=operational_state,
+        sync_state=normalized_sync_state,
+        review_state=review_state,
+    )
+    return {
+        "operational_state": operational_state,
+        "sync_state": normalized_sync_state,
+        "review_state": review_state,
+        "next_action": next_action,
+    }
 
 
 class ActivityBase(BaseModel):
@@ -89,19 +204,35 @@ class ActivityDTO(BaseModel):
     pk_end: int | None = None
     execution_state: str
     review_decision: str | None = Field(None, description="APPROVE | REJECT")
+    review_reject_reason_code: str | None = Field(
+        None,
+        description="Machine-readable reject reason code for corrections",
+    )
+    review_comment: str | None = Field(
+        None,
+        description="Human-readable coordinator comment explaining what to correct",
+    )
     assigned_to_user_id: UUID | None = None
     assigned_to_user_name: str | None = None
     created_by_user_id: UUID
-    catalog_version_id: UUID | None = None
+    catalog_version_id: UUID | str | None = None
     activity_type_code: str
     latitude: str | None = None
     longitude: str | None = None
     title: str | None = None
     description: str | None = None
+    wizard_payload: dict[str, Any] | None = Field(
+        None,
+        description="Structured wizard payload with classification/location metadata",
+    )
     flags: dict[str, bool] = Field(default_factory=lambda: {
         "gps_mismatch": False,
         "catalog_changed": False,
     })
+    operational_state: str = Field("PENDIENTE", description="PENDIENTE | EN_CURSO | POR_COMPLETAR | BLOQUEADA | CANCELADA")
+    sync_state: str = Field("SYNCED", description="LOCAL_ONLY | READY_TO_SYNC | SYNC_IN_PROGRESS | SYNCED | SYNC_ERROR")
+    review_state: str = Field("NOT_APPLICABLE", description="NOT_APPLICABLE | PENDING_REVIEW | CHANGES_REQUIRED | APPROVED | REJECTED")
+    next_action: str = Field("SIN_ACCION", description="Normalized next action for clients")
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
@@ -117,6 +248,19 @@ class ActivityDTO(BaseModel):
             # Pydantic populates __pydantic_fields_set__; the ORM object may
             # expose `.assigned_to.full_name` if the relationship was loaded.
             pass  # resolved via model_post_init below
+        return self
+
+    @model_validator(mode="after")
+    def _hydrate_canonical_flow_projection(self) -> 'ActivityDTO':
+        projection = build_canonical_flow_projection(
+            execution_state=self.execution_state,
+            review_decision=self.review_decision,
+            sync_state=self.sync_state,
+        )
+        self.operational_state = projection["operational_state"]
+        self.sync_state = projection["sync_state"]
+        self.review_state = projection["review_state"]
+        self.next_action = projection["next_action"]
         return self
 
     @classmethod

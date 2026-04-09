@@ -253,6 +253,7 @@ class Activities extends Table {
   DateTimeColumn get finishedAt => dateTime().nullable()();
 
   TextColumn get createdByUserId => text().references(Users, #id)();
+  TextColumn get assignedToUserId => text().nullable().references(Users, #id)(); // Usuario asignado desde backend
 
   // DRAFT | READY_TO_SYNC | SYNCED | ERROR | CANCELED
   TextColumn get status => text().withDefault(const Constant('DRAFT'))();
@@ -295,6 +296,45 @@ class ActivityLog extends Table {
   DateTimeColumn get at => dateTime()();
   TextColumn get userId => text().references(Users, #id)();
   TextColumn get note => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
+// ---------- Asignaciones locales (para flujo de asignación desde mobile) ----------
+class LocalAssignments extends Table {
+  TextColumn get id => text()(); // uuid generado localmente
+  TextColumn get projectId => text().references(Projects, #id)();
+  TextColumn get assigneeUserId => text().references(Users, #id)();
+
+  TextColumn get activityTypeCode => text().withLength(min: 1, max: 50)();
+  TextColumn get title => text().nullable().withLength(max: 200)();
+  TextColumn get description => text().nullable()();
+
+  TextColumn get frontId => text().nullable().references(ProjectSegments, #id)();
+  TextColumn get frontRef => text().nullable().withLength(max: 255)();
+  TextColumn get estado => text().nullable().withLength(max: 100)();
+  TextColumn get municipio => text().nullable().withLength(max: 100)();
+  TextColumn get colonia => text().nullable().withLength(max: 200)();
+
+  IntColumn get pk => integer().withDefault(const Constant(0))();
+  DateTimeColumn get startAt => dateTime()();
+  DateTimeColumn get endAt => dateTime()();
+
+  TextColumn get risk => text().withDefault(const Constant('bajo')).withLength(max: 20)();
+  RealColumn get latitude => real().nullable()();
+  RealColumn get longitude => real().nullable()();
+
+  // DRAFT | READY_TO_SYNC | SYNCED | ERROR | CANCELED
+  TextColumn get syncStatus => text().withDefault(const Constant('DRAFT'))();
+  TextColumn get syncError => text().nullable()();
+  IntColumn get syncRetryCount => integer().withDefault(const Constant(0))();
+
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get updatedAt => dateTime()();
+  DateTimeColumn get syncedAt => dateTime().nullable()();
+
+  TextColumn get backendActivityId => text().nullable()(); // uuid if synced
 
   @override
   Set<Column> get primaryKey => {id};
@@ -364,6 +404,9 @@ class SyncQueue extends Table {
   IntColumn get priority => integer().withDefault(const Constant(50))();
   IntColumn get attempts => integer().withDefault(const Constant(0))();
   DateTimeColumn get lastAttemptAt => dateTime().nullable()();
+  TextColumn get errorCode => text().nullable()();
+  BoolColumn get retryable => boolean().withDefault(const Constant(true))();
+  TextColumn get suggestedAction => text().nullable()();
   TextColumn get lastError => text().nullable()();
 
   // PENDING | IN_PROGRESS | DONE | ERROR

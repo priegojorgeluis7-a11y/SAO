@@ -1,29 +1,32 @@
 from datetime import datetime, timezone
+import hashlib
+import json
+import logging
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
 
 from app.api.deps import require_any_role
 from app.core.firestore import get_firestore_client
+from app.core.utils import parse_firestore_dt
 from typing import Any
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/reports", tags=["reports"])
 
+_ALL_FRONTS = {"todos", "todo", "all", "*"}
+
 
 def _parse_dt(value: object) -> datetime | None:
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str):
-        raw = value.strip()
-        if not raw:
-            return None
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        try:
-            parsed = datetime.fromisoformat(raw)
-            return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    return None
+    return parse_firestore_dt(value)
+
+
+def _report_dt(doc: dict) -> datetime | None:
+    return (
+        _parse_dt(doc.get("last_reviewed_at"))
+        or _parse_dt(doc.get("updated_at"))
+        or _parse_dt(doc.get("created_at"))
+    )
 
 
 def _risk_from_activity(doc: dict) -> str:
@@ -40,12 +43,14 @@ def _risk_from_activity(doc: dict) -> str:
 def _review_status_from_activity(doc: dict) -> str:
     decision = str(doc.get("review_decision") or "").upper()
     if decision == "REJECT":
-        return "RECHAZADO"
+        return "REJECTED"
     if decision in {"APPROVE", "APPROVE_EXCEPTION"}:
-        return "APROBADO"
+        return "APPROVED"
+    if decision in {"CHANGES_REQUIRED", "REQUEST_CHANGES", "REQUIRES_CHANGES"}:
+        return "CHANGES_REQUIRED"
     if str(doc.get("execution_state") or "") == "REVISION_PENDIENTE":
-        return "PENDIENTE_REVISION"
-    return "PENDIENTE_REVISION"
+        return "PENDING_REVIEW"
+    return "PENDING_REVIEW"
 
 
 def _build_users_map(client) -> dict[str, str]:
@@ -60,6 +65,35 @@ def _build_users_map(client) -> dict[str, str]:
     return users_map
 
 
+def _load_front_names(client, front_ids: set[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for front_id in front_ids:
+        if not front_id:
+            continue
+        snap = client.collection("fronts").document(front_id).get()
+        if not snap.exists:
+            continue
+        result[front_id] = str((snap.to_dict() or {}).get("name") or "")
+    return result
+
+
+def _load_user_names(client, user_ids: set[str]) -> dict[str, str]:
+    if not user_ids:
+        return {}
+    result: dict[str, str] = {}
+    for user_id in user_ids:
+        if not user_id:
+            continue
+        snap = client.collection("users").document(user_id).get()
+        if not snap.exists:
+            continue
+        payload = snap.to_dict() or {}
+        name = str(payload.get("display_name") or payload.get("name") or payload.get("email") or "").strip()
+        if name:
+            result[user_id] = name
+    return result
+
+
 @router.get("/activities")
 def list_report_activities(
     project_id: str | None = Query(None),
@@ -67,25 +101,25 @@ def list_report_activities(
     date_from: datetime | None = Query(None),
     date_to: datetime | None = Query(None),
     status: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD"])),
 ):
     client = get_firestore_client()
 
-    # Build front_id -> name lookup from Firestore fronts collection
-    fronts_map: dict[str, str] = {}
-    for doc in client.collection("fronts").stream():
-        d = doc.to_dict() or {}
-        fid = str(d.get("id") or doc.id)
-        fronts_map[fid] = str(d.get("name") or "")
-    users_map = _build_users_map(client)
-
-    docs = [d.to_dict() or {} for d in client.collection("activities").stream()]
-
-    front_filter = front.strip().lower() if front and front.strip() else None
+    front_raw = front.strip().lower() if front and front.strip() else None
+    front_filter = None if front_raw in _ALL_FRONTS else front_raw
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
     status_filter = status.strip().upper() if status and status.strip() else None
 
-    items: list[dict] = []
+    query = client.collection("activities")
+    if project_filter:
+        query = query.where("project_id", "==", project_filter)
+    docs = [d.to_dict() or {} for d in query.stream()]
+
+    candidate_docs: list[dict[str, Any]] = []
+    front_ids: set[str] = set()
+    user_ids: set[str] = set()
     for doc in docs:
         if doc.get("deleted_at") is not None:
             continue
@@ -93,11 +127,21 @@ def list_report_activities(
             continue
         if status_filter and str(doc.get("execution_state") or "") != status_filter:
             continue
-        created_dt = _parse_dt(doc.get("created_at"))
-        if date_from and (created_dt is None or created_dt < date_from):
+        report_dt = _report_dt(doc)
+        if date_from and (report_dt is None or report_dt < date_from):
             continue
-        if date_to and (created_dt is None or created_dt > date_to):
+        if date_to and (report_dt is None or report_dt > date_to):
             continue
+        candidate_docs.append(doc)
+        front_ids.add(str(doc.get("front_id") or "").strip())
+        user_ids.add(str(doc.get("assigned_to_user_id") or "").strip())
+
+    fronts_map = _load_front_names(client, front_ids)
+    users_map = _load_user_names(client, user_ids)
+
+    items: list[dict] = []
+    for doc in candidate_docs:
+        created_dt = _report_dt(doc)
         front_id = str(doc.get("front_id") or "")
         front_name = fronts_map.get(front_id, "")
         assigned_to_user_id = str(doc.get("assigned_to_user_id") or "").strip()
@@ -129,12 +173,18 @@ def list_report_activities(
         )
 
     items.sort(key=lambda x: x["created_at"], reverse=True)
-    items = items[:1000]
+    total = len(items)
+    start = (page - 1) * page_size
+    items = items[start : start + page_size]
 
     return {
         "meta": {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "generated_by": str(_current_user.id),
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+            "has_next": start + len(items) < total,
             "filters": {
                 "project_id": project_id,
                 "front": front,
@@ -145,3 +195,104 @@ def list_report_activities(
         },
         "items": items,
     }
+
+
+@router.post("/generate", status_code=status.HTTP_200_OK)
+def generate_auditab_report(
+    project_id: str = Query(..., min_length=1),
+    date_from: str | None = Query(None),
+    date_to: str | None = Query(None),
+    status_filter: str | None = Query(None),
+    front_id: str | None = Query(None),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "LECTOR"])),
+):
+    """
+    Generate auditable report with hash verification.
+    
+    Response includes hash for verification that backend data matches exported PDF/CSV.
+    """
+    try:
+        client = get_firestore_client()
+        now = datetime.now(timezone.utc)
+        trace_id = f"report-{now.timestamp()}-{current_user.id}"
+
+        project_id_upper = project_id.strip().upper()
+        
+        query = client.collection("activities").where("project_id", "==", project_id_upper)
+
+        if status_filter:
+            query = query.where("execution_state", "==", status_filter.strip().upper())
+
+        if front_id:
+            query = query.where("front_id", "==", front_id.strip())
+
+        if date_from:
+            query = query.where("created_at", ">=", date_from)
+        if date_to:
+            query = query.where("created_at", "<=", date_to)
+
+        docs = list(query.stream())
+        activities = [doc.to_dict() for doc in docs if doc.to_dict()]
+
+        report_data = []
+        for activity in activities:
+            report_data.append({
+                "uuid": activity.get("uuid"),
+                "project_id": activity.get("project_id"),
+                "execution_state": activity.get("execution_state"),
+                "activity_type_code": activity.get("activity_type_code"),
+                "title": activity.get("title"),
+                "pk_start": activity.get("pk_start"),
+                "created_at": activity.get("created_at"),
+                "assigned_to_user_id": activity.get("assigned_to_user_id"),
+            })
+
+        # Compute hash for verification
+        hashable_content = json.dumps(
+            {
+                "data": report_data,
+                "generated_at": now.isoformat(),
+                "generated_by": str(current_user.id),
+                "filters": {
+                    "project_id": project_id_upper,
+                    "date_from": date_from,
+                    "date_to": date_to,
+                    "status_filter": status_filter,
+                    "front_id": front_id,
+                },
+            },
+            sort_keys=True,
+        )
+        report_hash = hashlib.sha256(hashable_content.encode()).hexdigest()
+
+        # Audit log
+        write_firestore_audit_log(
+            user_id=str(current_user.id),
+            action="REPORT_GENERATE",
+            resource_type="Report",
+            resource_id=trace_id,
+            project_id=project_id_upper,
+            changes={
+                "generated_at": now.isoformat(),
+                "report_hash": report_hash,
+                "activity_count": len(report_data),
+            },
+            details=f"Report generated by {current_user.full_name}",
+        )
+
+        _logger.info(f"Report generated: project={project_id_upper}, activities={len(report_data)}, hash={report_hash[:16]}...")
+
+        return {
+            "trace_id": trace_id,
+            "generated_at": now.isoformat(),
+            "generated_by_user_id": str(current_user.id),
+            "project_id": project_id_upper,
+            "data": report_data,
+            "count": len(report_data),
+            "hash": report_hash,
+            "hash_algorithm": "SHA256",
+        }
+
+    except Exception as e:
+        _logger.error(f"Error generating report: {e}")
+        raise

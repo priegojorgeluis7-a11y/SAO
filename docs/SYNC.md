@@ -1,320 +1,234 @@
 # SAO — Sync Architecture
-**Versión:** 1.0.0 | **Fecha:** 2026-03-04
+**Version:** 2.0.0 | **Fecha:** 2026-03-24
+
+## Objetivo
+
+Definir el contrato tecnico de sincronizacion para actividades, eventos y evidencias, alineado con el flujo canonico del sistema.
+
+Documento relacionado:
+
+- `docs/WORKFLOW.md`
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
 
 ---
 
-## 1. Visión General
+## 1. Principios de sync
 
-```
-MOBILE (Offline-First)              BACKEND (Source of Truth)
-─────────────────────               ──────────────────────────
-   [Formulario]
-       │
-       ▼
-   Drift SyncQueue ──PUSH──► POST /sync/push ──► PostgreSQL
-   (PENDING/ERROR)                                    │
-                                                      │
-   Drift Activities ◄──PULL──── POST /sync/pull ◄────┘
-   (actualizado)          [cursor since_version]
-       │
-       ▼
-   Evidences Queue ──PRESIGN──► POST /evidences/upload-init
-       │                                    │ signed_url
-       └──UPLOAD────────────────────────────►GCS
-       └──CONFIRM──► POST /evidences/upload-complete
-```
+1. Offline-first: toda captura valida se conserva localmente antes de cualquier llamada de red.
+2. Idempotencia por UUID: push repetidos no deben duplicar registros.
+3. Consistencia incremental: pull por cursor/version para evitar full refresh costoso.
+4. Errores accionables: cada fallo debe indicar si se reintenta solo o requiere accion humana.
+5. Visibilidad estable: una actividad no debe perderse por desalineacion de version o assignee.
 
 ---
 
-## 2. Outbox Queue (Mobile)
+## 2. Flujo de sincronizacion end-to-end
 
-### 2.1 Tabla `SyncQueue` (Drift)
+## 2.1 Vista general
 
-```dart
-class SyncQueue extends Table {
-  TextColumn get id        => text()();          // UUID
-  TextColumn get entity    => text()();          // 'ACTIVITY' | 'EVENT' | 'EVIDENCE'
-  TextColumn get entityId  => text()();          // UUID de la entidad
-  TextColumn get action    => text()();          // 'UPSERT' | 'DELETE'
-  TextColumn get payloadJson => text()();        // JSON serializado
-  IntColumn  get priority  => integer()();       // 0 = alta, 9 = baja
-  IntColumn  get attempts  => integer()();
-  TextColumn get status    => text()();          // PENDING | IN_PROGRESS | DONE | ERROR
-  DateTimeColumn get lastAttemptAt => dateTime().nullable()();
-  TextColumn get lastError => text().nullable()();
-}
+```
+MOBILE (Drift)                           BACKEND (Source of Truth)
+-----------------                        -------------------------
+Activity/Wizard
+   -> SyncQueue (UPSERT/DELETE)
+   -> push /api/v1/sync/push ---------------------------->
+   <- per-item result (CREATED/UPDATED/UNCHANGED/CONFLICT)
+
+Metadata cursor local
+   -> pull /api/v1/sync/pull ---------------------------->
+   <- activities/events + current_version + pagination
+
+PendingUploads
+   -> /api/v1/evidences/upload-init
+   -> PUT signed URL
+   -> /api/v1/evidences/upload-complete
 ```
 
-### 2.2 Flujo de encolado
+## 2.2 Orden recomendado del ciclo
 
-1. Usuario completa formulario → Activity guardada en Drift con `status = DRAFT`.
-2. Usuario presiona "Enviar" → Activity pasa a `READY_TO_SYNC` y se encola en `SyncQueue` (action=UPSERT, status=PENDING).
-3. `AutoSyncService` detecta conectividad o dispara por timer → llama `SyncService.pushPendingChanges()`.
+1. push de actividades y eventos pendientes
+2. pull incremental por cursor
+3. sync de uploads pendientes
+4. actualizacion de metadata de sync (version/cursor/last_sync)
 
 ---
 
-## 3. Push Sync (Mobile → Backend)
+## 3. Modelo de estados de sync
 
-### 3.1 Implementación actual
+Para UX y observabilidad se recomienda converger a estos estados funcionales:
 
-**Archivo:** `lib/features/sync/services/sync_service.dart`
+- `LOCAL_ONLY`
+- `READY_TO_SYNC`
+- `SYNC_IN_PROGRESS`
+- `SYNCED`
+- `SYNC_ERROR`
 
-```
-pushPendingChanges():
-  1. Query SyncQueue WHERE entity='ACTIVITY' AND status IN ('PENDING','ERROR')
-  2. Deserializar payloadJson → ActivityDTO
-  3. Agrupar por project_id
-  4. Por cada grupo: POST /sync/push { project_id, activities: [...] }
-  5. Procesar respuesta por ítem:
-     CREATED   → SyncQueue.status = DONE, Activity.status = SYNCED
-     UPDATED   → SyncQueue.status = DONE, Activity.status = SYNCED
-     UNCHANGED → SyncQueue.status = DONE
-     CONFLICT  → SyncQueue.status = ERROR, Activity.status = ERROR
-  6. Push EVENTs: POST /api/v1/events/{uuid} (idempotente por UUID)
-  7. Actualizar SyncState.lastSyncAt
-```
-
-### 3.2 Endpoint backend
-
-```
-POST /api/v1/sync/push
-Authorization: Bearer {token}
-
-{
-  "project_id": "TMQ",
-  "activities": [
-    {
-      "uuid": "...",
-      "project_id": "TMQ",
-      "execution_state": "EN_CURSO",
-      "pk_start": 123.5,
-      "pk_end": 124.0,
-      "sync_version": 0,
-      ...
-    }
-  ]
-}
-
-Response:
-{
-  "results": [
-    { "uuid": "...", "status": "CREATED", "server_id": 42, "sync_version": 1 },
-    { "uuid": "...", "status": "CONFLICT", "conflict_version": 2 }
-  ],
-  "current_version": 7
-}
-```
-
-### 3.3 Lógica de idempotencia (backend)
-
-- Si `uuid` ya existe: compara `sync_version` del cliente vs servidor.
-  - `client_version >= server_version` → UPDATE → `UPDATED`
-  - `client_version < server_version` → Retorna `CONFLICT` (servidor tiene versión más nueva)
-- Si `uuid` no existe → INSERT → `CREATED`
+Nota: las tablas locales pueden conservar estados tecnicos internos (`PENDING`, `DONE`, `ERROR`) siempre que la UI exponga el modelo funcional.
 
 ---
 
-## 4. Pull Sync (Backend → Mobile)
+## 4. Push (mobile -> backend)
 
-### 4.1 Estado actual: PARCIALMENTE IMPLEMENTADO
+## 4.1 Contrato
 
-El orquestrador `sync_orchestrator.dart` existe pero el pull real desde backend no está implementado.
+Endpoint:
 
-### 4.2 Diseño target
+- `POST /api/v1/sync/push`
 
-```
-POST /api/v1/sync/pull
-{
-  "project_id": "TMQ",
-  "since_version": 5,      // cursor: última versión conocida
-  "limit": 100             // paginación
-}
+Requisitos:
 
-Response:
-{
-  "activities": [...],     // activities con sync_version > since_version
-  "current_version": 12,
-  "has_more": false
-}
-```
+1. Batch por proyecto.
+2. Idempotencia por `uuid`.
+3. Respuesta por item con estado y version resultante.
+4. Manejo explicito de conflictos.
 
-### 4.3 Implementación pendiente (mobile)
+Estados por item esperados:
 
-```dart
-// En SyncService o SyncOrchestrator:
-Future<void> pullChanges(String projectId) async {
-  final sinceVersion = await _db.syncMetadata.getSinceVersion(projectId);
-  final response = await _syncApiRepo.pull(projectId, sinceVersion);
+- `CREATED`
+- `UPDATED`
+- `UNCHANGED`
+- `CONFLICT`
+- `ERROR` (fallo no recuperable de validacion/permiso)
 
-  for (final activity in response.activities) {
-    await _db.activities.upsertFromServer(activity);
-  }
+## 4.2 Reglas de versionado
 
-  await _db.syncMetadata.saveSinceVersion(projectId, response.currentVersion);
-
-  if (response.hasMore) {
-    await pullChanges(projectId); // next page
-  }
-}
-```
+1. Si la version cliente es compatible con servidor: aplicar update.
+2. Si la version cliente es menor: marcar conflicto.
+3. Toda mutacion relevante debe incrementar version del servidor.
 
 ---
 
-## 5. Evidencias (Upload Flow)
+## 5. Pull (backend -> mobile)
 
-### 5.1 Tabla `PendingUploads` (Drift)
+## 5.1 Contrato
 
-```dart
-class PendingUploads extends Table {
-  TextColumn get id          => text()();    // UUID
-  TextColumn get activityId  => text()();
-  TextColumn get localPath   => text()();    // ruta local del archivo
-  TextColumn get fileName    => text()();
-  TextColumn get mimeType    => text()();
-  IntColumn  get sizeBytes   => integer()();
-  TextColumn get evidenceId  => text().nullable()();  // asignado tras upload-init
-  TextColumn get objectPath  => text().nullable()();  // ruta en GCS
-  TextColumn get signedUrl   => text().nullable()();  // pre-signed URL (15min)
-  TextColumn get status      => text()();    // PENDING_INIT | PENDING_UPLOAD | PENDING_COMPLETE | DONE | ERROR
-  IntColumn  get attempts    => integer()();
-  DateTimeColumn get nextRetryAt => dateTime().nullable()();
-}
-```
+Endpoint:
 
-### 5.2 Flujo de 3 pasos
+- `POST /api/v1/sync/pull`
 
-```
-[1] PENDING_INIT
-POST /evidences/upload-init
-  { activity_id, file_name, mime_type, size_bytes }
-Response: { evidence_id, signed_url, object_path }
-  → Guarda evidence_id, signed_url, object_path
-  → Status: PENDING_UPLOAD
+Parametros esperados:
 
-[2] PENDING_UPLOAD
-PUT {signed_url} (binario directo a GCS)
-  → Status: PENDING_COMPLETE
+- `project_id`
+- cursor de version (y cursor secundario cuando aplique)
+- `limit`
 
-[3] PENDING_COMPLETE
-POST /evidences/upload-complete
-  { evidence_id, object_path }
-Response: { success: true }
-  → Status: DONE
-```
+Respuesta esperada:
 
-### 5.3 Retry logic
+- items actualizados desde cursor
+- `current_version`
+- indicador de paginacion (`has_more` o equivalente)
 
-- `attempts` se incrementa en cada fallo.
-- `nextRetryAt = now + backoff(attempts)` — backoff exponencial.
-- Máx intentos: 5 (configurable).
-- Signed URLs expiran en 15 minutos → si `nextRetryAt > signed_url_expiry`, reiniciar desde PENDING_INIT.
+## 5.2 Regla de consistencia
+
+El cliente no debe avanzar cursor local hasta aplicar en Drift todos los cambios del bloque actual.
 
 ---
 
-## 6. Sync de Catálogo
+## 6. Evidencias (upload en 3 pasos)
 
-### 6.1 Estado actual
+1. `POST /api/v1/evidences/upload-init`
+2. `PUT signed_url` a storage
+3. `POST /api/v1/evidences/upload-complete`
 
-- Mobile descarga bundle completo en `loadProjectBundle()`.
-- No usa `GET /catalog/diff` incremental.
+Reglas:
 
-### 6.2 Diseño target (diff incremental)
-
-```dart
-Future<void> syncCatalog(String projectId) async {
-  final localHash = await _db.catalogVersions.getHash(projectId);
-  final check = await _apiClient.get('/catalog/check-updates?hash=$localHash');
-
-  if (!check.updateAvailable) return; // ya actualizado
-
-  if (check.diffAvailable) {
-    // Descarga solo los cambios
-    final diff = await _apiClient.get('/catalog/diff?from=$localHash');
-    await _db.catalog.applyDiff(diff);
-  } else {
-    // Descarga bundle completo
-    final bundle = await _apiClient.get('/catalog/bundle?project_id=$projectId');
-    await _db.catalog.replaceBundle(bundle);
-  }
-}
-```
+1. `upload-init` valida tipo y tamano permitido.
+2. Reintentos deben respetar expiracion de signed URL.
+3. Si la URL expira, reiniciar desde `upload-init`.
 
 ---
 
-## 7. Auto-Sync Service
+## 7. Manejo de conflictos
 
-**Archivo:** `lib/features/sync/services/auto_sync_service.dart`
+El conflicto es una condicion funcional del flujo, no solo un error tecnico.
 
-```
-AutoSyncService:
-  onInit():
-    ├── subscribeToConnectivity()
-    │     ↳ si online: trigger sync inmediato
-    └── Timer.periodic(Duration(minutes: 15))
-          ↳ cada 15 min: pushPendingChanges() + pullChanges()
+Politica recomendada:
 
-onConnectivityChange(status):
-  if (status == online && wasOffline):
-    await pushPendingChanges()
-    await pullChanges()
-    await syncPendingUploads()
-```
+1. Primer conflicto: reintento controlado si existe estrategia segura (`force_override`) definida por negocio.
+2. Persistencia de conflicto: marcar `SYNC_ERROR` con accion sugerida.
+3. Exponer al usuario opcion de resolver: usar version local o adoptar version servidor.
 
----
+Campos minimos de respuesta para conflicto:
 
-## 8. Manejo de Conflictos
-
-### 8.1 Estado actual (mobile)
-
-- Backend retorna `CONFLICT` en push.
-- Mobile marca la actividad con `status = ERROR` en Drift.
-- **No hay UI de resolución.** El usuario no sabe qué hacer.
-
-### 8.2 Diseño target
-
-**Política:** Last-Write-Wins con confirmación del usuario en conflictos explícitos.
-
-```
-Conflicto detectado:
-  → Mostrar dialog: "Esta actividad fue modificada por otro usuario"
-  → Opciones:
-     [Usar mi versión]  → reenviar con force_override=true
-     [Usar versión del servidor] → descartar cambios locales, pull de esa actividad
-     [Ver diferencias] → diff screen (opcional, fase avanzada)
-```
-
-**Endpoint adicional necesario:**
-```
-POST /sync/push
-{
-  "activities": [...],
-  "conflict_resolution": "force" | "skip"
-}
-```
+- `code`: `CONFLICT`
+- `server_version`
+- `client_version`
+- `retryable`
+- `suggested_action`
 
 ---
 
-## 9. Métricas de Sync
+## 8. Errores tipificados
 
-El `SyncCenterPage` (mobile) debe mostrar:
+Toda respuesta de error de sync debe incluir al menos:
 
-| Métrica | Fuente |
-|---------|--------|
-| Último sync exitoso | `SyncState.lastSyncAt` |
-| Items pendientes | `COUNT(SyncQueue WHERE status=PENDING)` |
-| Uploads pendientes | `COUNT(PendingUploads WHERE status!=DONE)` |
-| Items en error | `COUNT(SyncQueue WHERE status=ERROR)` |
-| Conflictos activos | `COUNT(Activities WHERE status=ERROR)` |
+- `code`
+- `message`
+- `retryable` (true/false)
+- `suggested_action`
+
+Categorias recomendadas:
+
+- `NETWORK_UNAVAILABLE`
+- `AUTH_EXPIRED`
+- `PERMISSION_DENIED`
+- `VALIDATION_FAILED`
+- `CONFLICT`
+- `CATALOG_MISMATCH`
+- `PAYLOAD_INVALID`
 
 ---
 
-## 10. Gaps y Deuda Técnica
+## 9. Auto-sync
 
-| Gap | Prioridad | Plan |
-|-----|-----------|------|
-| Pull sync no implementado | ALTA | F3 del plan de implementación |
-| Conflictos sin UI de resolución | ALTA | F3 |
-| Pull incremental de eventos | MEDIA | F3 |
-| Diff incremental de catálogo | MEDIA | F3 |
-| Desktop sin outbox (sin offline) | ALTA | F3 |
-| Retry backoff no configurable | BAJA | F5 |
+Trigger recomendados:
+
+1. cambio offline -> online
+2. timer periodico
+3. accion manual desde Sync Center
+
+Orden recomendado por corrida:
+
+1. push pendientes
+2. pull incremental
+3. upload evidencias
+4. refresh metricas de sync
+
+---
+
+## 10. Integracion con asignaciones y visibilidad
+
+Para evitar actividades invisibles despues de sync:
+
+1. asignaciones deben actualizar version de sync del registro afectado
+2. responsable efectivo de actividad debe persistirse de forma explicita
+3. cancelaciones deben usar semantica terminal clara (estado o soft-delete)
+
+---
+
+## 11. Metricas operativas de sync
+
+Sync Center debe mostrar como minimo:
+
+1. ultimo sync exitoso
+2. pendientes por enviar
+3. items en progreso
+4. errores por categoria
+5. conflictos activos
+6. uploads pendientes
+
+KPIs recomendados de proceso:
+
+1. tiempo captura -> sync exitosa
+2. tasa de reintentos
+3. tasa de conflicto
+4. tasa de error no recuperable
+
+---
+
+## 12. Pendientes y roadmap
+
+El roadmap de endurecimiento de sync y flujo se mantiene en:
+
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md`
+- `docs/BACKLOG_MEJORA_FLUJO_2026-03-24.md`

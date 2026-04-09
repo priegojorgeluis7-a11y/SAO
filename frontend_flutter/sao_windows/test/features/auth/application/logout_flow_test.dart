@@ -3,6 +3,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sao_windows/core/auth/token_storage.dart';
 import 'package:sao_windows/core/network/api_client.dart';
+import 'package:sao_windows/core/services/biometric_service.dart';
 import 'package:sao_windows/core/storage/kv_store.dart';
 import 'package:sao_windows/features/auth/application/auth_controller.dart';
 import 'package:sao_windows/features/auth/data/auth_repository.dart';
@@ -129,6 +130,19 @@ class _FakeAuthRepository extends AuthRepository {
   Future<BootstrapResult> bootstrap() async => BootstrapResult.unauthenticated;
 }
 
+class _StubBiometricService extends BiometricService {
+  @override
+  Future<bool> hasBiometricCredentials() async => true;
+
+  @override
+  Future<bool> authenticate({
+    required String localizedReason,
+    bool useErrorDialogs = true,
+    bool stickyAuth = true,
+    bool biometricOnly = true,
+  }) async => true;
+}
+
 void main() {
   group('Logout flow', () {
     test('logout clears local session even when revoke call fails', () async {
@@ -168,7 +182,10 @@ void main() {
         tokenStorage: tokenStorage,
         kvStore: kvStore,
       );
-      final controller = AuthController(repository);
+      final controller = AuthController(
+        repository,
+        biometricService: _StubBiometricService(),
+      );
 
       await controller.login('test@sao.dev', '123456');
       expect(controller.state.isAuthenticated, isTrue);

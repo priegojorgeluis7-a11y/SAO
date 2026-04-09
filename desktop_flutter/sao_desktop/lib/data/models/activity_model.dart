@@ -11,6 +11,10 @@ class ActivityWithDetails {
   final ActivityFlags flags;
   final String? pkLabel;
   final Map<String, dynamic>? wizardPayload;
+  final String? operationalState;
+  final String? syncState;
+  final String? reviewState;
+  final String? nextAction;
 
   ActivityWithDetails({
     required this.activity,
@@ -22,6 +26,10 @@ class ActivityWithDetails {
     this.flags = const ActivityFlags(),
     this.pkLabel,
     this.wizardPayload,
+    this.operationalState,
+    this.syncState,
+    this.reviewState,
+    this.nextAction,
   });
 
   String get statusLabel {

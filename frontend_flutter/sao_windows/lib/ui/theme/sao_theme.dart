@@ -114,17 +114,62 @@ class SaoTheme {
         ),
       ),
 
+      textButtonTheme: TextButtonThemeData(
+        style: ButtonStyle(
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return SaoColors.gray500;
+            }
+            return SaoColors.primary;
+          }),
+          textStyle: const WidgetStatePropertyAll(TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          )),
+        ),
+      ),
+
       outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          foregroundColor: SaoColors.primary,
-          side: const BorderSide(color: SaoColors.border),
-          padding: const EdgeInsets.symmetric(
+        style: ButtonStyle(
+          foregroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return SaoColors.gray500;
+            }
+            return SaoColors.primary;
+          }),
+          iconColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return SaoColors.gray500;
+            }
+            return SaoColors.primary;
+          }),
+          backgroundColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return SaoColors.gray100;
+            }
+            return Colors.white;
+          }),
+          side: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.disabled)) {
+              return const BorderSide(color: SaoColors.gray200);
+            }
+            return const BorderSide(color: SaoColors.border);
+          }),
+          padding: const WidgetStatePropertyAll(EdgeInsets.symmetric(
             horizontal: SaoSpacing.xxl,
             vertical: SaoSpacing.md,
+          )),
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(SaoRadii.md),
+            ),
           ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(SaoRadii.md),
-          ),
+          textStyle: const WidgetStatePropertyAll(TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          )),
         ),
       ),
 
@@ -133,6 +178,7 @@ class SaoTheme {
       // ============================================================
       chipTheme: ChipThemeData(
         backgroundColor: SaoColors.gray50,
+        disabledColor: SaoColors.gray100,
         selectedColor: SaoColors.primary.withValues(alpha: 0.12),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(SaoRadii.sm),
@@ -141,6 +187,7 @@ class SaoTheme {
         labelStyle: const TextStyle(
           fontSize: 13,
           fontWeight: FontWeight.w600,
+          color: SaoColors.gray800,
         ),
       ),
 

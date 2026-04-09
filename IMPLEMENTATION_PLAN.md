@@ -288,6 +288,53 @@ Ver AUDIT_REPORT.md §1.2 y DESIGN_TOKENS.md §6. Reemplazar ~50 instancias con 
 
 ---
 
+## Addendum 2026-03-24 - Mejora del Flujo del Sistema
+
+**Contexto:** El plan F0-F5 resolvio la mayor parte de la deuda funcional y tecnica base. El siguiente salto no es agregar modulos aislados, sino endurecer el flujo operativo completo para que asignacion, captura, sync y revision formen una sola historia de negocio.
+
+**Objetivo del addendum:** mejorar la claridad del flujo para operativo y coordinacion, reducir estados ambiguos y volver accionables los errores de sync y las devoluciones de revision.
+
+### Enfoque
+
+1. Separar de forma explicita estado operativo, estado de sync y estado de revision.
+2. Redisenar la experiencia visible alrededor de tareas y no de estados tecnicos.
+3. Hacer recuperable el wizard en cualquier paso con guardado incremental.
+4. Estructurar la devolucion de revision para que sea corregible en un solo ciclo.
+5. Medir el flujo con KPIs operativos y no solo con conteos tecnicos.
+
+### Lineas de trabajo
+
+| Prioridad | Linea | Resultado esperado |
+|-----------|-------|--------------------|
+| P0 | Contrato unico de flujo | Backend, mobile y desktop consumen la misma proyeccion de estado |
+| P1 | Home + Sync Center orientados a tareas | El operativo siempre ve su siguiente accion |
+| P1 | Wizard incremental y recuperable | Ningun avance se pierde y el sistema explica faltantes |
+| P1 | Revision estructurada | La devolucion llega con motivo, campo afectado y accion sugerida |
+| P2 | Asignacion y visibilidad robustas | Ninguna actividad desaparece por detalles de sync o assignee |
+| P2 | KPIs operativos | Dashboard y reportes muestran salud real del flujo |
+
+### Entregables canonicos
+
+- `docs/PLAN_MEJORA_FLUJO_2026-03-24.md` - plan ejecutivo y tecnico de mejora del flujo.
+- `docs/BACKLOG_MEJORA_FLUJO_2026-03-24.md` - backlog tecnico accionable por capa y carpeta del repositorio.
+
+### Criterios de exito
+
+1. El operativo puede identificar su siguiente accion sin interpretar estados internos.
+2. Una actividad puede seguirse sin ambiguedad desde asignacion hasta aprobacion.
+3. Los errores de sync informan causa, reintento automatico y accion manual si aplica.
+4. Las devoluciones de revision llegan como correcciones accionables y no como texto libre ambiguo.
+5. Dashboard y reportes se alimentan de KPIs del flujo, no solo de la cola de revision.
+
+### Secuencia recomendada
+
+1. Sprint 1: contrato unico de flujo + Home/Sync Center orientados a tareas.
+2. Sprint 2: wizard incremental + devolucion estructurada de revision.
+3. Sprint 3: endurecimiento de asignaciones + visibilidad + KPIs.
+4. Sprint 4: hardening, regresion E2E y limpieza documental final.
+
+---
+
 ## Diagrama de Dependencias entre Fases
 
 ```

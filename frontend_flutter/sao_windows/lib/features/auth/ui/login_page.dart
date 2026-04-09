@@ -25,12 +25,32 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
   bool _tutorialMode = false;
+  bool _biometricReady = false;
+  bool _biometricEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadBiometricState();
+  }
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadBiometricState() async {
+    final notifier = ref.read(authControllerProvider.notifier);
+    final canUse = await notifier.canUseBiometrics();
+    final enabled = await notifier.isBiometricEnabled();
+
+    if (!mounted) return;
+    setState(() {
+      _biometricReady = canUse;
+      _biometricEnabled = enabled;
+    });
   }
 
   Future<void> _handleLogin() async {
@@ -49,6 +69,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     await ref
       .read(authControllerProvider.notifier)
       .login(email, password);
+  }
+
+  Future<void> _handleBiometricLogin() async {
+    await ref.read(authControllerProvider.notifier).loginWithBiometrics();
   }
 
   String? _validateEmail(String? value) {
@@ -187,6 +211,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       isLoading: isLoading,
                       icon: _tutorialMode ? Icons.school_outlined : Icons.login,
                     ),
+                    if (!_tutorialMode && _biometricEnabled && _biometricReady) ...[
+                      const SizedBox(height: SaoSpacing.md),
+                      SaoButton.secondary(
+                        label: 'Entrar con huella',
+                        onPressed: isLoading ? null : _handleBiometricLogin,
+                        icon: Icons.fingerprint,
+                      ),
+                    ],
                     const SizedBox(height: SaoSpacing.md),
                     TextButton(
                       onPressed: isLoading ? null : () => context.go('/auth/signup'),

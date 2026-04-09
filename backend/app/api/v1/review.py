@@ -24,6 +24,8 @@ from app.schemas.review import (
     ReviewRejectPlaybookResponse,
     ReviewRejectReasonCreateIn,
 )
+from app.schemas.activity import build_canonical_flow_projection, infer_sync_state
+from app.services.push_notification_service import notify_review_decision
 from app.services.audit_redaction import sanitize_audit_details
 
 router = APIRouter(prefix="/review", tags=["review"])
@@ -33,15 +35,42 @@ REVISION_PENDIENTE = "REVISION_PENDIENTE"
 COMPLETADA = "COMPLETADA"
 
 
+def _normalize_execution_state(value: Any) -> str:
+    state = str(value or "").strip().upper()
+    if state in {"EN_REVISION", "PENDIENTE_REVISION"}:
+        return REVISION_PENDIENTE
+    if state in {"COMPLETADO", "COMPLETED", "DONE"}:
+        return COMPLETADA
+    return state
+
+
+def _normalize_review_decision(value: Any) -> str:
+    decision = str(value or "").strip().upper()
+    if decision in {"APPROVED", "OK"}:
+        return "APPROVE"
+    if decision in {"REJECTED", "NO"}:
+        return "REJECT"
+    if decision in {"NEEDS_FIX", "REQUIERE_CAMBIOS"}:
+        return "CHANGES_REQUIRED"
+    return decision
+
+
 def _review_status_from_firestore(activity_payload: dict) -> str:
-    decision = str(activity_payload.get("review_decision") or "").upper()
+    """
+    Derive review status from activity payload.
+    Returns standardized English status values to maintain API contract consistency.
+    """
+    decision = _normalize_review_decision(activity_payload.get("review_decision"))
+    execution_state = _normalize_execution_state(activity_payload.get("execution_state"))
     if decision == "REJECT":
-        return "RECHAZADO"
+        return "REJECTED"
     if decision in {"APPROVE", "APPROVE_EXCEPTION"}:
-        return "APROBADO"
-    if str(activity_payload.get("execution_state") or "") == REVISION_PENDIENTE:
-        return "PENDIENTE_REVISION"
-    return "PENDIENTE_REVISION"
+        return "APPROVED"
+    if decision in {"CHANGES_REQUIRED", "REQUEST_CHANGES", "REQUIRES_CHANGES"}:
+        return "CHANGES_REQUIRED"
+    if execution_state == REVISION_PENDIENTE:
+        return "PENDING_REVIEW"
+    return "PENDING_REVIEW"
 
 
 def _safe_dt(value: object, fallback: datetime) -> datetime:
@@ -52,11 +81,14 @@ def _safe_dt(value: object, fallback: datetime) -> datetime:
 
 def _should_include_in_review_queue(execution_state: str | None, review_status: str, evidence_count: int) -> bool:
     # Keep rejected activities visible in review queue/history views.
-    if review_status == "RECHAZADO":
+    if review_status == "REJECTED":
         return True
-    if review_status != "PENDIENTE_REVISION":
+    if review_status == "CHANGES_REQUIRED":
+        return True
+    if review_status != "PENDING_REVIEW":
         return False
-    return execution_state in {REVISION_PENDIENTE, COMPLETADA}
+    normalized_state = _normalize_execution_state(execution_state)
+    return normalized_state in {REVISION_PENDIENTE, COMPLETADA}
 
 
 def _severity_from_flags(gps_critical: bool, has_conflicts: bool, missing_evidence: bool) -> str:
@@ -65,6 +97,198 @@ def _severity_from_flags(gps_critical: bool, has_conflicts: bool, missing_eviden
     if missing_evidence:
         return "MED"
     return "LOW"
+
+
+def _normalize_lookup_key(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _load_front_names(client, front_ids: set[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    normalized_ids = [front_id for front_id in front_ids if front_id]
+    if not normalized_ids:
+        return result
+    refs = [client.collection("fronts").document(front_id) for front_id in normalized_ids]
+    if hasattr(client, "get_all"):
+        for snap in client.get_all(refs):
+            if not snap.exists:
+                continue
+            result[snap.id] = str((snap.to_dict() or {}).get("name") or "")
+        return result
+
+    # Test fallback for fake clients without get_all.
+    for ref in refs:
+        snap = ref.get()
+        if not snap.exists:
+            continue
+        result[snap.id] = str((snap.to_dict() or {}).get("name") or "")
+    return result
+
+
+def _load_project_front_scope_map(client, project_ids: set[str]) -> dict[str, dict[str, str]]:
+    result: dict[str, dict[str, str]] = {}
+    normalized_ids = [str(project_id or "").strip() for project_id in project_ids if str(project_id or "").strip()]
+    if not normalized_ids:
+        return result
+
+    refs = [client.collection("projects").document(project_id) for project_id in normalized_ids]
+    snapshots = client.get_all(refs) if hasattr(client, "get_all") else [ref.get() for ref in refs]
+    for snap in snapshots:
+        if not snap.exists:
+            continue
+        payload = snap.to_dict() or {}
+        raw_scope = payload.get("front_location_scope") or payload.get("front_location_scopes") or []
+        if not isinstance(raw_scope, list):
+            continue
+
+        project_scope: dict[str, str] = {}
+        for row in raw_scope:
+            if not isinstance(row, dict):
+                continue
+            municipality = str(row.get("municipio") or row.get("municipality") or "").strip()
+            front_name = str(row.get("front_name") or row.get("frontName") or row.get("name") or "").strip()
+            if municipality and front_name:
+                project_scope[_normalize_lookup_key(municipality)] = front_name
+
+        if project_scope:
+            result[str(snap.id)] = project_scope
+    return result
+
+
+def _extract_activity_municipality(activity_payload: dict[str, Any]) -> str | None:
+    municipality = str(
+        activity_payload.get("municipio")
+        or activity_payload.get("municipality")
+        or ""
+    ).strip()
+    if municipality:
+        return municipality
+
+    wizard_payload = activity_payload.get("wizard_payload")
+    if isinstance(wizard_payload, dict):
+        location_payload = wizard_payload.get("location")
+        if isinstance(location_payload, dict):
+            municipality = str(
+                location_payload.get("municipio")
+                or location_payload.get("municipality")
+                or ""
+            ).strip()
+            if municipality:
+                return municipality
+    return None
+
+
+def _resolve_activity_front_name(
+    activity_payload: dict[str, Any],
+    fronts_map: dict[str, str],
+    project_front_scope_map: dict[str, dict[str, str]],
+) -> str | None:
+    explicit_front = str(activity_payload.get("front") or activity_payload.get("front_name") or "").strip()
+    if explicit_front:
+        return explicit_front
+
+    front_id = str(activity_payload.get("front_id") or "").strip()
+    if front_id:
+        front_name = str(fronts_map.get(front_id) or "").strip()
+        if front_name:
+            return front_name
+
+    municipality = _extract_activity_municipality(activity_payload)
+    project_id = str(activity_payload.get("project_id") or "").strip()
+    if project_id and municipality:
+        inferred_front = project_front_scope_map.get(project_id, {}).get(_normalize_lookup_key(municipality), "")
+        if inferred_front:
+            return inferred_front
+    return None
+
+
+def _effective_assignee_user_id(activity_payload: dict[str, Any]) -> str:
+    return str(
+        activity_payload.get("assigned_to_user_id")
+        or activity_payload.get("created_by_user_id")
+        or ""
+    ).strip()
+
+
+def _load_user_names(client, user_ids: set[str]) -> dict[str, str]:
+    result: dict[str, str] = {}
+    normalized_ids = [user_id for user_id in user_ids if user_id]
+    if not normalized_ids:
+        return result
+    refs = [client.collection("users").document(user_id) for user_id in normalized_ids]
+    if hasattr(client, "get_all"):
+        for snap in client.get_all(refs):
+            if not snap.exists:
+                continue
+            payload = snap.to_dict() or {}
+            name = str(
+                payload.get("full_name")
+                or payload.get("fullName")
+                or payload.get("display_name")
+                or payload.get("name")
+                or payload.get("email")
+                or ""
+            ).strip()
+            if name:
+                result[snap.id] = name
+        return result
+
+    # Test fallback for fake clients without get_all.
+    for ref in refs:
+        snap = ref.get()
+        if not snap.exists:
+            continue
+        payload = snap.to_dict() or {}
+        name = str(
+            payload.get("full_name")
+            or payload.get("fullName")
+            or payload.get("display_name")
+            or payload.get("name")
+            or payload.get("email")
+            or ""
+        ).strip()
+        if name:
+            result[snap.id] = name
+    return result
+
+
+def _count_evidences(client, activity_ids: set[str]) -> dict[str, int]:
+    normalized_ids = [activity_id for activity_id in activity_ids if activity_id]
+    counts: dict[str, int] = {activity_id: 0 for activity_id in normalized_ids}
+    if not normalized_ids:
+        return counts
+
+    # Firestore IN queries support up to 30 values per query.
+    chunk_size = 30
+    for i in range(0, len(normalized_ids), chunk_size):
+        chunk = normalized_ids[i : i + chunk_size]
+        for snap in client.collection("evidences").where("activity_id", "in", chunk).stream():
+            payload = snap.to_dict() or {}
+            activity_id = str(payload.get("activity_id") or "").strip()
+            if activity_id in counts:
+                counts[activity_id] += 1
+    return counts
+
+
+def _sync_state_from_activity(activity_payload: dict) -> str:
+    return infer_sync_state(
+        str(activity_payload.get("sync_state") or ""),
+        has_local_changes=bool(
+            activity_payload.get("pending_sync")
+            or activity_payload.get("outbox_pending")
+            or activity_payload.get("ready_to_sync")
+            or activity_payload.get("local_only")
+        ),
+        has_sync_error=bool(
+            activity_payload.get("sync_error")
+            or activity_payload.get("last_sync_error")
+            or activity_payload.get("sync_failed")
+        ),
+        sync_in_progress=bool(
+            activity_payload.get("sync_in_progress")
+            or activity_payload.get("syncing")
+        ),
+    )
 
 
 def _pk_label(pk_start: Any, pk_end: Any) -> str | None:
@@ -94,50 +318,56 @@ def review_queue(
     q: str | None = Query(None),
     from_dt: datetime | None = Query(None, alias="from"),
     to_dt: datetime | None = Query(None, alias="to"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(50, ge=1, le=200),
     _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"])),
 ):
     client = get_firestore_client()
     now = datetime.now(timezone.utc)
-    activities_docs = [d.to_dict() or {} for d in client.collection("activities").stream()]
-    fronts_map = {
-        str(doc.id): str((doc.to_dict() or {}).get("name") or "")
-        for doc in client.collection("fronts").stream()
-    }
-    users_map: dict[str, str] = {}
-    for doc in client.collection("users").stream():
-        u = doc.to_dict() or {}
-        name = str(u.get("display_name") or u.get("name") or u.get("email") or "").strip()
-        if name:
-            users_map[str(doc.id)] = name
-    evidences_docs = [d.to_dict() or {} for d in client.collection("evidences").stream()]
-    evidence_count_by_activity: dict[str, int] = {}
-    for ev in evidences_docs:
-        aid = str(ev.get("activity_id") or "")
-        if not aid:
-            continue
-        evidence_count_by_activity[aid] = evidence_count_by_activity.get(aid, 0) + 1
-
-    items: list[ReviewQueueItemOut] = []
-    counters = {"pending": 0, "changed": 0, "gps_critical": 0, "rejected": 0}
-
+    # Apply project_id filter server-side to avoid a full collection scan.
+    acts_query = client.collection("activities")
+    if project_id:
+        acts_query = acts_query.where("project_id", "==", project_id)
+    activities_docs = [d.to_dict() or {} for d in acts_query.stream()]
+    scoped_activities: list[dict[str, Any]] = []
+    front_ids: set[str] = set()
+    user_ids: set[str] = set()
+    activity_ids: set[str] = set()
+    project_ids: set[str] = set()
     for activity in activities_docs:
-        if project_id and str(activity.get("project_id") or "") != project_id:
-            continue
         if front_id and str(activity.get("front_id") or "") != front_id:
             continue
 
         created_at = _safe_dt(activity.get("created_at"), now)
-        updated_at = _safe_dt(activity.get("updated_at"), now)
         if from_dt and created_at < from_dt:
             continue
         if to_dt and created_at > to_dt:
             continue
 
+        scoped_activities.append(activity)
+        front_ids.add(str(activity.get("front_id") or "").strip())
+        user_ids.add(_effective_assignee_user_id(activity))
+        activity_ids.add(str(activity.get("uuid") or "").strip())
+        project_ids.add(str(activity.get("project_id") or "").strip())
+
+    fronts_map = _load_front_names(client, front_ids)
+    project_front_scope_map = _load_project_front_scope_map(client, project_ids)
+    users_map = _load_user_names(client, user_ids)
+    evidence_count_by_activity = _count_evidences(client, activity_ids)
+
+    items: list[ReviewQueueItemOut] = []
+    counters = {"pending": 0, "changed": 0, "gps_critical": 0, "rejected": 0}
+
+    for activity in scoped_activities:
+        created_at = _safe_dt(activity.get("created_at"), now)
+        updated_at = _safe_dt(activity.get("updated_at"), now)
+
         lat = activity.get("latitude")
         lon = activity.get("longitude")
         gps_critical = bool(activity.get("gps_mismatch", False)) or not (lat and lon)
         evidence_count = evidence_count_by_activity.get(str(activity.get("uuid") or ""), 0)
-        execution_state = str(activity.get("execution_state") or "")
+        execution_state = _normalize_execution_state(activity.get("execution_state"))
+        review_decision = _normalize_review_decision(activity.get("review_decision"))
         status_value = _review_status_from_firestore(activity)
         if not _should_include_in_review_queue(execution_state, status_value, evidence_count):
             continue
@@ -150,13 +380,20 @@ def review_queue(
         severity = _severity_from_flags(gps_critical, has_conflicts, missing_evidence)
         pk_label = _pk_label(activity.get("pk_start"), activity.get("pk_end")) or "PK 0+000"
 
-        assigned_uid = str(activity.get("assigned_to_user_id") or "").strip()
+        assigned_uid = _effective_assignee_user_id(activity)
+        municipality_value = _extract_activity_municipality(activity)
+        front_name = _resolve_activity_front_name(activity, fronts_map, project_front_scope_map)
+        projection = build_canonical_flow_projection(
+            execution_state=execution_state,
+            review_decision=review_decision,
+            sync_state=_sync_state_from_activity(activity),
+        )
         try:
             item = ReviewQueueItemOut(
                 id=UUID(str(activity.get("uuid"))),
                 pk=pk_label,
-                front=fronts_map.get(str(activity.get("front_id") or "")) or None,
-                municipality=None,
+                front=front_name or None,
+                municipality=municipality_value,
                 activity_type=str(activity.get("activity_type_code") or ""),
                 title=str(activity.get("title") or "") or None,
                 project_id=str(activity.get("project_id") or "") or None,
@@ -175,6 +412,10 @@ def review_queue(
                 conflict_count=1 if has_conflicts else 0,
                 lat=float(lat) if lat not in (None, "") else None,
                 lon=float(lon) if lon not in (None, "") else None,
+                operational_state=projection["operational_state"],
+                sync_state=projection["sync_state"],
+                review_state=projection["review_state"],
+                next_action=projection["next_action"],
             )
         except Exception as exc:
             logger.warning(
@@ -193,20 +434,22 @@ def review_queue(
         if status_filter and item.status != status_filter:
             continue
 
-        if item.status == "PENDIENTE_REVISION":
+        if item.status == "PENDING_REVIEW":
             counters["pending"] += 1
         if item.catalog_change_pending or item.has_conflicts:
             counters["changed"] += 1
         if item.gps_critical:
             counters["gps_critical"] += 1
-        if item.status == "RECHAZADO":
+        if item.status == "REJECTED":
             counters["rejected"] += 1
 
         items.append(item)
 
     items.sort(key=lambda x: x.updated_at, reverse=True)
+    start = (page - 1) * page_size
+    paged_items = items[start : start + page_size]
     return ReviewQueueResponse(
-        items=items[:400],
+        items=paged_items,
         counters=ReviewQueueCountersOut(
             pending=counters["pending"],
             changed=counters["changed"],
@@ -233,25 +476,28 @@ def review_activity_detail(
     activity = activity_snap.to_dict() or {}
     wizard_payload_raw = activity.get("wizard_payload")
     wizard_payload = wizard_payload_raw if isinstance(wizard_payload_raw, dict) else None
-    location_payload = wizard_payload.get("location") if isinstance(wizard_payload, dict) else None
-    municipality_from_payload = (
-        str((location_payload or {}).get("municipio") or "").strip()
-        if isinstance(location_payload, dict)
-        else ""
+    municipality_value = _extract_activity_municipality(activity)
+    project_front_scope_map = _load_project_front_scope_map(
+        client,
+        {str(activity.get("project_id") or "").strip()},
     )
-    municipality_value = municipality_from_payload or None
-    front_name = None
+    front_lookup: dict[str, str] = {}
     front_id = activity.get("front_id")
     if front_id:
         front_snap = client.collection("fronts").document(str(front_id)).get()
         if front_snap.exists:
-            front_name = str((front_snap.to_dict() or {}).get("name") or "") or None
+            front_name = str((front_snap.to_dict() or {}).get("name") or "").strip()
+            if front_name:
+                front_lookup[str(front_id)] = front_name
+    front_name = _resolve_activity_front_name(activity, front_lookup, project_front_scope_map)
     status_value = _review_status_from_firestore(activity)
     gps_critical = bool(activity.get("gps_mismatch", False)) or not (activity.get("latitude") and activity.get("longitude"))
+    # Use a targeted query instead of streaming all evidences (avoids full collection scan).
     evidences = [
         d.to_dict() or {}
-        for d in client.collection("evidences").stream()
-        if str((d.to_dict() or {}).get("activity_id") or "") == str(activity_uuid)
+        for d in client.collection("evidences")
+            .where("activity_id", "==", str(activity_uuid))
+            .stream()
     ]
     quality_flags = {
         "evidence_ok": len(evidences) > 0,
@@ -270,11 +516,16 @@ def review_activity_detail(
                 suggested_options=["ACCEPT", "RESTORE", "CHOOSE_CATALOG"],
             )
         )
+    # Use compound index (entity ASC, entity_id ASC, created_at DESC) — already in
+    # firestore.indexes.json. Replaces a full audit_logs scan with a targeted query.
     history_rows = [
         d.to_dict() or {}
-        for d in client.collection("audit_logs").stream()
-        if (d.to_dict() or {}).get("entity") == "activity"
-        and str((d.to_dict() or {}).get("entity_id") or "") == str(activity_uuid)
+        for d in client.collection("audit_logs")
+            .where("entity", "==", "activity")
+            .where("entity_id", "==", str(activity_uuid))
+            .order_by("created_at", direction="DESCENDING")
+            .limit(20)
+            .stream()
     ]
     history_rows.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)), reverse=True)
     history = [
@@ -314,10 +565,12 @@ def review_activity_evidences(
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_ACTIVITY_ID", message="Invalid activity id")
 
     client = get_firestore_client()
+    # Use a targeted query instead of streaming all evidences.
     evidences_docs = [
         d.to_dict() or {}
-        for d in client.collection("evidences").stream()
-        if str((d.to_dict() or {}).get("activity_id") or "") == str(activity_uuid)
+        for d in client.collection("evidences")
+            .where("activity_id", "==", str(activity_uuid))
+            .stream()
     ]
     evidences_docs.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)))
     return [
@@ -341,7 +594,7 @@ def review_activity_evidences(
 def review_validate_evidence(
     evidence_id: str,
     body: ReviewEvidenceValidateIn,
-    _current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
 ):
     try:
         evidence_uuid = UUID(evidence_id)
@@ -456,6 +709,7 @@ def review_decision(
             raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_REJECT_REASON_REQUIRED", message="reject_reason_code is required when decision is REJECT")
 
     next_state = COMPLETADA if decision in {"APPROVE", "APPROVE_EXCEPTION"} else REVISION_PENDIENTE
+    persisted_review_decision = "CHANGES_REQUIRED" if decision == "REJECT" else decision
     next_sync_version = int(activity_payload.get("sync_version") or 0) + 1
     action = "REVIEW_APPROVE_EXCEPTION" if decision == "APPROVE_EXCEPTION" else ("REVIEW_APPROVE" if decision == "APPROVE" else "REVIEW_REJECT")
 
@@ -464,9 +718,10 @@ def review_decision(
             "execution_state": next_state,
             "sync_version": next_sync_version,
             "updated_at": now,
-            "review_decision": decision,
+            "review_decision": persisted_review_decision,
             "review_reject_reason_code": body.reject_reason_code,
             "review_comment": body.comment,
+            "deleted_at": None,
             "last_reviewed_by": str(getattr(current_user, "id", "")),
             "last_reviewed_at": now,
         },
@@ -478,7 +733,7 @@ def review_decision(
             "activity_id": str(activity_uuid),
             "project_id": activity_payload.get("project_id"),
             "decision": decision,
-            "status": "RECHAZADO" if decision == "REJECT" else "APROBADO",
+            "status": "REJECTED" if decision == "REJECT" else "APPROVED",
             "action": action,
             "reject_reason_code": body.reject_reason_code,
             "comment": body.comment,
@@ -491,12 +746,21 @@ def review_decision(
         }
     )
 
+    effective_assignee_user_id = (
+        str(
+            activity_payload.get("assigned_to_user_id")
+            or activity_payload.get("created_by_user_id")
+            or ""
+        ).strip()
+        or None
+    )
+
     if decision == "REJECT" and body.comment:
         client.collection("observations").document(str(uuid4())).set(
             {
                 "project_id": activity_payload.get("project_id"),
                 "activity_id": str(activity_uuid),
-                "assignee_user_id": activity_payload.get("assigned_to_user_id"),
+                "assignee_user_id": effective_assignee_user_id,
                 "tags_json": json.dumps(["review", "correction"]),
                 "message": body.comment,
                 "severity": "HIGH",
@@ -504,8 +768,21 @@ def review_decision(
                 "created_at": now,
             }
         )
+    try:
+        notify_review_decision(
+            project_id=str(activity_payload.get("project_id") or ""),
+            activity_id=str(activity_uuid),
+            decision=persisted_review_decision,
+            assigned_user_id=effective_assignee_user_id,
+            comment=body.comment,
+        )
+    except Exception:
+        logger.exception("REVIEW_NOTIFY_FAILED activity_id=%s", activity_uuid)
 
-    return ReviewDecisionOut(ok=True, status="RECHAZADO" if decision == "REJECT" else "APROBADO")
+    return ReviewDecisionOut(
+        ok=True,
+        status="CHANGES_REQUIRED" if decision == "REJECT" else "APPROVED",
+    )
 
 
 @router.get("/reject-playbook", response_model=ReviewRejectPlaybookResponse)

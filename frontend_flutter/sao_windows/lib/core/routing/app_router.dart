@@ -29,6 +29,7 @@ import '../../features/admin/history/admin_activity_history_page.dart';
 import '../../features/admin/admin_activity_detail.dart';
 import '../../features/admin/stats/admin_activity_stats_page.dart';
 import '../../features/profile/profile_page.dart';
+import '../../ui/theme/sao_colors.dart';
 import 'auth_redirect_resolver.dart';
 
 /// Provider for GoRouter with authentication redirect
@@ -435,32 +436,72 @@ class _ShellWithBottomNavState extends State<ShellWithBottomNav> {
         onTap: (index) => _onItemTapped(index, context),
         type: BottomNavigationBarType.fixed,
         showUnselectedLabels: true,
+        selectedItemColor: SaoColors.brandPrimary,
+        unselectedItemColor: SaoColors.gray500,
+        selectedFontSize: 11,
+        unselectedFontSize: 11,
+        selectedLabelStyle: const TextStyle(fontWeight: FontWeight.w700),
         items: const [
           BottomNavigationBarItem(
             label: 'Inicio',
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home),
+            icon: _NavItemIcon(icon: Icons.home_outlined),
+            activeIcon: _NavItemIcon(icon: Icons.home, active: true),
           ),
           BottomNavigationBarItem(
-            label: 'Sincronizar',
-            icon: Icon(Icons.sync_outlined),
-            activeIcon: Icon(Icons.sync),
+            label: 'Sincro',
+            icon: _NavItemIcon(icon: Icons.sync_outlined),
+            activeIcon: _NavItemIcon(icon: Icons.sync, active: true),
           ),
           BottomNavigationBarItem(
             label: 'Agenda',
-            icon: Icon(Icons.calendar_today_outlined),
-            activeIcon: Icon(Icons.calendar_today),
+            icon: _NavItemIcon(icon: Icons.calendar_today_outlined),
+            activeIcon: _NavItemIcon(icon: Icons.calendar_today, active: true),
           ),
           BottomNavigationBarItem(
             label: 'Historial',
-            icon: Icon(Icons.history_outlined),
-            activeIcon: Icon(Icons.history),
+            icon: _NavItemIcon(icon: Icons.history_outlined),
+            activeIcon: _NavItemIcon(icon: Icons.history, active: true),
           ),
           BottomNavigationBarItem(
             label: 'Ajustes',
-            icon: Icon(Icons.settings_outlined),
-            activeIcon: Icon(Icons.settings),
+            icon: _NavItemIcon(icon: Icons.settings_outlined),
+            activeIcon: _NavItemIcon(icon: Icons.settings, active: true),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NavItemIcon extends StatelessWidget {
+  final IconData icon;
+  final bool active;
+
+  const _NavItemIcon({
+    required this.icon,
+    this.active = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      // Active layout uses 3 + 4 + 24 = 31px, keep one extra pixel to avoid
+      // RenderFlex overflow on high-density Android devices.
+      height: active ? 31 : 24,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (active)
+            Container(
+              width: 18,
+              height: 3,
+              decoration: BoxDecoration(
+                color: SaoColors.brandPrimary,
+                borderRadius: BorderRadius.circular(999),
+              ),
+            ),
+          if (active) const SizedBox(height: 4),
+          Icon(icon),
         ],
       ),
     );

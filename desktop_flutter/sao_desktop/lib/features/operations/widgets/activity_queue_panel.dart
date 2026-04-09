@@ -7,7 +7,7 @@ import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../data/catalog/activity_status.dart';
 import '../../../catalog/risk_catalog.dart';
-import '../../../catalog/status_catalog.dart';
+import '../activity_queue_projection.dart';
 
 /// Panel de cola de actividades — lista compacta para poder-usuario.
 ///
@@ -99,7 +99,6 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
 
     filtered = filtered.where((activity) {
       final status = _deriveStatus(activity);
-      final hasGpsConflict = activity.flags.gpsMismatch;
       final hasCatalogChange = activity.flags.catalogChanged;
       final hasChecklistIncomplete = activity.flags.checklistIncomplete;
 
@@ -107,31 +106,27 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
         case 'ALL':
           return true;
         case 'PENDING':
-          return status == ActivityStatus.pendingReview;
+          return isPendingQueueBucket(activity);
         case 'CHANGED':
-          return status == ActivityStatus.conflict ||
-              hasCatalogChange ||
-              hasChecklistIncomplete;
+          return isChangesQueueBucket(activity);
         case 'REJECTED':
-          return status == ActivityStatus.rejected;
+          return isRejectedQueueBucket(activity);
         default:
           return true;
       }
     }).toList();
 
-    if (widget.filterPending ||
-        widget.filterRejected ||
-        widget.filterChanges) {
+    if (widget.filterPending || widget.filterRejected || widget.filterChanges) {
       filtered = filtered.where((activity) {
-        final status = _deriveStatus(activity);
-        if (widget.filterPending &&
-            status == ActivityStatus.pendingReview) return true;
-        if (widget.filterRejected &&
-            status == ActivityStatus.rejected) return true;
-        if (widget.filterChanges &&
-            (status == ActivityStatus.conflict ||
-                activity.flags.catalogChanged ||
-                activity.flags.checklistIncomplete)) return true;
+        if (widget.filterPending && isPendingQueueBucket(activity)) {
+          return true;
+        }
+        if (widget.filterRejected && isRejectedQueueBucket(activity)) {
+          return true;
+        }
+        if (widget.filterChanges && isChangesQueueBucket(activity)) {
+          return true;
+        }
         return false;
       }).toList();
     }
@@ -139,25 +134,21 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
     // "Solo conflictos" — oculta lo que no requiere decisión
     if (widget.filterOnlyConflicts) {
       filtered = filtered.where((activity) {
-        return activity.flags.catalogChanged ||
-            activity.flags.checklistIncomplete ||
-            _deriveStatus(activity) == ActivityStatus.conflict ||
-            _deriveStatus(activity) == ActivityStatus.rejected;
+        return isChangesQueueBucket(activity) ||
+            isRejectedQueueBucket(activity);
       }).toList();
     }
 
     if (widget.filterFront != null && widget.filterFront!.isNotEmpty) {
       filtered = filtered
-          .where((a) =>
-              (a.front?.name ?? 'Sin asignar') == widget.filterFront)
+          .where((a) => (a.front?.name ?? 'Sin asignar') == widget.filterFront)
           .toList();
     }
 
     if (widget.filterDateFrom != null) {
       final from = widget.filterDateFrom!;
-      filtered = filtered
-          .where((a) => !a.activity.createdAt.isBefore(from))
-          .toList();
+      filtered =
+          filtered.where((a) => !a.activity.createdAt.isBefore(from)).toList();
     }
     if (widget.filterDateTo != null) {
       final to = widget.filterDateTo!.add(const Duration(days: 1));
@@ -176,16 +167,13 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
       'REJECTED': 0,
     };
     for (final activity in activities) {
-      final status = _deriveStatus(activity);
-      if (status == ActivityStatus.pendingReview) {
+      if (isPendingQueueBucket(activity)) {
         counters['PENDING'] = (counters['PENDING'] ?? 0) + 1;
       }
-      if (status == ActivityStatus.conflict ||
-          activity.flags.catalogChanged ||
-          activity.flags.checklistIncomplete) {
+      if (isChangesQueueBucket(activity)) {
         counters['CHANGED'] = (counters['CHANGED'] ?? 0) + 1;
       }
-      if (status == ActivityStatus.rejected) {
+      if (isRejectedQueueBucket(activity)) {
         counters['REJECTED'] = (counters['REJECTED'] ?? 0) + 1;
       }
     }
@@ -196,45 +184,11 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
       _deriveRisk(activity).color;
 
   RiskLevel _deriveRisk(ActivityWithDetails activity) {
-    final description = (activity.activity.description ?? '').toLowerCase();
-    if (description.contains('prioritario') ||
-        description.contains('crítico')) return RiskCatalog.prioritario;
-    if (description.contains('alto')) return RiskCatalog.alto;
-    if (description.contains('medio')) return RiskCatalog.medio;
-    if (description.contains('bajo')) return RiskCatalog.bajo;
-
-    final status = ActivityStatus.normalize(_deriveStatus(activity));
-    switch (status) {
-      case ActivityStatus.rejected:
-      case ActivityStatus.conflict:
-      case ActivityStatus.needsFix:
-        return RiskCatalog.prioritario;
-      case ActivityStatus.pendingReview:
-        return RiskCatalog.alto;
-      case ActivityStatus.corrected:
-        return RiskCatalog.medio;
-      case ActivityStatus.approved:
-        return RiskCatalog.bajo;
-      default:
-        return RiskCatalog.medio;
-    }
+    return deriveActivityQueueRisk(activity);
   }
 
   String _deriveStatus(ActivityWithDetails activity) {
-    final description =
-        (activity.activity.description ?? '').trim().toLowerCase();
-    if (description.contains('rechazada') ||
-        description.contains('rechazado')) return ActivityStatus.rejected;
-    if (description.contains('corregida') ||
-        description.contains('corregido')) return ActivityStatus.corrected;
-    if (description.contains('necesita') ||
-        description.contains('falta')) return ActivityStatus.needsFix;
-    if (description.contains('cambios') ||
-        description.contains('discrepancia')) return ActivityStatus.conflict;
-    if (activity.flags.checklistIncomplete) return ActivityStatus.conflict;
-    if (description.contains('aprobada') ||
-        description.contains('aprobado')) return ActivityStatus.approved;
-    return activity.activity.status;
+    return deriveActivityQueueStatus(activity);
   }
 
   @override
@@ -277,8 +231,8 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                     icon: const Icon(Icons.deselect_rounded, size: 16),
                     tooltip: 'Deseleccionar todo',
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                        minWidth: 28, minHeight: 28),
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
                     onPressed: widget.onBulkClear,
                   ),
                 ] else ...[
@@ -302,7 +256,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
           widget.activitiesAsync.when(
             data: (activities) {
               final counters = _buildTabCounters(activities);
-              final tabs = const <(String, String)>[
+              const tabs = <(String, String)>[
                 ('PENDING', 'Pendientes'),
                 ('CHANGED', 'Cambios'),
                 ('REJECTED', 'Rechazadas'),
@@ -311,8 +265,8 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
               return SizedBox(
                 height: 36,
                 child: ListView.separated(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: SaoSpacing.md),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: SaoSpacing.md),
                   scrollDirection: Axis.horizontal,
                   itemCount: tabs.length,
                   separatorBuilder: (_, __) =>
@@ -325,8 +279,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                       label: tab.$2,
                       count: count,
                       selected: selected,
-                      onTap: () =>
-                          widget.onQueueTabChanged?.call(tab.$1),
+                      onTap: () => widget.onQueueTabChanged?.call(tab.$1),
                     );
                   },
                 ),
@@ -359,14 +312,12 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
 
                 final grouped = _groupByFront(filtered);
                 return ListView.builder(
-                  padding:
-                      const EdgeInsets.only(bottom: SaoSpacing.md),
+                  padding: const EdgeInsets.only(bottom: SaoSpacing.md),
                   itemCount: grouped.length,
                   itemBuilder: (context, index) {
                     final frontName = grouped.keys.elementAt(index);
                     final frontActivities = grouped[frontName]!;
-                    final isCollapsed =
-                        _collapsedFronts.contains(frontName);
+                    final isCollapsed = _collapsedFronts.contains(frontName);
 
                     return _FrontSection(
                       frontName: frontName,
@@ -409,19 +360,14 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(
-              hasSearch
-                  ? Icons.search_off_rounded
-                  : Icons.inbox_rounded,
+              hasSearch ? Icons.search_off_rounded : Icons.inbox_rounded,
               size: 40,
               color: SaoColors.gray300,
             ),
             const SizedBox(height: SaoSpacing.md),
             Text(
-              hasSearch
-                  ? 'Sin resultados'
-                  : 'Sin actividades pendientes',
-              style: SaoTypography.bodyText
-                  .copyWith(color: SaoColors.gray500),
+              hasSearch ? 'Sin resultados' : 'Sin actividades pendientes',
+              style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
               textAlign: TextAlign.center,
             ),
           ],
@@ -447,8 +393,8 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                   size: 36, color: SaoColors.error),
               const SizedBox(height: SaoSpacing.sm),
               Text(error,
-                  style: SaoTypography.caption
-                      .copyWith(color: SaoColors.gray600),
+                  style:
+                      SaoTypography.caption.copyWith(color: SaoColors.gray600),
                   textAlign: TextAlign.center),
             ],
           ),
@@ -499,10 +445,12 @@ class _FrontSection extends StatelessWidget {
     final rangeMatch =
         RegExp(r'PK\s*\d+[+]?\d*\s*[\-–]\s*\d+[+]?\d*', caseSensitive: false)
             .firstMatch(text);
-    if (rangeMatch != null) return rangeMatch.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
+    if (rangeMatch != null)
+      return rangeMatch.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
     final singleMatch =
         RegExp(r'PK\s*\d+', caseSensitive: false).firstMatch(text);
-    if (singleMatch != null) return singleMatch.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
+    if (singleMatch != null)
+      return singleMatch.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
     return 'Sin PK';
   }
 
@@ -526,9 +474,8 @@ class _FrontSection extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Count pending vs conflict in this front
-    final totalConflicts = activities
-        .where((a) => _conflictCount(a) > 0)
-        .length;
+    final totalConflicts =
+        activities.where((a) => _conflictCount(a) > 0).length;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -578,8 +525,7 @@ class _FrontSection extends StatelessWidget {
                       horizontal: SaoSpacing.xs, vertical: 2),
                   decoration: BoxDecoration(
                     color: SaoColors.gray200,
-                    borderRadius:
-                        BorderRadius.circular(SaoRadii.full),
+                    borderRadius: BorderRadius.circular(SaoRadii.full),
                   ),
                   child: Text(
                     '${activities.length}',
@@ -603,8 +549,8 @@ class _FrontSection extends StatelessWidget {
                 bulkSelectedIds.contains(activity.activity.id);
             final risk = deriveRisk(activity);
             final conflicts = _conflictCount(activity);
-            final actor = activity.assignedUser?.fullName ??
-                activity.activity.assignedTo;
+            final actor =
+                activity.assignedUser?.fullName ?? activity.activity.assignedTo;
             final pk = _pkLabel(activity);
             final eventTime =
                 activity.activity.executedAt ?? activity.activity.createdAt;
@@ -747,8 +693,7 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                             height: 18,
                             child: Checkbox(
                               value: widget.isBulkChecked,
-                              onChanged: (v) =>
-                                  widget.onBulkToggle(v ?? false),
+                              onChanged: (v) => widget.onBulkToggle(v ?? false),
                               materialTapTargetSize:
                                   MaterialTapTargetSize.shrinkWrap,
                               activeColor: SaoColors.primary,
@@ -806,8 +751,8 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                     const SizedBox(height: 2),
                     Text(
                       '${widget.actorName} · ${widget.relativeTime}',
-                      style: SaoTypography.caption.copyWith(
-                          color: SaoColors.gray400),
+                      style: SaoTypography.caption
+                          .copyWith(color: SaoColors.gray400),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
@@ -874,8 +819,7 @@ class _TabPill extends StatelessWidget {
             if (count > 0) ...[
               const SizedBox(width: 4),
               Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
                   color: selected
                       ? Colors.white.withValues(alpha: 0.25)
@@ -906,8 +850,8 @@ class _CountBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.symmetric(
-          horizontal: SaoSpacing.sm, vertical: 3),
+      padding:
+          const EdgeInsets.symmetric(horizontal: SaoSpacing.sm, vertical: 3),
       decoration: BoxDecoration(
         color: count > 0
             ? SaoColors.statusPendiente.withValues(alpha: 0.15)

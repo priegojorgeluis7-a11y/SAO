@@ -64,6 +64,7 @@ class FilterChipsRow extends StatelessWidget {
                 final selected = selectedFilterId == c.$1;
 
                 return ChoiceChip(
+                  showCheckmark: false,
                   selected: selected,
                   onSelected: (_) => onFilterChange(c.$1),
                   backgroundColor: SaoColors.gray100,
@@ -72,7 +73,7 @@ class FilterChipsRow extends StatelessWidget {
                     color: selected ? SaoColors.gray800 : SaoColors.gray200,
                   ),
                   labelStyle: TextStyle(
-                    color: selected ? Colors.white : SaoColors.primaryLight,
+                    color: selected ? Colors.white : SaoColors.gray800,
                     fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
                     fontSize: 13,
                   ),

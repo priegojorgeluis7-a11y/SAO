@@ -205,6 +205,7 @@ class AssignmentsRepository {
           'project_id': projectId,
           'from': from.toIso8601String(),
           'to': to.toIso8601String(),
+          'include_all': 'true', // Allow coordinators/supervisors to see all assignments
         },
       );
       return response.data;
@@ -212,14 +213,13 @@ class AssignmentsRepository {
   }
 
   Future<dynamic> _defaultCreateAssignment(AgendaItem item) async {
+    final activityTypeCode = await _resolveActivityTypeCodeForApi(item);
     final response = await _apiClientOrThrow.post<dynamic>(
       '/assignments',
       data: {
         'project_id': item.projectCode,
         'assignee_user_id': item.resourceId,
-        'activity_type_code': (item.activityId ?? item.activityTypeId ?? item.title)
-            .trim()
-            .toUpperCase(),
+        'activity_type_code': activityTypeCode,
         'title': item.title,
         'pk': item.pk ?? 0,
         'start_at': item.start.toUtc().toIso8601String(),
@@ -228,6 +228,50 @@ class AssignmentsRepository {
       },
     );
     return response.data;
+  }
+
+  Future<String> _resolveActivityTypeCodeForApi(AgendaItem item) async {
+    final candidates = <String>{
+      if ((item.activityTypeId ?? '').trim().isNotEmpty) item.activityTypeId!.trim(),
+      if ((item.activityId ?? '').trim().isNotEmpty) item.activityId!.trim(),
+      if (item.title.trim().isNotEmpty) item.title.trim(),
+    };
+
+    for (final candidate in candidates) {
+      final byId = await (_database.select(_database.catalogActivityTypes)
+            ..where((t) => t.id.equals(candidate)))
+          .getSingleOrNull();
+      final idCode = byId?.code.trim();
+      if (_isValidActivityTypeCode(idCode)) {
+        return idCode!.toUpperCase();
+      }
+
+      final byCode = await (_database.select(_database.catalogActivityTypes)
+            ..where((t) => t.code.equals(candidate.toUpperCase())))
+          .getSingleOrNull();
+      final code = byCode?.code.trim();
+      if (_isValidActivityTypeCode(code)) {
+        return code!.toUpperCase();
+      }
+
+      final byName = await (_database.select(_database.catalogActivityTypes)
+            ..where((t) => t.name.equals(candidate)))
+          .getSingleOrNull();
+      final nameCode = byName?.code.trim();
+      if (_isValidActivityTypeCode(nameCode)) {
+        return nameCode!.toUpperCase();
+      }
+    }
+
+    // Fallback for legacy behavior when we cannot map the type yet.
+    final fallback = (item.activityTypeId ?? item.activityId ?? item.title).trim().toUpperCase();
+    return fallback;
+  }
+
+  bool _isValidActivityTypeCode(String? code) {
+    final raw = code?.trim().toUpperCase() ?? '';
+    if (raw.isEmpty) return false;
+    return raw != 'UNKNOWN' && raw != 'UNK' && raw != 'UNKNOWN_ACTIVITY_TYPE';
   }
 
   ApiClient get _apiClientOrThrow {
@@ -250,6 +294,7 @@ class AssignmentsRepository {
             ? raw['items'] as List<dynamic>
             : <dynamic>[];
 
+    appLogger.i('Assignments _parseRemoteRecords: items_count=${list.length}');
     final out = <AgendaAssignmentRecord>[];
 
     for (final item in list) {
@@ -258,11 +303,23 @@ class AssignmentsRepository {
 
       final id = (map['id'] ?? map['uuid'] ?? '').toString();
       final resourceId = (map['resource_id'] ??
+              map['resourceId'] ??
               map['assignee_user_id'] ??
+              map['assigneeUserId'] ??
+              map['assigned_to_user_id'] ??
+              map['assignedToUserId'] ??
               map['created_by_user_id'] ??
+              map['createdByUserId'] ??
               map['created_by'] ??
               '')
           .toString();
+      
+      // Debug: log assignee info for unassigned fallback tracking
+      if (resourceId.isEmpty) {
+        appLogger.w('Assignment $id has NO resourceId. Full map keys: ${map.keys.toList()}');
+      } else if (resourceId == 'unknown' || resourceId.toLowerCase().contains('unknown')) {
+        appLogger.w('Assignment $id resourceId is "unknown". Full map: $map');
+      }
       final title = (map['activity_name'] ?? map['title'] ?? map['activity_type_code'] ?? '').toString();
       final startRaw = map['start_at'] ?? map['start'] ?? map['scheduled_start'];
       final endRaw = map['end_at'] ?? map['end'] ?? map['scheduled_end'];
@@ -281,7 +338,7 @@ class AssignmentsRepository {
           projectId: (map['project_id'] ?? projectId).toString(),
           resourceId: resourceId.isEmpty ? 'unassigned' : resourceId,
           resourceName: _extractAssigneeName(map),
-          activityId: map['activity_id']?.toString(),
+          activityId: _normalizeRemoteActivityId(map['activity_id']),
           title: title,
           frente: (map['frente'] ?? '').toString(),
           municipio: (map['municipio'] ?? '').toString(),
@@ -342,40 +399,56 @@ class AssignmentsRepository {
   ) async {
     if (records.isEmpty) return;
 
-    final now = DateTime.now();
     for (final record in records) {
-      final activityId = await _resolveTargetActivityId(record);
-      if (activityId.isEmpty) {
-        continue;
-      }
+      try {
+        final activityId = await _resolveTargetActivityId(record);
+        if (activityId.isEmpty) {
+          continue;
+        }
 
-      final projectId = record.projectId.trim();
-      if (projectId.isEmpty) {
-        continue;
-      }
+        final rawProjectId = record.projectId.trim();
+        if (rawProjectId.isEmpty) {
+          continue;
+        }
+        // Resolve project code → UUID to satisfy FK constraint on activities.project_id.
+        // The server may return the project code (e.g. "TMQ") instead of the UUID.
+        final projectId = await _resolveLocalProjectId(rawProjectId);
+        await _ensureProjectSnapshot(projectId, rawProjectId);
 
-      final userId = _normalizeUserId(record.resourceId) ?? 'unassigned';
-      await _upsertUserSnapshot(userId, displayName: record.resourceName);
-      final activityTypeId = await _resolveActivityTypeId(record);
+        final userId = _normalizeUserId(record.resourceId) ?? 'unassigned';
+        await _upsertUserSnapshot(userId, displayName: record.resourceName);
+        final activityTypeId = await _resolveActivityTypeId(record);
 
-      final existing = await (_database.select(_database.activities)
-            ..where((t) => t.id.equals(activityId)))
-          .getSingleOrNull();
+        final existing = await (_database.select(_database.activities)
+              ..where((t) => t.id.equals(activityId)))
+            .getSingleOrNull();
 
-      await _database.into(_database.activities).insertOnConflictUpdate(
-            ActivitiesCompanion.insert(
-              id: activityId,
-              projectId: projectId,
-              activityTypeId: activityTypeId,
-              title: record.title.trim().isNotEmpty ? record.title.trim() : 'Actividad',
-              pk: drift.Value(record.pk),
-              createdAt: existing?.createdAt ?? record.startAt,
-              createdByUserId: userId,
-              startedAt: drift.Value(existing?.startedAt),
-              finishedAt: drift.Value(existing?.finishedAt),
-              status: drift.Value(existing?.status ?? 'SYNCED'),
-            ),
+        // Guard: only upsert if the resolved projectId is FK-valid.
+        // If we cannot resolve to a valid project, skip rather than delete the
+        // existing row (INSERT OR REPLACE deletes the old row before inserting).
+        if (!await _projectExistsById(projectId)) {
+          appLogger.w(
+            '_upsertActivitiesFromAssignments: skipping activity $activityId '
+            '— projectId "$projectId" not found in local projects table.',
           );
+          continue;
+        }
+
+        await _database.into(_database.activities).insertOnConflictUpdate(
+              ActivitiesCompanion.insert(
+                id: activityId,
+                projectId: projectId,
+                activityTypeId: activityTypeId,
+                title: record.title.trim().isNotEmpty ? record.title.trim() : 'Actividad',
+                pk: drift.Value(record.pk),
+                createdAt: existing?.createdAt ?? record.startAt,
+                createdByUserId: existing?.createdByUserId ?? userId,
+                assignedToUserId: drift.Value(_normalizeUserId(record.resourceId) ?? existing?.assignedToUserId),
+                startedAt: drift.Value(existing?.startedAt),
+                finishedAt: drift.Value(existing?.finishedAt),
+                status: drift.Value(existing?.status ?? 'SYNCED'),
+              ),
+            );
 
       final assignmentsAssigneeFieldId = '$activityId:assignee_user_id';
       final frontNameFieldId = '$activityId:front_name';
@@ -427,30 +500,88 @@ class AssignmentsRepository {
             );
       }
 
-      final hasGeoContext = record.municipio.trim().isNotEmpty || record.estado.trim().isNotEmpty;
-      if (hasGeoContext) {
-        await (_database.update(_database.activities)
-              ..where((t) => t.id.equals(activityId)))
-            .write(
-          ActivitiesCompanion(
-            description: drift.Value(
-              _buildLegacyLocationDescription(
-                title: record.title,
-                frente: record.frente,
-                estado: record.estado,
-                municipio: record.municipio,
+        final hasGeoContext = record.municipio.trim().isNotEmpty || record.estado.trim().isNotEmpty;
+        if (hasGeoContext) {
+          await (_database.update(_database.activities)
+                ..where((t) => t.id.equals(activityId)))
+              .write(
+            ActivitiesCompanion(
+              description: drift.Value(
+                _buildLegacyLocationDescription(
+                  title: record.title,
+                  frente: record.frente,
+                  estado: record.estado,
+                  municipio: record.municipio,
+                ),
               ),
+              localRevision: drift.Value((existing?.localRevision ?? 1)),
+              serverRevision: drift.Value(existing?.serverRevision),
+              deviceId: drift.Value(existing?.deviceId),
+              geoLat: drift.Value(existing?.geoLat),
+              geoLon: drift.Value(existing?.geoLon),
+              geoAccuracy: drift.Value(existing?.geoAccuracy),
             ),
-            localRevision: drift.Value((existing?.localRevision ?? 1)),
-            serverRevision: drift.Value(existing?.serverRevision),
-            deviceId: drift.Value(existing?.deviceId),
-            geoLat: drift.Value(existing?.geoLat),
-            geoLon: drift.Value(existing?.geoLon),
-            geoAccuracy: drift.Value(existing?.geoAccuracy),
-          ),
+          );
+        }
+      } catch (e, st) {
+        appLogger.w(
+          '_upsertActivitiesFromAssignments: failed for record ${record.id}: $e\n$st',
         );
+        // Continue processing remaining records — a single failure must not
+        // abort the whole batch or delete already-persisted local state.
       }
     }
+  }
+
+  /// Resolves a raw project identifier (may be a code like "TMQ" or a UUID)
+  /// to the UUID stored in the local [projects] table.
+  Future<String> _resolveLocalProjectId(String rawProjectId) async {
+    final normalized = rawProjectId.trim();
+    if (normalized.isEmpty) return normalized;
+
+    // Try direct ID match first (already a UUID).
+    final byId = await (_database.select(_database.projects)
+          ..where((t) => t.id.equals(normalized)))
+        .getSingleOrNull();
+    if (byId != null) return byId.id;
+
+    // Try matching the project code (e.g. "TMQ").
+    final byCode = await (_database.select(_database.projects)
+          ..where((t) => t.code.equals(normalized.toUpperCase())))
+        .getSingleOrNull();
+    if (byCode != null) return byCode.id;
+
+    // Return the raw value as a last resort; FK check will catch invalids below.
+    return normalized;
+  }
+
+  Future<bool> _projectExistsById(String projectId) async {
+    final candidate = projectId.trim();
+    if (candidate.isEmpty) return false;
+    final row = await (_database.select(_database.projects)
+          ..where((t) => t.id.equals(candidate)))
+        .getSingleOrNull();
+    return row != null;
+  }
+
+  Future<void> _ensureProjectSnapshot(String projectId, String rawProjectId) async {
+    if (await _projectExistsById(projectId)) {
+      return;
+    }
+
+    final normalizedCode = rawProjectId.trim().toUpperCase();
+    final effectiveId = projectId.trim().isNotEmpty ? projectId.trim() : normalizedCode;
+    if (effectiveId.isEmpty || normalizedCode.isEmpty) {
+      return;
+    }
+
+    await _database.into(_database.projects).insertOnConflictUpdate(
+          ProjectsCompanion.insert(
+            id: effectiveId,
+            code: normalizedCode,
+            name: normalizedCode,
+          ),
+        );
   }
 
   String _deriveLocalActivityId(AgendaAssignmentRecord record) {
@@ -472,6 +603,19 @@ class AssignmentsRepository {
       }
     }
 
+    // If we already have a local row keyed by assignment id, keep using it.
+    // This preserves local execution state (startedAt/status) when backend starts
+    // returning a different canonical activity_id for the same assignment.
+    final assignmentId = record.id.trim();
+    if (assignmentId.isNotEmpty) {
+      final existingByAssignmentId = await (_database.select(_database.activities)
+            ..where((t) => t.id.equals(assignmentId)))
+          .getSingleOrNull();
+      if (existingByAssignmentId != null) {
+        return assignmentId;
+      }
+    }
+
     final fromActivityId = record.activityId?.trim();
     if (fromActivityId != null && fromActivityId.isNotEmpty) {
       final existingByActivityId = await (_database.select(_database.activities)
@@ -482,7 +626,7 @@ class AssignmentsRepository {
       }
     }
 
-    final projectId = record.projectId.trim();
+    final projectId = await _resolveLocalProjectId(record.projectId.trim());
     if (projectId.isNotEmpty && record.pk != null) {
       final candidates = await (_database.select(_database.activities)
             ..where((t) => t.projectId.equals(projectId) & t.pk.equals(record.pk!))
@@ -519,6 +663,14 @@ class AssignmentsRepository {
     return RegExp(
       r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
     ).hasMatch(normalized);
+  }
+
+  String? _normalizeRemoteActivityId(dynamic rawValue) {
+    final value = rawValue?.toString().trim();
+    if (value == null || value.isEmpty) {
+      return null;
+    }
+    return _looksLikeUuid(value) ? value : null;
   }
 
   String _normalizeActivityTitleForMatch(String rawTitle) {
@@ -607,7 +759,17 @@ class AssignmentsRepository {
         .getSingleOrNull();
     if (fallback != null) return fallback.id;
 
-    return 'unknown_activity_type';
+    // Create a placeholder so the FK constraint on activities.activity_type_id
+    // is satisfied even when the catalog has not been synced yet.
+    const placeholderId = 'unknown_activity_type';
+    await _database.into(_database.catalogActivityTypes).insertOnConflictUpdate(
+          CatalogActivityTypesCompanion.insert(
+            id: placeholderId,
+            code: 'UNK',
+            name: 'Actividad',
+          ),
+        );
+    return placeholderId;
   }
 
   String _buildLegacyLocationDescription({

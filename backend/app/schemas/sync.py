@@ -110,6 +110,8 @@ class SyncPushResultItem(BaseModel):
     sync_version: int = Field(..., description="Current sync_version after operation")
     error_code: str | None = Field(None, description="Machine-readable validation error code")
     message: str | None = Field(None, description="Validation/conflict message")
+    retryable: bool | None = Field(None, description="Whether client can retry automatically")
+    suggested_action: str | None = Field(None, description="Suggested next action for UX guidance")
 
 
 class SyncPushResponse(BaseModel):

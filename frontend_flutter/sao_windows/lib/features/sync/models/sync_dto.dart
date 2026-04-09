@@ -70,6 +70,8 @@ class ActivityDTO {
   final int? pkEnd;
   final String executionState;
   final String? reviewDecision;
+  final String? reviewRejectReasonCode;
+  final String? reviewComment;
   final String? assignedToUserId;
   final String? assignedToUserName;
   final String createdByUserId;
@@ -80,6 +82,10 @@ class ActivityDTO {
   final String? title;
   final String? description;
   final Map<String, dynamic>? wizardPayload;
+  final String operationalState;
+  final String syncState;
+  final String reviewState;
+  final String nextAction;
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
@@ -94,6 +100,8 @@ class ActivityDTO {
     this.pkEnd,
     required this.executionState,
     this.reviewDecision,
+    this.reviewRejectReasonCode,
+    this.reviewComment,
     this.assignedToUserId,
     this.assignedToUserName,
     required this.createdByUserId,
@@ -104,6 +112,10 @@ class ActivityDTO {
     this.title,
     this.description,
     this.wizardPayload,
+    this.operationalState = 'PENDIENTE',
+    this.syncState = 'SYNCED',
+    this.reviewState = 'NOT_APPLICABLE',
+    this.nextAction = 'SIN_ACCION',
     required this.createdAt,
     required this.updatedAt,
     this.deletedAt,
@@ -140,6 +152,8 @@ class ActivityDTO {
       pkEnd: json['pk_end'] as int?,
       executionState: asStringOrNull('execution_state') ?? 'PENDIENTE',
       reviewDecision: asStringOrNull('review_decision'),
+      reviewRejectReasonCode: asStringOrNull('review_reject_reason_code'),
+      reviewComment: asStringOrNull('review_comment'),
       assignedToUserId: asStringOrNull('assigned_to_user_id'),
       assignedToUserName: asStringOrNull('assigned_to_user_name'),
       createdByUserId: asStringOrNull('created_by_user_id') ?? '',
@@ -152,6 +166,10 @@ class ActivityDTO {
         wizardPayload: json['wizard_payload'] is Map
           ? Map<String, dynamic>.from(json['wizard_payload'] as Map)
           : null,
+      operationalState: asStringOrNull('operational_state') ?? 'PENDIENTE',
+      syncState: asStringOrNull('sync_state') ?? 'SYNCED',
+      reviewState: asStringOrNull('review_state') ?? 'NOT_APPLICABLE',
+      nextAction: asStringOrNull('next_action') ?? 'SIN_ACCION',
       createdAt: parseDate('created_at'),
       updatedAt: parseDate('updated_at'),
       deletedAt: asStringOrNull('deleted_at') != null
@@ -171,6 +189,8 @@ class ActivityDTO {
       'pk_end': pkEnd,
       'execution_state': executionState,
       'review_decision': reviewDecision,
+      'review_reject_reason_code': reviewRejectReasonCode,
+      'review_comment': reviewComment,
       'assigned_to_user_id': assignedToUserId,
       'created_by_user_id': createdByUserId,
       'catalog_version_id': catalogVersionId,
@@ -180,6 +200,10 @@ class ActivityDTO {
       'title': title,
       'description': description,
       if (wizardPayload != null) 'wizard_payload': wizardPayload,
+      'operational_state': operationalState,
+      'sync_state': syncState,
+      'review_state': reviewState,
+      'next_action': nextAction,
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'deleted_at': deletedAt?.toIso8601String(),
@@ -226,11 +250,27 @@ class SyncPushResultItem {
   /// sync_version after the operation.
   final int syncVersion;
 
+  /// Machine-readable backend error code when status is INVALID.
+  final String? errorCode;
+
+  /// Human-readable backend validation detail when available.
+  final String? message;
+
+  /// Whether the client should retry this item automatically/manual.
+  final bool retryable;
+
+  /// Suggested user/system action returned by backend.
+  final String? suggestedAction;
+
   const SyncPushResultItem({
     required this.uuid,
     required this.status,
     this.serverId,
     required this.syncVersion,
+    this.errorCode,
+    this.message,
+    this.retryable = false,
+    this.suggestedAction,
   });
 
   factory SyncPushResultItem.fromJson(Map<String, dynamic> json) =>
@@ -239,6 +279,16 @@ class SyncPushResultItem {
         status: json['status'] as String,
         serverId: json['server_id'] as int?,
         syncVersion: json['sync_version'] as int,
+        errorCode: (json['error_code'] as String?)?.trim().isEmpty == true
+          ? null
+          : json['error_code'] as String?,
+        message: (json['message'] as String?)?.trim().isEmpty == true
+          ? null
+          : json['message'] as String?,
+        retryable: (json['retryable'] as bool?) ?? false,
+        suggestedAction: (json['suggested_action'] as String?)?.trim().isEmpty == true
+            ? null
+            : json['suggested_action'] as String?,
       );
 
   bool get isSuccess =>

@@ -7267,6 +7267,20 @@ class $ActivitiesTable extends Activities
       'REFERENCES users (id)',
     ),
   );
+  static const VerificationMeta _assignedToUserIdMeta = const VerificationMeta(
+    'assignedToUserId',
+  );
+  @override
+  late final GeneratedColumn<String> assignedToUserId = GeneratedColumn<String>(
+    'assigned_to_user_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES users (id)',
+    ),
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -7355,6 +7369,7 @@ class $ActivitiesTable extends Activities
     startedAt,
     finishedAt,
     createdByUserId,
+    assignedToUserId,
     status,
     geoLat,
     geoLon,
@@ -7471,6 +7486,15 @@ class $ActivitiesTable extends Activities
     } else if (isInserting) {
       context.missing(_createdByUserIdMeta);
     }
+    if (data.containsKey('assigned_to_user_id')) {
+      context.handle(
+        _assignedToUserIdMeta,
+        assignedToUserId.isAcceptableOrUnknown(
+          data['assigned_to_user_id']!,
+          _assignedToUserIdMeta,
+        ),
+      );
+    }
     if (data.containsKey('status')) {
       context.handle(
         _statusMeta,
@@ -7583,6 +7607,10 @@ class $ActivitiesTable extends Activities
         DriftSqlType.string,
         data['${effectivePrefix}created_by_user_id'],
       )!,
+      assignedToUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}assigned_to_user_id'],
+      ),
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
@@ -7634,6 +7662,7 @@ class Activity extends DataClass implements Insertable<Activity> {
   final DateTime? startedAt;
   final DateTime? finishedAt;
   final String createdByUserId;
+  final String? assignedToUserId;
   final String status;
   final double? geoLat;
   final double? geoLon;
@@ -7655,6 +7684,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     this.startedAt,
     this.finishedAt,
     required this.createdByUserId,
+    this.assignedToUserId,
     required this.status,
     this.geoLat,
     this.geoLon,
@@ -7693,6 +7723,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       map['finished_at'] = Variable<DateTime>(finishedAt);
     }
     map['created_by_user_id'] = Variable<String>(createdByUserId);
+    if (!nullToAbsent || assignedToUserId != null) {
+      map['assigned_to_user_id'] = Variable<String>(assignedToUserId);
+    }
     map['status'] = Variable<String>(status);
     if (!nullToAbsent || geoLat != null) {
       map['geo_lat'] = Variable<double>(geoLat);
@@ -7740,6 +7773,9 @@ class Activity extends DataClass implements Insertable<Activity> {
           ? const Value.absent()
           : Value(finishedAt),
       createdByUserId: Value(createdByUserId),
+      assignedToUserId: assignedToUserId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(assignedToUserId),
       status: Value(status),
       geoLat: geoLat == null && nullToAbsent
           ? const Value.absent()
@@ -7779,6 +7815,7 @@ class Activity extends DataClass implements Insertable<Activity> {
       startedAt: serializer.fromJson<DateTime?>(json['startedAt']),
       finishedAt: serializer.fromJson<DateTime?>(json['finishedAt']),
       createdByUserId: serializer.fromJson<String>(json['createdByUserId']),
+      assignedToUserId: serializer.fromJson<String?>(json['assignedToUserId']),
       status: serializer.fromJson<String>(json['status']),
       geoLat: serializer.fromJson<double?>(json['geoLat']),
       geoLon: serializer.fromJson<double?>(json['geoLon']),
@@ -7805,6 +7842,7 @@ class Activity extends DataClass implements Insertable<Activity> {
       'startedAt': serializer.toJson<DateTime?>(startedAt),
       'finishedAt': serializer.toJson<DateTime?>(finishedAt),
       'createdByUserId': serializer.toJson<String>(createdByUserId),
+      'assignedToUserId': serializer.toJson<String?>(assignedToUserId),
       'status': serializer.toJson<String>(status),
       'geoLat': serializer.toJson<double?>(geoLat),
       'geoLon': serializer.toJson<double?>(geoLon),
@@ -7829,6 +7867,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     Value<DateTime?> startedAt = const Value.absent(),
     Value<DateTime?> finishedAt = const Value.absent(),
     String? createdByUserId,
+    Value<String?> assignedToUserId = const Value.absent(),
     String? status,
     Value<double?> geoLat = const Value.absent(),
     Value<double?> geoLon = const Value.absent(),
@@ -7852,6 +7891,9 @@ class Activity extends DataClass implements Insertable<Activity> {
     startedAt: startedAt.present ? startedAt.value : this.startedAt,
     finishedAt: finishedAt.present ? finishedAt.value : this.finishedAt,
     createdByUserId: createdByUserId ?? this.createdByUserId,
+    assignedToUserId: assignedToUserId.present
+        ? assignedToUserId.value
+        : this.assignedToUserId,
     status: status ?? this.status,
     geoLat: geoLat.present ? geoLat.value : this.geoLat,
     geoLon: geoLon.present ? geoLon.value : this.geoLon,
@@ -7887,6 +7929,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       createdByUserId: data.createdByUserId.present
           ? data.createdByUserId.value
           : this.createdByUserId,
+      assignedToUserId: data.assignedToUserId.present
+          ? data.assignedToUserId.value
+          : this.assignedToUserId,
       status: data.status.present ? data.status.value : this.status,
       geoLat: data.geoLat.present ? data.geoLat.value : this.geoLat,
       geoLon: data.geoLon.present ? data.geoLon.value : this.geoLon,
@@ -7919,6 +7964,7 @@ class Activity extends DataClass implements Insertable<Activity> {
           ..write('startedAt: $startedAt, ')
           ..write('finishedAt: $finishedAt, ')
           ..write('createdByUserId: $createdByUserId, ')
+          ..write('assignedToUserId: $assignedToUserId, ')
           ..write('status: $status, ')
           ..write('geoLat: $geoLat, ')
           ..write('geoLon: $geoLon, ')
@@ -7931,7 +7977,7 @@ class Activity extends DataClass implements Insertable<Activity> {
   }
 
   @override
-  int get hashCode => Object.hash(
+  int get hashCode => Object.hashAll([
     id,
     projectId,
     segmentId,
@@ -7945,6 +7991,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     startedAt,
     finishedAt,
     createdByUserId,
+    assignedToUserId,
     status,
     geoLat,
     geoLon,
@@ -7952,7 +7999,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     deviceId,
     localRevision,
     serverRevision,
-  );
+  ]);
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -7970,6 +8017,7 @@ class Activity extends DataClass implements Insertable<Activity> {
           other.startedAt == this.startedAt &&
           other.finishedAt == this.finishedAt &&
           other.createdByUserId == this.createdByUserId &&
+          other.assignedToUserId == this.assignedToUserId &&
           other.status == this.status &&
           other.geoLat == this.geoLat &&
           other.geoLon == this.geoLon &&
@@ -7993,6 +8041,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
   final Value<DateTime?> startedAt;
   final Value<DateTime?> finishedAt;
   final Value<String> createdByUserId;
+  final Value<String?> assignedToUserId;
   final Value<String> status;
   final Value<double?> geoLat;
   final Value<double?> geoLon;
@@ -8015,6 +8064,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     this.startedAt = const Value.absent(),
     this.finishedAt = const Value.absent(),
     this.createdByUserId = const Value.absent(),
+    this.assignedToUserId = const Value.absent(),
     this.status = const Value.absent(),
     this.geoLat = const Value.absent(),
     this.geoLon = const Value.absent(),
@@ -8038,6 +8088,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     this.startedAt = const Value.absent(),
     this.finishedAt = const Value.absent(),
     required String createdByUserId,
+    this.assignedToUserId = const Value.absent(),
     this.status = const Value.absent(),
     this.geoLat = const Value.absent(),
     this.geoLon = const Value.absent(),
@@ -8066,6 +8117,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     Expression<DateTime>? startedAt,
     Expression<DateTime>? finishedAt,
     Expression<String>? createdByUserId,
+    Expression<String>? assignedToUserId,
     Expression<String>? status,
     Expression<double>? geoLat,
     Expression<double>? geoLon,
@@ -8089,6 +8141,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
       if (startedAt != null) 'started_at': startedAt,
       if (finishedAt != null) 'finished_at': finishedAt,
       if (createdByUserId != null) 'created_by_user_id': createdByUserId,
+      if (assignedToUserId != null) 'assigned_to_user_id': assignedToUserId,
       if (status != null) 'status': status,
       if (geoLat != null) 'geo_lat': geoLat,
       if (geoLon != null) 'geo_lon': geoLon,
@@ -8114,6 +8167,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     Value<DateTime?>? startedAt,
     Value<DateTime?>? finishedAt,
     Value<String>? createdByUserId,
+    Value<String?>? assignedToUserId,
     Value<String>? status,
     Value<double?>? geoLat,
     Value<double?>? geoLon,
@@ -8137,6 +8191,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
       startedAt: startedAt ?? this.startedAt,
       finishedAt: finishedAt ?? this.finishedAt,
       createdByUserId: createdByUserId ?? this.createdByUserId,
+      assignedToUserId: assignedToUserId ?? this.assignedToUserId,
       status: status ?? this.status,
       geoLat: geoLat ?? this.geoLat,
       geoLon: geoLon ?? this.geoLon,
@@ -8190,6 +8245,9 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     if (createdByUserId.present) {
       map['created_by_user_id'] = Variable<String>(createdByUserId.value);
     }
+    if (assignedToUserId.present) {
+      map['assigned_to_user_id'] = Variable<String>(assignedToUserId.value);
+    }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
@@ -8233,6 +8291,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
           ..write('startedAt: $startedAt, ')
           ..write('finishedAt: $finishedAt, ')
           ..write('createdByUserId: $createdByUserId, ')
+          ..write('assignedToUserId: $assignedToUserId, ')
           ..write('status: $status, ')
           ..write('geoLat: $geoLat, ')
           ..write('geoLon: $geoLon, ')
@@ -9133,6 +9192,1328 @@ class ActivityLogCompanion extends UpdateCompanion<ActivityLogData> {
           ..write('at: $at, ')
           ..write('userId: $userId, ')
           ..write('note: $note, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $LocalAssignmentsTable extends LocalAssignments
+    with TableInfo<$LocalAssignmentsTable, LocalAssignment> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $LocalAssignmentsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES projects (id)',
+    ),
+  );
+  static const VerificationMeta _assigneeUserIdMeta = const VerificationMeta(
+    'assigneeUserId',
+  );
+  @override
+  late final GeneratedColumn<String> assigneeUserId = GeneratedColumn<String>(
+    'assignee_user_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES users (id)',
+    ),
+  );
+  static const VerificationMeta _activityTypeCodeMeta = const VerificationMeta(
+    'activityTypeCode',
+  );
+  @override
+  late final GeneratedColumn<String> activityTypeCode = GeneratedColumn<String>(
+    'activity_type_code',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 1,
+      maxTextLength: 50,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _titleMeta = const VerificationMeta('title');
+  @override
+  late final GeneratedColumn<String> title = GeneratedColumn<String>(
+    'title',
+    aliasedName,
+    true,
+    additionalChecks: GeneratedColumn.checkTextLength(maxTextLength: 200),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _descriptionMeta = const VerificationMeta(
+    'description',
+  );
+  @override
+  late final GeneratedColumn<String> description = GeneratedColumn<String>(
+    'description',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _frontIdMeta = const VerificationMeta(
+    'frontId',
+  );
+  @override
+  late final GeneratedColumn<String> frontId = GeneratedColumn<String>(
+    'front_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'REFERENCES project_segments (id)',
+    ),
+  );
+  static const VerificationMeta _frontRefMeta = const VerificationMeta(
+    'frontRef',
+  );
+  @override
+  late final GeneratedColumn<String> frontRef = GeneratedColumn<String>(
+    'front_ref',
+    aliasedName,
+    true,
+    additionalChecks: GeneratedColumn.checkTextLength(maxTextLength: 255),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _estadoMeta = const VerificationMeta('estado');
+  @override
+  late final GeneratedColumn<String> estado = GeneratedColumn<String>(
+    'estado',
+    aliasedName,
+    true,
+    additionalChecks: GeneratedColumn.checkTextLength(maxTextLength: 100),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _municipioMeta = const VerificationMeta(
+    'municipio',
+  );
+  @override
+  late final GeneratedColumn<String> municipio = GeneratedColumn<String>(
+    'municipio',
+    aliasedName,
+    true,
+    additionalChecks: GeneratedColumn.checkTextLength(maxTextLength: 100),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _coloniaMeta = const VerificationMeta(
+    'colonia',
+  );
+  @override
+  late final GeneratedColumn<String> colonia = GeneratedColumn<String>(
+    'colonia',
+    aliasedName,
+    true,
+    additionalChecks: GeneratedColumn.checkTextLength(maxTextLength: 200),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pkMeta = const VerificationMeta('pk');
+  @override
+  late final GeneratedColumn<int> pk = GeneratedColumn<int>(
+    'pk',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _startAtMeta = const VerificationMeta(
+    'startAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> startAt = GeneratedColumn<DateTime>(
+    'start_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _endAtMeta = const VerificationMeta('endAt');
+  @override
+  late final GeneratedColumn<DateTime> endAt = GeneratedColumn<DateTime>(
+    'end_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _riskMeta = const VerificationMeta('risk');
+  @override
+  late final GeneratedColumn<String> risk = GeneratedColumn<String>(
+    'risk',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(maxTextLength: 20),
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('bajo'),
+  );
+  static const VerificationMeta _latitudeMeta = const VerificationMeta(
+    'latitude',
+  );
+  @override
+  late final GeneratedColumn<double> latitude = GeneratedColumn<double>(
+    'latitude',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _longitudeMeta = const VerificationMeta(
+    'longitude',
+  );
+  @override
+  late final GeneratedColumn<double> longitude = GeneratedColumn<double>(
+    'longitude',
+    aliasedName,
+    true,
+    type: DriftSqlType.double,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _syncStatusMeta = const VerificationMeta(
+    'syncStatus',
+  );
+  @override
+  late final GeneratedColumn<String> syncStatus = GeneratedColumn<String>(
+    'sync_status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('DRAFT'),
+  );
+  static const VerificationMeta _syncErrorMeta = const VerificationMeta(
+    'syncError',
+  );
+  @override
+  late final GeneratedColumn<String> syncError = GeneratedColumn<String>(
+    'sync_error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _syncRetryCountMeta = const VerificationMeta(
+    'syncRetryCount',
+  );
+  @override
+  late final GeneratedColumn<int> syncRetryCount = GeneratedColumn<int>(
+    'sync_retry_count',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> updatedAt = GeneratedColumn<DateTime>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _syncedAtMeta = const VerificationMeta(
+    'syncedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> syncedAt = GeneratedColumn<DateTime>(
+    'synced_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _backendActivityIdMeta = const VerificationMeta(
+    'backendActivityId',
+  );
+  @override
+  late final GeneratedColumn<String> backendActivityId =
+      GeneratedColumn<String>(
+        'backend_activity_id',
+        aliasedName,
+        true,
+        type: DriftSqlType.string,
+        requiredDuringInsert: false,
+      );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    projectId,
+    assigneeUserId,
+    activityTypeCode,
+    title,
+    description,
+    frontId,
+    frontRef,
+    estado,
+    municipio,
+    colonia,
+    pk,
+    startAt,
+    endAt,
+    risk,
+    latitude,
+    longitude,
+    syncStatus,
+    syncError,
+    syncRetryCount,
+    createdAt,
+    updatedAt,
+    syncedAt,
+    backendActivityId,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'local_assignments';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<LocalAssignment> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('assignee_user_id')) {
+      context.handle(
+        _assigneeUserIdMeta,
+        assigneeUserId.isAcceptableOrUnknown(
+          data['assignee_user_id']!,
+          _assigneeUserIdMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_assigneeUserIdMeta);
+    }
+    if (data.containsKey('activity_type_code')) {
+      context.handle(
+        _activityTypeCodeMeta,
+        activityTypeCode.isAcceptableOrUnknown(
+          data['activity_type_code']!,
+          _activityTypeCodeMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_activityTypeCodeMeta);
+    }
+    if (data.containsKey('title')) {
+      context.handle(
+        _titleMeta,
+        title.isAcceptableOrUnknown(data['title']!, _titleMeta),
+      );
+    }
+    if (data.containsKey('description')) {
+      context.handle(
+        _descriptionMeta,
+        description.isAcceptableOrUnknown(
+          data['description']!,
+          _descriptionMeta,
+        ),
+      );
+    }
+    if (data.containsKey('front_id')) {
+      context.handle(
+        _frontIdMeta,
+        frontId.isAcceptableOrUnknown(data['front_id']!, _frontIdMeta),
+      );
+    }
+    if (data.containsKey('front_ref')) {
+      context.handle(
+        _frontRefMeta,
+        frontRef.isAcceptableOrUnknown(data['front_ref']!, _frontRefMeta),
+      );
+    }
+    if (data.containsKey('estado')) {
+      context.handle(
+        _estadoMeta,
+        estado.isAcceptableOrUnknown(data['estado']!, _estadoMeta),
+      );
+    }
+    if (data.containsKey('municipio')) {
+      context.handle(
+        _municipioMeta,
+        municipio.isAcceptableOrUnknown(data['municipio']!, _municipioMeta),
+      );
+    }
+    if (data.containsKey('colonia')) {
+      context.handle(
+        _coloniaMeta,
+        colonia.isAcceptableOrUnknown(data['colonia']!, _coloniaMeta),
+      );
+    }
+    if (data.containsKey('pk')) {
+      context.handle(_pkMeta, pk.isAcceptableOrUnknown(data['pk']!, _pkMeta));
+    }
+    if (data.containsKey('start_at')) {
+      context.handle(
+        _startAtMeta,
+        startAt.isAcceptableOrUnknown(data['start_at']!, _startAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_startAtMeta);
+    }
+    if (data.containsKey('end_at')) {
+      context.handle(
+        _endAtMeta,
+        endAt.isAcceptableOrUnknown(data['end_at']!, _endAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_endAtMeta);
+    }
+    if (data.containsKey('risk')) {
+      context.handle(
+        _riskMeta,
+        risk.isAcceptableOrUnknown(data['risk']!, _riskMeta),
+      );
+    }
+    if (data.containsKey('latitude')) {
+      context.handle(
+        _latitudeMeta,
+        latitude.isAcceptableOrUnknown(data['latitude']!, _latitudeMeta),
+      );
+    }
+    if (data.containsKey('longitude')) {
+      context.handle(
+        _longitudeMeta,
+        longitude.isAcceptableOrUnknown(data['longitude']!, _longitudeMeta),
+      );
+    }
+    if (data.containsKey('sync_status')) {
+      context.handle(
+        _syncStatusMeta,
+        syncStatus.isAcceptableOrUnknown(data['sync_status']!, _syncStatusMeta),
+      );
+    }
+    if (data.containsKey('sync_error')) {
+      context.handle(
+        _syncErrorMeta,
+        syncError.isAcceptableOrUnknown(data['sync_error']!, _syncErrorMeta),
+      );
+    }
+    if (data.containsKey('sync_retry_count')) {
+      context.handle(
+        _syncRetryCountMeta,
+        syncRetryCount.isAcceptableOrUnknown(
+          data['sync_retry_count']!,
+          _syncRetryCountMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    if (data.containsKey('synced_at')) {
+      context.handle(
+        _syncedAtMeta,
+        syncedAt.isAcceptableOrUnknown(data['synced_at']!, _syncedAtMeta),
+      );
+    }
+    if (data.containsKey('backend_activity_id')) {
+      context.handle(
+        _backendActivityIdMeta,
+        backendActivityId.isAcceptableOrUnknown(
+          data['backend_activity_id']!,
+          _backendActivityIdMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  LocalAssignment map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return LocalAssignment(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      assigneeUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}assignee_user_id'],
+      )!,
+      activityTypeCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}activity_type_code'],
+      )!,
+      title: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}title'],
+      ),
+      description: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}description'],
+      ),
+      frontId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}front_id'],
+      ),
+      frontRef: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}front_ref'],
+      ),
+      estado: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}estado'],
+      ),
+      municipio: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}municipio'],
+      ),
+      colonia: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}colonia'],
+      ),
+      pk: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}pk'],
+      )!,
+      startAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}start_at'],
+      )!,
+      endAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}end_at'],
+      )!,
+      risk: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}risk'],
+      )!,
+      latitude: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}latitude'],
+      ),
+      longitude: attachedDatabase.typeMapping.read(
+        DriftSqlType.double,
+        data['${effectivePrefix}longitude'],
+      ),
+      syncStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_status'],
+      )!,
+      syncError: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}sync_error'],
+      ),
+      syncRetryCount: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}sync_retry_count'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}updated_at'],
+      )!,
+      syncedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}synced_at'],
+      ),
+      backendActivityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}backend_activity_id'],
+      ),
+    );
+  }
+
+  @override
+  $LocalAssignmentsTable createAlias(String alias) {
+    return $LocalAssignmentsTable(attachedDatabase, alias);
+  }
+}
+
+class LocalAssignment extends DataClass implements Insertable<LocalAssignment> {
+  final String id;
+  final String projectId;
+  final String assigneeUserId;
+  final String activityTypeCode;
+  final String? title;
+  final String? description;
+  final String? frontId;
+  final String? frontRef;
+  final String? estado;
+  final String? municipio;
+  final String? colonia;
+  final int pk;
+  final DateTime startAt;
+  final DateTime endAt;
+  final String risk;
+  final double? latitude;
+  final double? longitude;
+  final String syncStatus;
+  final String? syncError;
+  final int syncRetryCount;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+  final DateTime? syncedAt;
+  final String? backendActivityId;
+  const LocalAssignment({
+    required this.id,
+    required this.projectId,
+    required this.assigneeUserId,
+    required this.activityTypeCode,
+    this.title,
+    this.description,
+    this.frontId,
+    this.frontRef,
+    this.estado,
+    this.municipio,
+    this.colonia,
+    required this.pk,
+    required this.startAt,
+    required this.endAt,
+    required this.risk,
+    this.latitude,
+    this.longitude,
+    required this.syncStatus,
+    this.syncError,
+    required this.syncRetryCount,
+    required this.createdAt,
+    required this.updatedAt,
+    this.syncedAt,
+    this.backendActivityId,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['project_id'] = Variable<String>(projectId);
+    map['assignee_user_id'] = Variable<String>(assigneeUserId);
+    map['activity_type_code'] = Variable<String>(activityTypeCode);
+    if (!nullToAbsent || title != null) {
+      map['title'] = Variable<String>(title);
+    }
+    if (!nullToAbsent || description != null) {
+      map['description'] = Variable<String>(description);
+    }
+    if (!nullToAbsent || frontId != null) {
+      map['front_id'] = Variable<String>(frontId);
+    }
+    if (!nullToAbsent || frontRef != null) {
+      map['front_ref'] = Variable<String>(frontRef);
+    }
+    if (!nullToAbsent || estado != null) {
+      map['estado'] = Variable<String>(estado);
+    }
+    if (!nullToAbsent || municipio != null) {
+      map['municipio'] = Variable<String>(municipio);
+    }
+    if (!nullToAbsent || colonia != null) {
+      map['colonia'] = Variable<String>(colonia);
+    }
+    map['pk'] = Variable<int>(pk);
+    map['start_at'] = Variable<DateTime>(startAt);
+    map['end_at'] = Variable<DateTime>(endAt);
+    map['risk'] = Variable<String>(risk);
+    if (!nullToAbsent || latitude != null) {
+      map['latitude'] = Variable<double>(latitude);
+    }
+    if (!nullToAbsent || longitude != null) {
+      map['longitude'] = Variable<double>(longitude);
+    }
+    map['sync_status'] = Variable<String>(syncStatus);
+    if (!nullToAbsent || syncError != null) {
+      map['sync_error'] = Variable<String>(syncError);
+    }
+    map['sync_retry_count'] = Variable<int>(syncRetryCount);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    map['updated_at'] = Variable<DateTime>(updatedAt);
+    if (!nullToAbsent || syncedAt != null) {
+      map['synced_at'] = Variable<DateTime>(syncedAt);
+    }
+    if (!nullToAbsent || backendActivityId != null) {
+      map['backend_activity_id'] = Variable<String>(backendActivityId);
+    }
+    return map;
+  }
+
+  LocalAssignmentsCompanion toCompanion(bool nullToAbsent) {
+    return LocalAssignmentsCompanion(
+      id: Value(id),
+      projectId: Value(projectId),
+      assigneeUserId: Value(assigneeUserId),
+      activityTypeCode: Value(activityTypeCode),
+      title: title == null && nullToAbsent
+          ? const Value.absent()
+          : Value(title),
+      description: description == null && nullToAbsent
+          ? const Value.absent()
+          : Value(description),
+      frontId: frontId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(frontId),
+      frontRef: frontRef == null && nullToAbsent
+          ? const Value.absent()
+          : Value(frontRef),
+      estado: estado == null && nullToAbsent
+          ? const Value.absent()
+          : Value(estado),
+      municipio: municipio == null && nullToAbsent
+          ? const Value.absent()
+          : Value(municipio),
+      colonia: colonia == null && nullToAbsent
+          ? const Value.absent()
+          : Value(colonia),
+      pk: Value(pk),
+      startAt: Value(startAt),
+      endAt: Value(endAt),
+      risk: Value(risk),
+      latitude: latitude == null && nullToAbsent
+          ? const Value.absent()
+          : Value(latitude),
+      longitude: longitude == null && nullToAbsent
+          ? const Value.absent()
+          : Value(longitude),
+      syncStatus: Value(syncStatus),
+      syncError: syncError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncError),
+      syncRetryCount: Value(syncRetryCount),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      syncedAt: syncedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(syncedAt),
+      backendActivityId: backendActivityId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(backendActivityId),
+    );
+  }
+
+  factory LocalAssignment.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return LocalAssignment(
+      id: serializer.fromJson<String>(json['id']),
+      projectId: serializer.fromJson<String>(json['projectId']),
+      assigneeUserId: serializer.fromJson<String>(json['assigneeUserId']),
+      activityTypeCode: serializer.fromJson<String>(json['activityTypeCode']),
+      title: serializer.fromJson<String?>(json['title']),
+      description: serializer.fromJson<String?>(json['description']),
+      frontId: serializer.fromJson<String?>(json['frontId']),
+      frontRef: serializer.fromJson<String?>(json['frontRef']),
+      estado: serializer.fromJson<String?>(json['estado']),
+      municipio: serializer.fromJson<String?>(json['municipio']),
+      colonia: serializer.fromJson<String?>(json['colonia']),
+      pk: serializer.fromJson<int>(json['pk']),
+      startAt: serializer.fromJson<DateTime>(json['startAt']),
+      endAt: serializer.fromJson<DateTime>(json['endAt']),
+      risk: serializer.fromJson<String>(json['risk']),
+      latitude: serializer.fromJson<double?>(json['latitude']),
+      longitude: serializer.fromJson<double?>(json['longitude']),
+      syncStatus: serializer.fromJson<String>(json['syncStatus']),
+      syncError: serializer.fromJson<String?>(json['syncError']),
+      syncRetryCount: serializer.fromJson<int>(json['syncRetryCount']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      updatedAt: serializer.fromJson<DateTime>(json['updatedAt']),
+      syncedAt: serializer.fromJson<DateTime?>(json['syncedAt']),
+      backendActivityId: serializer.fromJson<String?>(
+        json['backendActivityId'],
+      ),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'projectId': serializer.toJson<String>(projectId),
+      'assigneeUserId': serializer.toJson<String>(assigneeUserId),
+      'activityTypeCode': serializer.toJson<String>(activityTypeCode),
+      'title': serializer.toJson<String?>(title),
+      'description': serializer.toJson<String?>(description),
+      'frontId': serializer.toJson<String?>(frontId),
+      'frontRef': serializer.toJson<String?>(frontRef),
+      'estado': serializer.toJson<String?>(estado),
+      'municipio': serializer.toJson<String?>(municipio),
+      'colonia': serializer.toJson<String?>(colonia),
+      'pk': serializer.toJson<int>(pk),
+      'startAt': serializer.toJson<DateTime>(startAt),
+      'endAt': serializer.toJson<DateTime>(endAt),
+      'risk': serializer.toJson<String>(risk),
+      'latitude': serializer.toJson<double?>(latitude),
+      'longitude': serializer.toJson<double?>(longitude),
+      'syncStatus': serializer.toJson<String>(syncStatus),
+      'syncError': serializer.toJson<String?>(syncError),
+      'syncRetryCount': serializer.toJson<int>(syncRetryCount),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'updatedAt': serializer.toJson<DateTime>(updatedAt),
+      'syncedAt': serializer.toJson<DateTime?>(syncedAt),
+      'backendActivityId': serializer.toJson<String?>(backendActivityId),
+    };
+  }
+
+  LocalAssignment copyWith({
+    String? id,
+    String? projectId,
+    String? assigneeUserId,
+    String? activityTypeCode,
+    Value<String?> title = const Value.absent(),
+    Value<String?> description = const Value.absent(),
+    Value<String?> frontId = const Value.absent(),
+    Value<String?> frontRef = const Value.absent(),
+    Value<String?> estado = const Value.absent(),
+    Value<String?> municipio = const Value.absent(),
+    Value<String?> colonia = const Value.absent(),
+    int? pk,
+    DateTime? startAt,
+    DateTime? endAt,
+    String? risk,
+    Value<double?> latitude = const Value.absent(),
+    Value<double?> longitude = const Value.absent(),
+    String? syncStatus,
+    Value<String?> syncError = const Value.absent(),
+    int? syncRetryCount,
+    DateTime? createdAt,
+    DateTime? updatedAt,
+    Value<DateTime?> syncedAt = const Value.absent(),
+    Value<String?> backendActivityId = const Value.absent(),
+  }) => LocalAssignment(
+    id: id ?? this.id,
+    projectId: projectId ?? this.projectId,
+    assigneeUserId: assigneeUserId ?? this.assigneeUserId,
+    activityTypeCode: activityTypeCode ?? this.activityTypeCode,
+    title: title.present ? title.value : this.title,
+    description: description.present ? description.value : this.description,
+    frontId: frontId.present ? frontId.value : this.frontId,
+    frontRef: frontRef.present ? frontRef.value : this.frontRef,
+    estado: estado.present ? estado.value : this.estado,
+    municipio: municipio.present ? municipio.value : this.municipio,
+    colonia: colonia.present ? colonia.value : this.colonia,
+    pk: pk ?? this.pk,
+    startAt: startAt ?? this.startAt,
+    endAt: endAt ?? this.endAt,
+    risk: risk ?? this.risk,
+    latitude: latitude.present ? latitude.value : this.latitude,
+    longitude: longitude.present ? longitude.value : this.longitude,
+    syncStatus: syncStatus ?? this.syncStatus,
+    syncError: syncError.present ? syncError.value : this.syncError,
+    syncRetryCount: syncRetryCount ?? this.syncRetryCount,
+    createdAt: createdAt ?? this.createdAt,
+    updatedAt: updatedAt ?? this.updatedAt,
+    syncedAt: syncedAt.present ? syncedAt.value : this.syncedAt,
+    backendActivityId: backendActivityId.present
+        ? backendActivityId.value
+        : this.backendActivityId,
+  );
+  LocalAssignment copyWithCompanion(LocalAssignmentsCompanion data) {
+    return LocalAssignment(
+      id: data.id.present ? data.id.value : this.id,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      assigneeUserId: data.assigneeUserId.present
+          ? data.assigneeUserId.value
+          : this.assigneeUserId,
+      activityTypeCode: data.activityTypeCode.present
+          ? data.activityTypeCode.value
+          : this.activityTypeCode,
+      title: data.title.present ? data.title.value : this.title,
+      description: data.description.present
+          ? data.description.value
+          : this.description,
+      frontId: data.frontId.present ? data.frontId.value : this.frontId,
+      frontRef: data.frontRef.present ? data.frontRef.value : this.frontRef,
+      estado: data.estado.present ? data.estado.value : this.estado,
+      municipio: data.municipio.present ? data.municipio.value : this.municipio,
+      colonia: data.colonia.present ? data.colonia.value : this.colonia,
+      pk: data.pk.present ? data.pk.value : this.pk,
+      startAt: data.startAt.present ? data.startAt.value : this.startAt,
+      endAt: data.endAt.present ? data.endAt.value : this.endAt,
+      risk: data.risk.present ? data.risk.value : this.risk,
+      latitude: data.latitude.present ? data.latitude.value : this.latitude,
+      longitude: data.longitude.present ? data.longitude.value : this.longitude,
+      syncStatus: data.syncStatus.present
+          ? data.syncStatus.value
+          : this.syncStatus,
+      syncError: data.syncError.present ? data.syncError.value : this.syncError,
+      syncRetryCount: data.syncRetryCount.present
+          ? data.syncRetryCount.value
+          : this.syncRetryCount,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+      syncedAt: data.syncedAt.present ? data.syncedAt.value : this.syncedAt,
+      backendActivityId: data.backendActivityId.present
+          ? data.backendActivityId.value
+          : this.backendActivityId,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAssignment(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('assigneeUserId: $assigneeUserId, ')
+          ..write('activityTypeCode: $activityTypeCode, ')
+          ..write('title: $title, ')
+          ..write('description: $description, ')
+          ..write('frontId: $frontId, ')
+          ..write('frontRef: $frontRef, ')
+          ..write('estado: $estado, ')
+          ..write('municipio: $municipio, ')
+          ..write('colonia: $colonia, ')
+          ..write('pk: $pk, ')
+          ..write('startAt: $startAt, ')
+          ..write('endAt: $endAt, ')
+          ..write('risk: $risk, ')
+          ..write('latitude: $latitude, ')
+          ..write('longitude: $longitude, ')
+          ..write('syncStatus: $syncStatus, ')
+          ..write('syncError: $syncError, ')
+          ..write('syncRetryCount: $syncRetryCount, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('backendActivityId: $backendActivityId')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hashAll([
+    id,
+    projectId,
+    assigneeUserId,
+    activityTypeCode,
+    title,
+    description,
+    frontId,
+    frontRef,
+    estado,
+    municipio,
+    colonia,
+    pk,
+    startAt,
+    endAt,
+    risk,
+    latitude,
+    longitude,
+    syncStatus,
+    syncError,
+    syncRetryCount,
+    createdAt,
+    updatedAt,
+    syncedAt,
+    backendActivityId,
+  ]);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is LocalAssignment &&
+          other.id == this.id &&
+          other.projectId == this.projectId &&
+          other.assigneeUserId == this.assigneeUserId &&
+          other.activityTypeCode == this.activityTypeCode &&
+          other.title == this.title &&
+          other.description == this.description &&
+          other.frontId == this.frontId &&
+          other.frontRef == this.frontRef &&
+          other.estado == this.estado &&
+          other.municipio == this.municipio &&
+          other.colonia == this.colonia &&
+          other.pk == this.pk &&
+          other.startAt == this.startAt &&
+          other.endAt == this.endAt &&
+          other.risk == this.risk &&
+          other.latitude == this.latitude &&
+          other.longitude == this.longitude &&
+          other.syncStatus == this.syncStatus &&
+          other.syncError == this.syncError &&
+          other.syncRetryCount == this.syncRetryCount &&
+          other.createdAt == this.createdAt &&
+          other.updatedAt == this.updatedAt &&
+          other.syncedAt == this.syncedAt &&
+          other.backendActivityId == this.backendActivityId);
+}
+
+class LocalAssignmentsCompanion extends UpdateCompanion<LocalAssignment> {
+  final Value<String> id;
+  final Value<String> projectId;
+  final Value<String> assigneeUserId;
+  final Value<String> activityTypeCode;
+  final Value<String?> title;
+  final Value<String?> description;
+  final Value<String?> frontId;
+  final Value<String?> frontRef;
+  final Value<String?> estado;
+  final Value<String?> municipio;
+  final Value<String?> colonia;
+  final Value<int> pk;
+  final Value<DateTime> startAt;
+  final Value<DateTime> endAt;
+  final Value<String> risk;
+  final Value<double?> latitude;
+  final Value<double?> longitude;
+  final Value<String> syncStatus;
+  final Value<String?> syncError;
+  final Value<int> syncRetryCount;
+  final Value<DateTime> createdAt;
+  final Value<DateTime> updatedAt;
+  final Value<DateTime?> syncedAt;
+  final Value<String?> backendActivityId;
+  final Value<int> rowid;
+  const LocalAssignmentsCompanion({
+    this.id = const Value.absent(),
+    this.projectId = const Value.absent(),
+    this.assigneeUserId = const Value.absent(),
+    this.activityTypeCode = const Value.absent(),
+    this.title = const Value.absent(),
+    this.description = const Value.absent(),
+    this.frontId = const Value.absent(),
+    this.frontRef = const Value.absent(),
+    this.estado = const Value.absent(),
+    this.municipio = const Value.absent(),
+    this.colonia = const Value.absent(),
+    this.pk = const Value.absent(),
+    this.startAt = const Value.absent(),
+    this.endAt = const Value.absent(),
+    this.risk = const Value.absent(),
+    this.latitude = const Value.absent(),
+    this.longitude = const Value.absent(),
+    this.syncStatus = const Value.absent(),
+    this.syncError = const Value.absent(),
+    this.syncRetryCount = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+    this.syncedAt = const Value.absent(),
+    this.backendActivityId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  LocalAssignmentsCompanion.insert({
+    required String id,
+    required String projectId,
+    required String assigneeUserId,
+    required String activityTypeCode,
+    this.title = const Value.absent(),
+    this.description = const Value.absent(),
+    this.frontId = const Value.absent(),
+    this.frontRef = const Value.absent(),
+    this.estado = const Value.absent(),
+    this.municipio = const Value.absent(),
+    this.colonia = const Value.absent(),
+    this.pk = const Value.absent(),
+    required DateTime startAt,
+    required DateTime endAt,
+    this.risk = const Value.absent(),
+    this.latitude = const Value.absent(),
+    this.longitude = const Value.absent(),
+    this.syncStatus = const Value.absent(),
+    this.syncError = const Value.absent(),
+    this.syncRetryCount = const Value.absent(),
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    this.syncedAt = const Value.absent(),
+    this.backendActivityId = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       projectId = Value(projectId),
+       assigneeUserId = Value(assigneeUserId),
+       activityTypeCode = Value(activityTypeCode),
+       startAt = Value(startAt),
+       endAt = Value(endAt),
+       createdAt = Value(createdAt),
+       updatedAt = Value(updatedAt);
+  static Insertable<LocalAssignment> custom({
+    Expression<String>? id,
+    Expression<String>? projectId,
+    Expression<String>? assigneeUserId,
+    Expression<String>? activityTypeCode,
+    Expression<String>? title,
+    Expression<String>? description,
+    Expression<String>? frontId,
+    Expression<String>? frontRef,
+    Expression<String>? estado,
+    Expression<String>? municipio,
+    Expression<String>? colonia,
+    Expression<int>? pk,
+    Expression<DateTime>? startAt,
+    Expression<DateTime>? endAt,
+    Expression<String>? risk,
+    Expression<double>? latitude,
+    Expression<double>? longitude,
+    Expression<String>? syncStatus,
+    Expression<String>? syncError,
+    Expression<int>? syncRetryCount,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? updatedAt,
+    Expression<DateTime>? syncedAt,
+    Expression<String>? backendActivityId,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (projectId != null) 'project_id': projectId,
+      if (assigneeUserId != null) 'assignee_user_id': assigneeUserId,
+      if (activityTypeCode != null) 'activity_type_code': activityTypeCode,
+      if (title != null) 'title': title,
+      if (description != null) 'description': description,
+      if (frontId != null) 'front_id': frontId,
+      if (frontRef != null) 'front_ref': frontRef,
+      if (estado != null) 'estado': estado,
+      if (municipio != null) 'municipio': municipio,
+      if (colonia != null) 'colonia': colonia,
+      if (pk != null) 'pk': pk,
+      if (startAt != null) 'start_at': startAt,
+      if (endAt != null) 'end_at': endAt,
+      if (risk != null) 'risk': risk,
+      if (latitude != null) 'latitude': latitude,
+      if (longitude != null) 'longitude': longitude,
+      if (syncStatus != null) 'sync_status': syncStatus,
+      if (syncError != null) 'sync_error': syncError,
+      if (syncRetryCount != null) 'sync_retry_count': syncRetryCount,
+      if (createdAt != null) 'created_at': createdAt,
+      if (updatedAt != null) 'updated_at': updatedAt,
+      if (syncedAt != null) 'synced_at': syncedAt,
+      if (backendActivityId != null) 'backend_activity_id': backendActivityId,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  LocalAssignmentsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? projectId,
+    Value<String>? assigneeUserId,
+    Value<String>? activityTypeCode,
+    Value<String?>? title,
+    Value<String?>? description,
+    Value<String?>? frontId,
+    Value<String?>? frontRef,
+    Value<String?>? estado,
+    Value<String?>? municipio,
+    Value<String?>? colonia,
+    Value<int>? pk,
+    Value<DateTime>? startAt,
+    Value<DateTime>? endAt,
+    Value<String>? risk,
+    Value<double?>? latitude,
+    Value<double?>? longitude,
+    Value<String>? syncStatus,
+    Value<String?>? syncError,
+    Value<int>? syncRetryCount,
+    Value<DateTime>? createdAt,
+    Value<DateTime>? updatedAt,
+    Value<DateTime?>? syncedAt,
+    Value<String?>? backendActivityId,
+    Value<int>? rowid,
+  }) {
+    return LocalAssignmentsCompanion(
+      id: id ?? this.id,
+      projectId: projectId ?? this.projectId,
+      assigneeUserId: assigneeUserId ?? this.assigneeUserId,
+      activityTypeCode: activityTypeCode ?? this.activityTypeCode,
+      title: title ?? this.title,
+      description: description ?? this.description,
+      frontId: frontId ?? this.frontId,
+      frontRef: frontRef ?? this.frontRef,
+      estado: estado ?? this.estado,
+      municipio: municipio ?? this.municipio,
+      colonia: colonia ?? this.colonia,
+      pk: pk ?? this.pk,
+      startAt: startAt ?? this.startAt,
+      endAt: endAt ?? this.endAt,
+      risk: risk ?? this.risk,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
+      syncStatus: syncStatus ?? this.syncStatus,
+      syncError: syncError ?? this.syncError,
+      syncRetryCount: syncRetryCount ?? this.syncRetryCount,
+      createdAt: createdAt ?? this.createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      syncedAt: syncedAt ?? this.syncedAt,
+      backendActivityId: backendActivityId ?? this.backendActivityId,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (assigneeUserId.present) {
+      map['assignee_user_id'] = Variable<String>(assigneeUserId.value);
+    }
+    if (activityTypeCode.present) {
+      map['activity_type_code'] = Variable<String>(activityTypeCode.value);
+    }
+    if (title.present) {
+      map['title'] = Variable<String>(title.value);
+    }
+    if (description.present) {
+      map['description'] = Variable<String>(description.value);
+    }
+    if (frontId.present) {
+      map['front_id'] = Variable<String>(frontId.value);
+    }
+    if (frontRef.present) {
+      map['front_ref'] = Variable<String>(frontRef.value);
+    }
+    if (estado.present) {
+      map['estado'] = Variable<String>(estado.value);
+    }
+    if (municipio.present) {
+      map['municipio'] = Variable<String>(municipio.value);
+    }
+    if (colonia.present) {
+      map['colonia'] = Variable<String>(colonia.value);
+    }
+    if (pk.present) {
+      map['pk'] = Variable<int>(pk.value);
+    }
+    if (startAt.present) {
+      map['start_at'] = Variable<DateTime>(startAt.value);
+    }
+    if (endAt.present) {
+      map['end_at'] = Variable<DateTime>(endAt.value);
+    }
+    if (risk.present) {
+      map['risk'] = Variable<String>(risk.value);
+    }
+    if (latitude.present) {
+      map['latitude'] = Variable<double>(latitude.value);
+    }
+    if (longitude.present) {
+      map['longitude'] = Variable<double>(longitude.value);
+    }
+    if (syncStatus.present) {
+      map['sync_status'] = Variable<String>(syncStatus.value);
+    }
+    if (syncError.present) {
+      map['sync_error'] = Variable<String>(syncError.value);
+    }
+    if (syncRetryCount.present) {
+      map['sync_retry_count'] = Variable<int>(syncRetryCount.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<DateTime>(updatedAt.value);
+    }
+    if (syncedAt.present) {
+      map['synced_at'] = Variable<DateTime>(syncedAt.value);
+    }
+    if (backendActivityId.present) {
+      map['backend_activity_id'] = Variable<String>(backendActivityId.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('LocalAssignmentsCompanion(')
+          ..write('id: $id, ')
+          ..write('projectId: $projectId, ')
+          ..write('assigneeUserId: $assigneeUserId, ')
+          ..write('activityTypeCode: $activityTypeCode, ')
+          ..write('title: $title, ')
+          ..write('description: $description, ')
+          ..write('frontId: $frontId, ')
+          ..write('frontRef: $frontRef, ')
+          ..write('estado: $estado, ')
+          ..write('municipio: $municipio, ')
+          ..write('colonia: $colonia, ')
+          ..write('pk: $pk, ')
+          ..write('startAt: $startAt, ')
+          ..write('endAt: $endAt, ')
+          ..write('risk: $risk, ')
+          ..write('latitude: $latitude, ')
+          ..write('longitude: $longitude, ')
+          ..write('syncStatus: $syncStatus, ')
+          ..write('syncError: $syncError, ')
+          ..write('syncRetryCount: $syncRetryCount, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('updatedAt: $updatedAt, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('backendActivityId: $backendActivityId, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -10709,6 +12090,43 @@ class $SyncQueueTable extends SyncQueue
         type: DriftSqlType.dateTime,
         requiredDuringInsert: false,
       );
+  static const VerificationMeta _errorCodeMeta = const VerificationMeta(
+    'errorCode',
+  );
+  @override
+  late final GeneratedColumn<String> errorCode = GeneratedColumn<String>(
+    'error_code',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _retryableMeta = const VerificationMeta(
+    'retryable',
+  );
+  @override
+  late final GeneratedColumn<bool> retryable = GeneratedColumn<bool>(
+    'retryable',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("retryable" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  static const VerificationMeta _suggestedActionMeta = const VerificationMeta(
+    'suggestedAction',
+  );
+  @override
+  late final GeneratedColumn<String> suggestedAction = GeneratedColumn<String>(
+    'suggested_action',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _lastErrorMeta = const VerificationMeta(
     'lastError',
   );
@@ -10740,6 +12158,9 @@ class $SyncQueueTable extends SyncQueue
     priority,
     attempts,
     lastAttemptAt,
+    errorCode,
+    retryable,
+    suggestedAction,
     lastError,
     status,
   ];
@@ -10816,6 +12237,27 @@ class $SyncQueueTable extends SyncQueue
         ),
       );
     }
+    if (data.containsKey('error_code')) {
+      context.handle(
+        _errorCodeMeta,
+        errorCode.isAcceptableOrUnknown(data['error_code']!, _errorCodeMeta),
+      );
+    }
+    if (data.containsKey('retryable')) {
+      context.handle(
+        _retryableMeta,
+        retryable.isAcceptableOrUnknown(data['retryable']!, _retryableMeta),
+      );
+    }
+    if (data.containsKey('suggested_action')) {
+      context.handle(
+        _suggestedActionMeta,
+        suggestedAction.isAcceptableOrUnknown(
+          data['suggested_action']!,
+          _suggestedActionMeta,
+        ),
+      );
+    }
     if (data.containsKey('last_error')) {
       context.handle(
         _lastErrorMeta,
@@ -10869,6 +12311,18 @@ class $SyncQueueTable extends SyncQueue
         DriftSqlType.dateTime,
         data['${effectivePrefix}last_attempt_at'],
       ),
+      errorCode: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}error_code'],
+      ),
+      retryable: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}retryable'],
+      )!,
+      suggestedAction: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}suggested_action'],
+      ),
       lastError: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}last_error'],
@@ -10895,6 +12349,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
   final int priority;
   final int attempts;
   final DateTime? lastAttemptAt;
+  final String? errorCode;
+  final bool retryable;
+  final String? suggestedAction;
   final String? lastError;
   final String status;
   const SyncQueueData({
@@ -10906,6 +12363,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     required this.priority,
     required this.attempts,
     this.lastAttemptAt,
+    this.errorCode,
+    required this.retryable,
+    this.suggestedAction,
     this.lastError,
     required this.status,
   });
@@ -10921,6 +12381,13 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     map['attempts'] = Variable<int>(attempts);
     if (!nullToAbsent || lastAttemptAt != null) {
       map['last_attempt_at'] = Variable<DateTime>(lastAttemptAt);
+    }
+    if (!nullToAbsent || errorCode != null) {
+      map['error_code'] = Variable<String>(errorCode);
+    }
+    map['retryable'] = Variable<bool>(retryable);
+    if (!nullToAbsent || suggestedAction != null) {
+      map['suggested_action'] = Variable<String>(suggestedAction);
     }
     if (!nullToAbsent || lastError != null) {
       map['last_error'] = Variable<String>(lastError);
@@ -10941,6 +12408,13 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       lastAttemptAt: lastAttemptAt == null && nullToAbsent
           ? const Value.absent()
           : Value(lastAttemptAt),
+      errorCode: errorCode == null && nullToAbsent
+          ? const Value.absent()
+          : Value(errorCode),
+      retryable: Value(retryable),
+      suggestedAction: suggestedAction == null && nullToAbsent
+          ? const Value.absent()
+          : Value(suggestedAction),
       lastError: lastError == null && nullToAbsent
           ? const Value.absent()
           : Value(lastError),
@@ -10962,6 +12436,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       priority: serializer.fromJson<int>(json['priority']),
       attempts: serializer.fromJson<int>(json['attempts']),
       lastAttemptAt: serializer.fromJson<DateTime?>(json['lastAttemptAt']),
+      errorCode: serializer.fromJson<String?>(json['errorCode']),
+      retryable: serializer.fromJson<bool>(json['retryable']),
+      suggestedAction: serializer.fromJson<String?>(json['suggestedAction']),
       lastError: serializer.fromJson<String?>(json['lastError']),
       status: serializer.fromJson<String>(json['status']),
     );
@@ -10978,6 +12455,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       'priority': serializer.toJson<int>(priority),
       'attempts': serializer.toJson<int>(attempts),
       'lastAttemptAt': serializer.toJson<DateTime?>(lastAttemptAt),
+      'errorCode': serializer.toJson<String?>(errorCode),
+      'retryable': serializer.toJson<bool>(retryable),
+      'suggestedAction': serializer.toJson<String?>(suggestedAction),
       'lastError': serializer.toJson<String?>(lastError),
       'status': serializer.toJson<String>(status),
     };
@@ -10992,6 +12472,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     int? priority,
     int? attempts,
     Value<DateTime?> lastAttemptAt = const Value.absent(),
+    Value<String?> errorCode = const Value.absent(),
+    bool? retryable,
+    Value<String?> suggestedAction = const Value.absent(),
     Value<String?> lastError = const Value.absent(),
     String? status,
   }) => SyncQueueData(
@@ -11005,6 +12488,11 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     lastAttemptAt: lastAttemptAt.present
         ? lastAttemptAt.value
         : this.lastAttemptAt,
+    errorCode: errorCode.present ? errorCode.value : this.errorCode,
+    retryable: retryable ?? this.retryable,
+    suggestedAction: suggestedAction.present
+        ? suggestedAction.value
+        : this.suggestedAction,
     lastError: lastError.present ? lastError.value : this.lastError,
     status: status ?? this.status,
   );
@@ -11022,6 +12510,11 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
       lastAttemptAt: data.lastAttemptAt.present
           ? data.lastAttemptAt.value
           : this.lastAttemptAt,
+      errorCode: data.errorCode.present ? data.errorCode.value : this.errorCode,
+      retryable: data.retryable.present ? data.retryable.value : this.retryable,
+      suggestedAction: data.suggestedAction.present
+          ? data.suggestedAction.value
+          : this.suggestedAction,
       lastError: data.lastError.present ? data.lastError.value : this.lastError,
       status: data.status.present ? data.status.value : this.status,
     );
@@ -11038,6 +12531,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
           ..write('priority: $priority, ')
           ..write('attempts: $attempts, ')
           ..write('lastAttemptAt: $lastAttemptAt, ')
+          ..write('errorCode: $errorCode, ')
+          ..write('retryable: $retryable, ')
+          ..write('suggestedAction: $suggestedAction, ')
           ..write('lastError: $lastError, ')
           ..write('status: $status')
           ..write(')'))
@@ -11054,6 +12550,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
     priority,
     attempts,
     lastAttemptAt,
+    errorCode,
+    retryable,
+    suggestedAction,
     lastError,
     status,
   );
@@ -11069,6 +12568,9 @@ class SyncQueueData extends DataClass implements Insertable<SyncQueueData> {
           other.priority == this.priority &&
           other.attempts == this.attempts &&
           other.lastAttemptAt == this.lastAttemptAt &&
+          other.errorCode == this.errorCode &&
+          other.retryable == this.retryable &&
+          other.suggestedAction == this.suggestedAction &&
           other.lastError == this.lastError &&
           other.status == this.status);
 }
@@ -11082,6 +12584,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
   final Value<int> priority;
   final Value<int> attempts;
   final Value<DateTime?> lastAttemptAt;
+  final Value<String?> errorCode;
+  final Value<bool> retryable;
+  final Value<String?> suggestedAction;
   final Value<String?> lastError;
   final Value<String> status;
   final Value<int> rowid;
@@ -11094,6 +12599,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     this.priority = const Value.absent(),
     this.attempts = const Value.absent(),
     this.lastAttemptAt = const Value.absent(),
+    this.errorCode = const Value.absent(),
+    this.retryable = const Value.absent(),
+    this.suggestedAction = const Value.absent(),
     this.lastError = const Value.absent(),
     this.status = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -11107,6 +12615,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     this.priority = const Value.absent(),
     this.attempts = const Value.absent(),
     this.lastAttemptAt = const Value.absent(),
+    this.errorCode = const Value.absent(),
+    this.retryable = const Value.absent(),
+    this.suggestedAction = const Value.absent(),
     this.lastError = const Value.absent(),
     this.status = const Value.absent(),
     this.rowid = const Value.absent(),
@@ -11124,6 +12635,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     Expression<int>? priority,
     Expression<int>? attempts,
     Expression<DateTime>? lastAttemptAt,
+    Expression<String>? errorCode,
+    Expression<bool>? retryable,
+    Expression<String>? suggestedAction,
     Expression<String>? lastError,
     Expression<String>? status,
     Expression<int>? rowid,
@@ -11137,6 +12651,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
       if (priority != null) 'priority': priority,
       if (attempts != null) 'attempts': attempts,
       if (lastAttemptAt != null) 'last_attempt_at': lastAttemptAt,
+      if (errorCode != null) 'error_code': errorCode,
+      if (retryable != null) 'retryable': retryable,
+      if (suggestedAction != null) 'suggested_action': suggestedAction,
       if (lastError != null) 'last_error': lastError,
       if (status != null) 'status': status,
       if (rowid != null) 'rowid': rowid,
@@ -11152,6 +12669,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     Value<int>? priority,
     Value<int>? attempts,
     Value<DateTime?>? lastAttemptAt,
+    Value<String?>? errorCode,
+    Value<bool>? retryable,
+    Value<String?>? suggestedAction,
     Value<String?>? lastError,
     Value<String>? status,
     Value<int>? rowid,
@@ -11165,6 +12685,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
       priority: priority ?? this.priority,
       attempts: attempts ?? this.attempts,
       lastAttemptAt: lastAttemptAt ?? this.lastAttemptAt,
+      errorCode: errorCode ?? this.errorCode,
+      retryable: retryable ?? this.retryable,
+      suggestedAction: suggestedAction ?? this.suggestedAction,
       lastError: lastError ?? this.lastError,
       status: status ?? this.status,
       rowid: rowid ?? this.rowid,
@@ -11198,6 +12721,15 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
     if (lastAttemptAt.present) {
       map['last_attempt_at'] = Variable<DateTime>(lastAttemptAt.value);
     }
+    if (errorCode.present) {
+      map['error_code'] = Variable<String>(errorCode.value);
+    }
+    if (retryable.present) {
+      map['retryable'] = Variable<bool>(retryable.value);
+    }
+    if (suggestedAction.present) {
+      map['suggested_action'] = Variable<String>(suggestedAction.value);
+    }
     if (lastError.present) {
       map['last_error'] = Variable<String>(lastError.value);
     }
@@ -11221,6 +12753,9 @@ class SyncQueueCompanion extends UpdateCompanion<SyncQueueData> {
           ..write('priority: $priority, ')
           ..write('attempts: $attempts, ')
           ..write('lastAttemptAt: $lastAttemptAt, ')
+          ..write('errorCode: $errorCode, ')
+          ..write('retryable: $retryable, ')
+          ..write('suggestedAction: $suggestedAction, ')
           ..write('lastError: $lastError, ')
           ..write('status: $status, ')
           ..write('rowid: $rowid')
@@ -13372,6 +14907,9 @@ abstract class _$AppDb extends GeneratedDatabase {
   late final $ActivitiesTable activities = $ActivitiesTable(this);
   late final $ActivityFieldsTable activityFields = $ActivityFieldsTable(this);
   late final $ActivityLogTable activityLog = $ActivityLogTable(this);
+  late final $LocalAssignmentsTable localAssignments = $LocalAssignmentsTable(
+    this,
+  );
   late final $EvidencesTable evidences = $EvidencesTable(this);
   late final $PendingUploadsTable pendingUploads = $PendingUploadsTable(this);
   late final $SyncQueueTable syncQueue = $SyncQueueTable(this);
@@ -13403,6 +14941,7 @@ abstract class _$AppDb extends GeneratedDatabase {
     activities,
     activityFields,
     activityLog,
+    localAssignments,
     evidences,
     pendingUploads,
     syncQueue,
@@ -13700,23 +15239,6 @@ final class $$UsersTableReferences
     );
   }
 
-  static MultiTypedResultKey<$ActivitiesTable, List<Activity>>
-  _activitiesRefsTable(_$AppDb db) => MultiTypedResultKey.fromTable(
-    db.activities,
-    aliasName: $_aliasNameGenerator(db.users.id, db.activities.createdByUserId),
-  );
-
-  $$ActivitiesTableProcessedTableManager get activitiesRefs {
-    final manager = $$ActivitiesTableTableManager($_db, $_db.activities).filter(
-      (f) => f.createdByUserId.id.sqlEquals($_itemColumn<String>('id')!),
-    );
-
-    final cache = $_typedResult.readTableOrNull(_activitiesRefsTable($_db));
-    return ProcessedTableManager(
-      manager.$state.copyWith(prefetchedData: cache),
-    );
-  }
-
   static MultiTypedResultKey<$ActivityLogTable, List<ActivityLogData>>
   _activityLogRefsTable(_$AppDb db) => MultiTypedResultKey.fromTable(
     db.activityLog,
@@ -13730,6 +15252,29 @@ final class $$UsersTableReferences
     ).filter((f) => f.userId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_activityLogRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$LocalAssignmentsTable, List<LocalAssignment>>
+  _localAssignmentsRefsTable(_$AppDb db) => MultiTypedResultKey.fromTable(
+    db.localAssignments,
+    aliasName: $_aliasNameGenerator(
+      db.users.id,
+      db.localAssignments.assigneeUserId,
+    ),
+  );
+
+  $$LocalAssignmentsTableProcessedTableManager get localAssignmentsRefs {
+    final manager = $$LocalAssignmentsTableTableManager(
+      $_db,
+      $_db.localAssignments,
+    ).filter((f) => f.assigneeUserId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _localAssignmentsRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -13787,31 +15332,6 @@ class $$UsersTableFilterComposer extends Composer<_$AppDb, $UsersTable> {
     return composer;
   }
 
-  Expression<bool> activitiesRefs(
-    Expression<bool> Function($$ActivitiesTableFilterComposer f) f,
-  ) {
-    final $$ActivitiesTableFilterComposer composer = $composerBuilder(
-      composer: this,
-      getCurrentColumn: (t) => t.id,
-      referencedTable: $db.activities,
-      getReferencedColumn: (t) => t.createdByUserId,
-      builder:
-          (
-            joinBuilder, {
-            $addJoinBuilderToRootComposer,
-            $removeJoinBuilderFromRootComposer,
-          }) => $$ActivitiesTableFilterComposer(
-            $db: $db,
-            $table: $db.activities,
-            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-            joinBuilder: joinBuilder,
-            $removeJoinBuilderFromRootComposer:
-                $removeJoinBuilderFromRootComposer,
-          ),
-    );
-    return f(composer);
-  }
-
   Expression<bool> activityLogRefs(
     Expression<bool> Function($$ActivityLogTableFilterComposer f) f,
   ) {
@@ -13828,6 +15348,31 @@ class $$UsersTableFilterComposer extends Composer<_$AppDb, $UsersTable> {
           }) => $$ActivityLogTableFilterComposer(
             $db: $db,
             $table: $db.activityLog,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> localAssignmentsRefs(
+    Expression<bool> Function($$LocalAssignmentsTableFilterComposer f) f,
+  ) {
+    final $$LocalAssignmentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.localAssignments,
+      getReferencedColumn: (t) => t.assigneeUserId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LocalAssignmentsTableFilterComposer(
+            $db: $db,
+            $table: $db.localAssignments,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -13935,31 +15480,6 @@ class $$UsersTableAnnotationComposer extends Composer<_$AppDb, $UsersTable> {
     return composer;
   }
 
-  Expression<T> activitiesRefs<T extends Object>(
-    Expression<T> Function($$ActivitiesTableAnnotationComposer a) f,
-  ) {
-    final $$ActivitiesTableAnnotationComposer composer = $composerBuilder(
-      composer: this,
-      getCurrentColumn: (t) => t.id,
-      referencedTable: $db.activities,
-      getReferencedColumn: (t) => t.createdByUserId,
-      builder:
-          (
-            joinBuilder, {
-            $addJoinBuilderToRootComposer,
-            $removeJoinBuilderFromRootComposer,
-          }) => $$ActivitiesTableAnnotationComposer(
-            $db: $db,
-            $table: $db.activities,
-            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
-            joinBuilder: joinBuilder,
-            $removeJoinBuilderFromRootComposer:
-                $removeJoinBuilderFromRootComposer,
-          ),
-    );
-    return f(composer);
-  }
-
   Expression<T> activityLogRefs<T extends Object>(
     Expression<T> Function($$ActivityLogTableAnnotationComposer a) f,
   ) {
@@ -13976,6 +15496,31 @@ class $$UsersTableAnnotationComposer extends Composer<_$AppDb, $UsersTable> {
           }) => $$ActivityLogTableAnnotationComposer(
             $db: $db,
             $table: $db.activityLog,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<T> localAssignmentsRefs<T extends Object>(
+    Expression<T> Function($$LocalAssignmentsTableAnnotationComposer a) f,
+  ) {
+    final $$LocalAssignmentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.localAssignments,
+      getReferencedColumn: (t) => t.assigneeUserId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LocalAssignmentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.localAssignments,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -14001,8 +15546,8 @@ class $$UsersTableTableManager
           User,
           PrefetchHooks Function({
             bool roleId,
-            bool activitiesRefs,
             bool activityLogRefs,
+            bool localAssignmentsRefs,
           })
         > {
   $$UsersTableTableManager(_$AppDb db, $UsersTable table)
@@ -14057,14 +15602,14 @@ class $$UsersTableTableManager
           prefetchHooksCallback:
               ({
                 roleId = false,
-                activitiesRefs = false,
                 activityLogRefs = false,
+                localAssignmentsRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
                   explicitlyWatchedTables: [
-                    if (activitiesRefs) db.activities,
                     if (activityLogRefs) db.activityLog,
+                    if (localAssignmentsRefs) db.localAssignments,
                   ],
                   addJoins:
                       <
@@ -14100,23 +15645,6 @@ class $$UsersTableTableManager
                       },
                   getPrefetchedDataCallback: (items) async {
                     return [
-                      if (activitiesRefs)
-                        await $_getPrefetchedData<User, $UsersTable, Activity>(
-                          currentTable: table,
-                          referencedTable: $$UsersTableReferences
-                              ._activitiesRefsTable(db),
-                          managerFromTypedResult: (p0) =>
-                              $$UsersTableReferences(
-                                db,
-                                table,
-                                p0,
-                              ).activitiesRefs,
-                          referencedItemsForCurrentItem:
-                              (item, referencedItems) => referencedItems.where(
-                                (e) => e.createdByUserId == item.id,
-                              ),
-                          typedResults: items,
-                        ),
                       if (activityLogRefs)
                         await $_getPrefetchedData<
                           User,
@@ -14135,6 +15663,27 @@ class $$UsersTableTableManager
                           referencedItemsForCurrentItem:
                               (item, referencedItems) => referencedItems.where(
                                 (e) => e.userId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (localAssignmentsRefs)
+                        await $_getPrefetchedData<
+                          User,
+                          $UsersTable,
+                          LocalAssignment
+                        >(
+                          currentTable: table,
+                          referencedTable: $$UsersTableReferences
+                              ._localAssignmentsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$UsersTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).localAssignmentsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.assigneeUserId == item.id,
                               ),
                           typedResults: items,
                         ),
@@ -14160,8 +15709,8 @@ typedef $$UsersTableProcessedTableManager =
       User,
       PrefetchHooks Function({
         bool roleId,
-        bool activitiesRefs,
         bool activityLogRefs,
+        bool localAssignmentsRefs,
       })
     >;
 typedef $$ProjectsTableCreateCompanionBuilder =
@@ -14244,6 +15793,29 @@ final class $$ProjectsTableReferences
     ).filter((f) => f.projectId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_activitiesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$LocalAssignmentsTable, List<LocalAssignment>>
+  _localAssignmentsRefsTable(_$AppDb db) => MultiTypedResultKey.fromTable(
+    db.localAssignments,
+    aliasName: $_aliasNameGenerator(
+      db.projects.id,
+      db.localAssignments.projectId,
+    ),
+  );
+
+  $$LocalAssignmentsTableProcessedTableManager get localAssignmentsRefs {
+    final manager = $$LocalAssignmentsTableTableManager(
+      $_db,
+      $_db.localAssignments,
+    ).filter((f) => f.projectId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _localAssignmentsRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -14344,6 +15916,31 @@ class $$ProjectsTableFilterComposer extends Composer<_$AppDb, $ProjectsTable> {
           }) => $$ActivitiesTableFilterComposer(
             $db: $db,
             $table: $db.activities,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> localAssignmentsRefs(
+    Expression<bool> Function($$LocalAssignmentsTableFilterComposer f) f,
+  ) {
+    final $$LocalAssignmentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.localAssignments,
+      getReferencedColumn: (t) => t.projectId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LocalAssignmentsTableFilterComposer(
+            $db: $db,
+            $table: $db.localAssignments,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -14479,6 +16076,31 @@ class $$ProjectsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> localAssignmentsRefs<T extends Object>(
+    Expression<T> Function($$LocalAssignmentsTableAnnotationComposer a) f,
+  ) {
+    final $$LocalAssignmentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.localAssignments,
+      getReferencedColumn: (t) => t.projectId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LocalAssignmentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.localAssignments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$ProjectsTableTableManager
@@ -14498,6 +16120,7 @@ class $$ProjectsTableTableManager
             bool projectSegmentsRefs,
             bool catalogVersionsRefs,
             bool activitiesRefs,
+            bool localAssignmentsRefs,
           })
         > {
   $$ProjectsTableTableManager(_$AppDb db, $ProjectsTable table)
@@ -14552,6 +16175,7 @@ class $$ProjectsTableTableManager
                 projectSegmentsRefs = false,
                 catalogVersionsRefs = false,
                 activitiesRefs = false,
+                localAssignmentsRefs = false,
               }) {
                 return PrefetchHooks(
                   db: db,
@@ -14559,6 +16183,7 @@ class $$ProjectsTableTableManager
                     if (projectSegmentsRefs) db.projectSegments,
                     if (catalogVersionsRefs) db.catalogVersions,
                     if (activitiesRefs) db.activities,
+                    if (localAssignmentsRefs) db.localAssignments,
                   ],
                   addJoins: null,
                   getPrefetchedDataCallback: (items) async {
@@ -14626,6 +16251,27 @@ class $$ProjectsTableTableManager
                               ),
                           typedResults: items,
                         ),
+                      if (localAssignmentsRefs)
+                        await $_getPrefetchedData<
+                          Project,
+                          $ProjectsTable,
+                          LocalAssignment
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ProjectsTableReferences
+                              ._localAssignmentsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ProjectsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).localAssignmentsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.projectId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
                     ];
                   },
                 );
@@ -14650,6 +16296,7 @@ typedef $$ProjectsTableProcessedTableManager =
         bool projectSegmentsRefs,
         bool catalogVersionsRefs,
         bool activitiesRefs,
+        bool localAssignmentsRefs,
       })
     >;
 typedef $$ProjectSegmentsTableCreateCompanionBuilder =
@@ -14715,6 +16362,29 @@ final class $$ProjectSegmentsTableReferences
     ).filter((f) => f.segmentId.id.sqlEquals($_itemColumn<String>('id')!));
 
     final cache = $_typedResult.readTableOrNull(_activitiesRefsTable($_db));
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: cache),
+    );
+  }
+
+  static MultiTypedResultKey<$LocalAssignmentsTable, List<LocalAssignment>>
+  _localAssignmentsRefsTable(_$AppDb db) => MultiTypedResultKey.fromTable(
+    db.localAssignments,
+    aliasName: $_aliasNameGenerator(
+      db.projectSegments.id,
+      db.localAssignments.frontId,
+    ),
+  );
+
+  $$LocalAssignmentsTableProcessedTableManager get localAssignmentsRefs {
+    final manager = $$LocalAssignmentsTableTableManager(
+      $_db,
+      $_db.localAssignments,
+    ).filter((f) => f.frontId.id.sqlEquals($_itemColumn<String>('id')!));
+
+    final cache = $_typedResult.readTableOrNull(
+      _localAssignmentsRefsTable($_db),
+    );
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: cache),
     );
@@ -14794,6 +16464,31 @@ class $$ProjectSegmentsTableFilterComposer
           }) => $$ActivitiesTableFilterComposer(
             $db: $db,
             $table: $db.activities,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
+
+  Expression<bool> localAssignmentsRefs(
+    Expression<bool> Function($$LocalAssignmentsTableFilterComposer f) f,
+  ) {
+    final $$LocalAssignmentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.localAssignments,
+      getReferencedColumn: (t) => t.frontId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LocalAssignmentsTableFilterComposer(
+            $db: $db,
+            $table: $db.localAssignments,
             $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
             joinBuilder: joinBuilder,
             $removeJoinBuilderFromRootComposer:
@@ -14935,6 +16630,31 @@ class $$ProjectSegmentsTableAnnotationComposer
     );
     return f(composer);
   }
+
+  Expression<T> localAssignmentsRefs<T extends Object>(
+    Expression<T> Function($$LocalAssignmentsTableAnnotationComposer a) f,
+  ) {
+    final $$LocalAssignmentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.id,
+      referencedTable: $db.localAssignments,
+      getReferencedColumn: (t) => t.frontId,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$LocalAssignmentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.localAssignments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return f(composer);
+  }
 }
 
 class $$ProjectSegmentsTableTableManager
@@ -14950,7 +16670,11 @@ class $$ProjectSegmentsTableTableManager
           $$ProjectSegmentsTableUpdateCompanionBuilder,
           (ProjectSegment, $$ProjectSegmentsTableReferences),
           ProjectSegment,
-          PrefetchHooks Function({bool projectId, bool activitiesRefs})
+          PrefetchHooks Function({
+            bool projectId,
+            bool activitiesRefs,
+            bool localAssignmentsRefs,
+          })
         > {
   $$ProjectSegmentsTableTableManager(_$AppDb db, $ProjectSegmentsTable table)
     : super(
@@ -15007,69 +16731,100 @@ class $$ProjectSegmentsTableTableManager
                 ),
               )
               .toList(),
-          prefetchHooksCallback: ({projectId = false, activitiesRefs = false}) {
-            return PrefetchHooks(
-              db: db,
-              explicitlyWatchedTables: [if (activitiesRefs) db.activities],
-              addJoins:
-                  <
-                    T extends TableManagerState<
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic,
-                      dynamic
-                    >
-                  >(state) {
-                    if (projectId) {
-                      state =
-                          state.withJoin(
-                                currentTable: table,
-                                currentColumn: table.projectId,
-                                referencedTable:
-                                    $$ProjectSegmentsTableReferences
-                                        ._projectIdTable(db),
-                                referencedColumn:
-                                    $$ProjectSegmentsTableReferences
-                                        ._projectIdTable(db)
-                                        .id,
-                              )
-                              as T;
-                    }
+          prefetchHooksCallback:
+              ({
+                projectId = false,
+                activitiesRefs = false,
+                localAssignmentsRefs = false,
+              }) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [
+                    if (activitiesRefs) db.activities,
+                    if (localAssignmentsRefs) db.localAssignments,
+                  ],
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (projectId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.projectId,
+                                    referencedTable:
+                                        $$ProjectSegmentsTableReferences
+                                            ._projectIdTable(db),
+                                    referencedColumn:
+                                        $$ProjectSegmentsTableReferences
+                                            ._projectIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
 
-                    return state;
+                        return state;
+                      },
+                  getPrefetchedDataCallback: (items) async {
+                    return [
+                      if (activitiesRefs)
+                        await $_getPrefetchedData<
+                          ProjectSegment,
+                          $ProjectSegmentsTable,
+                          Activity
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ProjectSegmentsTableReferences
+                              ._activitiesRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ProjectSegmentsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).activitiesRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.segmentId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                      if (localAssignmentsRefs)
+                        await $_getPrefetchedData<
+                          ProjectSegment,
+                          $ProjectSegmentsTable,
+                          LocalAssignment
+                        >(
+                          currentTable: table,
+                          referencedTable: $$ProjectSegmentsTableReferences
+                              ._localAssignmentsRefsTable(db),
+                          managerFromTypedResult: (p0) =>
+                              $$ProjectSegmentsTableReferences(
+                                db,
+                                table,
+                                p0,
+                              ).localAssignmentsRefs,
+                          referencedItemsForCurrentItem:
+                              (item, referencedItems) => referencedItems.where(
+                                (e) => e.frontId == item.id,
+                              ),
+                          typedResults: items,
+                        ),
+                    ];
                   },
-              getPrefetchedDataCallback: (items) async {
-                return [
-                  if (activitiesRefs)
-                    await $_getPrefetchedData<
-                      ProjectSegment,
-                      $ProjectSegmentsTable,
-                      Activity
-                    >(
-                      currentTable: table,
-                      referencedTable: $$ProjectSegmentsTableReferences
-                          ._activitiesRefsTable(db),
-                      managerFromTypedResult: (p0) =>
-                          $$ProjectSegmentsTableReferences(
-                            db,
-                            table,
-                            p0,
-                          ).activitiesRefs,
-                      referencedItemsForCurrentItem: (item, referencedItems) =>
-                          referencedItems.where((e) => e.segmentId == item.id),
-                      typedResults: items,
-                    ),
-                ];
+                );
               },
-            );
-          },
         ),
       );
 }
@@ -15086,7 +16841,11 @@ typedef $$ProjectSegmentsTableProcessedTableManager =
       $$ProjectSegmentsTableUpdateCompanionBuilder,
       (ProjectSegment, $$ProjectSegmentsTableReferences),
       ProjectSegment,
-      PrefetchHooks Function({bool projectId, bool activitiesRefs})
+      PrefetchHooks Function({
+        bool projectId,
+        bool activitiesRefs,
+        bool localAssignmentsRefs,
+      })
     >;
 typedef $$CatalogVersionsTableCreateCompanionBuilder =
     CatalogVersionsCompanion Function({
@@ -18496,6 +20255,7 @@ typedef $$ActivitiesTableCreateCompanionBuilder =
       Value<DateTime?> startedAt,
       Value<DateTime?> finishedAt,
       required String createdByUserId,
+      Value<String?> assignedToUserId,
       Value<String> status,
       Value<double?> geoLat,
       Value<double?> geoLon,
@@ -18520,6 +20280,7 @@ typedef $$ActivitiesTableUpdateCompanionBuilder =
       Value<DateTime?> startedAt,
       Value<DateTime?> finishedAt,
       Value<String> createdByUserId,
+      Value<String?> assignedToUserId,
       Value<String> status,
       Value<double?> geoLat,
       Value<double?> geoLon,
@@ -18605,6 +20366,24 @@ final class $$ActivitiesTableReferences
       $_db.users,
     ).filter((f) => f.id.sqlEquals($_column));
     final item = $_typedResult.readTableOrNull(_createdByUserIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $UsersTable _assignedToUserIdTable(_$AppDb db) => db.users.createAlias(
+    $_aliasNameGenerator(db.activities.assignedToUserId, db.users.id),
+  );
+
+  $$UsersTableProcessedTableManager? get assignedToUserId {
+    final $_column = $_itemColumn<String>('assigned_to_user_id');
+    if ($_column == null) return null;
+    final manager = $$UsersTableTableManager(
+      $_db,
+      $_db.users,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_assignedToUserIdTable($_db));
     if (item == null) return manager;
     return ProcessedTableManager(
       manager.$state.copyWith(prefetchedData: [item]),
@@ -18834,6 +20613,29 @@ class $$ActivitiesTableFilterComposer
     final $$UsersTableFilterComposer composer = $composerBuilder(
       composer: this,
       getCurrentColumn: (t) => t.createdByUserId,
+      referencedTable: $db.users,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$UsersTableFilterComposer(
+            $db: $db,
+            $table: $db.users,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$UsersTableFilterComposer get assignedToUserId {
+    final $$UsersTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.assignedToUserId,
       referencedTable: $db.users,
       getReferencedColumn: (t) => t.id,
       builder:
@@ -19110,6 +20912,29 @@ class $$ActivitiesTableOrderingComposer
     );
     return composer;
   }
+
+  $$UsersTableOrderingComposer get assignedToUserId {
+    final $$UsersTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.assignedToUserId,
+      referencedTable: $db.users,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$UsersTableOrderingComposer(
+            $db: $db,
+            $table: $db.users,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
 }
 
 class $$ActivitiesTableAnnotationComposer
@@ -19274,6 +21099,29 @@ class $$ActivitiesTableAnnotationComposer
     return composer;
   }
 
+  $$UsersTableAnnotationComposer get assignedToUserId {
+    final $$UsersTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.assignedToUserId,
+      referencedTable: $db.users,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$UsersTableAnnotationComposer(
+            $db: $db,
+            $table: $db.users,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
   Expression<T> activityFieldsRefs<T extends Object>(
     Expression<T> Function($$ActivityFieldsTableAnnotationComposer a) f,
   ) {
@@ -19368,6 +21216,7 @@ class $$ActivitiesTableTableManager
             bool segmentId,
             bool activityTypeId,
             bool createdByUserId,
+            bool assignedToUserId,
             bool activityFieldsRefs,
             bool activityLogRefs,
             bool evidencesRefs,
@@ -19399,6 +21248,7 @@ class $$ActivitiesTableTableManager
                 Value<DateTime?> startedAt = const Value.absent(),
                 Value<DateTime?> finishedAt = const Value.absent(),
                 Value<String> createdByUserId = const Value.absent(),
+                Value<String?> assignedToUserId = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<double?> geoLat = const Value.absent(),
                 Value<double?> geoLon = const Value.absent(),
@@ -19421,6 +21271,7 @@ class $$ActivitiesTableTableManager
                 startedAt: startedAt,
                 finishedAt: finishedAt,
                 createdByUserId: createdByUserId,
+                assignedToUserId: assignedToUserId,
                 status: status,
                 geoLat: geoLat,
                 geoLon: geoLon,
@@ -19445,6 +21296,7 @@ class $$ActivitiesTableTableManager
                 Value<DateTime?> startedAt = const Value.absent(),
                 Value<DateTime?> finishedAt = const Value.absent(),
                 required String createdByUserId,
+                Value<String?> assignedToUserId = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<double?> geoLat = const Value.absent(),
                 Value<double?> geoLon = const Value.absent(),
@@ -19467,6 +21319,7 @@ class $$ActivitiesTableTableManager
                 startedAt: startedAt,
                 finishedAt: finishedAt,
                 createdByUserId: createdByUserId,
+                assignedToUserId: assignedToUserId,
                 status: status,
                 geoLat: geoLat,
                 geoLon: geoLon,
@@ -19490,6 +21343,7 @@ class $$ActivitiesTableTableManager
                 segmentId = false,
                 activityTypeId = false,
                 createdByUserId = false,
+                assignedToUserId = false,
                 activityFieldsRefs = false,
                 activityLogRefs = false,
                 evidencesRefs = false,
@@ -19569,6 +21423,20 @@ class $$ActivitiesTableTableManager
                                     referencedColumn:
                                         $$ActivitiesTableReferences
                                             ._createdByUserIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (assignedToUserId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.assignedToUserId,
+                                    referencedTable: $$ActivitiesTableReferences
+                                        ._assignedToUserIdTable(db),
+                                    referencedColumn:
+                                        $$ActivitiesTableReferences
+                                            ._assignedToUserIdTable(db)
                                             .id,
                                   )
                                   as T;
@@ -19666,6 +21534,7 @@ typedef $$ActivitiesTableProcessedTableManager =
         bool segmentId,
         bool activityTypeId,
         bool createdByUserId,
+        bool assignedToUserId,
         bool activityFieldsRefs,
         bool activityLogRefs,
         bool evidencesRefs,
@@ -20459,6 +22328,892 @@ typedef $$ActivityLogTableProcessedTableManager =
       (ActivityLogData, $$ActivityLogTableReferences),
       ActivityLogData,
       PrefetchHooks Function({bool activityId, bool userId})
+    >;
+typedef $$LocalAssignmentsTableCreateCompanionBuilder =
+    LocalAssignmentsCompanion Function({
+      required String id,
+      required String projectId,
+      required String assigneeUserId,
+      required String activityTypeCode,
+      Value<String?> title,
+      Value<String?> description,
+      Value<String?> frontId,
+      Value<String?> frontRef,
+      Value<String?> estado,
+      Value<String?> municipio,
+      Value<String?> colonia,
+      Value<int> pk,
+      required DateTime startAt,
+      required DateTime endAt,
+      Value<String> risk,
+      Value<double?> latitude,
+      Value<double?> longitude,
+      Value<String> syncStatus,
+      Value<String?> syncError,
+      Value<int> syncRetryCount,
+      required DateTime createdAt,
+      required DateTime updatedAt,
+      Value<DateTime?> syncedAt,
+      Value<String?> backendActivityId,
+      Value<int> rowid,
+    });
+typedef $$LocalAssignmentsTableUpdateCompanionBuilder =
+    LocalAssignmentsCompanion Function({
+      Value<String> id,
+      Value<String> projectId,
+      Value<String> assigneeUserId,
+      Value<String> activityTypeCode,
+      Value<String?> title,
+      Value<String?> description,
+      Value<String?> frontId,
+      Value<String?> frontRef,
+      Value<String?> estado,
+      Value<String?> municipio,
+      Value<String?> colonia,
+      Value<int> pk,
+      Value<DateTime> startAt,
+      Value<DateTime> endAt,
+      Value<String> risk,
+      Value<double?> latitude,
+      Value<double?> longitude,
+      Value<String> syncStatus,
+      Value<String?> syncError,
+      Value<int> syncRetryCount,
+      Value<DateTime> createdAt,
+      Value<DateTime> updatedAt,
+      Value<DateTime?> syncedAt,
+      Value<String?> backendActivityId,
+      Value<int> rowid,
+    });
+
+final class $$LocalAssignmentsTableReferences
+    extends BaseReferences<_$AppDb, $LocalAssignmentsTable, LocalAssignment> {
+  $$LocalAssignmentsTableReferences(
+    super.$_db,
+    super.$_table,
+    super.$_typedResult,
+  );
+
+  static $ProjectsTable _projectIdTable(_$AppDb db) => db.projects.createAlias(
+    $_aliasNameGenerator(db.localAssignments.projectId, db.projects.id),
+  );
+
+  $$ProjectsTableProcessedTableManager get projectId {
+    final $_column = $_itemColumn<String>('project_id')!;
+
+    final manager = $$ProjectsTableTableManager(
+      $_db,
+      $_db.projects,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_projectIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $UsersTable _assigneeUserIdTable(_$AppDb db) => db.users.createAlias(
+    $_aliasNameGenerator(db.localAssignments.assigneeUserId, db.users.id),
+  );
+
+  $$UsersTableProcessedTableManager get assigneeUserId {
+    final $_column = $_itemColumn<String>('assignee_user_id')!;
+
+    final manager = $$UsersTableTableManager(
+      $_db,
+      $_db.users,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_assigneeUserIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+
+  static $ProjectSegmentsTable _frontIdTable(_$AppDb db) =>
+      db.projectSegments.createAlias(
+        $_aliasNameGenerator(
+          db.localAssignments.frontId,
+          db.projectSegments.id,
+        ),
+      );
+
+  $$ProjectSegmentsTableProcessedTableManager? get frontId {
+    final $_column = $_itemColumn<String>('front_id');
+    if ($_column == null) return null;
+    final manager = $$ProjectSegmentsTableTableManager(
+      $_db,
+      $_db.projectSegments,
+    ).filter((f) => f.id.sqlEquals($_column));
+    final item = $_typedResult.readTableOrNull(_frontIdTable($_db));
+    if (item == null) return manager;
+    return ProcessedTableManager(
+      manager.$state.copyWith(prefetchedData: [item]),
+    );
+  }
+}
+
+class $$LocalAssignmentsTableFilterComposer
+    extends Composer<_$AppDb, $LocalAssignmentsTable> {
+  $$LocalAssignmentsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get activityTypeCode => $composableBuilder(
+    column: $table.activityTypeCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get frontRef => $composableBuilder(
+    column: $table.frontRef,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get estado => $composableBuilder(
+    column: $table.estado,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get municipio => $composableBuilder(
+    column: $table.municipio,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get colonia => $composableBuilder(
+    column: $table.colonia,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pk => $composableBuilder(
+    column: $table.pk,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get startAt => $composableBuilder(
+    column: $table.startAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get endAt => $composableBuilder(
+    column: $table.endAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get risk => $composableBuilder(
+    column: $table.risk,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get latitude => $composableBuilder(
+    column: $table.latitude,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<double> get longitude => $composableBuilder(
+    column: $table.longitude,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncStatus => $composableBuilder(
+    column: $table.syncStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get syncError => $composableBuilder(
+    column: $table.syncError,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get syncRetryCount => $composableBuilder(
+    column: $table.syncRetryCount,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get syncedAt => $composableBuilder(
+    column: $table.syncedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get backendActivityId => $composableBuilder(
+    column: $table.backendActivityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  $$ProjectsTableFilterComposer get projectId {
+    final $$ProjectsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableFilterComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$UsersTableFilterComposer get assigneeUserId {
+    final $$UsersTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.assigneeUserId,
+      referencedTable: $db.users,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$UsersTableFilterComposer(
+            $db: $db,
+            $table: $db.users,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$ProjectSegmentsTableFilterComposer get frontId {
+    final $$ProjectSegmentsTableFilterComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.frontId,
+      referencedTable: $db.projectSegments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectSegmentsTableFilterComposer(
+            $db: $db,
+            $table: $db.projectSegments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$LocalAssignmentsTableOrderingComposer
+    extends Composer<_$AppDb, $LocalAssignmentsTable> {
+  $$LocalAssignmentsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get activityTypeCode => $composableBuilder(
+    column: $table.activityTypeCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get title => $composableBuilder(
+    column: $table.title,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get frontRef => $composableBuilder(
+    column: $table.frontRef,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get estado => $composableBuilder(
+    column: $table.estado,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get municipio => $composableBuilder(
+    column: $table.municipio,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get colonia => $composableBuilder(
+    column: $table.colonia,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pk => $composableBuilder(
+    column: $table.pk,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get startAt => $composableBuilder(
+    column: $table.startAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get endAt => $composableBuilder(
+    column: $table.endAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get risk => $composableBuilder(
+    column: $table.risk,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get latitude => $composableBuilder(
+    column: $table.latitude,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<double> get longitude => $composableBuilder(
+    column: $table.longitude,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get syncStatus => $composableBuilder(
+    column: $table.syncStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get syncError => $composableBuilder(
+    column: $table.syncError,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get syncRetryCount => $composableBuilder(
+    column: $table.syncRetryCount,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get syncedAt => $composableBuilder(
+    column: $table.syncedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get backendActivityId => $composableBuilder(
+    column: $table.backendActivityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  $$ProjectsTableOrderingComposer get projectId {
+    final $$ProjectsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableOrderingComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$UsersTableOrderingComposer get assigneeUserId {
+    final $$UsersTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.assigneeUserId,
+      referencedTable: $db.users,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$UsersTableOrderingComposer(
+            $db: $db,
+            $table: $db.users,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$ProjectSegmentsTableOrderingComposer get frontId {
+    final $$ProjectSegmentsTableOrderingComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.frontId,
+      referencedTable: $db.projectSegments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectSegmentsTableOrderingComposer(
+            $db: $db,
+            $table: $db.projectSegments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$LocalAssignmentsTableAnnotationComposer
+    extends Composer<_$AppDb, $LocalAssignmentsTable> {
+  $$LocalAssignmentsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get activityTypeCode => $composableBuilder(
+    column: $table.activityTypeCode,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get title =>
+      $composableBuilder(column: $table.title, builder: (column) => column);
+
+  GeneratedColumn<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get frontRef =>
+      $composableBuilder(column: $table.frontRef, builder: (column) => column);
+
+  GeneratedColumn<String> get estado =>
+      $composableBuilder(column: $table.estado, builder: (column) => column);
+
+  GeneratedColumn<String> get municipio =>
+      $composableBuilder(column: $table.municipio, builder: (column) => column);
+
+  GeneratedColumn<String> get colonia =>
+      $composableBuilder(column: $table.colonia, builder: (column) => column);
+
+  GeneratedColumn<int> get pk =>
+      $composableBuilder(column: $table.pk, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get startAt =>
+      $composableBuilder(column: $table.startAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get endAt =>
+      $composableBuilder(column: $table.endAt, builder: (column) => column);
+
+  GeneratedColumn<String> get risk =>
+      $composableBuilder(column: $table.risk, builder: (column) => column);
+
+  GeneratedColumn<double> get latitude =>
+      $composableBuilder(column: $table.latitude, builder: (column) => column);
+
+  GeneratedColumn<double> get longitude =>
+      $composableBuilder(column: $table.longitude, builder: (column) => column);
+
+  GeneratedColumn<String> get syncStatus => $composableBuilder(
+    column: $table.syncStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get syncError =>
+      $composableBuilder(column: $table.syncError, builder: (column) => column);
+
+  GeneratedColumn<int> get syncRetryCount => $composableBuilder(
+    column: $table.syncRetryCount,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get syncedAt =>
+      $composableBuilder(column: $table.syncedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get backendActivityId => $composableBuilder(
+    column: $table.backendActivityId,
+    builder: (column) => column,
+  );
+
+  $$ProjectsTableAnnotationComposer get projectId {
+    final $$ProjectsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.projectId,
+      referencedTable: $db.projects,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.projects,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$UsersTableAnnotationComposer get assigneeUserId {
+    final $$UsersTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.assigneeUserId,
+      referencedTable: $db.users,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$UsersTableAnnotationComposer(
+            $db: $db,
+            $table: $db.users,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+
+  $$ProjectSegmentsTableAnnotationComposer get frontId {
+    final $$ProjectSegmentsTableAnnotationComposer composer = $composerBuilder(
+      composer: this,
+      getCurrentColumn: (t) => t.frontId,
+      referencedTable: $db.projectSegments,
+      getReferencedColumn: (t) => t.id,
+      builder:
+          (
+            joinBuilder, {
+            $addJoinBuilderToRootComposer,
+            $removeJoinBuilderFromRootComposer,
+          }) => $$ProjectSegmentsTableAnnotationComposer(
+            $db: $db,
+            $table: $db.projectSegments,
+            $addJoinBuilderToRootComposer: $addJoinBuilderToRootComposer,
+            joinBuilder: joinBuilder,
+            $removeJoinBuilderFromRootComposer:
+                $removeJoinBuilderFromRootComposer,
+          ),
+    );
+    return composer;
+  }
+}
+
+class $$LocalAssignmentsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDb,
+          $LocalAssignmentsTable,
+          LocalAssignment,
+          $$LocalAssignmentsTableFilterComposer,
+          $$LocalAssignmentsTableOrderingComposer,
+          $$LocalAssignmentsTableAnnotationComposer,
+          $$LocalAssignmentsTableCreateCompanionBuilder,
+          $$LocalAssignmentsTableUpdateCompanionBuilder,
+          (LocalAssignment, $$LocalAssignmentsTableReferences),
+          LocalAssignment,
+          PrefetchHooks Function({
+            bool projectId,
+            bool assigneeUserId,
+            bool frontId,
+          })
+        > {
+  $$LocalAssignmentsTableTableManager(_$AppDb db, $LocalAssignmentsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$LocalAssignmentsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$LocalAssignmentsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$LocalAssignmentsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> projectId = const Value.absent(),
+                Value<String> assigneeUserId = const Value.absent(),
+                Value<String> activityTypeCode = const Value.absent(),
+                Value<String?> title = const Value.absent(),
+                Value<String?> description = const Value.absent(),
+                Value<String?> frontId = const Value.absent(),
+                Value<String?> frontRef = const Value.absent(),
+                Value<String?> estado = const Value.absent(),
+                Value<String?> municipio = const Value.absent(),
+                Value<String?> colonia = const Value.absent(),
+                Value<int> pk = const Value.absent(),
+                Value<DateTime> startAt = const Value.absent(),
+                Value<DateTime> endAt = const Value.absent(),
+                Value<String> risk = const Value.absent(),
+                Value<double?> latitude = const Value.absent(),
+                Value<double?> longitude = const Value.absent(),
+                Value<String> syncStatus = const Value.absent(),
+                Value<String?> syncError = const Value.absent(),
+                Value<int> syncRetryCount = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime> updatedAt = const Value.absent(),
+                Value<DateTime?> syncedAt = const Value.absent(),
+                Value<String?> backendActivityId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAssignmentsCompanion(
+                id: id,
+                projectId: projectId,
+                assigneeUserId: assigneeUserId,
+                activityTypeCode: activityTypeCode,
+                title: title,
+                description: description,
+                frontId: frontId,
+                frontRef: frontRef,
+                estado: estado,
+                municipio: municipio,
+                colonia: colonia,
+                pk: pk,
+                startAt: startAt,
+                endAt: endAt,
+                risk: risk,
+                latitude: latitude,
+                longitude: longitude,
+                syncStatus: syncStatus,
+                syncError: syncError,
+                syncRetryCount: syncRetryCount,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                syncedAt: syncedAt,
+                backendActivityId: backendActivityId,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String projectId,
+                required String assigneeUserId,
+                required String activityTypeCode,
+                Value<String?> title = const Value.absent(),
+                Value<String?> description = const Value.absent(),
+                Value<String?> frontId = const Value.absent(),
+                Value<String?> frontRef = const Value.absent(),
+                Value<String?> estado = const Value.absent(),
+                Value<String?> municipio = const Value.absent(),
+                Value<String?> colonia = const Value.absent(),
+                Value<int> pk = const Value.absent(),
+                required DateTime startAt,
+                required DateTime endAt,
+                Value<String> risk = const Value.absent(),
+                Value<double?> latitude = const Value.absent(),
+                Value<double?> longitude = const Value.absent(),
+                Value<String> syncStatus = const Value.absent(),
+                Value<String?> syncError = const Value.absent(),
+                Value<int> syncRetryCount = const Value.absent(),
+                required DateTime createdAt,
+                required DateTime updatedAt,
+                Value<DateTime?> syncedAt = const Value.absent(),
+                Value<String?> backendActivityId = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => LocalAssignmentsCompanion.insert(
+                id: id,
+                projectId: projectId,
+                assigneeUserId: assigneeUserId,
+                activityTypeCode: activityTypeCode,
+                title: title,
+                description: description,
+                frontId: frontId,
+                frontRef: frontRef,
+                estado: estado,
+                municipio: municipio,
+                colonia: colonia,
+                pk: pk,
+                startAt: startAt,
+                endAt: endAt,
+                risk: risk,
+                latitude: latitude,
+                longitude: longitude,
+                syncStatus: syncStatus,
+                syncError: syncError,
+                syncRetryCount: syncRetryCount,
+                createdAt: createdAt,
+                updatedAt: updatedAt,
+                syncedAt: syncedAt,
+                backendActivityId: backendActivityId,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable(table),
+                  $$LocalAssignmentsTableReferences(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback:
+              ({projectId = false, assigneeUserId = false, frontId = false}) {
+                return PrefetchHooks(
+                  db: db,
+                  explicitlyWatchedTables: [],
+                  addJoins:
+                      <
+                        T extends TableManagerState<
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic,
+                          dynamic
+                        >
+                      >(state) {
+                        if (projectId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.projectId,
+                                    referencedTable:
+                                        $$LocalAssignmentsTableReferences
+                                            ._projectIdTable(db),
+                                    referencedColumn:
+                                        $$LocalAssignmentsTableReferences
+                                            ._projectIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (assigneeUserId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.assigneeUserId,
+                                    referencedTable:
+                                        $$LocalAssignmentsTableReferences
+                                            ._assigneeUserIdTable(db),
+                                    referencedColumn:
+                                        $$LocalAssignmentsTableReferences
+                                            ._assigneeUserIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+                        if (frontId) {
+                          state =
+                              state.withJoin(
+                                    currentTable: table,
+                                    currentColumn: table.frontId,
+                                    referencedTable:
+                                        $$LocalAssignmentsTableReferences
+                                            ._frontIdTable(db),
+                                    referencedColumn:
+                                        $$LocalAssignmentsTableReferences
+                                            ._frontIdTable(db)
+                                            .id,
+                                  )
+                                  as T;
+                        }
+
+                        return state;
+                      },
+                  getPrefetchedDataCallback: (items) async {
+                    return [];
+                  },
+                );
+              },
+        ),
+      );
+}
+
+typedef $$LocalAssignmentsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDb,
+      $LocalAssignmentsTable,
+      LocalAssignment,
+      $$LocalAssignmentsTableFilterComposer,
+      $$LocalAssignmentsTableOrderingComposer,
+      $$LocalAssignmentsTableAnnotationComposer,
+      $$LocalAssignmentsTableCreateCompanionBuilder,
+      $$LocalAssignmentsTableUpdateCompanionBuilder,
+      (LocalAssignment, $$LocalAssignmentsTableReferences),
+      LocalAssignment,
+      PrefetchHooks Function({
+        bool projectId,
+        bool assigneeUserId,
+        bool frontId,
+      })
     >;
 typedef $$EvidencesTableCreateCompanionBuilder =
     EvidencesCompanion Function({
@@ -21284,6 +24039,9 @@ typedef $$SyncQueueTableCreateCompanionBuilder =
       Value<int> priority,
       Value<int> attempts,
       Value<DateTime?> lastAttemptAt,
+      Value<String?> errorCode,
+      Value<bool> retryable,
+      Value<String?> suggestedAction,
       Value<String?> lastError,
       Value<String> status,
       Value<int> rowid,
@@ -21298,6 +24056,9 @@ typedef $$SyncQueueTableUpdateCompanionBuilder =
       Value<int> priority,
       Value<int> attempts,
       Value<DateTime?> lastAttemptAt,
+      Value<String?> errorCode,
+      Value<bool> retryable,
+      Value<String?> suggestedAction,
       Value<String?> lastError,
       Value<String> status,
       Value<int> rowid,
@@ -21349,6 +24110,21 @@ class $$SyncQueueTableFilterComposer
 
   ColumnFilters<DateTime> get lastAttemptAt => $composableBuilder(
     column: $table.lastAttemptAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get errorCode => $composableBuilder(
+    column: $table.errorCode,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get retryable => $composableBuilder(
+    column: $table.retryable,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get suggestedAction => $composableBuilder(
+    column: $table.suggestedAction,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -21412,6 +24188,21 @@ class $$SyncQueueTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get errorCode => $composableBuilder(
+    column: $table.errorCode,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get retryable => $composableBuilder(
+    column: $table.retryable,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get suggestedAction => $composableBuilder(
+    column: $table.suggestedAction,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get lastError => $composableBuilder(
     column: $table.lastError,
     builder: (column) => ColumnOrderings(column),
@@ -21457,6 +24248,17 @@ class $$SyncQueueTableAnnotationComposer
 
   GeneratedColumn<DateTime> get lastAttemptAt => $composableBuilder(
     column: $table.lastAttemptAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get errorCode =>
+      $composableBuilder(column: $table.errorCode, builder: (column) => column);
+
+  GeneratedColumn<bool> get retryable =>
+      $composableBuilder(column: $table.retryable, builder: (column) => column);
+
+  GeneratedColumn<String> get suggestedAction => $composableBuilder(
+    column: $table.suggestedAction,
     builder: (column) => column,
   );
 
@@ -21506,6 +24308,9 @@ class $$SyncQueueTableTableManager
                 Value<int> priority = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
                 Value<DateTime?> lastAttemptAt = const Value.absent(),
+                Value<String?> errorCode = const Value.absent(),
+                Value<bool> retryable = const Value.absent(),
+                Value<String?> suggestedAction = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -21518,6 +24323,9 @@ class $$SyncQueueTableTableManager
                 priority: priority,
                 attempts: attempts,
                 lastAttemptAt: lastAttemptAt,
+                errorCode: errorCode,
+                retryable: retryable,
+                suggestedAction: suggestedAction,
                 lastError: lastError,
                 status: status,
                 rowid: rowid,
@@ -21532,6 +24340,9 @@ class $$SyncQueueTableTableManager
                 Value<int> priority = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
                 Value<DateTime?> lastAttemptAt = const Value.absent(),
+                Value<String?> errorCode = const Value.absent(),
+                Value<bool> retryable = const Value.absent(),
+                Value<String?> suggestedAction = const Value.absent(),
                 Value<String?> lastError = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
@@ -21544,6 +24355,9 @@ class $$SyncQueueTableTableManager
                 priority: priority,
                 attempts: attempts,
                 lastAttemptAt: lastAttemptAt,
+                errorCode: errorCode,
+                retryable: retryable,
+                suggestedAction: suggestedAction,
                 lastError: lastError,
                 status: status,
                 rowid: rowid,
@@ -22619,6 +25433,8 @@ class $AppDbManager {
       $$ActivityFieldsTableTableManager(_db, _db.activityFields);
   $$ActivityLogTableTableManager get activityLog =>
       $$ActivityLogTableTableManager(_db, _db.activityLog);
+  $$LocalAssignmentsTableTableManager get localAssignments =>
+      $$LocalAssignmentsTableTableManager(_db, _db.localAssignments);
   $$EvidencesTableTableManager get evidences =>
       $$EvidencesTableTableManager(_db, _db.evidences);
   $$PendingUploadsTableTableManager get pendingUploads =>

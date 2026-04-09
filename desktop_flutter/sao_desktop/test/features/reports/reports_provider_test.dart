@@ -2,12 +2,19 @@ import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/date_symbol_data_local.dart';
+import 'package:intl/intl.dart';
 import 'package:sao_desktop/features/reports/reports_provider.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const channel = MethodChannel('plugins.flutter.io/path_provider');
+
+  setUpAll(() async {
+    await initializeDateFormatting('es_MX');
+    Intl.defaultLocale = 'es_MX';
+  });
 
   group('reports_provider models', () {
     test('ReportFilters copyWith and ReportActivityItem mapping', () {
@@ -40,6 +47,43 @@ void main() {
       expect(item.assignedName, 'Operador');
       expect(item.projectId, 'TMQ');
       expect(item.statusLabel, 'Aprobado');
+
+      final approvedByReview = ReportActivityItem.fromJson({
+        'id': 'a2',
+        'activity_type': 'Caminamiento',
+        'pk': 'PK-20',
+        'front_name': 'Frente 1',
+        'status': 'COMPLETADA',
+        'review_decision': 'APPROVE',
+        'review_status': 'APPROVED',
+        'created_at': '2026-03-05T00:00:00Z',
+      });
+
+      expect(approvedByReview.statusLabel, 'Aprobado');
+
+      final enrichedFromDataFields = ReportActivityItem.fromJson({
+        'id': 'a3',
+        'activity_type': 'Caminamiento',
+        'front_name': 'Frente 1',
+        'status': 'COMPLETADA',
+        'review_decision': 'APPROVE',
+        'review_status': 'APPROVED',
+        'data_fields': {
+          'purpose': 'Recorrido de seguimiento comunitario',
+          'temas': ['Avance de obra', 'Acuerdos con vecinos'],
+          'asistentes': ['SICT', 'ATTRAPI'],
+          'resultado': 'Aprobado',
+          'hora_inicio': '09:00',
+          'hora_fin': '10:30',
+        },
+      });
+
+      expect(enrichedFromDataFields.purpose, 'Recorrido de seguimiento comunitario');
+      expect(enrichedFromDataFields.topics, contains('Avance de obra'));
+      expect(enrichedFromDataFields.attendees, contains('ATTRAPI'));
+      expect(enrichedFromDataFields.result, 'Aprobado');
+      expect(enrichedFromDataFields.startTime, '09:00');
+      expect(enrichedFromDataFields.endTime, '10:30');
 
       final fallback = ReportActivityItem.fromJson(const {});
       expect(fallback.activityType, 'Actividad');

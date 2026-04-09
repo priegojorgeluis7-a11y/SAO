@@ -86,8 +86,8 @@ class ActivityRepository {
     final now = DateTime.now();
     final detailTitle = (detail['title'] ?? '').toString().trim();
     final detailDescription = detail['description']?.toString().trim();
-    final detailFront = detail['front']?.toString().trim();
-    final detailMunicipality = detail['municipality']?.toString().trim();
+    final detailFront = (detail['front'] ?? detail['front_name'] ?? detail['frontName'])?.toString().trim();
+    final detailMunicipality = (detail['municipality'] ?? detail['municipio'])?.toString().trim();
     final wizardPayloadRaw = detail['wizard_payload'];
     final wizardPayload = wizardPayloadRaw is Map<String, dynamic>
       ? wizardPayloadRaw
@@ -106,6 +106,7 @@ class ActivityRepository {
       summary.activity.id,
       evidencesJson,
       now,
+      wizardPayload: wizardPayload,
     );
 
     return ActivityWithDetails(
@@ -145,6 +146,10 @@ class ActivityRepository {
           ? (detail['pk'] as String).trim()
           : summary.pkLabel,
       wizardPayload: wizardPayload,
+      operationalState: summary.operationalState,
+      syncState: summary.syncState,
+      reviewState: summary.reviewState,
+      nextAction: summary.nextAction,
     );
   }
 
@@ -203,6 +208,26 @@ class ActivityRepository {
 
     final now = DateTime.now();
     final result = <ActivityWithDetails>[];
+    final localUsers = await _db.select(_db.users).get();
+    final localUsersById = {for (final user in localUsers) user.id: user};
+
+    String pickMostCompleteText(Iterable<String?> candidates) {
+      var best = '';
+      var bestScore = -1;
+      for (final candidate in candidates) {
+        final text = (candidate ?? '').trim();
+        if (text.isEmpty || text.toLowerCase() == 'sin responsable') {
+          continue;
+        }
+        final wordCount = text.split(RegExp(r'\s+')).where((part) => part.isNotEmpty).length;
+        final score = (wordCount * 100) + text.length;
+        if (score > bestScore) {
+          bestScore = score;
+          best = text;
+        }
+      }
+      return best;
+    }
 
     for (final raw in items) {
       if (raw is! Map<String, dynamic>) continue;
@@ -210,21 +235,39 @@ class ActivityRepository {
       if (activityId.isEmpty) continue;
 
       final activityTypeCode = (raw['activity_type'] ?? 'ACT').toString().toUpperCase();
-      final statusRaw = (raw['status'] ?? 'PENDIENTE_REVISION').toString();
+      final statusRaw = (raw['status'] ?? 'PENDIENTE_REVISION').toString().trim().toUpperCase();
       final status = switch (statusRaw) {
-        'APROBADO' => ActivityStatus.approved,
-        'RECHAZADO' => ActivityStatus.rejected,
+        'APROBADO' || 'APPROVED' => ActivityStatus.approved,
+        'RECHAZADO' || 'REJECTED' => ActivityStatus.rejected,
+        'CHANGES_REQUIRED' || 'NEEDS_FIX' || 'REQUIERE_CAMBIOS' => ActivityStatus.needsFix,
         _ => ActivityStatus.pendingReview,
       };
-      final frontName = (raw['front'] ?? 'Sin frente').toString();
-      final municipalityName = (raw['municipality'] ?? 'Sin municipio').toString();
+      final operationalState = raw['operational_state']?.toString().trim();
+      final syncState = raw['sync_state']?.toString().trim();
+      final reviewState = raw['review_state']?.toString().trim();
+      final nextAction = raw['next_action']?.toString().trim();
+      final frontName = (raw['front'] ?? raw['front_name'] ?? raw['frontName'] ?? 'Sin frente').toString();
+      final municipalityName = (raw['municipality'] ?? raw['municipio'] ?? 'Sin municipio').toString();
       final evidenceCount = (raw['evidence_count'] as num?)?.toInt() ?? 0;
+      final assignedToId =
+          (raw['assigned_to_user_id'] ?? raw['created_by_user_id'] ?? '')
+              .toString();
+      final localAssignedUser = localUsersById[assignedToId];
+      final resolvedAssignedEmail = pickMostCompleteText([
+        raw['assigned_to_user_email']?.toString(),
+        localAssignedUser?.email,
+      ]);
+      final resolvedAssignedName = pickMostCompleteText([
+        raw['assigned_to_user_name']?.toString(),
+        localAssignedUser?.fullName,
+        resolvedAssignedEmail,
+      ]);
 
       final activity = Activity(
         id: activityId,
         projectId: (raw['project_id'] ?? '').toString(),
         activityTypeId: 'act-type-$activityTypeCode',
-        assignedTo: (raw['assigned_to_user_id'] ?? 'usr-backend').toString(),
+        assignedTo: assignedToId,
         frontId: null,
         municipalityId: null,
         title: (raw['title'] ?? activityTypeCode).toString(),
@@ -261,8 +304,10 @@ class ActivityRepository {
           ),
           assignedUser: User(
             id: activity.assignedTo,
-            email: (raw['assigned_to_user_email'] ?? 'backend@sao.mx').toString(),
-            fullName: (raw['assigned_to_user_name'] ?? 'Sin responsable').toString(),
+            email: resolvedAssignedEmail,
+            fullName: resolvedAssignedName.isNotEmpty
+                ? resolvedAssignedName
+                : 'Sin responsable',
             role: (raw['assigned_to_user_role'] ?? 'OPERATIVO').toString(),
             status: 'ACTIVE',
             createdAt: now,
@@ -284,6 +329,10 @@ class ActivityRepository {
             checklistIncomplete: (raw['checklist_incomplete'] as bool?) ?? false,
           ),
           pkLabel: (raw['pk'] as String?)?.trim(),
+          operationalState: operationalState?.isEmpty == true ? null : operationalState,
+          syncState: syncState?.isEmpty == true ? null : syncState,
+          reviewState: reviewState?.isEmpty == true ? null : reviewState,
+          nextAction: nextAction?.isEmpty == true ? null : nextAction,
         ),
       );
     }
@@ -305,33 +354,153 @@ class ActivityRepository {
   List<Evidence> _parseReviewEvidences(
     String activityId,
     dynamic decoded,
-    DateTime fallback,
-  ) {
-    if (decoded is! List) return const <Evidence>[];
+    DateTime fallback, {
+    Map<String, dynamic>? wizardPayload,
+  }) {
+    double? asDouble(dynamic value) {
+      if (value is num) return value.toDouble();
+      return double.tryParse((value ?? '').toString().trim());
+    }
 
-    return decoded
-        .whereType<Map<String, dynamic>>()
-        .map((raw) {
-          final evidenceId = (raw['id'] ?? '').toString().trim();
-          if (evidenceId.isEmpty) {
-            return null;
-          }
-          final takenAt = DateTime.tryParse((raw['takenAt'] ?? '').toString()) ?? fallback;
-          final gcsKey = (raw['gcsKey'] ?? '').toString().trim();
-          final fileType = gcsKey.toLowerCase().endsWith('.pdf') ? 'DOCUMENT' : 'IMAGE';
-          return Evidence(
-            id: evidenceId,
-            activityId: activityId,
-            filePath: 'backend://evidence/$evidenceId',
-            fileType: fileType,
-            caption: raw['description']?.toString(),
-            capturedAt: takenAt,
-            latitude: (raw['lat'] as num?)?.toDouble(),
-            longitude: (raw['lng'] as num?)?.toDouble(),
-          );
-        })
-        .whereType<Evidence>()
-        .toList(growable: false);
+    String? firstNonEmptyText(Iterable<Object?> values) {
+      for (final value in values) {
+        final text = (value ?? '').toString().trim();
+        if (text.isNotEmpty && text.toLowerCase() != 'null') {
+          return text;
+        }
+      }
+      return null;
+    }
+
+    final wizardEvidenceEntries = ((wizardPayload?['evidences']) is List)
+        ? (wizardPayload?['evidences'] as List)
+            .whereType<Map>()
+            .map((raw) => raw.cast<String, dynamic>())
+            .toList(growable: false)
+        : const <Map<String, dynamic>>[];
+
+    String? wizardCaptionFor(String evidenceId, int index) {
+      for (final payload in wizardEvidenceEntries) {
+        if ((payload['id'] ?? '').toString().trim() == evidenceId) {
+          return firstNonEmptyText([
+            payload['caption'],
+            payload['description'],
+            payload['descripcion'],
+            payload['notes'],
+          ]);
+        }
+      }
+      if (index >= 0 && index < wizardEvidenceEntries.length) {
+        final payload = wizardEvidenceEntries[index];
+        return firstNonEmptyText([
+          payload['caption'],
+          payload['description'],
+          payload['descripcion'],
+          payload['notes'],
+        ]);
+      }
+      return null;
+    }
+
+    final parsedBackend = decoded is! List
+        ? const <Evidence>[]
+        : decoded
+              .whereType<Map<String, dynamic>>()
+              .toList(growable: false)
+              .asMap()
+              .entries
+              .map((entry) {
+                final index = entry.key;
+                final raw = entry.value;
+                final evidenceId = (raw['id'] ?? '').toString().trim();
+                if (evidenceId.isEmpty) {
+                  return null;
+                }
+                final takenAt =
+                    DateTime.tryParse((raw['takenAt'] ?? '').toString()) ??
+                    fallback;
+                final gcsKey = (raw['gcsKey'] ?? '').toString().trim();
+                final statusToken = (raw['status'] ?? '').toString().trim().toUpperCase();
+                final fileType = gcsKey.toLowerCase().endsWith('.pdf')
+                    ? 'DOCUMENT'
+                    : 'IMAGE';
+                return Evidence(
+                  id: evidenceId,
+                  activityId: activityId,
+                  filePath: statusToken == 'UPLOADED'
+                      ? 'backend://evidence/$evidenceId'
+                      : 'pending://evidence/$evidenceId',
+                  fileType: fileType,
+                  caption: firstNonEmptyText([
+                    raw['caption'],
+                    raw['description'],
+                    raw['descripcion'],
+                    wizardCaptionFor(evidenceId, index),
+                  ]),
+                  capturedAt: takenAt,
+                  latitude: asDouble(raw['lat']),
+                  longitude: asDouble(raw['lng']),
+                );
+              })
+              .whereType<Evidence>()
+              .toList(growable: false);
+
+    if (parsedBackend.isNotEmpty) {
+      return parsedBackend;
+    }
+
+    final rawWizardEvidences = wizardPayload?['evidences'];
+    if (rawWizardEvidences is! List) {
+      return parsedBackend;
+    }
+
+    return rawWizardEvidences.asMap().entries.map((entry) {
+      final index = entry.key;
+      final raw = entry.value;
+      if (raw is! Map) {
+        return null;
+      }
+
+      final payload = raw.cast<String, dynamic>();
+      final evidenceId = (payload['id'] ?? 'wizard-$activityId-$index')
+          .toString()
+          .trim();
+      if (evidenceId.isEmpty) {
+        return null;
+      }
+
+      final path = (payload['signedUrl'] ??
+              payload['remoteUrl'] ??
+              payload['url'] ??
+              payload['localPath'] ??
+              '')
+          .toString()
+          .trim();
+      final takenAt =
+          DateTime.tryParse(
+            (payload['takenAt'] ?? payload['createdAt'] ?? payload['capturedAt'] ?? '')
+                .toString(),
+          ) ??
+          fallback;
+      final fileTypeToken = (payload['mimeType'] ?? payload['type'] ?? path)
+          .toString()
+          .toLowerCase();
+
+      return Evidence(
+        id: evidenceId,
+        activityId: activityId,
+        filePath: path.isNotEmpty ? path : 'pending://evidence/$activityId/$index',
+        fileType: fileTypeToken.contains('pdf') ? 'DOCUMENT' : 'IMAGE',
+        caption: (payload['caption'] ??
+                payload['description'] ??
+                payload['descripcion'] ??
+                payload['notes'])
+            ?.toString(),
+        capturedAt: takenAt,
+        latitude: asDouble(payload['lat'] ?? payload['latitude']),
+        longitude: asDouble(payload['lng'] ?? payload['longitude']),
+      );
+    }).whereType<Evidence>().toList(growable: false);
   }
 
   String _slugify(String value) {
