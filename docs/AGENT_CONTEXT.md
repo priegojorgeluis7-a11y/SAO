@@ -296,7 +296,7 @@ cd frontend_flutter/sao_windows && dart run build_runner build --delete-conflict
 cd frontend_flutter/sao_windows && flutter test
 
 # Deploy producción
-./deploy_to_cloud_run.ps1   # Incluye gate de smoke test automático
+./tools/deploy/deploy_to_cloud_run.ps1   # Incluye gate de smoke test automático
 
 # Smoke test post-deploy
 ./backend/scripts/smoke_test_prod.ps1

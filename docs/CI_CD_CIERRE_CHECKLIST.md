@@ -127,4 +127,4 @@ Al completar esta checklist:
 
 ## Resultado esperado
 
-Fase 1 cerrada: existe corrida automatizada completa y exitosa en `main`, con deploy y smoke test en verde, sin depender de `deploy_to_cloud_run.ps1` como ruta principal.
+Fase 1 cerrada: existe corrida automatizada completa y exitosa en `main`, con deploy y smoke test en verde, sin depender de `tools/deploy/deploy_to_cloud_run.ps1` como ruta principal.

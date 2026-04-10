@@ -110,7 +110,7 @@ cd d:\SAO
     -Region "us-central1"
 
 # Paso 2: Deploy a Cloud Run (build + deploy + test)
-.\deploy_to_cloud_run.ps1 `
+.\tools\deploy\deploy_to_cloud_run.ps1 `
     -ProjectId "tu-proyecto-gcp" `
     -DBPassword "ContraseñaFuerte123!@#" `
     -JwtSecret "jwt-secret-64-caracteres-aleatorios"

@@ -6,8 +6,14 @@ Concentrar documentos de auditoria, diagnostico y planes fechados que ya no son 
 ## Estructura
 - `docs/historico/auditorias/` - auditorias y revisiones puntuales.
 - `docs/historico/planes/` - planes de mitigacion y diagnosticos historicos.
+- `docs/historico/analisis_home_2026-04/` - analisis historico del Home y seguimiento de fixes.
 
 ## Indice por periodo
+
+### 2026-04
+
+#### Analisis y seguimiento Home
+- `docs/historico/analisis_home_2026-04/README.md`
 
 ### 2026-03
 

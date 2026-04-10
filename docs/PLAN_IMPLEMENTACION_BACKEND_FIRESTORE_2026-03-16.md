@@ -270,7 +270,7 @@ Estrategia:
 Estado Fase A:
 - completado: deploy runtime firestore-only estricto (sin cloudsql-instances y sin DATABASE_URL en Cloud Run).
 - completado: workflow deploy actualiza env firestore-only y limpia secretos SQL runtime.
-- completado: `deploy_to_cloud_run.ps1` ya no expone parametros SQL obsoletos.
+- completado: `tools/deploy/deploy_to_cloud_run.ps1` ya no expone parametros SQL obsoletos.
 
 ### Fase B (Riesgo Medio)
 - identificar endpoints que aun tienen ramas SQL fallback y migrarlos a implementacion firestore nativa.

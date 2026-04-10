@@ -76,7 +76,7 @@ SAO/
 │   │   └── core/              # Config, auth, RBAC
 │   └── tests/
 │
-├── mobile/                     # App Flutter Móvil
+├── frontend_flutter/           # App Flutter Móvil
 │   └── sao_windows/
 │       ├── lib/
 │       │   ├── features/      # Home, Activities, Agenda, etc.
@@ -84,21 +84,26 @@ SAO/
 │       │   └── data/          # Repositories, Drift DB
 │       └── test/
 │
-├── desktop/                    # Admin Flutter Windows
-│   └── lib/
-│       └── features/
-│           ├── catalog_admin/ # CRUD catálogos
-│           ├── form_builder/  # Constructor visual
-│           └── user_admin/    # Gestión usuarios
+├── desktop_flutter/            # Admin Flutter Desktop
+│   └── sao_desktop/
+│       └── lib/
+│           └── features/
+│               ├── catalog_admin/ # CRUD catálogos
+│               ├── form_builder/  # Constructor visual
+│               └── user_admin/    # Gestión usuarios
 │
-├── docs/                       # Documentación
-│   ├── API.md
-│   ├── CATALOG_SPEC.md
-│   └── WORKFLOW.md
+├── docs/                       # Documentación central
+│   ├── README.md               # Índice documental
+│   ├── WORKFLOW.md
+│   └── historico/              # Documentación archivada
 │
-├── ARCHITECTURE.md            # Arquitectura detallada
-├── IMPLEMENTATION_PLAN.md     # Plan por fases
-└── README.md                  # Este archivo
+├── tools/                      # Scripts operativos y diagnóstico
+│   ├── deploy/
+│   └── diagnostics/
+│
+├── ARCHITECTURE.md             # Arquitectura detallada
+├── IMPLEMENTATION_PLAN.md      # Plan por fases
+└── README.md                   # Este archivo
 ```
 
 ---
@@ -111,7 +116,20 @@ SAO/
 - **Flutter 3.24+** (móvil + desktop)
 - **Docker** (opcional, para desarrollo local)
 
+### Backend operativo
+
+El backend que deben usar mobile y desktop esta desplegado en Cloud Run:
+
+```text
+https://sao-api-fjzra25vya-uc.a.run.app
+```
+
+Los clientes ya estan configurados para usar ese backend por defecto.
+
 ### 1. Backend
+
+Para uso normal de mobile y desktop, no necesitas levantar un backend local.
+Esta seccion aplica si vas a desarrollar o depurar el backend.
 
 ```bash
 cd backend
@@ -131,13 +149,14 @@ cp .env.example .env
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-**API disponible en:** `http://localhost:8000` (local) o `http://192.168.1.100:8000` (red)  
-**Docs interactivas:** `http://192.168.1.100:8000/docs`
+**Cloud Run:** `https://sao-api-fjzra25vya-uc.a.run.app`  
+**API local opcional:** `http://localhost:8000`  
+**Docs interactivas locales:** `http://localhost:8000/docs`
 
 ### 2. App Móvil
 
 ```bash
-cd mobile/sao_windows
+cd frontend_flutter/sao_windows
 
 # Obtener dependencias
 flutter pub get
@@ -152,14 +171,18 @@ flutter run
 flutter run -d chrome
 ```
 
+Por defecto, la app movil consume Cloud Run.
+
 ### 3. Escritorio Admin
 
 ```bash
-cd desktop
+cd desktop_flutter/sao_desktop
 
 flutter pub get
-flutter run -d windows
+flutter run -d macos --dart-define=SAO_BACKEND_URL=https://sao-api-fjzra25vya-uc.a.run.app
 ```
+
+Desktop debe apuntar a Cloud Run como backend operativo.
 
 ---
 
@@ -242,8 +265,8 @@ DRAFT → (validación) → PUBLISHED → (nuevo publish) → DEPRECATED
 
 - [**ARCHITECTURE.md**](ARCHITECTURE.md): Arquitectura detallada del sistema
 - [**IMPLEMENTATION_PLAN.md**](IMPLEMENTATION_PLAN.md): Plan de implementación por fases
-- [**API.md**](docs/API.md): Especificación de endpoints REST
-- [**CATALOG_SPEC.md**](docs/CATALOG_SPEC.md): Estructura del paquete de catálogos
+- [**Centro de documentación**](docs/README.md): Índice y rutas canónicas de documentación
+- [**CATALOG_CONTRACT.md**](docs/CATALOG_CONTRACT.md): Contrato del bundle de catálogos
 - [**WORKFLOW.md**](docs/WORKFLOW.md): Diseño del workflow engine
 
 ---
@@ -258,13 +281,13 @@ pytest tests/ --cov=app
 
 ### Móvil
 ```bash
-cd mobile/sao_windows
+cd frontend_flutter/sao_windows
 flutter test --coverage
 ```
 
 ### Desktop
 ```bash
-cd desktop
+cd desktop_flutter/sao_desktop
 flutter test
 ```
 

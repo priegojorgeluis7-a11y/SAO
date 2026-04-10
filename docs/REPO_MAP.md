@@ -340,8 +340,8 @@
 
 | Archivo | Para qué |
 |---------|---------|
-| `deploy_to_cloud_run.ps1` | Deploy completo con gate de smoke test |
-| `verificar_honor.ps1` | Script de verificación |
+| `tools/deploy/deploy_to_cloud_run.ps1` | Deploy completo con gate de smoke test |
+| `tools/deploy/verificar_honor.ps1` | Script de verificación |
 | `backend/.env` | Variables locales (no commitear) |
 | `backend/.env.example` | Template para nuevos devs |
 | `backend/pytest.ini` | Config pytest (testpaths, markers) |

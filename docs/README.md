@@ -68,6 +68,7 @@ Este documento organiza toda la documentacion del repositorio en un unico punto 
 
 ## 8) Historico (auditorias y diagnosticos fechados)
 - Indice historico: `docs/historico/README.md`
+- Analisis Home (archivo 2026-04): `docs/historico/analisis_home_2026-04/README.md`
 - `docs/historico/auditorias/AUDITORIA_MOVIL_2026-03-05.md` - auditoria de app movil.
 - `docs/historico/auditorias/AUDITORIA_FIX_CATALOGOS_MULTIPROYECTO.md` - auditoria de fix multi-proyecto.
 - `docs/historico/auditorias/CODE_AUDIT_2026-03-09.md` - auditoria de malas practicas.
@@ -85,3 +86,16 @@ Este documento organiza toda la documentacion del repositorio en un unico punto 
 - Evitar duplicar contenido de arquitectura; enlazar en su lugar al documento canonico.
 - Si un documento queda obsoleto, moverlo a seccion historica o marcarlo como superseded.
 - Usar `docs/TEMPLATE_DOC.md` como base para nuevos documentos.
+
+## 10) Herramientas y scripts
+- `tools/deploy/deploy_to_cloud_run.ps1` - despliegue manual con gate de smoke test.
+- `tools/deploy/verificar_honor.ps1` - verificacion operativa puntual.
+- `tools/diagnostics/scripts/` - scripts de diagnostico y pruebas ad-hoc.
+- `tools/diagnostics/data/` - payloads de apoyo para scripts de diagnostico.
+
+## Convenciones de ubicacion (repo)
+- Documentacion operativa vigente: `docs/` (indexar en `docs/README.md`).
+- Documentacion historica o fotografia de estado: `docs/historico/` (con subcarpeta por tema/periodo).
+- Scripts de despliegue/manuales operativos: `tools/deploy/`.
+- Scripts de diagnostico, debug o pruebas ad-hoc: `tools/diagnostics/scripts/`.
+- Datos de soporte para diagnostico (payloads, fixtures): `tools/diagnostics/data/`.

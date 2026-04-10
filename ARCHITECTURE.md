@@ -350,7 +350,7 @@ Ver [DESIGN_TOKENS.md](docs/DESIGN_TOKENS.md).
 | Evidencias | GCS bucket | us-central1 |
 | Secrets | Secret Manager | GCP |
 
-**Deploy:** `deploy_to_cloud_run.ps1` → gate de smoke test → 100% tráfico.
+**Deploy:** `tools/deploy/deploy_to_cloud_run.ps1` → gate de smoke test → 100% tráfico.
 **Smoke test:** `backend/scripts/smoke_test_prod.ps1`.
 
 ---

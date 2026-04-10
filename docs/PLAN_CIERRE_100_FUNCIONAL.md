@@ -78,7 +78,7 @@ Pendientes para 100%:
 - Activar workflow de backend: `test -> build -> deploy -> smoke`.
 - Activar workflow flutter: `analyze + tests` (mobile/desktop segun alcance).
 - Configurar secretos CI de GCP y permisos de despliegue.
-- Eliminar dependencia operativa de `deploy_to_cloud_run.ps1` como ruta principal.
+- Eliminar dependencia operativa de `tools/deploy/deploy_to_cloud_run.ps1` como ruta principal.
 
 **Entregables:**
 - Pipeline en `main` ejecutando automaticamente.

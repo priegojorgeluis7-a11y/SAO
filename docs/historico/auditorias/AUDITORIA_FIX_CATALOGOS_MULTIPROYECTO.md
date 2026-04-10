@@ -361,5 +361,5 @@ SELECT project_id, version_id, is_active FROM cat_projects;
 - [x] Suite backend: 98/98 passed (0 regresiones)
 - [x] No se modificaron modelos, migraciones ni schemas
 - [x] Función `seed_project_effective_catalog` es idempotente (ON CONFLICT DO NOTHING)
-- [ ] Deploy a Cloud Run ejecutado (pendiente — `deploy_to_cloud_run.ps1`)
+- [ ] Deploy a Cloud Run ejecutado (pendiente — `tools/deploy/deploy_to_cloud_run.ps1`)
 - [ ] Verificación E2E en staging con proyecto TAP real (pendiente)
