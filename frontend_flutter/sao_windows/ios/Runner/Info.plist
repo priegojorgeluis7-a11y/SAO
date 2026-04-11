@@ -2,12 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CADisableMinimumFrameDurationOnPhone</key>
-	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Sao Windows</string>
+	<string>SAO</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -15,7 +13,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>sao_windows</string>
+	<string>SAO</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>
@@ -26,6 +24,18 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>SAO necesita acceso a la camara para capturar evidencias de campo.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>SAO usa Face ID para proteger el acceso local a la aplicacion.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>SAO usa tu ubicacion mientras registras actividades y evidencias en campo.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>SAO necesita acceso al microfono cuando capturas video como evidencia.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>SAO necesita guardar evidencias generadas desde la aplicacion cuando corresponda.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>SAO necesita acceso a tus fotos para adjuntar evidencias existentes.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -47,6 +57,10 @@
 			</array>
 		</dict>
 	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
@@ -66,5 +80,7 @@
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>CADisableMinimumFrameDurationOnPhone</key>
+	<true/>
 </dict>
 </plist>
