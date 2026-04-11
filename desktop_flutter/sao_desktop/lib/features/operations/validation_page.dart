@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
 import '../../data/repositories/activity_repository.dart';
@@ -11,7 +10,6 @@ import 'widgets/activity_queue_panel.dart';
 import 'widgets/activity_form_panel.dart';
 import 'widgets/evidence_gallery_panel.dart';
 import 'widgets/review_actions.dart';
-import 'widgets/gps_validation_banner.dart';
 
 class ValidationPage extends ConsumerStatefulWidget {
   const ValidationPage({super.key});
@@ -24,6 +22,8 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
   ActivityWithDetails? _selectedActivity;
   int _selectedEvidenceIndex = 0;
   String _searchQuery = '';
+  List<ActivityWithDetails> _visibleActivities = const [];
+  final Set<String> _bulkSelectedIds = <String>{};
 
   final _reviewCommentsController = TextEditingController();
   final _focusNode = FocusNode();
@@ -42,8 +42,8 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
   }
 
   // Atajos de teclado
-  void _handleKeyPress(RawKeyEvent event) {
-    if (event is! RawKeyDownEvent) return;
+  void _handleKeyPress(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
     if (_selectedActivity == null) return;
 
     if (event.logicalKey == LogicalKeyboardKey.enter) {
@@ -64,7 +64,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Row(
+          content: const Row(
             children: [
               Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary),
               SizedBox(width: SaoSpacing.md),
@@ -74,7 +74,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
           backgroundColor: SaoColors.success,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SaoRadii.sm)),
-          duration: Duration(seconds: 1),
+          duration: const Duration(seconds: 1),
         ),
       );
       _loadNextActivity();
@@ -88,7 +88,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SaoRadii.xl)),
         child: Container(
           width: 550,
-          padding: EdgeInsets.all(SaoSpacing.xxl),
+          padding: const EdgeInsets.all(SaoSpacing.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -96,15 +96,15 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
               Row(
                 children: [
                   Container(
-                    padding: EdgeInsets.all(SaoSpacing.md),
+                    padding: const EdgeInsets.all(SaoSpacing.md),
                     decoration: BoxDecoration(
-                      color: SaoColors.error.withOpacity(0.1),
+                      color: SaoColors.error.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(SaoRadii.md),
                     ),
-                    child: Icon(Icons.cancel_rounded, color: SaoColors.error, size: 28),
+                    child: const Icon(Icons.cancel_rounded, color: SaoColors.error, size: 28),
                   ),
-                  SizedBox(width: SaoSpacing.lg),
-                  Expanded(
+                  const SizedBox(width: SaoSpacing.lg),
+                  const Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -121,12 +121,12 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                   ),
                 ],
               ),
-              SizedBox(height: SaoSpacing.xxl),
-              Text(
+              const SizedBox(height: SaoSpacing.xxl),
+              const Text(
                 'Motivo del rechazo:',
                 style: SaoTypography.bodyTextBold,
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               TextField(
                 controller: _reviewCommentsController,
                 maxLines: 4,
@@ -138,12 +138,12 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                   fillColor: SaoColors.gray50,
                 ),
               ),
-              SizedBox(height: SaoSpacing.lg),
+              const SizedBox(height: SaoSpacing.lg),
               Text(
                 'Motivos comunes:',
                 style: SaoTypography.caption.copyWith(fontWeight: FontWeight.w600),
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               Wrap(
                 spacing: SaoSpacing.sm,
                 runSpacing: SaoSpacing.sm,
@@ -154,7 +154,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                   _buildReasonChip('Falta información'),
                 ],
               ),
-              SizedBox(height: SaoSpacing.xxl),
+              const SizedBox(height: SaoSpacing.xxl),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -163,9 +163,9 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                       _reviewCommentsController.clear();
                       Navigator.pop(ctx);
                     },
-                    child: Text('Cancelar'),
+                    child: const Text('Cancelar'),
                   ),
-                  SizedBox(width: SaoSpacing.md),
+                  const SizedBox(width: SaoSpacing.md),
                   FilledButton.icon(
                     onPressed: () async {
                       if (_reviewCommentsController.text.trim().isEmpty) return;
@@ -174,10 +174,10 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                     },
                     style: FilledButton.styleFrom(
                       backgroundColor: SaoColors.error,
-                      padding: EdgeInsets.symmetric(horizontal: SaoSpacing.xxl, vertical: SaoSpacing.md),
+                      padding: const EdgeInsets.symmetric(horizontal: SaoSpacing.xxl, vertical: SaoSpacing.md),
                     ),
-                    icon: Icon(Icons.send_rounded, size: 18),
-                    label: Text('Enviar Rechazo'),
+                    icon: const Icon(Icons.send_rounded, size: 18),
+                    label: const Text('Enviar Rechazo'),
                   ),
                 ],
               ),
@@ -195,7 +195,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
       backgroundColor: SaoColors.gray100,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: SaoColors.gray300),
+        side: const BorderSide(color: SaoColors.gray300),
       ),
     );
   }
@@ -216,7 +216,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Row(
+          content: const Row(
             children: [
               Icon(Icons.info_outline_rounded, color: SaoColors.onPrimary),
               SizedBox(width: SaoSpacing.md),
@@ -226,7 +226,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
           backgroundColor: SaoColors.error,
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(SaoRadii.sm)),
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
       _reviewCommentsController.clear();
@@ -270,9 +270,9 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
   Widget build(BuildContext context) {
     final activitiesAsync = ref.watch(pendingActivitiesProvider);
 
-    return RawKeyboardListener(
+    return KeyboardListener(
       focusNode: _focusNode,
-      onKey: _handleKeyPress,
+      onKeyEvent: _handleKeyPress,
       child: Scaffold(
         backgroundColor: SaoColors.gray50,
         body: Column(
@@ -290,15 +290,39 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                         activitiesAsync: activitiesAsync,
                         selectedActivity: _selectedActivity,
                         searchQuery: _searchQuery,
+                        bulkSelectedIds: _bulkSelectedIds,
                         onSelectActivity: (activity) {
                           setState(() {
                             _selectedActivity = activity;
                             _selectedEvidenceIndex = 0;
                           });
                         },
+                        onVisibleActivitiesChanged: (activities) {
+                          if (!mounted) return;
+                          setState(() => _visibleActivities = activities);
+                        },
+                        onBulkToggle: (activityId) {
+                          setState(() {
+                            if (_bulkSelectedIds.contains(activityId)) {
+                              _bulkSelectedIds.remove(activityId);
+                            } else {
+                              _bulkSelectedIds.add(activityId);
+                            }
+                          });
+                        },
+                        onBulkSelectAll: () {
+                          setState(() {
+                            _bulkSelectedIds
+                              ..clear()
+                              ..addAll(_visibleActivities.map((activity) => activity.activity.id));
+                          });
+                        },
+                        onBulkClear: () {
+                          setState(_bulkSelectedIds.clear);
+                        },
                       ),
                     ),
-                    SizedBox(width: 16),
+                    const SizedBox(width: 16),
                     
                     // Panel Central: Detalles con Diff View (redesigned)
                     Expanded(
@@ -306,17 +330,17 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                       child: ActivityFormPanel(
                         activity: _selectedActivity,
                         onFieldChanged: (field, value) {
-                          print('Campo $field cambiado a: $value');
+                          debugPrint('Campo $field cambiado a: $value');
                         },
                         onAcceptChange: (field) {
-                          print('Cambio aceptado en campo: $field');
+                          debugPrint('Cambio aceptado en campo: $field');
                         },
                         onRevertChange: (field) {
-                          print('Cambio revertido en campo: $field');
+                          debugPrint('Cambio revertido en campo: $field');
                         },
                       ),
                     ),
-                    SizedBox(width: 16),
+                    const SizedBox(width: 16),
                     
                     // Panel Derecho: Evidencias con Zoom y GPS (redesigned)
                     Expanded(
@@ -331,7 +355,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                                   setState(() => _selectedEvidenceIndex = index),
                             ),
                           ),
-                          SizedBox(height: 16),
+                          const SizedBox(height: 16),
                           ReviewActions(
                             activity: _selectedActivity,
                             onApprove: _approveAndNext,
@@ -367,14 +391,14 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
         : 0;
 
     return Container(
-      padding: EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
           BoxShadow(
-            color: Theme.of(context).colorScheme.shadow.withOpacity(0.05),
+            color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.05),
             blurRadius: 8,
-            offset: Offset(0, 2),
+            offset: const Offset(0, 2),
           ),
         ],
       ),
@@ -386,15 +410,15 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
+                  const Text(
                     'Validación de Actividades',
                     style: SaoTypography.pageTitle,
                   ),
-                  SizedBox(height: 4),
+                  const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.location_on_rounded, size: 14, color: SaoColors.gray600),
-                      SizedBox(width: 6),
+                      const Icon(Icons.location_on_rounded, size: 14, color: SaoColors.gray600),
+                      const SizedBox(width: 6),
                       Text(
                         'Proyecto: ${ref.watch(activeProjectIdProvider)}',
                         style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
@@ -403,7 +427,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                   ),
                 ],
               ),
-              SizedBox(width: 48),
+              const SizedBox(width: 48),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -424,35 +448,35 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                         ),
                       ],
                     ),
-                    SizedBox(height: 8),
+                    const SizedBox(height: 8),
                     ClipRRect(
                       borderRadius: BorderRadius.circular(6),
                       child: LinearProgressIndicator(
                         value: total > 0 ? currentIndex / total : 0,
                         minHeight: 8,
                         backgroundColor: SaoColors.gray200,
-                        valueColor: AlwaysStoppedAnimation<Color>(SaoColors.primary),
+                        valueColor: const AlwaysStoppedAnimation<Color>(SaoColors.primary),
                       ),
                     ),
                   ],
                 ),
               ),
-              SizedBox(width: 48),
+              const SizedBox(width: 48),
               Tooltip(
                 message: 'Enter: Aprobar | R: Rechazar | Esc: Saltar',
                 child: Container(
-                  padding: EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: SaoColors.primary.withOpacity(0.05),
+                    color: SaoColors.primary.withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(Icons.keyboard_rounded, size: 20, color: SaoColors.primary),
+                  child: const Icon(Icons.keyboard_rounded, size: 20, color: SaoColors.primary),
                 ),
               ),
             ],
           ),
-          
-          SizedBox(height: 16),
+
+          const SizedBox(height: 16),
           
           // Barra de búsqueda inteligente (NEW!)
           SizedBox(
@@ -481,7 +505,7 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
               projectName: ref.watch(activeProjectIdProvider),
               onFilterPressed: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Filtros avanzados próximamente')),
+                  const SnackBar(content: Text('Filtros avanzados próximamente')),
                 );
               },
             ),

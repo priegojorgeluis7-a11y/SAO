@@ -27,10 +27,10 @@ class SaoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cardContent = Container(
       decoration: BoxDecoration(
-        color: color ?? SaoColors.surface,
+        color: color ?? SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
         border: Border.fromBorderSide(
-          border ?? const BorderSide(color: SaoColors.border),
+          border ?? BorderSide(color: SaoColors.borderFor(context)),
         ),
         boxShadow: SaoShadows.cardShadow,
       ),

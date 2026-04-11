@@ -251,36 +251,36 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
 
   Widget _buildPendingEvidencePlaceholder(Evidence evidence) {
     return Container(
-      color: SaoColors.gray100,
+      color: SaoColors.surfaceRaisedFor(context),
       child: Center(
         child: SingleChildScrollView(
-          padding: EdgeInsets.all(SaoSpacing.lg),
+          padding: const EdgeInsets.all(SaoSpacing.lg),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
+              const Icon(
                 Icons.cloud_upload_outlined,
                 size: 56,
                 color: SaoColors.warning,
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               Text(
                 'La evidencia aún no está disponible en el servidor',
                 style: SaoTypography.bodyText.copyWith(
-                  color: SaoColors.gray700,
+                  color: SaoColors.textFor(context),
                   fontWeight: FontWeight.w700,
                 ),
                 textAlign: TextAlign.center,
               ),
-              SizedBox(height: SaoSpacing.sm),
+              const SizedBox(height: SaoSpacing.sm),
               Text(
                 'Sincroniza nuevamente desde el móvil para terminar la carga de la foto y vuelve a abrir esta actividad.',
                 style: SaoTypography.caption.copyWith(
-                  color: SaoColors.gray600,
+                  color: SaoColors.textMutedFor(context),
                 ),
                 textAlign: TextAlign.center,
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               OutlinedButton.icon(
                 onPressed: () => setState(() {
                   _clearSignedUrlState(evidence.id);
@@ -323,12 +323,16 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
           const SizedBox(height: 12),
           Text(
             'Cargando evidencia del servidor...',
-            style: SaoTypography.bodyText.copyWith(color: SaoColors.gray700),
+            style: SaoTypography.bodyText.copyWith(
+              color: SaoColors.textFor(context),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             'La primera carga puede tardar unos segundos.',
-            style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
+            style: SaoTypography.caption.copyWith(
+              color: SaoColors.textMutedFor(context),
+            ),
           ),
         ],
       ),
@@ -462,30 +466,33 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
 
   @override
   Widget build(BuildContext context) {
+    final surfaceColor = SaoColors.surfaceFor(context);
+    final borderColor = SaoColors.borderFor(context);
+    final textColor = SaoColors.textFor(context);
+    final mutedTextColor = SaoColors.textMutedFor(context);
     if (widget.activity == null || widget.activity!.evidences.isEmpty) {
       return Container(
         decoration: BoxDecoration(
-          color: SaoColors.surface,
+          color: surfaceColor,
           borderRadius: BorderRadius.circular(SaoRadii.md),
-          border: Border.all(color: SaoColors.border),
+          border: Border.all(color: borderColor),
         ),
         child: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.photo_library_outlined,
+              const Icon(Icons.photo_library_outlined,
                   size: 64, color: SaoColors.gray400),
-              SizedBox(height: SaoSpacing.lg),
+              const SizedBox(height: SaoSpacing.lg),
               Text(
                 'Sin evidencias',
-                style:
-                    SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
+                style: SaoTypography.bodyText.copyWith(color: mutedTextColor),
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               ElevatedButton.icon(
                 onPressed: () => setState(_initializeControllers),
-                icon: Icon(Icons.refresh_rounded),
-                label: Text('Reintentar carga'),
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Reintentar carga'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: SaoColors.primary,
                   foregroundColor: SaoColors.onPrimary,
@@ -526,25 +533,25 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
           flex: 3,
           child: Container(
             decoration: BoxDecoration(
-              color: SaoColors.surface,
+              color: surfaceColor,
               borderRadius: BorderRadius.circular(SaoRadii.md),
-              border: Border.all(color: SaoColors.border),
+              border: Border.all(color: borderColor),
             ),
             child: Column(
               children: [
                 // Header con nav
                 Container(
-                  padding: EdgeInsets.all(SaoSpacing.md),
+                  padding: const EdgeInsets.all(SaoSpacing.md),
                   decoration: BoxDecoration(
                     border: Border(
-                      bottom: BorderSide(color: SaoColors.border),
+                      bottom: BorderSide(color: borderColor),
                     ),
                   ),
                   child: Row(
                     children: [
                       Icon(Icons.photo_library_rounded,
-                          color: SaoColors.primary),
-                      SizedBox(width: SaoSpacing.sm),
+                          color: textColor),
+                      const SizedBox(width: SaoSpacing.sm),
                       Expanded(
                         child: Text(
                           'Evidencias (${safeSelectedIndex + 1}/${activity.evidences.length})',
@@ -559,7 +566,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                                 ? () => widget.onSelectEvidence(
                                     safeSelectedIndex - 1)
                                 : null,
-                            icon: Icon(Icons.navigate_before_rounded),
+                            icon: const Icon(Icons.navigate_before_rounded),
                           ),
                           IconButton(
                             onPressed: safeSelectedIndex <
@@ -567,7 +574,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                                 ? () => widget.onSelectEvidence(
                                     safeSelectedIndex + 1)
                                 : null,
-                            icon: Icon(Icons.navigate_next_rounded),
+                            icon: const Icon(Icons.navigate_next_rounded),
                           ),
                         ],
                       ),
@@ -584,7 +591,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                           left: SaoSpacing.md,
                           top: SaoSpacing.md,
                           child: Container(
-                            padding: EdgeInsets.symmetric(
+                            padding: const EdgeInsets.symmetric(
                               horizontal: SaoSpacing.sm,
                               vertical: SaoSpacing.xs,
                             ),
@@ -593,7 +600,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                               borderRadius: BorderRadius.circular(SaoRadii.full),
                             ),
                             child: Text(
-                              'Error de integridad territorial · ${gpsDistanceMeters!.toStringAsFixed(0)}m',
+                              'Error de integridad territorial · ${gpsDistanceMeters.toStringAsFixed(0)}m',
                               style: SaoTypography.caption.copyWith(
                                 color: SaoColors.onPrimary,
                                 fontWeight: FontWeight.w600,
@@ -609,7 +616,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
           ),
         ),
 
-        SizedBox(height: SaoSpacing.md),
+        const SizedBox(height: SaoSpacing.md),
 
         Expanded(
           flex: 2,
@@ -618,26 +625,26 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: SaoColors.surface,
+                    color: surfaceColor,
                     borderRadius: BorderRadius.circular(SaoRadii.md),
-                    border: Border.all(color: SaoColors.border),
+                    border: Border.all(color: borderColor),
                   ),
-                  padding: EdgeInsets.all(SaoSpacing.md),
+                  padding: const EdgeInsets.all(SaoSpacing.md),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
                           Icon(Icons.tips_and_updates_outlined,
-                              size: 16, color: SaoColors.gray600),
-                          SizedBox(width: SaoSpacing.sm),
-                          Text(
+                              size: 16, color: mutedTextColor),
+                          const SizedBox(width: SaoSpacing.sm),
+                          const Text(
                             'Resumen rápido',
                             style: SaoTypography.sectionTitle,
                           ),
                         ],
                       ),
-                      SizedBox(height: SaoSpacing.sm),
+                      const SizedBox(height: SaoSpacing.sm),
                       Wrap(
                         spacing: SaoSpacing.sm,
                         runSpacing: SaoSpacing.sm,
@@ -645,9 +652,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                           _buildQuickStatChip(
                             icon: Icons.access_time_rounded,
                             label: 'Captura',
-                            value: evidence.capturedAt != null
-                                ? DateFormat('dd/MM HH:mm').format(evidence.capturedAt!)
-                                : 'Sin fecha',
+                            value: DateFormat('dd/MM HH:mm').format(evidence.capturedAt),
                           ),
                           _buildQuickStatChip(
                             icon: Icons.location_on_outlined,
@@ -670,40 +675,40 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                   ),
                 ),
 
-                SizedBox(height: SaoSpacing.md),
+                const SizedBox(height: SaoSpacing.md),
 
                 // PIE DE FOTO
                 Container(
                   decoration: BoxDecoration(
-                    color: SaoColors.surface,
+                    color: surfaceColor,
                     borderRadius: BorderRadius.circular(SaoRadii.md),
-                    border: Border.all(color: SaoColors.border),
+                    border: Border.all(color: borderColor),
                   ),
-                  padding: EdgeInsets.all(SaoSpacing.md),
+                  padding: const EdgeInsets.all(SaoSpacing.md),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          Icon(Icons.title_rounded, size: 16, color: SaoColors.gray600),
-                          SizedBox(width: SaoSpacing.sm),
-                          Text(
+                          Icon(Icons.title_rounded, size: 16, color: mutedTextColor),
+                          const SizedBox(width: SaoSpacing.sm),
+                          const Text(
                             'Pie de foto',
                             style: SaoTypography.sectionTitle,
                           ),
-                          Spacer(),
-                          if (!(_isEditingCaption[evidence.id] ?? false))
+                          const Spacer(),
+                          if (!_isEditingCaption[evidence.id]!)
                             IconButton(
-                              icon: Icon(Icons.edit_outlined, size: 16),
+                              icon: const Icon(Icons.edit_outlined, size: 16),
                               onPressed: () => setState(() => _isEditingCaption[evidence.id] = true),
                               tooltip: 'Editar pie de foto',
-                              padding: EdgeInsets.all(4),
-                              constraints: BoxConstraints(minWidth: 24, minHeight: 24),
+                              padding: const EdgeInsets.all(4),
+                              constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
                             ),
                         ],
                       ),
-                      SizedBox(height: SaoSpacing.sm),
-                      if (_isEditingCaption[evidence.id] ?? false)
+                      const SizedBox(height: SaoSpacing.sm),
+                      if (_isEditingCaption[evidence.id]!)
                         Column(
                           children: [
                             TextField(
@@ -714,12 +719,12 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(SaoRadii.sm),
                                 ),
-                                contentPadding: EdgeInsets.all(SaoSpacing.sm),
+                                contentPadding: const EdgeInsets.all(SaoSpacing.sm),
                                 isDense: true,
                               ),
                               style: SaoTypography.bodyText,
                             ),
-                            SizedBox(height: SaoSpacing.sm),
+                            const SizedBox(height: SaoSpacing.sm),
                             Row(
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
@@ -731,20 +736,20 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                                     }
                                     setState(() => _isEditingCaption[evidence.id] = false);
                                   },
-                                  child: Text('Cancelar'),
+                                  child: const Text('Cancelar'),
                                 ),
-                                SizedBox(width: SaoSpacing.xs),
+                                const SizedBox(width: SaoSpacing.xs),
                                 ElevatedButton(
                                   onPressed: () => _saveCaption(evidence.id),
-                                  child: Text('Guardar'),
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: SaoColors.primary,
                                     foregroundColor: SaoColors.onPrimary,
-                                    padding: EdgeInsets.symmetric(
+                                    padding: const EdgeInsets.symmetric(
                                       horizontal: SaoSpacing.md,
                                       vertical: SaoSpacing.sm,
                                     ),
                                   ),
+                                  child: const Text('Guardar'),
                                 ),
                               ],
                             ),
@@ -757,8 +762,8 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                               : 'Sin descripción',
                           style: SaoTypography.bodyText.copyWith(
                             color: displayCaption.isNotEmpty
-                                ? SaoColors.gray700
-                                : SaoColors.gray500,
+                              ? textColor
+                              : mutedTextColor,
                             fontStyle: displayCaption.isNotEmpty
                                 ? FontStyle.normal
                                 : FontStyle.italic,
@@ -768,49 +773,47 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                   ),
                 ),
 
-                SizedBox(height: SaoSpacing.md),
+                const SizedBox(height: SaoSpacing.md),
 
                 Container(
                   decoration: BoxDecoration(
-                    color: SaoColors.surface,
+                    color: surfaceColor,
                     borderRadius: BorderRadius.circular(SaoRadii.md),
-                    border: Border.all(color: SaoColors.border),
+                    border: Border.all(color: borderColor),
                   ),
                   child: Theme(
                     data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                     child: ExpansionTile(
                       initiallyExpanded: false,
-                      tilePadding: EdgeInsets.symmetric(
+                      tilePadding: const EdgeInsets.symmetric(
                         horizontal: SaoSpacing.md,
                         vertical: SaoSpacing.xs,
                       ),
-                      childrenPadding: EdgeInsets.fromLTRB(
+                      childrenPadding: const EdgeInsets.fromLTRB(
                         SaoSpacing.md,
                         0,
                         SaoSpacing.md,
                         SaoSpacing.md,
                       ),
                       leading: Icon(Icons.info_outline_rounded,
-                          size: 16, color: SaoColors.gray600),
-                      title: Text(
+                          size: 16, color: mutedTextColor),
+                      title: const Text(
                         'Metadatos completos',
                         style: SaoTypography.sectionTitle,
                       ),
                       subtitle: Text(
                         'Fecha, GPS, distancia y archivo',
                         style: SaoTypography.caption.copyWith(
-                          color: SaoColors.gray500,
+                          color: mutedTextColor,
                         ),
                       ),
                       children: [
                         _buildMetadataRow(
                           'Fecha y hora',
-                          evidence.capturedAt != null
-                              ? DateFormat('dd/MM/yyyy HH:mm:ss').format(evidence.capturedAt!)
-                              : 'No disponible',
+                          DateFormat('dd/MM/yyyy HH:mm:ss').format(evidence.capturedAt),
                           Icons.access_time_rounded,
                         ),
-                        SizedBox(height: SaoSpacing.sm),
+                        const SizedBox(height: SaoSpacing.sm),
                         _buildMetadataRow(
                           'Coordenadas GPS',
                           evidence.latitude != null && evidence.longitude != null
@@ -820,7 +823,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                           valueColor: gpsMismatch ? SaoColors.error : null,
                         ),
                         if (gpsDistanceMeters != null) ...[
-                          SizedBox(height: SaoSpacing.sm),
+                          const SizedBox(height: SaoSpacing.sm),
                           _buildMetadataRow(
                             'Distancia al punto',
                             '${gpsDistanceMeters.toStringAsFixed(1)} m',
@@ -828,7 +831,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                             valueColor: gpsMismatch ? SaoColors.error : SaoColors.success,
                           ),
                         ],
-                        SizedBox(height: SaoSpacing.sm),
+                        const SizedBox(height: SaoSpacing.sm),
                         _buildMetadataRow(
                           'Archivo',
                           evidence.filePath.split('/').last,
@@ -839,38 +842,38 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                   ),
                 ),
 
-                SizedBox(height: SaoSpacing.md),
+                const SizedBox(height: SaoSpacing.md),
 
                 Container(
                   decoration: BoxDecoration(
-                    color: SaoColors.surface,
+                    color: surfaceColor,
                     borderRadius: BorderRadius.circular(SaoRadii.md),
-                    border: Border.all(color: SaoColors.border),
+                    border: Border.all(color: borderColor),
                   ),
                   child: Theme(
                     data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                     child: ExpansionTile(
                       initiallyExpanded: false,
-                      tilePadding: EdgeInsets.symmetric(
+                      tilePadding: const EdgeInsets.symmetric(
                         horizontal: SaoSpacing.md,
                         vertical: SaoSpacing.xs,
                       ),
-                      childrenPadding: EdgeInsets.fromLTRB(
+                      childrenPadding: const EdgeInsets.fromLTRB(
                         SaoSpacing.md,
                         0,
                         SaoSpacing.md,
                         SaoSpacing.md,
                       ),
                       leading: Icon(Icons.edit_note_rounded,
-                          size: 16, color: SaoColors.gray600),
-                      title: Text(
+                          size: 16, color: mutedTextColor),
+                      title: const Text(
                         'Notas internas',
                         style: SaoTypography.sectionTitle,
                       ),
                       subtitle: Text(
                         'Solo visibles para validadores',
                         style: SaoTypography.caption.copyWith(
-                          color: SaoColors.gray500,
+                          color: mutedTextColor,
                         ),
                       ),
                       children: [
@@ -882,7 +885,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(SaoRadii.sm),
                             ),
-                            contentPadding: EdgeInsets.all(SaoSpacing.sm),
+                            contentPadding: const EdgeInsets.all(SaoSpacing.sm),
                             isDense: true,
                           ),
                           style: SaoTypography.bodyText,
@@ -890,7 +893,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                             // Auto-save notes (debounced in real implementation)
                           },
                         ),
-                        SizedBox(height: SaoSpacing.sm),
+                        const SizedBox(height: SaoSpacing.sm),
                         Text(
                           'Estas notas no serán visibles en el reporte final',
                           style: SaoTypography.caption.copyWith(
@@ -916,25 +919,25 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     required String value,
     Color? color,
   }) {
-    final accent = color ?? SaoColors.primary;
+    final accent = color ?? Theme.of(context).colorScheme.primary;
     return Container(
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.sm,
         vertical: SaoSpacing.xs,
       ),
       decoration: BoxDecoration(
-        color: accent.withOpacity(0.08),
+        color: accent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(SaoRadii.full),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 14, color: accent),
-          SizedBox(width: SaoSpacing.xs),
+          const SizedBox(width: SaoSpacing.xs),
           Text(
             '$label: $value',
             style: SaoTypography.caption.copyWith(
-              color: SaoColors.gray700,
+              color: SaoColors.textFor(context),
               fontWeight: FontWeight.w600,
             ),
           ),
@@ -951,8 +954,8 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   }) {
     return Row(
       children: [
-        Icon(icon, size: 14, color: SaoColors.gray500),
-        SizedBox(width: SaoSpacing.sm),
+        Icon(icon, size: 14, color: SaoColors.textMutedFor(context)),
+        const SizedBox(width: SaoSpacing.sm),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -960,13 +963,13 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
               Text(
                 label,
                 style: SaoTypography.caption.copyWith(
-                  color: SaoColors.gray500,
+                  color: SaoColors.textMutedFor(context),
                 ),
               ),
               Text(
                 value,
                 style: SaoTypography.caption.copyWith(
-                  color: valueColor ?? SaoColors.gray700,
+                  color: valueColor ?? SaoColors.textFor(context),
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,

@@ -4,7 +4,6 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../ui/theme/sao_colors.dart';
-import '../../../core/enums/shared_enums.dart';
 import '../providers/operations_provider.dart';
 import '../../../data/repositories/catalog_repository.dart';
 
@@ -48,7 +47,7 @@ class _OperationsValidationViewState extends ConsumerState<OperationsValidationV
       error: (error, stack) => Scaffold(
         backgroundColor: SaoColors.surfaceDim,
         body: Center(
-          child: Text('Error: $error', style: TextStyle(color: SaoColors.error)),
+          child: Text('Error: $error', style: const TextStyle(color: SaoColors.error)),
         ),
       ),
       data: (operationsData) {
@@ -66,78 +65,74 @@ class _OperationsValidationViewState extends ConsumerState<OperationsValidationV
         }
         
         final item = items[selectedIndex];
-
-    return Scaffold(
-      backgroundColor: SaoColors.surfaceDim,
-      body: CallbackShortcuts(
-        bindings: {
-          // 🚀 Atajos de teclado (Power User)
-          const SingleActivator(LogicalKeyboardKey.keyA): () => _approveAndNext(),
-          const SingleActivator(LogicalKeyboardKey.keyR): () => _showRejectDialog(context),
-          const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _goPrevious(),
-          const SingleActivator(LogicalKeyboardKey.arrowRight): () => _goNext(),
-        },
-        child: Focus(
-          autofocus: true,
-          child: Column(
-            children: [
-              const _TopBar(),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                  child: Row(
-                    children: [
-                      // IZQUIERDA (20%) - Cola de Trabajo
-                      Expanded(
-                        flex: 20,
-                        child: _LeftInbox(
-                          items: _applyFilter(items, filter),
-                          selectedId: item.id,
-                          filter: filter,
-                          onFilterChanged: (v) => setState(() => filter = v),
-                          onSelect: (id) {
-                            final idx = items.indexWhere((e) => e.id == id);
-                            if (idx != -1) setState(() => selectedIndex = idx);
-                          },
-                        ),
+        return Scaffold(
+          backgroundColor: SaoColors.surfaceDim,
+          body: CallbackShortcuts(
+            bindings: {
+              // Atajos de teclado para revisión rápida.
+              const SingleActivator(LogicalKeyboardKey.keyA): () => _approveAndNext(items),
+              const SingleActivator(LogicalKeyboardKey.keyR): () => _showRejectDialog(context),
+              const SingleActivator(LogicalKeyboardKey.arrowLeft): () => _goPrevious(items),
+              const SingleActivator(LogicalKeyboardKey.arrowRight): () => _goNext(items),
+            },
+            child: Focus(
+              autofocus: true,
+              child: Column(
+                children: [
+                  const _TopBar(),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 20,
+                            child: _LeftInbox(
+                              items: _applyFilter(items, filter),
+                              selectedId: item.id,
+                              filter: filter,
+                              onFilterChanged: (v) => setState(() => filter = v),
+                              onSelect: (id) {
+                                final idx = items.indexWhere((e) => e.id == id);
+                                if (idx != -1) {
+                                  setState(() => selectedIndex = idx);
+                                }
+                              },
+                            ),
+                          ),
+                          const Gap(12),
+                          Expanded(
+                            flex: 30,
+                            child: _CenterForm(
+                              item: item,
+                              catalogRepo: operationsData.catalogRepo,
+                              editedDescription: editedDescription,
+                              editedClassification: editedClassification,
+                              onEditDescription: () => setState(() => editedDescription = true),
+                              onEditClassification: () => setState(() => editedClassification = true),
+                            ),
+                          ),
+                          const Gap(12),
+                          Expanded(
+                            flex: 50,
+                            child: _RightEvidence(item: item),
+                          ),
+                        ],
                       ),
-                      const Gap(12),
-                      // CENTRO (30%) - Verdad Técnica
-                      Expanded(
-                        flex: 30,
-                        child: _CenterForm(
-                          item: item,
-                          catalogRepo: operationsData.catalogRepo,
-                          editedDescription: editedDescription,
-                          editedClassification: editedClassification,
-                          onEditDescription: () => setState(() => editedDescription = true),
-                          onEditClassification: () => setState(() => editedClassification = true),
-                        ),
-                      ),
-                      const Gap(12),
-                      // DERECHA (50%) - Evidencia Visual
-                      Expanded(
-                        flex: 50,
-                        child: _RightEvidence(item: item),
-                      ),
-                    ],
+                    ),
                   ),
-                ),
+                  _FooterActions(
+                    onPrev: selectedIndex > 0 ? () => _goPrevious(items) : null,
+                    onNext: selectedIndex < items.length - 1 ? () => _goNext(items) : null,
+                    onReject: () => _showRejectDialog(context),
+                    onApprove: () => _approveAndNext(items),
+                  ),
+                ],
               ),
-              _FooterActions(
-                onPrev: selectedIndex > 0 ? () => _goPrevious(items) : null,
-                onNext: selectedIndex < items.length - 1 ? () => _goNext(items) : null,
-                onReject: () => _showRejectDialog(context),
-                onApprove: () => _approveAndNext(items),
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
-        },
-      ),
-    );
-  }
+        );
+      },
     );
   }
 
@@ -195,7 +190,7 @@ class _OperationsValidationViewState extends ConsumerState<OperationsValidationV
             mainAxisSize: MainAxisSize.min,
             children: [
               DropdownButtonFormField<String>(
-                value: selected,
+                initialValue: selected,
                 items: reasons
                     .map((e) => DropdownMenuItem(value: e, child: Text(e)))
                     .toList(),
@@ -243,41 +238,41 @@ class _TopBar extends StatelessWidget {
     return Container(
       height: 56,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: SaoColors.surface,
         border: Border(bottom: BorderSide(color: SaoColors.border)),
       ),
-      child: Row(
+      child: const Row(
         children: [
-          Icon(Icons.railway_alert, color: SaoColors.actionPrimary),  // 🎯 Azul marino elegante
-          const Gap(10),
+          Icon(Icons.railway_alert, color: SaoColors.actionPrimary),
+          Gap(10),
           Text(
             'SAO • Operaciones • Validación',
             style: TextStyle(
-              color: SaoColors.actionPrimary,  // 🎯 Azul marino elegante
+              color: SaoColors.actionPrimary,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const Spacer(),
+          Spacer(),
           _Pill(
             icon: Icons.cloud_done,
             text: 'Sincronización OK',
             color: SaoColors.success,
             bg: SaoColors.gray100,
           ),
-          const Gap(8),
+          Gap(8),
           _Pill(
             icon: Icons.account_circle,
             text: 'Coordinador',
             color: SaoColors.gray700,
             bg: SaoColors.gray100,
           ),
-          const Gap(8),
-          Flexible(  // 🔧 Fix overflow: wrap in Flexible
+          Gap(8),
+          Flexible(
             child: _Pill(
               icon: Icons.keyboard,
               text: 'A=Aprobar • R=Rechazar',
-              color: SaoColors.actionPrimary,  // 🎯 Azul marino elegante
+              color: SaoColors.actionPrimary,
               bg: SaoColors.gray50,
             ),
           ),
@@ -310,7 +305,7 @@ class _LeftInbox extends StatelessWidget {
       headerTrailing: IconButton(
         tooltip: 'Actualizar',
         onPressed: () {},
-        icon: Icon(Icons.refresh, color: SaoColors.gray700),
+        icon: const Icon(Icons.refresh, color: SaoColors.gray700),
       ),
       child: Column(
         children: [
@@ -333,15 +328,19 @@ class _LeftInbox extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: selected ? SaoColors.actionPrimary.withOpacity(0.04) : SaoColors.surface,  // 🎯 Selection con azul marino
+                      color: selected
+                          ? SaoColors.actionPrimary.withValues(alpha: 0.04)
+                          : SaoColors.surface,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: selected ? SaoColors.actionPrimary.withOpacity(0.3) : SaoColors.border,  // 🎯 Border azul marino
+                        color: selected
+                            ? SaoColors.actionPrimary.withValues(alpha: 0.3)
+                            : SaoColors.border,
                         width: selected ? 1.2 : 1,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: SaoColors.gray900.withOpacity(0.04),
+                          color: SaoColors.gray900.withValues(alpha: 0.04),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         )
@@ -398,7 +397,7 @@ class _LeftInbox extends StatelessWidget {
                               const Gap(6),
                               Row(
                                 children: [
-                                  Icon(Icons.cloud, size: 14, color: SaoColors.gray500),
+                                  const Icon(Icons.cloud, size: 14, color: SaoColors.gray500),
                                   const Gap(4),
                                   Text(
                                     'Sincronizado hace ${it.syncedAgo}',
@@ -446,19 +445,18 @@ class _CenterForm extends StatelessWidget {
   Widget build(BuildContext context) {
     final gpsOk = item.gpsDeltaMeters <= 5;
     final gpsWarn = item.gpsDeltaMeters > 5 && item.gpsDeltaMeters <= 100;
-    final gpsBad = item.gpsDeltaMeters > 100;
 
     final alertBg = gpsOk
-        ? SaoColors.success.withOpacity(0.10)
+      ? SaoColors.success.withValues(alpha: 0.10)
         : gpsWarn
             ? SaoColors.alertBg
-            : SaoColors.error.withOpacity(0.10);
+        : SaoColors.error.withValues(alpha: 0.10);
 
     final alertBorder = gpsOk
-        ? SaoColors.success.withOpacity(0.35)
+      ? SaoColors.success.withValues(alpha: 0.35)
         : gpsWarn
             ? SaoColors.alertBorder
-            : SaoColors.error.withOpacity(0.35);
+        : SaoColors.error.withValues(alpha: 0.35);
 
     final alertText = gpsOk
         ? SaoColors.success
@@ -516,15 +514,15 @@ class _CenterForm extends StatelessWidget {
             const Gap(14),
 
             // Datos Editables (más rápido corregir que rechazar)
-            _SectionTitle('Información editable'),
+            const _SectionTitle('Información editable'),
             const Gap(10),
 
             DropdownButtonFormField<String>(
-              value: item.type,  // 📱 Uso datos del catálogo
+              initialValue: item.type,
               items: catalogRepo.getActivityTypes()
                   .map((activity) => DropdownMenuItem(
                         value: activity.name, 
-                        child: Text(activity.name)
+                        child: Text(activity.name),
                       ))
                   .toList(),
               onChanged: (_) {},
@@ -533,7 +531,7 @@ class _CenterForm extends StatelessWidget {
             const Gap(12),
 
             DropdownButtonFormField<String>(
-              value: item.classification,  // 📱 Uso datos reales
+              initialValue: item.classification,
               items: const [
                 DropdownMenuItem(value: 'Ambiental', child: Text('Ambiental')),
                 DropdownMenuItem(value: 'Social', child: Text('Social')),
@@ -561,16 +559,16 @@ class _CenterForm extends StatelessWidget {
             const Gap(14),
 
             // Metadatos (duración automática)
-            _SectionTitle('Información adicional'),
+            const _SectionTitle('Información adicional'),
             const Gap(10),
             _KeyValueRow('Estado', item.state),
             _KeyValueRow('Municipio', item.municipality),
-            _KeyValueRow('Hora inicio', '08:15'),
-            _KeyValueRow('Hora fin', '10:30'),
-            _KeyValueRow('Duración', '2h 15m'),  // 🎯 Calculada automáticamente
+            const _KeyValueRow('Hora inicio', '08:15'),
+            const _KeyValueRow('Hora fin', '10:30'),
+            const _KeyValueRow('Duración', '2h 15m'),
             const Gap(14),
 
-            _SectionTitle('Riesgo'),
+            const _SectionTitle('Riesgo'),
             const Gap(10),
             Row(
               children: [
@@ -611,12 +609,12 @@ class _RightEvidence extends StatelessWidget {
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(color: SaoColors.border),
                   ),
-                  child: Center(
+                  child: const Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.photo, size: 56, color: SaoColors.gray400),
-                        const Gap(8),
+                        Gap(8),
                         Text(
                           'Fotografía del muro de contención',
                           style: TextStyle(color: SaoColors.gray600),
@@ -626,7 +624,7 @@ class _RightEvidence extends StatelessWidget {
                   ),
                 ),
                 // Herramientas flotantes: Zoom, Rotar, Brillo
-                Positioned(
+                const Positioned(
                   top: 12,
                   right: 12,
                   child: _FloatingTools(),
@@ -658,11 +656,11 @@ class _RightEvidence extends StatelessWidget {
               ),
               child: Stack(
                 children: [
-                  Center(
-                    child: Column(
+                    Center(
+                      child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.map_outlined, size: 46, color: SaoColors.gray400),
+                        const Icon(Icons.map_outlined, size: 46, color: SaoColors.gray400),
                         const Gap(8),
                         Text(
                           'Mapa: Trazo de vía + Ubicación del reporte',
@@ -674,7 +672,7 @@ class _RightEvidence extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Positioned(
+                  const Positioned(
                     top: 10,
                     left: 10,
                     child: _Pill(
@@ -714,10 +712,10 @@ class _FooterActions extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
         color: SaoColors.surface,
-        border: Border(top: BorderSide(color: SaoColors.border)),
+        border: const Border(top: BorderSide(color: SaoColors.border)),
         boxShadow: [
           BoxShadow(
-            color: SaoColors.gray900.withOpacity(0.06),
+            color: SaoColors.gray900.withValues(alpha: 0.06),
             blurRadius: 18,
             offset: const Offset(0, -6),
           )
@@ -728,12 +726,12 @@ class _FooterActions extends StatelessWidget {
           IconButton(
             tooltip: 'Anterior (←)',
             onPressed: onPrev,
-            icon: Icon(Icons.chevron_left, color: SaoColors.gray700),
+            icon: const Icon(Icons.chevron_left, color: SaoColors.gray700),
           ),
           IconButton(
             tooltip: 'Siguiente (→)',
             onPressed: onNext,
-            icon: Icon(Icons.chevron_right, color: SaoColors.gray700),
+            icon: const Icon(Icons.chevron_right, color: SaoColors.gray700),
           ),
           const Spacer(),
           // Botón RECHAZAR (Blanco/Borde Rojo)
@@ -741,7 +739,7 @@ class _FooterActions extends StatelessWidget {
             onPressed: onReject,
             style: OutlinedButton.styleFrom(
               foregroundColor: SaoColors.error,
-              side: BorderSide(color: SaoColors.error.withOpacity(0.7)),
+              side: BorderSide(color: SaoColors.error.withValues(alpha: 0.7)),
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
@@ -793,7 +791,7 @@ class _Panel extends StatelessWidget {
         border: Border.all(color: SaoColors.border),
         boxShadow: [
           BoxShadow(
-            color: SaoColors.gray900.withOpacity(0.04),
+            color: SaoColors.gray900.withValues(alpha: 0.04),
             blurRadius: 14,
             offset: const Offset(0, 6),
           )
@@ -803,8 +801,8 @@ class _Panel extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
-            decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: SaoColors.border)),
+              decoration: const BoxDecoration(
+                border: Border(bottom: BorderSide(color: SaoColors.border)),
             ),
             child: Row(
               children: [
@@ -813,7 +811,7 @@ class _Panel extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(title,
-                          style: TextStyle(
+                            style: const TextStyle(
                             color: SaoColors.actionPrimary,  // 🎯 Headers en azul marino
                             fontWeight: FontWeight.w800,
                           )),
@@ -905,9 +903,15 @@ class _FilterChip extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
         decoration: BoxDecoration(
-          color: selected ? SaoColors.actionPrimary.withOpacity(0.08) : SaoColors.surface,  // 🎯 Azul marino selection
+          color: selected
+              ? SaoColors.actionPrimary.withValues(alpha: 0.08)
+              : SaoColors.surface,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: selected ? SaoColors.actionPrimary.withOpacity(0.3) : SaoColors.border),  // 🎯 Border azul marino
+          border: Border.all(
+            color: selected
+                ? SaoColors.actionPrimary.withValues(alpha: 0.3)
+                : SaoColors.border,
+          ),
         ),
         child: Text(
           label,
@@ -922,6 +926,8 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _FloatingTools extends StatelessWidget {
+  const _FloatingTools();
+
   @override
   Widget build(BuildContext context) {
     Widget btn(IconData icon, String tooltip) {
@@ -1038,9 +1044,9 @@ class _ValuePill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
-        color: SaoColors.actionPrimary.withOpacity(0.06),  // 🎯 Fondo azul marino tenue
+        color: SaoColors.actionPrimary.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: SaoColors.actionPrimary.withOpacity(0.2)),  // 🎯 Border azul marino
+        border: Border.all(color: SaoColors.actionPrimary.withValues(alpha: 0.2)),
       ),
       child: Text(
         text,
@@ -1062,7 +1068,7 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: TextStyle(
+      style: const TextStyle(
         color: SaoColors.gray800,
         fontWeight: FontWeight.w800,
       ),
@@ -1081,6 +1087,10 @@ class _KeyValueRow extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
+          const SizedBox(
+            width: 92,
+            child: SizedBox(),
+          ),
           SizedBox(
             width: 92,
             child: Text(
@@ -1094,7 +1104,7 @@ class _KeyValueRow extends StatelessWidget {
           Expanded(
             child: Text(
               v,
-              style: TextStyle(color: SaoColors.gray800, fontWeight: FontWeight.w600),
+              style: const TextStyle(color: SaoColors.gray800, fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -1122,14 +1132,23 @@ InputDecoration _fieldDeco({
     labelText: label,
     prefixIcon: Icon(icon, color: SaoColors.gray500),
     filled: true,
-    fillColor: edited ? SaoColors.warning.withOpacity(0.14) : SaoColors.gray50,  // 🎯 Amarillo tenue para "editado en oficina"
+    fillColor: edited
+        ? SaoColors.warning.withValues(alpha: 0.14)
+        : SaoColors.gray50,
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: BorderSide(color: edited ? SaoColors.warning.withOpacity(0.5) : SaoColors.border),  // 🎯 Border amarillo si editado
+      borderSide: BorderSide(
+        color: edited
+            ? SaoColors.warning.withValues(alpha: 0.5)
+            : SaoColors.border,
+      ),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: BorderSide(color: SaoColors.actionPrimary.withOpacity(0.7), width: 1.3),  // 🎯 Focus azul marino
+      borderSide: BorderSide(
+        color: SaoColors.actionPrimary.withValues(alpha: 0.7),
+        width: 1.3,
+      ),
     ),
   );
 }

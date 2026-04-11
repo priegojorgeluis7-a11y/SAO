@@ -37,7 +37,7 @@ class SaoLiberacionViaCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(SaoRadii.md),
         border: Border.all(color: statusColor, width: 2),
       ),
@@ -45,10 +45,10 @@ class SaoLiberacionViaCard extends StatelessWidget {
         children: [
           // Header
           Container(
-            padding: EdgeInsets.all(SaoSpacing.md),
+            padding: const EdgeInsets.all(SaoSpacing.md),
             decoration: BoxDecoration(
-              color: statusColor.withOpacity(0.14),
-              borderRadius: BorderRadius.only(
+              color: statusColor.withValues(alpha: 0.14),
+              borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(SaoRadii.md - 2),
                 topRight: Radius.circular(SaoRadii.md - 2),
               ),
@@ -56,7 +56,7 @@ class SaoLiberacionViaCard extends StatelessWidget {
             child: Row(
               children: [
                 Icon(_getStatusIcon(status), color: statusColor, size: 28),
-                SizedBox(width: SaoSpacing.sm),
+                const SizedBox(width: SaoSpacing.sm),
                 Text(
                   statusLabel,
                   style: SaoTypography.sectionTitle.copyWith(color: statusColor),
@@ -66,32 +66,32 @@ class SaoLiberacionViaCard extends StatelessWidget {
           ),
           // Content
           Padding(
-            padding: EdgeInsets.all(SaoSpacing.cardPadding),
+            padding: const EdgeInsets.all(SaoSpacing.cardPadding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Frente: $frente', style: SaoTypography.bodyTextBold),
-                SizedBox(height: SaoSpacing.xs),
+                const SizedBox(height: SaoSpacing.xs),
                 Text(
                   'Rango: PK ${_formatPK(pkRange.start)} - ${_formatPK(pkRange.end)}',
                   style: SaoTypography.pkLabel,
                 ),
-                SizedBox(height: SaoSpacing.md),
+                const SizedBox(height: SaoSpacing.md),
                 Text('Liberado: ${_formatDate(timestamp)}', style: SaoTypography.bodyText),
                 Text('Por: $approvedBy', style: SaoTypography.bodyText),
-                SizedBox(height: SaoSpacing.md),
+                const SizedBox(height: SaoSpacing.md),
                 Row(
                   children: [
-                    Icon(Icons.check_circle, color: SaoColors.success, size: 16),
-                    SizedBox(width: SaoSpacing.xs),
+                    const Icon(Icons.check_circle, color: SaoColors.success, size: 16),
+                    const SizedBox(width: SaoSpacing.xs),
                     Text('$activities actividades aprobadas', style: SaoTypography.caption),
                   ],
                 ),
-                SizedBox(height: SaoSpacing.xs),
+                const SizedBox(height: SaoSpacing.xs),
                 Row(
                   children: [
-                    Icon(Icons.photo_camera, color: SaoColors.info, size: 16),
-                    SizedBox(width: SaoSpacing.xs),
+                    const Icon(Icons.photo_camera, color: SaoColors.info, size: 16),
+                    const SizedBox(width: SaoSpacing.xs),
                     Text('$evidences evidencias adjuntas', style: SaoTypography.caption),
                   ],
                 ),

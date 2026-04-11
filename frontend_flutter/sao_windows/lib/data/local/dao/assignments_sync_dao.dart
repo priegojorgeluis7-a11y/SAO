@@ -39,16 +39,21 @@ class AssignmentsSyncDao extends DatabaseAccessor<AppDb> with _$AssignmentsSyncD
 
   /// Mark assignment as syncing error
   Future<void> markAsError(String assignmentId, String error) {
-    return (update(localAssignments)
-          ..where((t) => t.id.equals(assignmentId)))
-        .write(
-      LocalAssignmentsCompanion(
-        syncStatus: const Value('ERROR'),
-        syncError: Value(error),
-        syncRetryCount: localAssignments.syncRetryCount + 1,
-        updatedAt: Value(DateTime.now()),
-      ),
-    );
+    return transaction(() async {
+      final existing = await getById(assignmentId);
+      final nextRetryCount = (existing?.syncRetryCount ?? 0) + 1;
+
+      await (update(localAssignments)
+            ..where((t) => t.id.equals(assignmentId)))
+          .write(
+        LocalAssignmentsCompanion(
+          syncStatus: const Value('ERROR'),
+          syncError: Value(error),
+          syncRetryCount: Value(nextRetryCount),
+          updatedAt: Value(DateTime.now()),
+        ),
+      );
+    });
   }
 
   /// Get assignment by ID
@@ -65,7 +70,7 @@ class AssignmentsSyncDao extends DatabaseAccessor<AppDb> with _$AssignmentsSyncD
   }
 
   /// Delete assignment
-  Future<void> delete(String assignmentId) {
+  Future<void> deleteAssignment(String assignmentId) {
     return (delete(localAssignments)..where((t) => t.id.equals(assignmentId))).go();
   }
 }

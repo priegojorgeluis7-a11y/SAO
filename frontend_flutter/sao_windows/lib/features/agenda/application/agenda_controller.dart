@@ -91,15 +91,18 @@ class AgendaController extends StateNotifier<AgendaState> {
   String? _projectId;
   bool _isOffline = false;
   Resource? _selfResource;
+  bool _preferSelfFilter = true;
 
   Future<void> initialize({
     String? projectId,
     required bool isOffline,
     Resource? selfResource,
+    bool preferSelfFilter = true,
   }) async {
     _projectId = projectId;
     _isOffline = isOffline;
     _selfResource = selfResource;
+    _preferSelfFilter = preferSelfFilter;
     state = state.copyWith(loadingUsers: true, usersError: null, items: const []);
 
     try {
@@ -112,7 +115,7 @@ class AgendaController extends StateNotifier<AgendaState> {
         currentFilterId: state.selectedFilterId,
         resources: resources,
         selfResource: selfResource,
-        preferSelf: true,
+        preferSelf: _preferSelfFilter,
       );
       appLogger.i(
         'AgendaController.initialize resources=${resources.length} '
@@ -131,7 +134,7 @@ class AgendaController extends StateNotifier<AgendaState> {
         currentFilterId: state.selectedFilterId,
         resources: fallbackResources,
         selfResource: selfResource,
-        preferSelf: true,
+        preferSelf: _preferSelfFilter,
       );
       state = state.copyWith(
         selectedFilterId: selectedFilterId,
@@ -260,7 +263,7 @@ class AgendaController extends StateNotifier<AgendaState> {
       currentFilterId: state.selectedFilterId,
       resources: updated,
       selfResource: selfResource,
-      preferSelf: state.selectedFilterId == 'Todos',
+      preferSelf: _preferSelfFilter && state.selectedFilterId == 'Todos',
     );
     if (_sameResourceOrder(updated, state.resources) &&
         selectedFilterId == state.selectedFilterId) {

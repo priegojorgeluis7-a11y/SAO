@@ -11,16 +11,20 @@
 import 'package:drift/drift.dart';
 
 import '../app_db.dart';
+import '../dao/activity_dao.dart';
 
 class AssigneeResolver {
   final AppDb _db;
+  late final ActivityDao _activityDao;
 
-  AssigneeResolver(this._db);
+  AssigneeResolver(this._db) {
+    _activityDao = ActivityDao(_db);
+  }
 
   /// Resuelve el user ID asignado a una actividad usando fallbacks
   Future<String?> resolveAssignedToUserId(String activityId) async {
     // 1. Leer desde Activities directamente
-    final activity = await _db.getActivityById(activityId);
+    final activity = await _activityDao.getActivityById(activityId);
     if (activity != null && activity.assignedToUserId != null && activity.assignedToUserId!.trim().isNotEmpty) {
       return activity.assignedToUserId!.trim();
     }

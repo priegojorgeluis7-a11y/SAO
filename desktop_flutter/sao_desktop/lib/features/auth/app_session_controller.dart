@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -135,6 +136,21 @@ abstract class AuthHttp {
   Future<dynamic> getAny(String path, String token);
 }
 
+class AuthApiException implements Exception {
+  final int statusCode;
+  final String message;
+  final Uri uri;
+
+  const AuthApiException({
+    required this.statusCode,
+    required this.message,
+    required this.uri,
+  });
+
+  @override
+  String toString() => 'AuthApiException($statusCode): $message';
+}
+
 class _AuthHttp implements AuthHttp {
   final String baseUrl;
   static const Duration _requestTimeout = Duration(seconds: 8);
@@ -160,7 +176,11 @@ class _AuthHttp implements AuthHttp {
       final res = await req.close().timeout(_requestTimeout);
       final raw = await res.transform(utf8.decoder).join().timeout(_requestTimeout);
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw HttpException('$path ${res.statusCode}: $raw', uri: uri);
+        throw AuthApiException(
+          statusCode: res.statusCode,
+          message: raw,
+          uri: uri,
+        );
       }
       return jsonDecode(raw) as Map<String, dynamic>;
     } finally {
@@ -189,7 +209,11 @@ class _AuthHttp implements AuthHttp {
       final res = await req.close().timeout(_requestTimeout);
       final raw = await res.transform(utf8.decoder).join().timeout(_requestTimeout);
       if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw HttpException('$path ${res.statusCode}: $raw', uri: uri);
+        throw AuthApiException(
+          statusCode: res.statusCode,
+          message: raw,
+          uri: uri,
+        );
       }
       return jsonDecode(raw);
     } finally {
@@ -232,6 +256,48 @@ class AppSessionController extends StateNotifier<AppSessionState> {
         target.add(value);
       }
     }
+  }
+
+  static String _humanizeAuthError(Object error) {
+    if (error is AuthApiException) {
+      String? detail;
+      try {
+        final decoded = jsonDecode(error.message);
+        if (decoded is Map<String, dynamic>) {
+          final rawDetail = decoded['detail'];
+          if (rawDetail is String) {
+            detail = rawDetail.trim();
+          } else if (rawDetail is List && rawDetail.isNotEmpty) {
+            final first = rawDetail.first;
+            if (first is Map<String, dynamic>) {
+              detail = (first['msg'] ?? first['detail'] ?? '').toString().trim();
+            } else {
+              detail = first.toString().trim();
+            }
+          }
+        }
+      } catch (_) {}
+
+      if (detail != null && detail.isNotEmpty) {
+        return 'No se pudo iniciar sesión: $detail';
+      }
+
+      return 'No se pudo iniciar sesión (${error.statusCode}).';
+    }
+
+    if (error is SocketException) {
+      return 'No se pudo conectar con el backend. Verifica tu red.';
+    }
+
+    if (error is TimeoutException) {
+      return 'El backend tardó demasiado en responder.';
+    }
+
+    if (error is HttpException) {
+      return 'No se pudo iniciar sesión: ${error.message}';
+    }
+
+    return 'No se pudo iniciar sesión: $error';
   }
 
   Future<Map<String, dynamic>> _resolveMePayload(String accessToken) async {
@@ -384,7 +450,7 @@ class AppSessionController extends StateNotifier<AppSessionState> {
     } catch (e) {
       state = state.copyWith(
         loading: false,
-        error: 'No se pudo iniciar sesión. Verifica tus credenciales.',
+        error: _humanizeAuthError(e),
       );
     }
   }
@@ -446,9 +512,7 @@ class AppSessionController extends StateNotifier<AppSessionState> {
 // ---------------------------------------------------------------------------
 
 final _backendBaseUrlProvider = Provider<String>((ref) {
-  const url = AppDataMode.backendBaseUrl;
-  if (url.trim().isNotEmpty) return url.trim();
-  return 'http://127.0.0.1:8000';
+  return AppDataMode.requireRealBackendUrl();
 });
 
 final appSessionControllerProvider =

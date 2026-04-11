@@ -4,10 +4,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../features/dashboard/dashboard_page.dart';
+import '../features/digital_records/digital_records_page.dart';
 import '../features/operations/operations_hub_page.dart';
 import '../features/planning/planning_page.dart';
-import '../features/events/events_page.dart';
-import '../features/ocr/ocr_minutes_page.dart';
 import '../features/profile/profile_settings_page.dart';
 import '../features/structure/structure_page.dart';
 import '../features/ui_catalog/ui_catalog_page.dart';
@@ -48,14 +47,9 @@ class _AppShellState extends ConsumerState<AppShell> {
         page: const StructurePage(),
       ),
       _NavItem(
-        icon: Icons.campaign_rounded,
-        label: 'Eventos',
-        page: const EventsPage(),
-      ),
-      _NavItem(
-        icon: Icons.document_scanner_rounded,
-        label: 'OCR Minutas',
-        page: const OcrMinutesPage(),
+        icon: Icons.folder_copy_rounded,
+        label: 'Expediente digital',
+        page: const DigitalRecordsPage(),
       ),
       if (kDebugMode)
         _NavItem(

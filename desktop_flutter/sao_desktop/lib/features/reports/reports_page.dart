@@ -2,9 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../data/repositories/evidence_repository.dart';
+import '../../core/providers/project_providers.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../ui/theme/sao_spacing.dart';
 import '../../ui/theme/sao_typography.dart';
@@ -37,23 +38,56 @@ String _previewLocation(ReportActivityItem item) {
   return parts.isEmpty ? 'Ubicación por confirmar' : parts.join(', ');
 }
 
-String _previewResponsible(ReportActivityItem item) {
-  final name = item.assignedName?.trim() ?? '';
-  return name.isEmpty ? 'Personal operativo' : name;
-}
-
-String _previewWindow(ReportActivityItem item) {
-  final start = item.startTime?.trim() ?? '';
-  final end = item.endTime?.trim() ?? '';
-  if (start.isNotEmpty && end.isNotEmpty) return '$start - $end';
-  if (start.isNotEmpty) return start;
-  if (end.isNotEmpty) return end;
-  return 'N/D';
-}
-
 bool _isApproved(ReportActivityItem item) => item.isApprovedForReport;
 
-// ── Per-activity draft ────────────────────────────────────────────────────────
+String _normalizeReportProject(String value) => value.trim().toUpperCase();
+
+bool _matchesVisibleProject(ReportActivityItem item, String projectId) {
+  final selectedProject = _normalizeReportProject(projectId);
+  if (selectedProject.isEmpty) return true;
+  return _normalizeReportProject(item.projectId ?? '') == selectedProject;
+}
+
+bool _matchesVisibleFront(ReportActivityItem item, String frontName) {
+  final normalizedFront = frontName.trim().toLowerCase();
+  if (normalizedFront.isEmpty ||
+      normalizedFront == 'todos' ||
+      normalizedFront == 'todo' ||
+      normalizedFront == 'all' ||
+      normalizedFront == '*') {
+    return true;
+  }
+  return item.frontName.toLowerCase().contains(normalizedFront);
+}
+
+bool _looksGenericReportText(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized.startsWith('actividad realizada en ') ||
+      normalized.startsWith('actividad validada para emision') ||
+      normalized.startsWith('actividad validada para emisión') ||
+      normalized.startsWith('actividad:') ||
+      normalized.contains('|');
+}
+
+String _resolvedDraftPurpose(ReportActivityItem item) {
+  final purpose = item.purpose?.trim() ?? '';
+  if (purpose.isEmpty || _looksGenericReportText(purpose)) {
+    return 'Desarrollar las acciones operativas previstas para la actividad y documentar sus resultados en campo.';
+  }
+  return purpose;
+}
+
+String _resolvedDraftDetail(ReportActivityItem item) {
+  final detail = item.detail?.trim() ?? '';
+  if (detail.isEmpty || _looksGenericReportText(detail)) {
+    return buildReportNaturalNarrative(
+      item,
+      fallbackText:
+          'Actividad realizada en ${_previewLocation(item)} para seguimiento operativo del frente ${item.frontName}.',
+    );
+  }
+  return detail;
+}
 
 class _ActivityDraft {
   String title;
@@ -72,21 +106,13 @@ class _ActivityDraft {
         title: item.title?.trim().isNotEmpty == true
             ? item.title!
             : item.activityType,
-        purpose: item.purpose?.trim().isNotEmpty == true
-            ? item.purpose!
-            : 'Actividad validada para emisión de reporte técnico.',
-        detail: item.detail?.trim().isNotEmpty == true
-            ? item.detail!
-            : 'Actividad realizada en ${_previewLocation(item)} para seguimiento operativo del frente ${item.frontName}.',
+        purpose: _resolvedDraftPurpose(item),
+        detail: _resolvedDraftDetail(item),
         agreements: item.agreements?.trim().isNotEmpty == true
             ? item.agreements!
-            : '1. Validar cierre operativo.\n2. Integrar evidencia fotográfica.',
+            : '',
       );
 }
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// ROOT PAGE
-// ═══════════════════════════════════════════════════════════════════════════════
 
 class ReportsPage extends ConsumerStatefulWidget {
   const ReportsPage({super.key});
@@ -105,6 +131,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
   String? _focusedId;
   bool _initialized = false;
   bool _sidebarCollapsed = false;
+  String _projectScope = '';
 
   // Per-activity drafts
   final Map<String, _ActivityDraft> _drafts = {};
@@ -129,6 +156,16 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
   String? _lastSavedPath;
 
   @override
+  void initState() {
+    super.initState();
+    _projectScope = ref.read(activeProjectIdProvider).trim().toUpperCase();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _syncToProject(_projectScope, updateGlobal: false);
+    });
+  }
+
+  @override
   void dispose() {
     _tabController.dispose();
     _titleCtrl.dispose();
@@ -137,6 +174,44 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
     _agreementsCtrl.dispose();
     _summaryCtrl.dispose();
     super.dispose();
+  }
+
+  void _resetViewStateForProject() {
+    _selectedIds.clear();
+    _drafts.clear();
+    _focusedId = null;
+    _initialized = false;
+    _lastSavedPath = null;
+    _titleCtrl.clear();
+    _purposeCtrl.clear();
+    _detailCtrl.clear();
+    _agreementsCtrl.clear();
+    _summaryCtrl.clear();
+  }
+
+  void _syncToProject(String projectId, {required bool updateGlobal}) {
+    final normalizedProject = projectId.trim().toUpperCase();
+    final currentFilters = ref.read(reportFiltersProvider);
+    final filtersChanged = currentFilters.projectId != normalizedProject ||
+        currentFilters.frontName != 'Todos';
+
+    if (updateGlobal) {
+      ref.read(activeProjectIdProvider.notifier).select(normalizedProject);
+    }
+
+    setState(() {
+      _projectScope = normalizedProject;
+      _resetViewStateForProject();
+    });
+
+    if (filtersChanged) {
+      ref.read(reportFiltersProvider.notifier).state = currentFilters.copyWith(
+            projectId: normalizedProject,
+            frontName: 'Todos',
+          );
+    }
+
+    ref.invalidate(reportActivitiesProvider);
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
@@ -170,6 +245,14 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
   }
 
   ReportActivityItem _withDraft(ReportActivityItem item) {
+    final resolvedPurpose = _purposeCtrl.text.trim().isEmpty
+        ? _resolvedDraftPurpose(item)
+        : _purposeCtrl.text;
+    final resolvedDetail = _detailCtrl.text.trim().isEmpty ||
+            _looksGenericReportText(_detailCtrl.text)
+        ? _resolvedDraftDetail(item)
+        : _detailCtrl.text;
+
     if (item.id == _focusedId) {
       return ReportActivityItem(
         id: item.id,
@@ -177,35 +260,87 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
         pk: item.pk,
         frontName: item.frontName,
         status: item.status,
+        reviewDecision: item.reviewDecision,
+        reviewStatus: item.reviewStatus,
         createdAt: item.createdAt,
         assignedName: item.assignedName,
         projectId: item.projectId,
         title: _titleCtrl.text,
-        purpose: _purposeCtrl.text,
-        detail: _detailCtrl.text,
+        purpose: resolvedPurpose,
+        detail: resolvedDetail,
         agreements: _agreementsCtrl.text,
         municipality: item.municipality,
         state: item.state,
+        colony: item.colony,
+        riskLevel: item.riskLevel,
+        locationType: item.locationType,
+        pkStart: item.pkStart,
+        pkEnd: item.pkEnd,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        technicalLatitude: item.technicalLatitude,
+        technicalLongitude: item.technicalLongitude,
+        gpsPrecision: item.gpsPrecision,
+        isUnplanned: item.isUnplanned,
+        unplannedReason: item.unplannedReason,
+        referenceFolio: item.referenceFolio,
+        subcategory: item.subcategory,
+        topics: item.topics,
+        attendees: item.attendees,
+        result: item.result,
+        notes: item.notes,
+        pendingEvidence: item.pendingEvidence,
+        evidenceDueAt: item.evidenceDueAt,
         evidences: item.evidences,
       );
     }
     final d = _drafts[item.id];
     if (d == null) return item;
+    final resolvedDraftPurposeText = d.purpose.trim().isEmpty ||
+        _looksGenericReportText(d.purpose)
+      ? _resolvedDraftPurpose(item)
+      : d.purpose;
+    final resolvedDraftDetailText = d.detail.trim().isEmpty ||
+        _looksGenericReportText(d.detail)
+      ? _resolvedDraftDetail(item)
+      : d.detail;
     return ReportActivityItem(
       id: item.id,
       activityType: item.activityType,
       pk: item.pk,
       frontName: item.frontName,
       status: item.status,
+      reviewDecision: item.reviewDecision,
+      reviewStatus: item.reviewStatus,
       createdAt: item.createdAt,
       assignedName: item.assignedName,
       projectId: item.projectId,
       title: d.title,
-      purpose: d.purpose,
-      detail: d.detail,
+      purpose: resolvedDraftPurposeText,
+      detail: resolvedDraftDetailText,
       agreements: d.agreements,
       municipality: item.municipality,
       state: item.state,
+      colony: item.colony,
+      riskLevel: item.riskLevel,
+      locationType: item.locationType,
+      pkStart: item.pkStart,
+      pkEnd: item.pkEnd,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      technicalLatitude: item.technicalLatitude,
+      technicalLongitude: item.technicalLongitude,
+      gpsPrecision: item.gpsPrecision,
+      isUnplanned: item.isUnplanned,
+      unplannedReason: item.unplannedReason,
+      referenceFolio: item.referenceFolio,
+      subcategory: item.subcategory,
+      topics: item.topics,
+      attendees: item.attendees,
+      result: item.result,
+      notes: item.notes,
+      pendingEvidence: item.pendingEvidence,
+      evidenceDueAt: item.evidenceDueAt,
       evidences: item.evidences,
     );
   }
@@ -274,11 +409,23 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
 
   @override
   Widget build(BuildContext context) {
+    final activeProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
     final filters = ref.watch(reportFiltersProvider);
     final activitiesAsync = ref.watch(reportActivitiesProvider);
 
+    if (activeProjectId != _projectScope) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _syncToProject(activeProjectId, updateGlobal: false);
+      });
+    }
+
     final allItems = activitiesAsync.valueOrNull ?? const [];
-    final reportableItems = allItems.where(_isApproved).toList(growable: false);
+    final reportableItems = allItems
+      .where(_isApproved)
+      .where((item) => _matchesVisibleProject(item, filters.projectId))
+      .where((item) => _matchesVisibleFront(item, filters.frontName))
+      .toList(growable: false);
 
     // Auto-initialize once data arrives
     if (reportableItems.isNotEmpty && !_initialized) {
@@ -320,6 +467,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
           isGenerating: _isGenerating,
           canGenerate: focusedApproved != null && !_isGenerating,
           onRefresh: refresh,
+          onProjectChanged: (projectId) => _syncToProject(projectId, updateGlobal: true),
           onGenerate: () => _generatePdf([focusedApproved!], filters),
         ),
         const Divider(height: 1),
@@ -365,8 +513,10 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
                         _selectedIds.addAll(
                             reportableItems.map((a) => a.id));
                       }),
-                      onDeselectAll: () =>
-                          setState(() => _selectedIds.clear()),
+                      onDeselectAll: () => setState(() {
+                        _selectedIds.removeAll(
+                            reportableItems.map((a) => a.id));
+                      }),
                       onIncludeAudit: (v) =>
                           setState(() => _includeAudit = v),
                       onIncludeNotes: (v) =>
@@ -388,18 +538,23 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
                     cursor: SystemMouseCursors.click,
                     child: Container(
                       width: 16,
-                      color: SaoColors.gray100,
+                      color: SaoColors.surfaceRaisedFor(context),
                       alignment: Alignment.center,
                       child: Stack(
                         alignment: Alignment.center,
                         children: [
-                          Container(width: 1, color: SaoColors.border),
+                          Container(
+                            width: 1,
+                            color: SaoColors.borderFor(context),
+                          ),
                           Container(
                             width: 16,
                             height: 36,
                             decoration: BoxDecoration(
-                              color: SaoColors.surface,
-                              border: Border.all(color: SaoColors.border),
+                              color: SaoColors.surfaceFor(context),
+                              border: Border.all(
+                                color: SaoColors.borderFor(context),
+                              ),
                               borderRadius: BorderRadius.circular(SaoRadii.sm),
                             ),
                             child: Icon(
@@ -407,7 +562,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
                                   ? Icons.chevron_right_rounded
                                   : Icons.chevron_left_rounded,
                               size: 13,
-                              color: SaoColors.gray400,
+                              color: SaoColors.textMutedFor(context),
                             ),
                           ),
                         ],
@@ -420,14 +575,19 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
               // Main workbench
               Expanded(
                 child: _MainWorkbench(
+                  filters: filters,
                   tabController: _tabController,
                   allItems: reportableItems,
                   focusedItem: focusedItem,
                   selectedItems: selectedItems,
+                  summaryCtrl: _summaryCtrl,
                   titleCtrl: _titleCtrl,
                   purposeCtrl: _purposeCtrl,
                   detailCtrl: _detailCtrl,
                   agreementsCtrl: _agreementsCtrl,
+                  includeAudit: _includeAudit,
+                  includeNotes: _includeNotes,
+                  includeAttachments: _includeAttachments,
                   showRisk: _showRisk,
                   showTechGps: _showTechGps,
                   showPhotoGps: _showPhotoGps,
@@ -478,6 +638,7 @@ class _TopBar extends ConsumerWidget {
   final bool isGenerating;
   final bool canGenerate;
   final VoidCallback onRefresh;
+  final ValueChanged<String> onProjectChanged;
   final VoidCallback onGenerate;
 
   const _TopBar({
@@ -487,6 +648,7 @@ class _TopBar extends ConsumerWidget {
     required this.isGenerating,
     required this.canGenerate,
     required this.onRefresh,
+    required this.onProjectChanged,
     required this.onGenerate,
   });
 
@@ -507,7 +669,7 @@ class _TopBar extends ConsumerWidget {
           const Icon(Icons.summarize_rounded,
               color: SaoColors.primary, size: 18),
           const SizedBox(width: SaoSpacing.sm),
-          Text('Reportes Operativos', style: SaoTypography.sectionTitle),
+          const Text('Reportes Operativos', style: SaoTypography.sectionTitle),
           const SizedBox(width: SaoSpacing.lg),
 
           // Project filter
@@ -524,8 +686,7 @@ class _TopBar extends ConsumerWidget {
                 label: 'Proyecto',
                 value: val,
                 items: projects,
-                onChanged: (v) => _updateFilters(
-                    ref, filters.copyWith(projectId: v)),
+                onChanged: onProjectChanged,
               );
             },
           ),
@@ -620,9 +781,9 @@ class _CompactDropdown extends StatelessWidget {
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
-        color: SaoColors.gray50,
+        color: SaoColors.surfaceMutedFor(context),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
@@ -635,7 +796,7 @@ class _CompactDropdown extends StatelessWidget {
           style: SaoTypography.bodyText.copyWith(fontSize: 13),
           hint: Text(label,
               style: SaoTypography.caption.copyWith(
-                  color: SaoColors.gray500)),
+                  color: SaoColors.textMutedFor(context))),
         ),
       ),
     );
@@ -731,6 +892,11 @@ class _ActivityTray extends StatelessWidget {
         .length;
     final allSelected =
         approvedItems.isNotEmpty && selectedApproved == approvedItems.length;
+    final textColor = SaoColors.textFor(context);
+    final mutedTextColor = SaoColors.textMutedFor(context);
+    final raisedSurface = SaoColors.surfaceRaisedFor(context);
+    final borderColor = SaoColors.borderFor(context);
+    final accent = Theme.of(context).colorScheme.primary;
 
     return Container(
       color: Theme.of(context).scaffoldBackgroundColor,
@@ -744,7 +910,10 @@ class _ActivityTray extends StatelessWidget {
             color: Theme.of(context).colorScheme.surface,
             child: Row(
               children: [
-                Text('Actividades', style: SaoTypography.sectionTitle),
+                Text(
+                  'Actividades',
+                  style: SaoTypography.sectionTitle.copyWith(color: textColor),
+                ),
                 const SizedBox(width: SaoSpacing.xs),
                 if (approvedItems.isNotEmpty)
                   _CountBadge(
@@ -767,22 +936,22 @@ class _ActivityTray extends StatelessWidget {
                             horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
                           color: allSelected
-                              ? SaoColors.primary
-                              : SaoColors.gray100,
+                              ? accent
+                              : raisedSurface,
                           borderRadius:
                               BorderRadius.circular(SaoRadii.sm),
                           border: Border.all(
                             color: allSelected
-                                ? SaoColors.primary
-                                : SaoColors.border,
+                                ? accent
+                                : borderColor,
                           ),
                         ),
                         child: Text(
                           allSelected ? 'Quitar todas' : 'Sel. todas',
                           style: SaoTypography.caption.copyWith(
                             color: allSelected
-                                ? Colors.white
-                                : SaoColors.gray600,
+                                ? Theme.of(context).colorScheme.onPrimary
+                                : mutedTextColor,
                             fontWeight: FontWeight.w700,
                             fontSize: 11,
                           ),
@@ -797,10 +966,13 @@ class _ActivityTray extends StatelessWidget {
                   child: InkWell(
                     onTap: onCollapse,
                     borderRadius: BorderRadius.circular(SaoRadii.sm),
-                    child: const Padding(
-                      padding: EdgeInsets.all(4),
-                      child: Icon(Icons.chevron_left_rounded,
-                          size: 16, color: SaoColors.gray400),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.chevron_left_rounded,
+                        size: 16,
+                        color: mutedTextColor,
+                      ),
                     ),
                   ),
                 ),
@@ -822,17 +994,23 @@ class _ActivityTray extends StatelessWidget {
               ),
               data: (items) {
                 if (items.isEmpty) {
-                  return const Center(
+                  return Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.inbox_rounded,
-                            size: 40, color: SaoColors.gray300),
-                        SizedBox(height: 8),
-                        Text('Sin actividades',
-                            style: TextStyle(
-                                color: SaoColors.gray400,
-                                fontSize: 13)),
+                        Icon(
+                          Icons.inbox_rounded,
+                          size: 40,
+                          color: mutedTextColor,
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Sin actividades',
+                          style: TextStyle(
+                            color: mutedTextColor,
+                            fontSize: 13,
+                          ),
+                        ),
                       ],
                     ),
                   );
@@ -944,9 +1122,9 @@ class _ActivityTray extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: SaoColors.success.withOpacity(0.07),
+                      color: SaoColors.success.withValues(alpha: 0.07),
                       border: Border.all(
-                          color: SaoColors.success.withOpacity(0.4)),
+                        color: SaoColors.success.withValues(alpha: 0.4)),
                       borderRadius:
                           BorderRadius.circular(SaoRadii.sm),
                     ),
@@ -1023,26 +1201,28 @@ class _TrayItemState extends State<_TrayItem> {
   Widget build(BuildContext context) {
     final statusColor = SaoColors.getStatusColor(widget.item.status);
     final dimmed = !widget.isApproved;
+    final isDark = SaoColors.isDarkMode(context);
+    final accent = Theme.of(context).colorScheme.primary;
 
     // Visual states
     Color cardColor;
     Color borderColor;
     double borderWidth;
     if (widget.isFocused) {
-      cardColor = SaoColors.primary.withOpacity(0.07);
-      borderColor = SaoColors.primary.withOpacity(0.55);
+      cardColor = accent.withValues(alpha: isDark ? 0.18 : 0.07);
+      borderColor = accent.withValues(alpha: isDark ? 0.75 : 0.55);
       borderWidth = 1.5;
     } else if (widget.isSelected && widget.isApproved) {
-      cardColor = SaoColors.success.withOpacity(0.06);
-      borderColor = SaoColors.success.withOpacity(0.45);
+      cardColor = SaoColors.success.withValues(alpha: 0.06);
+      borderColor = SaoColors.success.withValues(alpha: 0.45);
       borderWidth = 1.5;
     } else if (_hovered) {
-      cardColor = SaoColors.gray100;
-      borderColor = SaoColors.gray300;
+      cardColor = SaoColors.surfaceRaisedFor(context);
+      borderColor = SaoColors.borderFor(context);
       borderWidth = 1;
     } else {
-      cardColor = SaoColors.surface;
-      borderColor = SaoColors.border;
+      cardColor = SaoColors.surfaceFor(context);
+      borderColor = SaoColors.borderFor(context);
       borderWidth = 1;
     }
 
@@ -1130,10 +1310,10 @@ class _TrayItemState extends State<_TrayItem> {
                               width: 26,
                               height: 26,
                               decoration: BoxDecoration(
-                                color: SaoColors.primary.withOpacity(0.09),
+                                color: SaoColors.primary.withValues(alpha: 0.09),
                                 borderRadius: BorderRadius.circular(SaoRadii.sm),
                                 border: Border.all(
-                                    color: SaoColors.primary.withOpacity(0.25)),
+                                  color: SaoColors.primary.withValues(alpha: 0.25)),
                               ),
                               child: const Icon(Icons.edit_rounded,
                                   size: 13, color: SaoColors.primary),
@@ -1199,7 +1379,7 @@ class _StatusPill extends StatelessWidget {
         color: bg,
         borderRadius: BorderRadius.circular(SaoRadii.full),
         // Border improves contrast for low-saturation states (e.g. PENDIENTE)
-        border: Border.all(color: color.withOpacity(0.35), width: 0.8),
+        border: Border.all(color: color.withValues(alpha: 0.35), width: 0.8),
       ),
       child: Text(
         label,
@@ -1223,7 +1403,7 @@ class _EvidenceBadge extends StatelessWidget {
       padding:
           const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
-        color: SaoColors.info.withOpacity(0.10),
+        color: SaoColors.info.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(SaoRadii.full),
       ),
       child: Row(
@@ -1256,7 +1436,7 @@ class _CountBadge extends StatelessWidget {
       padding:
           const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(SaoRadii.full),
       ),
       child: Text(
@@ -1312,8 +1492,8 @@ class _OptionRow extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
                 color: value
-                    ? SaoColors.primary.withOpacity(0.10)
-                    : SaoColors.gray100,
+                    ? SaoColors.primary.withValues(alpha: 0.10)
+                    : SaoColors.surfaceRaisedFor(context),
                 borderRadius: BorderRadius.circular(SaoRadii.full),
               ),
               child: Text(
@@ -1353,14 +1533,19 @@ class _OptionRow extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _MainWorkbench extends StatelessWidget {
+  final ReportFilters filters;
   final TabController tabController;
   final List<ReportActivityItem> allItems;
   final ReportActivityItem? focusedItem;
   final List<ReportActivityItem> selectedItems;
+  final TextEditingController summaryCtrl;
   final TextEditingController titleCtrl;
   final TextEditingController purposeCtrl;
   final TextEditingController detailCtrl;
   final TextEditingController agreementsCtrl;
+  final bool includeAudit;
+  final bool includeNotes;
+  final bool includeAttachments;
   final bool showRisk;
   final bool showTechGps;
   final bool showPhotoGps;
@@ -1374,14 +1559,19 @@ class _MainWorkbench extends StatelessWidget {
   final int totalItems;
 
   const _MainWorkbench({
+    required this.filters,
     required this.tabController,
     required this.allItems,
     required this.focusedItem,
     required this.selectedItems,
+    required this.summaryCtrl,
     required this.titleCtrl,
     required this.purposeCtrl,
     required this.detailCtrl,
     required this.agreementsCtrl,
+    required this.includeAudit,
+    required this.includeNotes,
+    required this.includeAttachments,
     required this.showRisk,
     required this.showTechGps,
     required this.showPhotoGps,
@@ -1413,13 +1603,13 @@ class _MainWorkbench extends StatelessWidget {
             indicatorColor: SaoColors.primary,
             indicatorWeight: 2,
             tabs: [
-              Tab(
+              const Tab(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.edit_rounded, size: 15),
-                    const SizedBox(width: 6),
-                    const Text('Editar'),
+                    Icon(Icons.edit_rounded, size: 15),
+                    SizedBox(width: 6),
+                    Text('Editar'),
                   ],
                 ),
               ),
@@ -1455,11 +1645,16 @@ class _MainWorkbench extends StatelessWidget {
                 listenable: Listenable.merge(
                     [titleCtrl, purposeCtrl, detailCtrl, agreementsCtrl]),
                 builder: (_, __) => _EditorTab(
+                  filters: filters,
                   item: focusedItem,
+                  summaryCtrl: summaryCtrl,
                   titleCtrl: titleCtrl,
                   purposeCtrl: purposeCtrl,
                   detailCtrl: detailCtrl,
                   agreementsCtrl: agreementsCtrl,
+                  includeAudit: includeAudit,
+                  includeNotes: includeNotes,
+                  includeAttachments: includeAttachments,
                   showRisk: showRisk,
                   showTechGps: showTechGps,
                   showPhotoGps: showPhotoGps,
@@ -1478,8 +1673,13 @@ class _MainWorkbench extends StatelessWidget {
                 listenable: Listenable.merge(
                     [titleCtrl, purposeCtrl, detailCtrl, agreementsCtrl]),
                 builder: (_, __) => _PreviewTab(
+                  filters: filters,
                   selectedItems:
                       selectedItems.map(withDraft).toList(),
+                  executiveSummary: summaryCtrl.text.trim(),
+                  includeAudit: includeAudit,
+                  includeNotes: includeNotes,
+                  includeAttachments: includeAttachments,
                   showRisk: showRisk,
                   showPhotoGps: showPhotoGps,
                 ),
@@ -1497,11 +1697,16 @@ class _MainWorkbench extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _EditorTab extends StatelessWidget {
+  final ReportFilters filters;
   final ReportActivityItem? item;
+  final TextEditingController summaryCtrl;
   final TextEditingController titleCtrl;
   final TextEditingController purposeCtrl;
   final TextEditingController detailCtrl;
   final TextEditingController agreementsCtrl;
+  final bool includeAudit;
+  final bool includeNotes;
+  final bool includeAttachments;
   final bool showRisk;
   final bool showTechGps;
   final bool showPhotoGps;
@@ -1514,11 +1719,16 @@ class _EditorTab extends StatelessWidget {
   final VoidCallback onFocusNext;
 
   const _EditorTab({
+    required this.filters,
     required this.item,
+    required this.summaryCtrl,
     required this.titleCtrl,
     required this.purposeCtrl,
     required this.detailCtrl,
     required this.agreementsCtrl,
+    required this.includeAudit,
+    required this.includeNotes,
+    required this.includeAttachments,
     required this.showRisk,
     required this.showTechGps,
     required this.showPhotoGps,
@@ -1541,7 +1751,7 @@ class _EditorTab extends StatelessWidget {
     final statusBg = SaoColors.getStatusBackground(item!.status);
 
     return Container(
-      color: SaoColors.gray100,
+      color: SaoColors.surfaceMutedFor(context),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1658,10 +1868,10 @@ class _EditorTab extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(SaoSpacing.md),
                     decoration: BoxDecoration(
-                      color: SaoColors.surface,
+                      color: SaoColors.surfaceFor(context),
                       borderRadius:
                           BorderRadius.circular(SaoRadii.md),
-                      border: Border.all(color: SaoColors.border),
+                      border: Border.all(color: SaoColors.borderFor(context)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1706,11 +1916,16 @@ class _EditorTab extends StatelessWidget {
           Expanded(
             flex: 4,
             child: _MiniDocPreview(
+              filters: filters,
               item: item!,
+              summaryCtrl: summaryCtrl,
               titleCtrl: titleCtrl,
               purposeCtrl: purposeCtrl,
               detailCtrl: detailCtrl,
               agreementsCtrl: agreementsCtrl,
+              includeAudit: includeAudit,
+              includeNotes: includeNotes,
+              includeAttachments: includeAttachments,
               showRisk: showRisk,
               showTechGps: showTechGps,
               showPhotoGps: showPhotoGps,
@@ -1778,14 +1993,14 @@ class _EditorField extends StatelessWidget {
             contentPadding: const EdgeInsets.symmetric(
                 horizontal: SaoSpacing.sm, vertical: 9),
             filled: true,
-            fillColor: SaoColors.surface,
+            fillColor: SaoColors.surfaceFor(context),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(SaoRadii.sm),
-              borderSide: const BorderSide(color: SaoColors.border),
+              borderSide: BorderSide(color: SaoColors.borderFor(context)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(SaoRadii.sm),
-              borderSide: const BorderSide(color: SaoColors.border),
+              borderSide: BorderSide(color: SaoColors.borderFor(context)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(SaoRadii.sm),
@@ -1824,10 +2039,10 @@ class _ToggleChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           // Solid fill when active — unmistakable on/off state
-          color: active ? SaoColors.primary : SaoColors.gray100,
+          color: active ? SaoColors.primary : SaoColors.surfaceRaisedFor(context),
           borderRadius: BorderRadius.circular(SaoRadii.full),
           border: Border.all(
-            color: active ? SaoColors.primary : SaoColors.border,
+            color: active ? SaoColors.primary : SaoColors.borderFor(context),
           ),
         ),
         child: Row(
@@ -1861,11 +2076,16 @@ class _ToggleChip extends StatelessWidget {
 // ── Mini doc preview (editor right panel) ─────────────────────────────────────
 
 class _MiniDocPreview extends StatelessWidget {
+  final ReportFilters filters;
   final ReportActivityItem item;
+  final TextEditingController summaryCtrl;
   final TextEditingController titleCtrl;
   final TextEditingController purposeCtrl;
   final TextEditingController detailCtrl;
   final TextEditingController agreementsCtrl;
+  final bool includeAudit;
+  final bool includeNotes;
+  final bool includeAttachments;
   final bool showRisk;
   final bool showTechGps;
   final bool showPhotoGps;
@@ -1875,11 +2095,16 @@ class _MiniDocPreview extends StatelessWidget {
   final VoidCallback onFocusNext;
 
   const _MiniDocPreview({
+    required this.filters,
     required this.item,
+    required this.summaryCtrl,
     required this.titleCtrl,
     required this.purposeCtrl,
     required this.detailCtrl,
     required this.agreementsCtrl,
+    required this.includeAudit,
+    required this.includeNotes,
+    required this.includeAttachments,
     required this.showRisk,
     required this.showTechGps,
     required this.showPhotoGps,
@@ -1889,17 +2114,60 @@ class _MiniDocPreview extends StatelessWidget {
     required this.onFocusNext,
   });
 
+  static const double _previewPageWidth = 760;
+
   @override
   Widget build(BuildContext context) {
+    final previewItem = ReportActivityItem(
+      id: item.id,
+      activityType: item.activityType,
+      pk: item.pk,
+      frontName: item.frontName,
+      status: item.status,
+      reviewDecision: item.reviewDecision,
+      reviewStatus: item.reviewStatus,
+      createdAt: item.createdAt,
+      assignedName: item.assignedName,
+      projectId: item.projectId,
+      title: titleCtrl.text.trim().isNotEmpty ? titleCtrl.text : item.title,
+      purpose: purposeCtrl.text.trim().isNotEmpty ? purposeCtrl.text : item.purpose,
+      detail: detailCtrl.text.trim().isNotEmpty ? detailCtrl.text : item.detail,
+      agreements: agreementsCtrl.text.trim().isNotEmpty
+          ? agreementsCtrl.text
+          : item.agreements,
+      municipality: item.municipality,
+      state: item.state,
+      colony: item.colony,
+      riskLevel: item.riskLevel,
+      locationType: item.locationType,
+      pkStart: item.pkStart,
+      pkEnd: item.pkEnd,
+      startTime: item.startTime,
+      endTime: item.endTime,
+      technicalLatitude: item.technicalLatitude,
+      technicalLongitude: item.technicalLongitude,
+      gpsPrecision: item.gpsPrecision,
+      isUnplanned: item.isUnplanned,
+      unplannedReason: item.unplannedReason,
+      referenceFolio: item.referenceFolio,
+      subcategory: item.subcategory,
+      topics: item.topics,
+      attendees: item.attendees,
+      result: item.result,
+      notes: item.notes,
+      pendingEvidence: item.pendingEvidence,
+      evidenceDueAt: item.evidenceDueAt,
+      evidences: item.evidences,
+    );
+
     return Container(
-      color: SaoColors.gray100,
+      color: SaoColors.surfaceMutedFor(context),
       child: Column(
         children: [
-          // Navigation bar
           Container(
             padding: const EdgeInsets.symmetric(
                 horizontal: SaoSpacing.md, vertical: 8),
-            color: SaoColors.surface,
+            color: SaoColors.surfaceFor(context),
             child: Row(
               children: [
                 const Icon(Icons.article_rounded,
@@ -1913,16 +2181,14 @@ class _MiniDocPreview extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                // Navigation
                 if (totalItems > 1) ...[
                   IconButton(
-                    icon: const Icon(Icons.chevron_left_rounded,
-                        size: 18),
+                    icon: const Icon(Icons.chevron_left_rounded, size: 18),
                     onPressed: focusedIdx > 0 ? onFocusPrev : null,
                     tooltip: 'Actividad anterior',
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                        minWidth: 28, minHeight: 28),
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
                   ),
                   Text(
                     '${focusedIdx + 1} / $totalItems',
@@ -1930,574 +2196,34 @@ class _MiniDocPreview extends StatelessWidget {
                         .copyWith(color: SaoColors.gray500),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.chevron_right_rounded,
-                        size: 18),
+                    icon: const Icon(Icons.chevron_right_rounded, size: 18),
                     onPressed: focusedIdx < totalItems - 1
                         ? onFocusNext
                         : null,
                     tooltip: 'Actividad siguiente',
                     padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(
-                        minWidth: 28, minHeight: 28),
+                    constraints:
+                        const BoxConstraints(minWidth: 28, minHeight: 28),
                   ),
                 ],
               ],
             ),
           ),
           const Divider(height: 1),
-
-          // Document body
           Expanded(
-            child: SingleChildScrollView(
+            child: Padding(
               padding: const EdgeInsets.all(SaoSpacing.md),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
-                  child: Container(
-                    clipBehavior: Clip.antiAlias,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFCFCFC),
-                      borderRadius:
-                          BorderRadius.circular(SaoRadii.sm),
-                      border: Border.all(color: SaoColors.border),
-                      image: const DecorationImage(
-                        image: AssetImage('assets/images/membrete.png'),
-                        fit: BoxFit.fitWidth,
-                        alignment: Alignment.topCenter,
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.05),
-                          blurRadius: 8,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      children: [
-                        // Doc content
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(20, 118, 20, 20),
-                          child: Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.start,
-                            children: [
-                              // Title
-                              Row(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      titleCtrl.text.isNotEmpty
-                                          ? titleCtrl.text.toUpperCase()
-                                          : item.activityType.toUpperCase(),
-                                      style: const TextStyle(
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w900,
-                                        color: Color(0xFF9F2241),
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    _fmtCreatedAt(item.createdAt),
-                                    style: const TextStyle(
-                                        fontSize: 10, color: SaoColors.gray500),
-                                  ),
-                                ],
-                              ),
-                              const Divider(height: 12),
-
-                              Container(
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: SaoColors.gray50,
-                                  border: Border.all(color: SaoColors.border),
-                                  borderRadius:
-                                      BorderRadius.circular(SaoRadii.sm),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Text(
-                                      'Resumen Ejecutivo',
-                                      style: TextStyle(
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w700,
-                                        color: Color(0xFF9F2241),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${item.activityType} · ${item.projectId ?? '-'} / ${item.frontName}',
-                                      style: const TextStyle(fontSize: 11, color: SaoColors.gray700),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      _previewLocation(item),
-                                      style: const TextStyle(fontSize: 10, color: SaoColors.gray500),
-                                    ),
-                                    const SizedBox(height: 6),
-                                    RichText(
-                                      text: TextSpan(
-                                        style: const TextStyle(fontSize: 10, color: SaoColors.gray700),
-                                        children: [
-                                          const TextSpan(
-                                            text: 'Resultado: ',
-                                            style: TextStyle(fontWeight: FontWeight.w700),
-                                          ),
-                                          TextSpan(text: item.statusLabel),
-                                        ],
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Container(
-                                padding: const EdgeInsets.all(9),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  border: Border.all(color: SaoColors.border),
-                                  borderRadius:
-                                      BorderRadius.circular(SaoRadii.sm),
-                                ),
-                                child: Column(
-                                  children: [
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: _DocCell(
-                                            label: 'Proyecto / Frente',
-                                            value:
-                                                '${item.projectId ?? '-'} / ${item.frontName}',
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: _DocCell(
-                                            label: 'Ubicación',
-                                            value: _previewLocation(item),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Row(
-                                      children: [
-                                        Expanded(
-                                          child: _DocCell(
-                                            label: 'Responsable',
-                                            value: _previewResponsible(item),
-                                          ),
-                                        ),
-                                        Expanded(
-                                          child: _DocCell(
-                                            label: 'Horario atención',
-                                            value: _previewWindow(item),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-
-                              if (showTechGps &&
-                                  item.evidences.isNotEmpty &&
-                                  (item.evidences.first.latitude ?? '')
-                                      .isNotEmpty) ...[
-                                const SizedBox(height: 4),
-                                Text(
-                                  'GPS: ${item.evidences.first.latitude}, ${item.evidences.first.longitude}',
-                                  style: const TextStyle(
-                                      fontSize: 10, color: SaoColors.info),
-                                ),
-                              ],
-
-                              const SizedBox(height: 10),
-
-                              // Sections
-                              _DocSection(
-                                  number: '2',
-                                  title: 'ASUNTO Y DESARROLLO'),
-                              const SizedBox(height: 5),
-                              if (purposeCtrl.text.isNotEmpty) ...[
-                                const Text(
-                                  'Propósito:',
-                                  style: TextStyle(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: SaoColors.gray700),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  purposeCtrl.text,
-                                  style: const TextStyle(
-                                      fontSize: 11, color: SaoColors.gray700),
-                                ),
-                                const SizedBox(height: 7),
-                              ],
-                              if (detailCtrl.text.isNotEmpty)
-                                Text(
-                                  detailCtrl.text,
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: SaoColors.gray700,
-                                      height: 1.45),
-                                  textAlign: TextAlign.justify,
-                                ),
-
-                              if (agreementsCtrl.text.isNotEmpty) ...[
-                                const SizedBox(height: 9),
-                                Container(
-                                  padding: const EdgeInsets.all(9),
-                                  decoration: BoxDecoration(
-                                    border:
-                                        Border.all(color: SaoColors.border),
-                                    borderRadius:
-                                        BorderRadius.circular(SaoRadii.sm),
-                                  ),
-                                  child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      const Text(
-                                        'Acuerdos Principales',
-                                        style: TextStyle(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                          color: Color(0xFF9F2241),
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      ...agreementsCtrl.text
-                                          .split('\n')
-                                          .where((l) =>
-                                              l.trim().isNotEmpty)
-                                          .map(
-                                            (l) => Padding(
-                                              padding:
-                                                  const EdgeInsets
-                                                      .only(
-                                                      bottom: 2),
-                                              child: Row(
-                                                crossAxisAlignment:
-                                                    CrossAxisAlignment
-                                                        .start,
-                                                children: [
-                                                  const Text(
-                                                      '• ',
-                                                      style:
-                                                          TextStyle(
-                                                              fontSize:
-                                                                  9)),
-                                                  Expanded(
-                                                    child: Text(
-                                                        l.trim(),
-                                                        style: const TextStyle(
-                                                            fontSize:
-                                                                9,
-                                                            color:
-                                                                SaoColors.gray700)),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-
-                              // Evidence thumbnails
-                              if (item.evidences.isNotEmpty) ...[
-                                const SizedBox(height: 10),
-                                _DocSection(
-                                    number: '3',
-                                    title:
-                                        'EVIDENCIA FOTOGRÁFICA'),
-                                const SizedBox(height: 6),
-                                Wrap(
-                                  spacing: 6,
-                                  runSpacing: 6,
-                                  children: item.evidences
-                                      .take(4)
-                                      .map((ev) => _SmallThumb(
-                                          evidence: ev,
-                                          showGps: showPhotoGps))
-                                      .toList(),
-                                ),
-                              ],
-
-                              // Footer
-                              const SizedBox(height: 14),
-                              const Divider(height: 1),
-                              const SizedBox(height: 5),
-                              const Text(
-                                'Av. Universidad 1738, Col. Santa Catarina, CDMX  ·  sict.gob.mx',
-                                style: TextStyle(
-                                    fontSize: 9, color: SaoColors.gray400),
-                                textAlign: TextAlign.center,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+              child: _ActualPdfPreview(
+                items: [previewItem],
+                filters: filters,
+                executiveSummary: summaryCtrl.text.trim(),
+                includeAudit: includeAudit,
+                includeNotes: includeNotes,
+                includeAttachments: includeAttachments,
+                maxPageWidth: _previewPageWidth,
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _DocCell extends StatelessWidget {
-  final String label;
-  final String value;
-  const _DocCell({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label.toUpperCase(),
-            style: const TextStyle(
-                fontSize: 7, color: SaoColors.gray500)),
-        const SizedBox(height: 1),
-        Text(value,
-            style: const TextStyle(
-                fontSize: 9,
-                fontWeight: FontWeight.w700,
-                color: SaoColors.gray800)),
-      ],
-    );
-  }
-}
-
-class _DocSection extends StatelessWidget {
-  final String number;
-  final String title;
-  const _DocSection({required this.number, required this.title});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(
-            bottom: BorderSide(color: Color(0xFF9F2241), width: 1)),
-      ),
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Text(
-        '$number. $title',
-        style: const TextStyle(
-            fontSize: 9,
-            fontWeight: FontWeight.w800,
-            color: SaoColors.gray800),
-      ),
-    );
-  }
-}
-
-class _ReportEvidenceImage extends StatefulWidget {
-  final ReportEvidenceItem evidence;
-  final double height;
-
-  const _ReportEvidenceImage({
-    required this.evidence,
-    required this.height,
-  });
-
-  @override
-  State<_ReportEvidenceImage> createState() => _ReportEvidenceImageState();
-}
-
-class _ReportEvidenceImageState extends State<_ReportEvidenceImage> {
-  static final EvidenceRepository _repository = EvidenceRepository();
-  static final Map<String, Future<String?>> _sourceCache = {};
-
-  late Future<String?> _sourceFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _sourceFuture = _resolveSource();
-  }
-
-  @override
-  void didUpdateWidget(covariant _ReportEvidenceImage oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.evidence.id != widget.evidence.id ||
-        oldWidget.evidence.filePath != widget.evidence.filePath) {
-      _sourceFuture = _resolveSource();
-    }
-  }
-
-  Future<String?> _resolveSource() {
-    final rawPath = widget.evidence.filePath.trim();
-    final cacheKey = '${widget.evidence.id}|$rawPath';
-
-    return _sourceCache.putIfAbsent(cacheKey, () async {
-      if (rawPath.isEmpty) {
-        return null;
-      }
-
-      if (rawPath.startsWith('http://') ||
-          rawPath.startsWith('https://') ||
-          rawPath.startsWith('file://')) {
-        return rawPath;
-      }
-
-      final localFile = File(rawPath);
-      if (localFile.existsSync()) {
-        return localFile.path;
-      }
-
-      if (widget.evidence.id.trim().isEmpty) {
-        return null;
-      }
-
-      try {
-        return await _repository.getDownloadSignedUrl(widget.evidence.id);
-      } catch (_) {
-        return null;
-      }
-    });
-  }
-
-  Widget _placeholder({bool loading = false}) {
-    return Container(
-      height: widget.height,
-      color: SaoColors.gray100,
-      alignment: Alignment.center,
-      child: loading
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.photo_rounded,
-              size: 24, color: SaoColors.gray300),
-    );
-  }
-
-  Widget _imageFromSource(String source) {
-    if (source.startsWith('file://')) {
-      return Image.file(
-        File(Uri.parse(source).toFilePath()),
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(),
-      );
-    }
-
-    final localFile = File(source);
-    if (!source.startsWith('http://') &&
-        !source.startsWith('https://') &&
-        localFile.existsSync()) {
-      return Image.file(
-        localFile,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _placeholder(),
-      );
-    }
-
-    return Image.network(
-      source,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => _placeholder(),
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) {
-          return child;
-        }
-        return _placeholder(loading: true);
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(SaoRadii.sm),
-      child: FutureBuilder<String?>(
-        future: _sourceFuture,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return _placeholder(loading: true);
-          }
-
-          final source = snapshot.data?.trim() ?? '';
-          if (source.isEmpty) {
-            return _placeholder();
-          }
-
-          return SizedBox(
-            height: widget.height,
-            width: double.infinity,
-            child: _imageFromSource(source),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _SmallThumb extends StatelessWidget {
-  final ReportEvidenceItem evidence;
-  final bool showGps;
-  const _SmallThumb({required this.evidence, required this.showGps});
-
-  @override
-  Widget build(BuildContext context) {
-    final caption = evidence.caption?.trim().isNotEmpty == true
-        ? evidence.caption!.trim()
-        : 'Evidencia ${evidence.id}';
-
-    return Container(
-      width: 118,
-      padding: const EdgeInsets.all(4),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: SaoColors.border),
-        borderRadius: BorderRadius.circular(SaoRadii.sm),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            width: double.infinity,
-            height: 74,
-            child: _ReportEvidenceImage(
-              evidence: evidence,
-              height: 74,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            caption,
-            style: const TextStyle(
-              fontSize: 7.5,
-              color: SaoColors.gray700,
-              fontWeight: FontWeight.w600,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          if (showGps && (evidence.latitude ?? '').isNotEmpty) ...[
-            const SizedBox(height: 2),
-            Text(
-              '${evidence.latitude}, ${evidence.longitude}',
-              style: const TextStyle(
-                fontSize: 6.5,
-                color: SaoColors.gray500,
-              ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ],
         ],
       ),
     );
@@ -2509,15 +2235,27 @@ class _SmallThumb extends StatelessWidget {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 class _PreviewTab extends StatelessWidget {
+  final ReportFilters filters;
   final List<ReportActivityItem> selectedItems;
+  final String executiveSummary;
+  final bool includeAudit;
+  final bool includeNotes;
+  final bool includeAttachments;
   final bool showRisk;
   final bool showPhotoGps;
 
   const _PreviewTab({
+    required this.filters,
     required this.selectedItems,
+    required this.executiveSummary,
+    required this.includeAudit,
+    required this.includeNotes,
+    required this.includeAttachments,
     required this.showRisk,
     required this.showPhotoGps,
   });
+
+  static const double _previewPageWidth = 760;
 
   @override
   Widget build(BuildContext context) {
@@ -2546,426 +2284,86 @@ class _PreviewTab extends StatelessWidget {
     }
 
     return Container(
-      color: SaoColors.gray200,
-      child: ListView.separated(
-        padding: const EdgeInsets.symmetric(
-            vertical: SaoSpacing.lg, horizontal: SaoSpacing.lg),
-        itemCount: selectedItems.length,
-        separatorBuilder: (_, i) => Column(
-          children: [
-            const SizedBox(height: SaoSpacing.md),
-            Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 4),
-                decoration: BoxDecoration(
-                  color: SaoColors.gray300,
-                  borderRadius: BorderRadius.circular(SaoRadii.full),
-                ),
-                child: Text(
-                  'Página ${i + 2}',
-                  style: SaoTypography.caption.copyWith(
-                      color: SaoColors.gray600, fontSize: 11),
-                ),
-              ),
-            ),
-            const SizedBox(height: SaoSpacing.md),
-          ],
-        ),
-        itemBuilder: (_, i) => Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: _FullDocPage(
-              item: selectedItems[i],
-              pageNumber: i + 1,
-              totalPages: selectedItems.length,
-              showRisk: showRisk,
-              showPhotoGps: showPhotoGps,
-            ),
-          ),
+      color: SaoColors.surfaceMutedFor(context),
+      child: Padding(
+        padding: const EdgeInsets.all(SaoSpacing.md),
+        child: _ActualPdfPreview(
+          items: selectedItems,
+          filters: filters,
+          executiveSummary: executiveSummary,
+          includeAudit: includeAudit,
+          includeNotes: includeNotes,
+          includeAttachments: includeAttachments,
+          maxPageWidth: _previewPageWidth,
         ),
       ),
     );
   }
 }
 
-class _FullDocPage extends StatelessWidget {
-  final ReportActivityItem item;
-  final int pageNumber;
-  final int totalPages;
-  final bool showRisk;
-  final bool showPhotoGps;
+class _ActualPdfPreview extends StatelessWidget {
+  final List<ReportActivityItem> items;
+  final ReportFilters filters;
+  final String executiveSummary;
+  final bool includeAudit;
+  final bool includeNotes;
+  final bool includeAttachments;
+  final double maxPageWidth;
 
-  const _FullDocPage({
-    required this.item,
-    required this.pageNumber,
-    required this.totalPages,
-    required this.showRisk,
-    required this.showPhotoGps,
+  const _ActualPdfPreview({
+    required this.items,
+    required this.filters,
+    required this.executiveSummary,
+    required this.includeAudit,
+    required this.includeNotes,
+    required this.includeAttachments,
+    required this.maxPageWidth,
   });
 
   @override
   Widget build(BuildContext context) {
-    DateTime? createdAt;
-    try { createdAt = DateTime.parse(item.createdAt); } catch (_) {}
-
     return Container(
-      clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: const Color(0xFFFCFCFC),
+        color: SaoColors.surfaceMutedFor(context),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
-        border: Border.all(color: SaoColors.border),
-        image: const DecorationImage(
-          image: AssetImage('assets/images/membrete.png'),
-          fit: BoxFit.fitWidth,
-          alignment: Alignment.topCenter,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 12,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
-      child: Column(
-        children: [
-          // ── Doc body ─────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.fromLTRB(28, 132, 28, 28),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Title row
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            (item.title?.trim().isNotEmpty == true
-                                    ? item.title!
-                                    : item.activityType)
-                                .toUpperCase(),
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w900,
-                              color: Color(0xFF9F2241),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    if (createdAt != null)
-                      Text(
-                        _fmtDate(createdAt),
-                        style: const TextStyle(
-                            fontSize: 10, color: SaoColors.gray600),
-                      ),
-                  ],
-                ),
-                const Divider(height: 14),
-
-                // Resumen ejecutivo
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: SaoColors.gray50,
-                    border: Border.all(color: SaoColors.border),
-                    borderRadius:
-                        BorderRadius.circular(SaoRadii.sm),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Resumen Ejecutivo',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF9F2241),
-                          )),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${item.activityType} · ${item.projectId ?? '-'} / ${item.frontName}',
-                        style: const TextStyle(fontSize: 11, color: SaoColors.gray700),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _previewLocation(item),
-                        style: const TextStyle(fontSize: 10, color: SaoColors.gray500),
-                      ),
-                      const SizedBox(height: 6),
-                      RichText(
-                        text: TextSpan(
-                          style: const TextStyle(fontSize: 10, color: SaoColors.gray700),
-                          children: [
-                            const TextSpan(
-                              text: 'Resultado: ',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                            TextSpan(text: item.statusLabel),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: SaoColors.border),
-                    borderRadius:
-                        BorderRadius.circular(SaoRadii.sm),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DocCell(
-                              label: 'Proyecto / Frente',
-                              value:
-                                  '${item.projectId ?? '-'} / ${item.frontName}',
-                            ),
-                          ),
-                          Expanded(
-                            child: _DocCell(
-                              label: 'Ubicación administrativa',
-                              value: _previewLocation(item),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _DocCell(
-                              label: 'Responsable',
-                              value: _previewResponsible(item),
-                            ),
-                          ),
-                          Expanded(
-                            child: _DocCell(
-                              label: 'Horario atención',
-                              value: _previewWindow(item),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-
-                // 2. Asunto y desarrollo
-                _FullDocSection('2. ASUNTO Y DESARROLLO'),
-                const SizedBox(height: 6),
-                if ((item.purpose?.trim().isNotEmpty) == true) ...[
-                  const Text('Propósito:',
-                      style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: SaoColors.gray700)),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.purpose!,
-                    style: const TextStyle(
-                        fontSize: 11, color: SaoColors.gray700),
-                  ),
-                  const SizedBox(height: 8),
-                ],
-                if ((item.detail?.trim().isNotEmpty) == true)
-                  Text(
-                    item.detail!,
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: SaoColors.gray700,
-                        height: 1.5),
-                    textAlign: TextAlign.justify,
-                  ),
-
-                // Acuerdos
-                if ((item.agreements?.trim().isNotEmpty) == true) ...[
-                  const SizedBox(height: 10),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: SaoColors.border),
-                      borderRadius:
-                          BorderRadius.circular(SaoRadii.sm),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Acuerdos Principales',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: Color(0xFF9F2241),
-                            )),
-                        const SizedBox(height: 6),
-                        ...item.agreements!
-                            .split('\n')
-                            .where((l) => l.trim().isNotEmpty)
-                            .map(
-                              (l) => Padding(
-                                padding:
-                                    const EdgeInsets.only(bottom: 4),
-                                child: Row(
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.start,
-                                  children: [
-                                    const Text('•  ',
-                                        style: TextStyle(
-                                            fontSize: 11,
-                                            color:
-                                                SaoColors.gray600)),
-                                    Expanded(
-                                      child: Text(l.trim(),
-                                          style: const TextStyle(
-                                              fontSize: 11,
-                                              color:
-                                                  SaoColors.gray700)),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                // Evidence
-                if (item.evidences.isNotEmpty) ...[
-                  const SizedBox(height: 12),
-                  _FullDocSection('3. EVIDENCIA FOTOGRÁFICA'),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: item.evidences
-                        .take(6)
-                        .map((ev) => _FullEvidenceCard(
-                            evidence: ev, showGps: showPhotoGps))
-                        .toList(),
-                  ),
-                ],
-
-                // Page footer
-                const SizedBox(height: 16),
-                const Divider(height: 1),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        'Av. Universidad 1738, Col. Santa Catarina, C.P. 04010, Alcaldía Coyoacán, CDMX',
-                        style: const TextStyle(
-                            fontSize: 8, color: SaoColors.gray400),
-                      ),
-                    ),
-                    Text(
-                      'Página $pageNumber de $totalPages',
-                      style: const TextStyle(
-                          fontSize: 8, color: SaoColors.gray400),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _FullDocSection extends StatelessWidget {
-  final String title;
-  const _FullDocSection(this.title);
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        border: Border(
-            bottom: BorderSide(color: Color(0xFF9F2241), width: 1.5)),
-      ),
-      padding: const EdgeInsets.only(bottom: 3),
-      child: Text(
-        title,
-        style: const TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w800,
-            color: SaoColors.gray900),
-      ),
-    );
-  }
-}
-
-class _FullEvidenceCard extends StatelessWidget {
-  final ReportEvidenceItem evidence;
-  final bool showGps;
-  const _FullEvidenceCard(
-      {required this.evidence, required this.showGps});
-
-  @override
-  Widget build(BuildContext context) {
-    final caption = evidence.caption?.trim().isNotEmpty == true
-        ? evidence.caption!.trim()
-        : 'Evidencia ${evidence.id}';
-
-    return Container(
-      width: 178,
-      padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: SaoColors.border),
-        borderRadius: BorderRadius.circular(SaoRadii.sm),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          SizedBox(
-            height: 116,
-            width: double.infinity,
-            child: _ReportEvidenceImage(
-              evidence: evidence,
-              height: 116,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            caption,
-            style: const TextStyle(
-              fontSize: 9,
-              color: SaoColors.gray700,
-              fontWeight: FontWeight.w600,
-            ),
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
-          if (showGps && (evidence.latitude ?? '').isNotEmpty) ...[
-            const SizedBox(height: 3),
-            Text(
-              '${evidence.latitude}, ${evidence.longitude}',
-              style: const TextStyle(
-                fontSize: 8,
-                color: SaoColors.gray400,
+      child: Padding(
+        padding: const EdgeInsets.all(SaoSpacing.sm),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: SaoColors.surfaceFor(context),
+            borderRadius: BorderRadius.circular(SaoRadii.sm),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.22),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            ],
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(SaoRadii.sm),
+            child: PdfPreview(
+              build: (_) => buildActivitiesPdfBytes(
+                items,
+                filters,
+                executiveSummary: executiveSummary,
+                includeAudit: includeAudit,
+                includeNotes: includeNotes,
+                includeAttachments: includeAttachments,
+              ),
+              canChangePageFormat: false,
+              canChangeOrientation: false,
+              canDebug: false,
+              allowPrinting: false,
+              allowSharing: false,
+              useActions: false,
+              maxPageWidth: maxPageWidth,
+              pdfFileName: 'preview.pdf',
             ),
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -3004,6 +2402,3 @@ class _EmptyEditor extends StatelessWidget {
 
 // ── String helper extension ───────────────────────────────────────────────────
 
-extension on String {
-  String ifEmpty(String fallback) => isEmpty ? fallback : this;
-}

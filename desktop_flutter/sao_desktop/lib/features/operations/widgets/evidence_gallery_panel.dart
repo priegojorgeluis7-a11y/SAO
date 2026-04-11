@@ -1,13 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../ui/widgets/sao_evidence_viewer.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../core/theme/app_spacing.dart';
 import 'gps_validation_banner.dart';
 import 'caption_editor_widget.dart';
 
@@ -37,8 +34,8 @@ class EvidenceGalleryPanel extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.photo_library_outlined, size: 64, color: SaoColors.gray400),
-              SizedBox(height: SaoSpacing.lg),
+              const Icon(Icons.photo_library_outlined, size: 64, color: SaoColors.gray400),
+              const SizedBox(height: SaoSpacing.lg),
               Text(
                 'Sin evidencias',
                 style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
@@ -65,15 +62,15 @@ class EvidenceGalleryPanel extends StatelessWidget {
         children: [
           // GPS Validation Banner
           Padding(
-            padding: EdgeInsets.all(SaoSpacing.md),
+            padding: const EdgeInsets.all(SaoSpacing.md),
             child: GpsValidationBanner(
               status: gpsStatus,
               pkLabel: 'PK 142+000',
-              gpsCoordinates: '${activity!.activity.gpsLatitude?.toStringAsFixed(4) ?? '20.6295'}°N, ${activity!.activity.gpsLongitude?.toStringAsFixed(4) ?? '100.3161'}°W',
+              gpsCoordinates: '${activity!.activity.latitude?.toStringAsFixed(4) ?? '20.6295'}°N, ${activity!.activity.longitude?.toStringAsFixed(4) ?? '100.3161'}°W',
               distanceInMeters: distance,
               onViewMap: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                  const SnackBar(
                     content: Text('Abriendo mapa con ubicación...'),
                     backgroundColor: SaoColors.info,
                   ),
@@ -81,7 +78,7 @@ class EvidenceGalleryPanel extends StatelessWidget {
               },
               onEditGps: () {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
+                  const SnackBar(
                     content: Text('Funcionalidad de edición de GPS (próximamente)'),
                     backgroundColor: SaoColors.warning,
                   ),
@@ -90,7 +87,7 @@ class EvidenceGalleryPanel extends StatelessWidget {
             ),
           ),
 
-          Divider(height: 1, color: SaoColors.border),
+          const Divider(height: 1, color: SaoColors.border),
 
           // Evidence Viewer
           Expanded(
@@ -132,7 +129,7 @@ class EvidenceGalleryPanel extends StatelessWidget {
                         onMapView: () {
                           Navigator.of(context).pop();
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
+                            const SnackBar(
                               content: Text('Abriendo ubicación en mapa...'),
                               backgroundColor: SaoColors.success,
                             ),
@@ -144,7 +141,7 @@ class EvidenceGalleryPanel extends StatelessWidget {
                 },
                 onMapView: () {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
+                    const SnackBar(
                       content: Text('Abriendo ubicación GPS en mapa...'),
                       backgroundColor: SaoColors.info,
                     ),
@@ -154,20 +151,20 @@ class EvidenceGalleryPanel extends StatelessWidget {
             ),
           ),
 
-          Divider(height: 1, color: SaoColors.border),
+          const Divider(height: 1, color: SaoColors.border),
 
           // Caption Editor
           Padding(
-            padding: EdgeInsets.all(SaoSpacing.md),
+            padding: const EdgeInsets.all(SaoSpacing.md),
             child: CaptionEditorWidget(
               initialCaption: evidence.caption ?? '',
               evidenceId: evidence.id,
               maxLines: 2,
               onSaveCaption: (newCaption) {
-                print('Caption guardado: $newCaption');
+                debugPrint('Caption guardado: $newCaption');
               },
               onCancel: () {
-                print('Edición cancelada');
+                debugPrint('Edición cancelada');
               },
             ),
           ),
@@ -197,3 +194,5 @@ class EvidenceGalleryPanel extends StatelessWidget {
   double _calculateDistance(ActivityWithDetails activity, double fallbackDistance) {
     // TODO: Implementar cálculo real usando Haversine formula
     return fallbackDistance;
+  }
+}

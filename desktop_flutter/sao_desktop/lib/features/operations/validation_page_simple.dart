@@ -51,16 +51,16 @@ class ValidationPageSimple extends ConsumerWidget {
       color: SaoColors.surface,
       child: Row(
         children: [
-          Column(
+            const Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Validación de Actividades', style: SaoTypography.pageTitle),
-              const SizedBox(height: SaoSpacing.xs),
-              Row(
                 children: [
-                  Icon(Icons.location_on_rounded, size: 14, color: SaoColors.gray600),
-                  const SizedBox(width: SaoSpacing.xs),
-                  Text('Proyecto: TMQ - Tramo 4', style: SaoTypography.hint),
+                Text('Validación de Actividades', style: SaoTypography.pageTitle),
+                SizedBox(height: SaoSpacing.xs),
+                Row(
+                  children: [
+                    Icon(Icons.location_on_rounded, size: 14, color: SaoColors.gray600),
+                    SizedBox(width: SaoSpacing.xs),
+                    Text('Proyecto: TMQ - Tramo 4', style: SaoTypography.hint),
                 ],
               ),
             ],
@@ -75,7 +75,7 @@ class ValidationPageSimple extends ConsumerWidget {
                     final total = activities.length;
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
+                        children: [
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -89,18 +89,18 @@ class ValidationPageSimple extends ConsumerWidget {
                         const SizedBox(height: SaoSpacing.sm),
                         ClipRRect(
                           borderRadius: BorderRadius.circular(SaoRadii.sm),
-                          child: LinearProgressIndicator(
+                            child: const LinearProgressIndicator(
                             value: 0.0,
                             minHeight: 8,
                             backgroundColor: SaoColors.gray200,
-                            valueColor: AlwaysStoppedAnimation<Color>(SaoColors.primary),
+                              valueColor: AlwaysStoppedAnimation<Color>(SaoColors.primary),
                           ),
                         ),
                       ],
                     );
                   },
-                  loading: () => Text('Cargando...', style: SaoTypography.hint),
-                  error: (_, __) => Text('Error al cargar', style: SaoTypography.hint),
+                  loading: () => const Text('Cargando...', style: SaoTypography.hint),
+                  error: (_, __) => const Text('Error al cargar', style: SaoTypography.hint),
                 ),
               ],
             ),
@@ -111,10 +111,10 @@ class ValidationPageSimple extends ConsumerWidget {
             child: Container(
               padding: const EdgeInsets.all(SaoSpacing.sm),
               decoration: BoxDecoration(
-                color: SaoColors.primary.withOpacity(0.05),
+                color: SaoColors.primary.withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(SaoRadii.sm),
               ),
-              child: Icon(Icons.keyboard_rounded, size: 20, color: SaoColors.primary),
+              child: const Icon(Icons.keyboard_rounded, size: 20, color: SaoColors.primary),
             ),
           ),
         ],
@@ -131,7 +131,7 @@ class ValidationPageSimple extends ConsumerWidget {
             padding: const EdgeInsets.all(SaoSpacing.lg),
             child: Row(
               children: [
-                Text('Cola de Revisión', style: SaoTypography.sectionTitle),
+                  const Text('Cola de Revisión', style: SaoTypography.sectionTitle),
                 const Spacer(),
                 SaoBadge.status('10'),
               ],
@@ -185,7 +185,7 @@ class ValidationPageSimple extends ConsumerWidget {
                   Container(
                     padding: const EdgeInsets.all(SaoSpacing.lg),
                     decoration: BoxDecoration(
-                      color: SaoColors.primary.withOpacity(0.03),
+                      color: SaoColors.primary.withValues(alpha: 0.03),
                       borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(SaoRadii.lg),
                         topRight: Radius.circular(SaoRadii.lg),
@@ -193,12 +193,12 @@ class ValidationPageSimple extends ConsumerWidget {
                     ),
                     child: Row(
                       children: [
-                        Expanded(
+                        const Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('ACT-001-2024', style: SaoTypography.caption),
-                              const SizedBox(height: SaoSpacing.xs),
+                              SizedBox(height: SaoSpacing.xs),
                               Text('Actividad de ejemplo', style: SaoTypography.cardTitle),
                             ],
                           ),
@@ -245,9 +245,9 @@ class ValidationPageSimple extends ConsumerWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Información', style: SaoTypography.sectionTitle),
+        const Text('Información', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.lg),
-        
+
         Row(
           children: [
             Expanded(
@@ -260,13 +260,13 @@ class ValidationPageSimple extends ConsumerWidget {
           ],
         ),
         const SizedBox(height: SaoSpacing.lg),
-        
+
         _buildInfoCard('Tipo', 'Construcción de puente', Icons.construction_rounded),
         const SizedBox(height: SaoSpacing.lg),
-        
+
         _buildInfoCard('Frente', 'Frente Norte', Icons.groups_rounded),
         const SizedBox(height: SaoSpacing.lg),
-        
+
         _buildInfoCard('Municipio', 'Bogotá, Cundinamarca', Icons.location_city_rounded),
       ],
     );
@@ -351,11 +351,11 @@ class _ActivityMiniCard extends StatelessWidget {
           const SizedBox(height: SaoSpacing.xs),
           Row(
             children: [
-              Icon(Icons.location_on, size: 12, color: SaoColors.gray500),
+              const Icon(Icons.location_on, size: 12, color: SaoColors.gray500),
               const SizedBox(width: SaoSpacing.xs),
               Expanded(
                 child: Text(
-                  '${activity.municipality?.name ?? "Sin ubicación"}',
+                  activity.municipality?.name ?? 'Sin ubicación',
                   style: SaoTypography.caption,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

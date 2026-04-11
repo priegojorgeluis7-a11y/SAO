@@ -81,9 +81,17 @@ def _shared_rate_limit_key(scope: str, client_key: str, window_start: int) -> st
 def _shared_consume(client_key: str, *, scope: str, limit: int, window_seconds: int) -> float | None:
     now = time.time()
     window_start, window_end = _bucket_window(now, window_seconds)
-    collection = get_firestore_client().collection("rate_limits")
-    doc_ref = collection.document(_shared_rate_limit_key(scope, client_key, window_start))
-    transaction = get_firestore_client().transaction()
+    try:
+        client = get_firestore_client()
+        collection = client.collection("rate_limits")
+        doc_ref = collection.document(_shared_rate_limit_key(scope, client_key, window_start))
+        transaction = client.transaction()
+    except Exception:
+        logger.warning(
+            "Shared rate limiter unavailable during client initialization — falling back to per-instance in-memory limiter.",
+            exc_info=True,
+        )
+        return None
 
     @transactional
     def _consume_in_transaction(txn):

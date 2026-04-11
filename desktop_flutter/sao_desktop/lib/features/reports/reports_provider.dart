@@ -177,7 +177,7 @@ class ReportActivityItem {
       ),
       agreements: _extractNestedString(
         json,
-        const ['agreements', 'acuerdos', 'commitments', 'compromisos'],
+        const ['agreements', 'acuerdos', 'commitments', 'compromisos', 'report_agreements'],
       ),
       municipality: _extractNestedString(json, const ['municipality', 'municipio', 'localidad']),
       state: _extractNestedString(json, const ['state', 'estado']),
@@ -191,11 +191,27 @@ class ReportActivityItem {
         pkEnd: _extractNestedString(json, const ['pk_end', 'pk_fin']),
         startTime: _extractNestedString(
           json,
-          const ['start_time', 'hora_inicio', 'horario_inicio', 'horaatencioninicio'],
+            const [
+              'start_time',
+              'hora_inicio',
+              'horario_inicio',
+              'horaatencioninicio',
+              'draft_hora_inicio',
+              'started_at',
+              'startedAt',
+            ],
         ),
         endTime: _extractNestedString(
           json,
-          const ['end_time', 'hora_fin', 'horario_fin', 'horaatencionfin'],
+            const [
+              'end_time',
+              'hora_fin',
+              'horario_fin',
+              'horaatencionfin',
+              'draft_hora_fin',
+              'finished_at',
+              'finishedAt',
+            ],
         ),
         technicalLatitude: _extractNestedString(
           json,
@@ -219,7 +235,10 @@ class ReportActivityItem {
           const ['attendees', 'assistants', 'involucrados', 'asistentes', 'autoridades'],
         ),
         result: _extractNestedString(json, const ['result', 'resultado', 'resultado_final']),
-        notes: _extractNestedString(json, const ['notes', 'notas', 'review_notes', 'comentarios']),
+        notes: _extractNestedString(
+          json,
+          const ['notes', 'notas', 'review_notes', 'comentarios', 'report_notes'],
+        ),
         pendingEvidence: _parseBool(
           _extractNestedValue(
             json,
@@ -342,6 +361,17 @@ bool _isAllFrontsFilter(String rawFront) {
       normalized == '*';
 }
 
+String _normalizeProjectFilter(String rawProject) =>
+    rawProject.trim().toUpperCase();
+
+bool _matchesSelectedProject(ReportActivityItem item, String rawProject) {
+  final selectedProject = _normalizeProjectFilter(rawProject);
+  if (selectedProject.isEmpty) return true;
+
+  final itemProject = _normalizeProjectFilter(item.projectId ?? '');
+  return itemProject == selectedProject;
+}
+
 bool _isWithinSelectedRange(String rawDate, ReportDateRange range) {
   final dt = _tryParseDate(rawDate);
   if (dt == null) return true;
@@ -382,6 +412,7 @@ Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
     final reportItems = items
         .whereType<Map<String, dynamic>>()
         .map((e) => ReportActivityItem.fromJson(e))
+        .where((item) => _matchesSelectedProject(item, filters.projectId))
         .where((item) => item.isApprovedForReport)
         .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
         .where((item) {
@@ -395,7 +426,7 @@ Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
         .toList(growable: false);
 
     if (reportItems.isNotEmpty) {
-      return _hydrateReportItems(client, reportItems);
+      return _hydrateReportItems(client, reportItems, filters.projectId);
     }
 
     return _loadFromCompletedActivities(client, filters);
@@ -436,11 +467,12 @@ Future<List<ReportActivityItem>> _loadFromCompletedActivities(
               normalized['reviewed_at'] ?? normalized['created_at'] ?? '';
           return ReportActivityItem.fromJson(normalized);
         })
+        .where((item) => _matchesSelectedProject(item, filters.projectId))
         .where((item) => item.isApprovedForReport)
         .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
         .toList(growable: false);
 
-    return _hydrateReportItems(client, baseItems);
+    return _hydrateReportItems(client, baseItems, filters.projectId);
   } catch (_) {
     return [];
   }
@@ -449,6 +481,7 @@ Future<List<ReportActivityItem>> _loadFromCompletedActivities(
 Future<List<ReportActivityItem>> _hydrateReportItems(
   BackendApiClient client,
   List<ReportActivityItem> items,
+  String projectId,
 ) async {
   if (items.isEmpty) return const [];
 
@@ -456,8 +489,12 @@ Future<List<ReportActivityItem>> _hydrateReportItems(
     items.map((item) => _hydrateReportItem(client, item)),
   );
 
-  enriched.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-  return enriched;
+  final filtered = enriched
+      .where((item) => _matchesSelectedProject(item, projectId))
+      .toList(growable: false);
+
+  filtered.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  return filtered;
 }
 
 Future<ReportActivityItem> _hydrateReportItem(
@@ -470,7 +507,9 @@ Future<ReportActivityItem> _hydrateReportItem(
       (item.agreements?.trim().isNotEmpty != true) ||
       item.topics.isEmpty ||
       item.attendees.isEmpty ||
-      item.evidences.isEmpty;
+        item.evidences.isEmpty ||
+        ((item.startTime?.trim().isEmpty ?? true) &&
+          (item.endTime?.trim().isEmpty ?? true));
 
   if (!needsDetails) {
     return item;
@@ -483,6 +522,21 @@ Future<ReportActivityItem> _hydrateReportItem(
     if (decoded is! Map<String, dynamic>) return item;
 
     final normalized = Map<String, dynamic>.from(decoded);
+    try {
+      final rawActivityDecoded = await client.getJson(
+        '/api/v1/activities/${Uri.encodeComponent(item.id)}',
+      );
+      if (rawActivityDecoded is Map<String, dynamic>) {
+        normalized['wizard_payload'] ??= rawActivityDecoded['wizard_payload'];
+        normalized['data_fields'] ??= rawActivityDecoded['data_fields'];
+        normalized['description'] ??= rawActivityDecoded['description'];
+        normalized['latitude'] ??= rawActivityDecoded['latitude'];
+        normalized['longitude'] ??= rawActivityDecoded['longitude'];
+        normalized['activity_type'] ??= rawActivityDecoded['activity_type_code'];
+        normalized['title'] ??= rawActivityDecoded['title'];
+      }
+    } catch (_) {}
+
     final detailEvidences = (normalized['evidences'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
         .map((evidence) => <String, dynamic>{
@@ -493,6 +547,35 @@ Future<ReportActivityItem> _hydrateReportItem(
               'created_at': evidence['uploaded_at'] ?? '',
             })
         .toList(growable: false);
+    final detailEvidenceById = <String, Map<String, dynamic>>{
+      for (final evidence in detailEvidences)
+        (evidence['id'] ?? '').toString(): evidence,
+    };
+
+    List<Map<String, dynamic>> reviewEvidences = const [];
+    try {
+      final reviewDecoded = await client.getJson(
+        '/api/v1/review/activity/${Uri.encodeComponent(item.id)}/evidences',
+      );
+      if (reviewDecoded is List) {
+        reviewEvidences = reviewDecoded
+            .whereType<Map<String, dynamic>>()
+            .map((evidence) {
+              final evidenceId = (evidence['id'] ?? '').toString();
+              final detailEvidence = detailEvidenceById[evidenceId] ?? const <String, dynamic>{};
+              return <String, dynamic>{
+                'id': evidence['id'],
+                'file_path': evidence['gcsKey'] ?? detailEvidence['file_path'] ?? '',
+                'file_type': detailEvidence['file_type'] ?? 'PHOTO',
+                'caption': evidence['description'] ?? detailEvidence['caption'] ?? '',
+                'captured_at': evidence['takenAt'] ?? '',
+                'created_at': evidence['takenAt'] ?? detailEvidence['created_at'] ?? '',
+              };
+            })
+            .where((evidence) => (evidence['id'] ?? '').toString().isNotEmpty)
+            .toList(growable: false);
+      }
+    } catch (_) {}
 
     normalized['status'] ??= item.status;
     normalized['review_decision'] ??= item.reviewDecision;
@@ -507,8 +590,24 @@ Future<ReportActivityItem> _hydrateReportItem(
     normalized['municipality'] ??= item.municipality;
     normalized['state'] ??= item.state;
     normalized['created_at'] ??= item.createdAt;
-    if (detailEvidences.isNotEmpty) {
-      normalized['evidences'] = detailEvidences;
+    final resolvedEvidences = reviewEvidences.isNotEmpty ? reviewEvidences : detailEvidences;
+    if (resolvedEvidences.isNotEmpty) {
+      normalized['evidences'] = resolvedEvidences;
+    }
+
+    if ((normalized['start_time'] == null || normalized['start_time'].toString().trim().isEmpty) &&
+        (normalized['end_time'] == null || normalized['end_time'].toString().trim().isEmpty)) {
+      final evidenceTimes = resolvedEvidences
+          .map((evidence) => _tryParseDate((evidence['captured_at'] ?? evidence['created_at'] ?? '').toString()))
+          .whereType<DateTime>()
+          .toList(growable: false)
+        ..sort();
+      if (evidenceTimes.isNotEmpty) {
+        final first = evidenceTimes.first;
+        final last = evidenceTimes.last;
+        normalized['start_time'] = _formatTimeOnly(first);
+        normalized['end_time'] = _formatTimeOnly(last);
+      }
     }
 
     final enriched = ReportActivityItem.fromJson(normalized);
@@ -519,7 +618,7 @@ Future<ReportActivityItem> _hydrateReportItem(
 }
 
 Future<List<ReportActivityItem>> _loadFromLocalDb(
-    AutoDisposeFutureProviderRef<List<ReportActivityItem>> ref,
+  Ref ref,
     ReportFilters filters,
 ) async {
   final db = ref.read(databaseProvider);
@@ -626,7 +725,7 @@ const _membreteSinglePath =
 
 /// Generates a PDF report for a list of activities and saves it to disk.
 /// Returns the saved [File].
-Future<File> generateActivitiesPdf(
+Future<Uint8List> buildActivitiesPdfBytes(
   List<ReportActivityItem> items,
   ReportFilters filters, {
   String executiveSummary = '',
@@ -662,7 +761,7 @@ Future<File> generateActivitiesPdf(
         build: (_) => pw.Center(
           child: pw.Text(
             'Sin actividades aprobadas para generar reporte.',
-            style: pw.TextStyle(fontSize: 12, color: _textGray),
+            style: const pw.TextStyle(fontSize: 12, color: _textGray),
           ),
         ),
       ),
@@ -673,12 +772,8 @@ Future<File> generateActivitiesPdf(
       final activityDate = _tryParseDate(item.createdAt) ?? now;
       final allSummary = (executiveSummary.trim().isNotEmpty)
           ? executiveSummary.trim()
-          : (item.detail?.trim().isNotEmpty == true
-              ? item.detail!.trim()
-              : 'Actividad registrada para seguimiento operativo y generación de reporte ejecutivo.');
-      final agreements = (item.agreements?.trim().isNotEmpty == true)
-          ? item.agreements!.trim()
-          : '1. Dar seguimiento semanal.\n2. Integrar evidencia de campo.\n3. Confirmar cierre operativo.';
+          : _buildNaturalDevelopmentNarrative(item);
+        final agreements = item.agreements?.trim() ?? '';
       final shouldUseTwoPages =
           allSummary.length + agreements.length > 860 || item.evidences.length >= 4;
 
@@ -744,7 +839,7 @@ Future<File> generateActivitiesPdf(
                 padding: const pw.EdgeInsets.only(top: 8),
                 child: pw.Text(
                   'Notas internas: ${includeNotes ? 'incluidas' : 'no incluidas'} · Auditoría: ${includeAudit ? 'incluida' : 'no incluida'}',
-                  style: pw.TextStyle(fontSize: 8, color: _textGray),
+                  style: const pw.TextStyle(fontSize: 8, color: _textGray),
                 ),
               ),
             if (includeAttachments &&
@@ -771,11 +866,11 @@ Future<File> generateActivitiesPdf(
                 children: [
                   pw.Text(
                     'Anexo fotográfico',
-                    style: pw.TextStyle(fontSize: 9, color: _textGray),
+                    style: const pw.TextStyle(fontSize: 9, color: _textGray),
                   ),
                   pw.Text(
                     'Hoja 2 de 2',
-                    style: pw.TextStyle(fontSize: 8, color: _textGray),
+                    style: const pw.TextStyle(fontSize: 8, color: _textGray),
                   ),
                 ],
               ),
@@ -790,17 +885,43 @@ Future<File> generateActivitiesPdf(
     }
   }
 
+  return pdf.save();
+}
+
+/// Generates a PDF report for a list of activities and saves it to disk.
+/// Returns the saved [File].
+Future<File> generateActivitiesPdf(
+  List<ReportActivityItem> items,
+  ReportFilters filters, {
+  String executiveSummary = '',
+  bool includeAudit = true,
+  bool includeNotes = false,
+  bool includeAttachments = true,
+}) async {
+  final now = DateTime.now();
+  final pdfBytes = await buildActivitiesPdfBytes(
+    items,
+    filters,
+    executiveSummary: executiveSummary,
+    includeAudit: includeAudit,
+    includeNotes: includeNotes,
+    includeAttachments: includeAttachments,
+  );
+
   // Save to documents
   final docsDir = await getApplicationDocumentsDirectory();
-  final reportsDir = Directory('${docsDir.path}/SAO_Reportes');
+  final normalizedProject = filters.projectId.trim().isEmpty
+      ? 'GENERAL'
+      : filters.projectId.trim().toUpperCase();
+  final reportsDir = Directory('${docsDir.path}/SAO_Reportes/$normalizedProject');
   if (!await reportsDir.exists()) {
     await reportsDir.create(recursive: true);
   }
 
   final fileName =
-      'SAO_${filters.projectId}_${DateFormat('yyyyMMdd_HHmm').format(now)}.pdf';
+      'SAO_${normalizedProject}_${DateFormat('yyyyMMdd_HHmm').format(now)}.pdf';
   final file = File('${reportsDir.path}/$fileName');
-  await file.writeAsBytes(await pdf.save());
+  await file.writeAsBytes(pdfBytes);
   return file;
 }
 
@@ -824,8 +945,8 @@ pw.EdgeInsets _buildAdaptiveMargin({
 
   // Base area for the provided membretado.
   // Top margin adapts to content density to avoid large empty space.
-  final leftRight = 71.0;
-  final bottom = 88.0;
+  const leftRight = 71.0;
+  const bottom = 88.0;
 
   if (isAnnex) {
     return const pw.EdgeInsets.fromLTRB(71, 148, 71, 88);
@@ -841,81 +962,10 @@ pw.EdgeInsets _buildAdaptiveMargin({
   return pw.EdgeInsets.fromLTRB(leftRight, top, leftRight, bottom);
 }
 
-pw.Widget _buildMembreteHeader(int year) {
-  return pw.Row(
-    mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-    crossAxisAlignment: pw.CrossAxisAlignment.start,
-    children: [
-      pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('Comunicaciones',
-                  style: pw.TextStyle(
-                      fontSize: 12, fontWeight: pw.FontWeight.bold, color: _textDark)),
-              pw.Text(
-                'Secretaría de Infraestructura,\nComunicaciones y Transportes',
-                style: pw.TextStyle(fontSize: 8, color: _textGray),
-              ),
-            ],
-          ),
-          pw.SizedBox(width: 10),
-          pw.Container(width: 1, height: 30, color: _borderGray),
-          pw.SizedBox(width: 10),
-          pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              pw.Text('TRENES',
-                  style: pw.TextStyle(
-                      fontSize: 12, fontWeight: pw.FontWeight.bold, color: _textDark)),
-              pw.Text(
-                'Agencia de Trenes y Transporte\nPúblico Integrada',
-                style: pw.TextStyle(fontSize: 8, color: _textGray),
-              ),
-            ],
-          ),
-        ],
-      ),
-      pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text('$year',
-              style: pw.TextStyle(
-                  fontSize: 16, fontWeight: pw.FontWeight.bold, color: _guinda)),
-          pw.SizedBox(width: 4),
-          pw.Text('año de\nMargarita\nMaza', style: pw.TextStyle(fontSize: 8, color: _textGray)),
-        ],
-      ),
-    ],
-  );
-}
-
-pw.Widget _buildMembreteFooter() {
-  return pw.Column(
-    mainAxisSize: pw.MainAxisSize.min,
-    children: [
-      pw.Divider(color: _borderGray, height: 6),
-      pw.Text(
-        'Avenida Universidad 1738, Colonia Santa Catarina, C.P. 04010, Alcaldía Coyoacán, Ciudad de México.',
-        textAlign: pw.TextAlign.center,
-        style: pw.TextStyle(fontSize: 8, color: _textGray),
-      ),
-      pw.SizedBox(height: 2),
-      pw.Text(
-        'Tel: (55) 5723 9300 | www.gob.mx/attrapi',
-        textAlign: pw.TextAlign.center,
-        style: pw.TextStyle(fontSize: 8, color: _textGray),
-      ),
-    ],
-  );
-}
-
 pw.Widget _buildTitleRow(ReportActivityItem item, DateTime activityDate) {
   final dateFmt = DateFormat("d 'de' MMMM, y", 'es_MX');
   return pw.Container(
-    decoration: pw.BoxDecoration(
+    decoration: const pw.BoxDecoration(
       border: pw.Border(bottom: pw.BorderSide(color: _borderGray)),
     ),
     padding: const pw.EdgeInsets.only(bottom: 8),
@@ -939,7 +989,7 @@ pw.Widget _buildTitleRow(ReportActivityItem item, DateTime activityDate) {
             ],
           ),
         ),
-        pw.Text(dateFmt.format(activityDate), style: pw.TextStyle(fontSize: 9, color: _textDark)),
+        pw.Text(dateFmt.format(activityDate), style: const pw.TextStyle(fontSize: 9, color: _textDark)),
       ],
     ),
   );
@@ -950,6 +1000,7 @@ pw.Widget _buildExecutiveHeader(
   DateTime activityDate,
 ) {
   final dateFmt = DateFormat('dd/MM/yyyy HH:mm', 'es_MX');
+  final executiveSummary = _buildExecutiveSummary(item);
 
   return pw.Container(
     padding: const pw.EdgeInsets.all(8),
@@ -977,23 +1028,28 @@ pw.Widget _buildExecutiveHeader(
                   pw.SizedBox(height: 3),
                   pw.Text(
                     '${item.activityType} · ${item.subcategory ?? 'Sin subcategoría'}',
-                    style: pw.TextStyle(fontSize: 8.5, color: _textDark),
+                    style: const pw.TextStyle(fontSize: 8.5, color: _textDark),
                   ),
                   pw.Text(
                     '${item.projectId ?? '-'} / ${item.frontName} · ${item.municipality ?? '-'}, ${item.state ?? '-'}',
-                    style: pw.TextStyle(fontSize: 8.5, color: _textGray),
+                    style: const pw.TextStyle(fontSize: 8.5, color: _textGray),
                   ),
                   pw.Text(
                     'Ventana: ${_formatTimeRange(item.startTime, item.endTime)} · Registro: ${dateFmt.format(activityDate)}',
-                    style: pw.TextStyle(fontSize: 8, color: _textGray),
+                    style: const pw.TextStyle(fontSize: 8, color: _textGray),
                   ),
+                  if (executiveSummary.isNotEmpty) ...[
+                    pw.SizedBox(height: 5),
+                    pw.Text(
+                      executiveSummary,
+                      style: const pw.TextStyle(fontSize: 8.3, color: _textDark, lineSpacing: 2),
+                    ),
+                  ],
                 ],
               ),
             ),
           ],
         ),
-        pw.SizedBox(height: 6),
-        _kvText('Resultado', (item.result ?? item.statusLabel).trim()),
         if (item.isUnplanned)
           pw.Padding(
             padding: const pw.EdgeInsets.only(top: 5),
@@ -1001,7 +1057,7 @@ pw.Widget _buildExecutiveHeader(
               alignment: pw.Alignment.centerLeft,
               child: pw.Text(
                 'No planeada: ${item.unplannedReason?.trim().isNotEmpty == true ? item.unplannedReason : 'Sin motivo capturado'}',
-                style: pw.TextStyle(fontSize: 8, color: _textDark),
+                style: const pw.TextStyle(fontSize: 8, color: _textDark),
               ),
             ),
           ),
@@ -1046,7 +1102,7 @@ pw.Widget _dataCell(String label, String value) {
     child: pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(label.toUpperCase(), style: pw.TextStyle(fontSize: 7, color: _textGray)),
+        pw.Text(label.toUpperCase(), style: const pw.TextStyle(fontSize: 7, color: _textGray)),
         pw.SizedBox(height: 2),
         pw.Text(value, style: pw.TextStyle(fontSize: 9, color: _textDark, fontWeight: pw.FontWeight.bold)),
       ],
@@ -1057,7 +1113,7 @@ pw.Widget _dataCell(String label, String value) {
 pw.Widget _buildSectionTitle(String title) {
   return pw.Container(
     width: double.infinity,
-    decoration: pw.BoxDecoration(
+    decoration: const pw.BoxDecoration(
       border: pw.Border(bottom: pw.BorderSide(color: _guinda, width: 1.5)),
     ),
     padding: const pw.EdgeInsets.only(bottom: 3),
@@ -1073,7 +1129,9 @@ pw.Widget _buildNarrativeBlock(ReportActivityItem item, String text) {
   final topics = item.topics.isEmpty ? 'Sin temas capturados' : item.topics.join(', ');
   final purpose = item.purpose?.trim().isNotEmpty == true ? item.purpose!.trim() : 'Sin propósito capturado';
   final result = item.result?.trim().isNotEmpty == true ? item.result!.trim() : item.statusLabel;
-  final notes = item.notes?.trim().isNotEmpty == true ? item.notes!.trim() : text;
+  final notes = item.notes?.trim().isNotEmpty == true
+      ? item.notes!.trim()
+      : _buildNaturalDevelopmentNarrative(item, fallbackText: text);
 
   return pw.Container(
     padding: const pw.EdgeInsets.all(6),
@@ -1082,8 +1140,8 @@ pw.Widget _buildNarrativeBlock(ReportActivityItem item, String text) {
       children: [
         _kvText('Propósito', purpose),
         _kvText('Temas tratados', topics),
+        _kvText('Desarrollo', notes),
         _kvText('Resultado final', result),
-        _kvText('Minuta / notas', notes),
       ],
     ),
   );
@@ -1104,17 +1162,22 @@ pw.Widget _buildAgreementsBlock(String agreements) {
     child: pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text('Acuerdos / Pendientes',
+        pw.Text('Seguimiento acordado',
             style: pw.TextStyle(fontSize: 9, color: _guinda, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 4),
+        if (rows.isEmpty)
+          pw.Text(
+            'Sin compromisos adicionales registrados para seguimiento.',
+              style: const pw.TextStyle(fontSize: 8.5, color: _textGray),
+          ),
         ...rows.map((row) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 3),
               child: pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                  pw.Text('• ', style: pw.TextStyle(fontSize: 9, color: _textDark)),
+                    pw.Text('• ', style: const pw.TextStyle(fontSize: 9, color: _textDark)),
                   pw.Expanded(
-                    child: pw.Text(row, style: pw.TextStyle(fontSize: 9, color: _textDark)),
+                      child: pw.Text(row, style: const pw.TextStyle(fontSize: 9, color: _textDark)),
                   ),
                 ],
               ),
@@ -1128,8 +1191,9 @@ pw.Widget _buildAuthorities(ReportActivityItem item) {
   final authorityRows = item.attendees.isNotEmpty
       ? item.attendees
       : <String>[
-          'SICT Vinculación - ${item.assignedName ?? 'Por definir'}',
-          'ATTRAPI - Representante operativo',
+          if ((item.assignedName ?? '').trim().isNotEmpty)
+            'Responsable operativo: ${item.assignedName!.trim()}',
+          'Autoridades y participantes por confirmar',
         ];
   return pw.Wrap(
     spacing: 12,
@@ -1138,10 +1202,10 @@ pw.Widget _buildAuthorities(ReportActivityItem item) {
         .map((row) => pw.Container(
               width: 220,
               padding: const pw.EdgeInsets.only(left: 6),
-              decoration: pw.BoxDecoration(
+              decoration: const pw.BoxDecoration(
                 border: pw.Border(left: pw.BorderSide(color: _borderGray, width: 2)),
               ),
-              child: pw.Text(row, style: pw.TextStyle(fontSize: 8.5, color: _textDark)),
+              child: pw.Text(row, style: const pw.TextStyle(fontSize: 8.5, color: _textDark)),
             ))
         .toList(growable: false),
   );
@@ -1154,7 +1218,7 @@ List<pw.Widget> _buildEvidenceGrid(
   if (evidences.isEmpty) {
     return [
       pw.Text('Sin evidencia fotográfica disponible.',
-          style: pw.TextStyle(fontSize: 9, color: _textGray)),
+          style: const pw.TextStyle(fontSize: 9, color: _textGray)),
     ];
   }
 
@@ -1210,7 +1274,7 @@ pw.Widget _buildEvidenceCard(
           child: evidence.image == null
               ? pw.Center(
                   child: pw.Text('Sin imagen',
-                      style: pw.TextStyle(fontSize: 9, color: _textGray)),
+                style: const pw.TextStyle(fontSize: 9, color: _textGray)),
                 )
               : pw.Image(evidence.image!, fit: pw.BoxFit.cover),
         ),
@@ -1241,7 +1305,7 @@ pw.Widget _buildPendingEvidenceBlock(ReportActivityItem item) {
     ),
     child: pw.Text(
       'Estatus: Pendiente de evidencia · Fecha límite: ${item.evidenceDueAt ?? 'Por definir'}',
-      style: pw.TextStyle(fontSize: 8.2, color: _textDark),
+      style: const pw.TextStyle(fontSize: 8.2, color: _textDark),
     ),
   );
 }
@@ -1251,7 +1315,7 @@ pw.Widget _kvText(String label, String value) {
     padding: const pw.EdgeInsets.only(bottom: 4),
     child: pw.RichText(
       text: pw.TextSpan(
-        style: pw.TextStyle(fontSize: 8.6, color: _textDark, lineSpacing: 2),
+        style: const pw.TextStyle(fontSize: 8.6, color: _textDark, lineSpacing: 2),
         children: [
           pw.TextSpan(text: '$label: ', style: pw.TextStyle(fontWeight: pw.FontWeight.bold)),
           pw.TextSpan(text: value),
@@ -1269,55 +1333,199 @@ String _buildEvidenceMeta(ReportEvidenceItem evidence) {
   return 'Captura: $dateLabel';
 }
 
-String _buildCadenamiento(ReportActivityItem item) {
-  final type = item.locationType?.trim().toLowerCase() ?? '';
-  if (type == 'tramo') {
-    final start = item.pkStart?.trim().isNotEmpty == true ? item.pkStart!.trim() : item.pk;
-    final end = item.pkEnd?.trim().isNotEmpty == true ? item.pkEnd!.trim() : 'N/D';
-    return '$start - $end';
-  }
-  if (type == 'general') {
-    return 'General';
-  }
-  return item.pk.trim().isNotEmpty ? item.pk : (item.pkStart ?? 'N/D');
-}
-
 String _formatTimeRange(String? start, String? end) {
-  final s = start?.trim();
-  final e = end?.trim();
+  final s = _normalizeTimeValue(start);
+  final e = _normalizeTimeValue(end);
   if ((s ?? '').isEmpty && (e ?? '').isEmpty) return 'N/D';
-  return '${s?.isNotEmpty == true ? s : 'N/D'} - ${e?.isNotEmpty == true ? e : 'N/D'}';
+  if ((s ?? '').isNotEmpty && s == e) return s!;
+  if ((s ?? '').isNotEmpty && (e ?? '').isEmpty) return s!;
+  if ((s ?? '').isEmpty && (e ?? '').isNotEmpty) return e!;
+  return '$s - $e';
 }
 
-String _normalizeRisk(String? raw) {
-  final risk = raw?.trim().toLowerCase() ?? '';
-  if (risk == 'prioritario') return 'prioritario';
-  if (risk == 'alto') return 'alto';
-  if (risk == 'medio') return 'medio';
-  if (risk == 'bajo') return 'bajo';
-  return 'sin dato';
+String? _normalizeTimeValue(String? raw) {
+  final value = raw?.trim();
+  if (value == null || value.isEmpty) return null;
+  final parsed = _tryParseDate(value);
+  if (parsed != null) {
+    return _formatTimeOnly(parsed);
+  }
+  final hhmmMatch = RegExp(r'^(\d{1,2}:\d{2})(?::\d{2})?$').firstMatch(value);
+  if (hhmmMatch != null) {
+    return hhmmMatch.group(1);
+  }
+  return value;
 }
 
-pw.Widget _buildRiskBadge(String risk) {
-  final color = switch (risk) {
-    'prioritario' => const PdfColor.fromInt(0xFFB42318),
-    'alto' => const PdfColor.fromInt(0xFFE11D48),
-    'medio' => const PdfColor.fromInt(0xFFF59E0B),
-    'bajo' => const PdfColor.fromInt(0xFF16A34A),
-    _ => _textGray,
-  };
+String _formatTimeOnly(DateTime value) {
+  final local = value.toLocal();
+  final hour = local.hour.toString().padLeft(2, '0');
+  final minute = local.minute.toString().padLeft(2, '0');
+  return '$hour:$minute';
+}
 
-  return pw.Container(
-    padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: pw.BoxDecoration(
-      color: color,
-      borderRadius: const pw.BorderRadius.all(pw.Radius.circular(2)),
-    ),
-    child: pw.Text(
-      'Riesgo: ${risk.toUpperCase()}',
-      style: pw.TextStyle(fontSize: 7.2, color: PdfColors.white, fontWeight: pw.FontWeight.bold),
-    ),
-  );
+String _buildNaturalDevelopmentNarrative(
+  ReportActivityItem item, {
+  String? fallbackText,
+}) {
+  final preferredDetail = item.detail?.trim();
+  if (preferredDetail != null &&
+      preferredDetail.isNotEmpty &&
+      !_looksSystemGeneratedNarrative(preferredDetail)) {
+    return preferredDetail;
+  }
+
+  final activityLabel = _humanActivityLabel(item);
+  final subcategory = item.subcategory?.trim();
+  final location = _joinNonEmpty([
+    item.municipality?.trim(),
+    item.state?.trim(),
+  ]);
+  final frontLabel = _joinNonEmpty([
+    item.projectId?.trim(),
+    item.frontName.trim().isEmpty ? null : item.frontName.trim(),
+  ], separator: ' / ');
+  final purpose = item.purpose?.trim();
+  final topics = item.topics.where((topic) => topic.trim().isNotEmpty).toList(growable: false);
+  final attendees = item.attendees.where((attendee) => attendee.trim().isNotEmpty).toList(growable: false);
+  final result = item.result?.trim();
+
+  final sentences = <String>[];
+
+  final openingParts = <String>[_activityOpening(item, activityLabel)];
+  if (subcategory != null && subcategory.isNotEmpty) {
+      openingParts.add('dentro de la subcategoría ${_lowercaseFirst(subcategory)}');
+  }
+  if (location.isNotEmpty) {
+    openingParts.add('en $location');
+  }
+  if (frontLabel.isNotEmpty) {
+      openingParts.add('en el proyecto $frontLabel');
+  }
+  sentences.add('${openingParts.join(' ')}.');
+
+  if (purpose != null && purpose.isNotEmpty) {
+    sentences.add('La actividad tuvo como propósito ${_lowercaseFirst(purpose)}.');
+  }
+
+  if (topics.isNotEmpty) {
+    sentences.add('Durante su desarrollo se abordaron ${_naturalList(topics)}.');
+  }
+
+  if (attendees.isNotEmpty) {
+    sentences.add('Se contó con la participación de ${_naturalList(attendees)}.');
+  }
+
+  if (result != null && result.isNotEmpty) {
+    sentences.add('Como resultado, ${_lowercaseFirst(result)}.');
+  }
+
+  final generated = sentences.join(' ');
+  if (generated.trim().isNotEmpty) {
+    return generated.trim();
+  }
+
+  final fallback = fallbackText?.trim();
+  if (fallback != null && fallback.isNotEmpty) {
+    return fallback;
+  }
+
+  return 'Actividad registrada para seguimiento operativo y generación de reporte ejecutivo.';
+}
+
+String buildReportNaturalNarrative(ReportActivityItem item, {String? fallbackText}) {
+  return _buildNaturalDevelopmentNarrative(item, fallbackText: fallbackText);
+}
+
+String _buildExecutiveSummary(ReportActivityItem item) {
+  final purpose = item.purpose?.trim();
+  final result = item.result?.trim();
+  final location = _joinNonEmpty([
+    item.municipality?.trim(),
+    item.state?.trim(),
+  ]);
+
+  final parts = <String>[];
+  if (purpose != null && purpose.isNotEmpty) {
+    parts.add('Actividad orientada a ${_lowercaseFirst(purpose)}');
+  }
+  if (location.isNotEmpty) {
+    parts.add('desarrollada en $location');
+  }
+  if (result != null && result.isNotEmpty) {
+    parts.add('con resultado ${_lowercaseFirst(result)}');
+  }
+  if (parts.isEmpty) {
+    return '';
+  }
+  return '${parts.join(', ')}.';
+}
+
+bool _looksSystemGeneratedNarrative(String value) {
+  final normalized = value.trim().toLowerCase();
+  return normalized.startsWith('actividad:') ||
+      normalized.startsWith('actividad realizada en ') ||
+      normalized.startsWith('actividad validada para emision') ||
+      normalized.startsWith('actividad validada para emisión') ||
+      value.contains('|');
+}
+
+String _humanActivityLabel(ReportActivityItem item) {
+  final title = item.title?.trim();
+  if (title != null && title.isNotEmpty) {
+    return _lowercaseFirst(title);
+  }
+  return _lowercaseFirst(item.activityType.trim());
+}
+
+String _activityOpening(ReportActivityItem item, String activityLabel) {
+  final raw = [item.title, item.activityType]
+      .whereType<String>()
+      .map((value) => value.trim().toLowerCase())
+      .firstWhere((value) => value.isNotEmpty, orElse: () => activityLabel.toLowerCase());
+
+  if (raw.contains('caminamiento')) {
+    return 'Se llevó a cabo un caminamiento';
+  }
+  if (raw.contains('reun')) {
+    return 'Se celebró una reunión de trabajo';
+  }
+  if (raw.contains('asamblea')) {
+    return 'Se realizó una asamblea';
+  }
+  if (raw.contains('socializ')) {
+    return 'Se desarrolló una jornada de socialización';
+  }
+  if (raw.contains('acompañamiento')) {
+    return 'Se brindó acompañamiento institucional';
+  }
+  return 'Se realizó la actividad de $activityLabel';
+}
+
+String _lowercaseFirst(String value) {
+  final trimmed = value.trim();
+  if (trimmed.isEmpty) return trimmed;
+  return '${trimmed[0].toLowerCase()}${trimmed.substring(1)}';
+}
+
+String _joinNonEmpty(List<String?> values, {String separator = ', '}) {
+  return values
+      .whereType<String>()
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .join(separator);
+}
+
+String _naturalList(List<String> values) {
+  final cleaned = values
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toList(growable: false);
+  if (cleaned.isEmpty) return '';
+  if (cleaned.length == 1) return cleaned.first;
+  if (cleaned.length == 2) return '${cleaned.first} y ${cleaned.last}';
+  final head = cleaned.sublist(0, cleaned.length - 1).join(', ');
+  return '$head y ${cleaned.last}';
 }
 
 final _evidenceRepository = EvidenceRepository();
@@ -1328,19 +1536,17 @@ Future<String?> _resolveEvidenceSource(ReportEvidenceItem evidence) {
   final cacheKey = '${evidence.id}|$rawPath';
 
   return _evidenceSourceCache.putIfAbsent(cacheKey, () async {
-    if (rawPath.isEmpty) {
-      return null;
-    }
+    if (rawPath.isNotEmpty) {
+      if (rawPath.startsWith('http://') ||
+          rawPath.startsWith('https://') ||
+          rawPath.startsWith('file://')) {
+        return rawPath;
+      }
 
-    if (rawPath.startsWith('http://') ||
-        rawPath.startsWith('https://') ||
-        rawPath.startsWith('file://')) {
-      return rawPath;
-    }
-
-    final localFile = File(rawPath);
-    if (await localFile.exists()) {
-      return localFile.path;
+      final localFile = File(rawPath);
+      if (await localFile.exists()) {
+        return localFile.path;
+      }
     }
 
     if (evidence.id.trim().isEmpty) {
@@ -1434,11 +1640,6 @@ pw.PageTheme _buildPageTheme(
   );
 }
 
-bool _isApprovedStatus(String status) {
-  final normalized = status.toUpperCase();
-  return normalized == 'APROBADO' || normalized == 'APPROVED';
-}
-
 String _normalizeFieldKey(String key) =>
     key.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
 
@@ -1465,6 +1666,35 @@ dynamic _findInMap(Map<String, dynamic> source, List<String> candidates) {
   return null;
 }
 
+dynamic _findDeepValue(dynamic source, List<String> candidates) {
+  if (source is Map) {
+    final normalizedSource = source.map(
+      (key, value) => MapEntry(key.toString(), value),
+    );
+    final direct = _findInMap(normalizedSource, candidates);
+    if (_hasMeaningfulValue(direct)) {
+      return direct;
+    }
+    for (final value in normalizedSource.values) {
+      final nested = _findDeepValue(value, candidates);
+      if (_hasMeaningfulValue(nested)) {
+        return nested;
+      }
+    }
+  }
+
+  if (source is List) {
+    for (final value in source) {
+      final nested = _findDeepValue(value, candidates);
+      if (_hasMeaningfulValue(nested)) {
+        return nested;
+      }
+    }
+  }
+
+  return null;
+}
+
 dynamic _extractNestedValue(Map<String, dynamic> json, List<String> candidates) {
   final topLevel = _findInMap(json, candidates);
   if (_hasMeaningfulValue(topLevel)) {
@@ -1476,8 +1706,18 @@ dynamic _extractNestedValue(Map<String, dynamic> json, List<String> candidates) 
     final nested = dataFields.map(
       (key, value) => MapEntry(key.toString(), value),
     );
-    return _findInMap(nested, candidates);
+    final dataFieldsValue = _findDeepValue(nested, candidates);
+    if (_hasMeaningfulValue(dataFieldsValue)) {
+      return dataFieldsValue;
+    }
   }
+
+  final wizardPayload = json['wizard_payload'] ?? json['wizardPayload'];
+  final wizardValue = _findDeepValue(wizardPayload, candidates);
+  if (_hasMeaningfulValue(wizardValue)) {
+    return wizardValue;
+  }
+
   return null;
 }
 
@@ -1490,7 +1730,29 @@ String _stringifyValue(dynamic value) {
         .join(', ');
   }
   if (value is Map) {
-    return value.values
+    final normalized = value.map(
+      (key, nestedValue) => MapEntry(_normalizeFieldKey(key.toString()), nestedValue),
+    );
+    for (final preferredKey in const [
+      'name',
+      'label',
+      'title',
+      'descripcion',
+      'description',
+      'representativename',
+      'reason',
+      'othertext',
+      'reference',
+      'value',
+    ]) {
+      final preferredValue = normalized[preferredKey];
+      final text = _stringifyValue(preferredValue);
+      if (text.isNotEmpty) {
+        return text;
+      }
+    }
+
+    return normalized.values
         .map(_stringifyValue)
         .where((entry) => entry.isNotEmpty)
         .join(', ');
@@ -1522,7 +1784,23 @@ bool _parseBool(dynamic value) {
 List<String> _parseStringList(dynamic raw) {
   if (raw is List) {
     return raw
-        .map((e) => e.toString().trim())
+        .map((entry) {
+          if (entry is Map) {
+            final normalized = entry.map(
+              (key, value) => MapEntry(_normalizeFieldKey(key.toString()), value),
+            );
+            final name = _stringifyValue(normalized['name']);
+            final representativeName = _stringifyValue(normalized['representativename']);
+            if (name.isNotEmpty && representativeName.isNotEmpty) {
+              return '$name - $representativeName';
+            }
+            if (name.isNotEmpty) {
+              return name;
+            }
+            return _stringifyValue(normalized);
+          }
+          return entry.toString().trim();
+        })
         .where((e) => e.isNotEmpty)
         .toList(growable: false);
   }

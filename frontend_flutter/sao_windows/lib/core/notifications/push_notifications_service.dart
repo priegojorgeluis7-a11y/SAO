@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
@@ -97,7 +98,7 @@ class PushNotificationsService {
         data: {
           'token': token,
           'project_id': normalizedProject,
-          'platform': 'android',
+          'platform': _currentPlatform(),
         },
       );
     } catch (e, st) {
@@ -158,5 +159,24 @@ class PushNotificationsService {
         defaultValue: '',
       ),
     );
+  }
+
+  String _currentPlatform() {
+    if (kIsWeb) return 'web';
+
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return 'android';
+      case TargetPlatform.iOS:
+        return 'ios';
+      case TargetPlatform.macOS:
+        return 'macos';
+      case TargetPlatform.windows:
+        return 'windows';
+      case TargetPlatform.linux:
+        return 'linux';
+      case TargetPlatform.fuchsia:
+        return 'fuchsia';
+    }
   }
 }

@@ -7,8 +7,6 @@ import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../ui/widgets/sao_activity_card.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../core/theme/app_spacing.dart';
 
 /// Panel de cola de actividades con agrupación por frentes
 /// 
@@ -94,23 +92,6 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
     }
   }
 
-  Color _getRiskColor(ActivityWithDetails activity) {
-    // TODO: Implementar lógica real de riesgo basada en datos
-    // Por ahora usamos estado como proxy
-    switch (activity.activity.status) {
-      case 'pending_review':
-        return SaoColors.statusPendiente;
-      case 'approved':
-        return SaoColors.success;
-      case 'rejected':
-        return SaoColors.error;
-      case 'needs_fix':
-        return SaoColors.warning;
-      default:
-        return SaoColors.info;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return Container(
@@ -124,30 +105,30 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
         children: [
           // Header
           Padding(
-            padding: EdgeInsets.all(SaoSpacing.lg),
+            padding: const EdgeInsets.all(SaoSpacing.lg),
             child: Row(
               children: [
-                Icon(
+                const Icon(
                   Icons.pending_actions_rounded,
                   size: 20,
                   color: SaoColors.primary,
                 ),
-                SizedBox(width: SaoSpacing.sm),
-                Text(
+                const SizedBox(width: SaoSpacing.sm),
+                const Text(
                   'Cola de Revisión',
-                  style: SaoTypography.h3,
+                  style: SaoTypography.sectionTitle,
                 ),
                 const Spacer(),
                 widget.activitiesAsync.when(
                   data: (activities) {
                     final filtered = _filterActivities(activities);
                     return Container(
-                      padding: EdgeInsets.symmetric(
+                      padding: const EdgeInsets.symmetric(
                         horizontal: SaoSpacing.sm,
                         vertical: 4,
                       ),
                       decoration: BoxDecoration(
-                        color: SaoColors.statusPendiente.withOpacity(0.12),
+                        color: SaoColors.statusPendiente.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(SaoRadii.sm),
                       ),
                       child: Text(
@@ -165,7 +146,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
               ],
             ),
           ),
-          Divider(height: 1, color: SaoColors.border),
+          const Divider(height: 1, color: SaoColors.border),
 
           // Lista de actividades agrupadas
           Expanded(
@@ -181,15 +162,15 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                         Icon(
                           Icons.check_circle_outline_rounded,
                           size: 64,
-                          color: SaoColors.success.withOpacity(0.3),
+                          color: SaoColors.success.withValues(alpha: 0.3),
                         ),
-                        SizedBox(height: SaoSpacing.lg),
+                        const SizedBox(height: SaoSpacing.lg),
                         Text(
                           widget.searchQuery != null && widget.searchQuery!.isNotEmpty
                               ? 'No se encontraron\nresultados'
                               : 'No hay actividades\npendientes',
                           textAlign: TextAlign.center,
-                          style: SaoTypography.body.copyWith(
+                          style: SaoTypography.bodyText.copyWith(
                             color: SaoColors.gray500,
                           ),
                         ),
@@ -202,7 +183,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                 final frontNames = grouped.keys.toList()..sort();
 
                 return ListView.builder(
-                  padding: EdgeInsets.all(SaoSpacing.md),
+                  padding: const EdgeInsets.all(SaoSpacing.md),
                   itemCount: frontNames.length,
                   itemBuilder: (context, index) {
                     final frontName = frontNames[index];
@@ -239,12 +220,12 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                     Icon(
                       Icons.error_outline_rounded,
                       size: 64,
-                      color: SaoColors.error.withOpacity(0.3),
+                      color: SaoColors.error.withValues(alpha: 0.3),
                     ),
-                    SizedBox(height: SaoSpacing.lg),
+                    const SizedBox(height: SaoSpacing.lg),
                     Text(
                       'Error al cargar',
-                      style: SaoTypography.body.copyWith(
+                      style: SaoTypography.bodyText.copyWith(
                         color: SaoColors.error,
                       ),
                     ),
@@ -289,7 +270,7 @@ class _FrontSection extends StatelessWidget {
           onTap: onToggleCollapse,
           borderRadius: BorderRadius.circular(SaoRadii.sm),
           child: Container(
-            padding: EdgeInsets.symmetric(
+            padding: const EdgeInsets.symmetric(
               horizontal: SaoSpacing.sm,
               vertical: SaoSpacing.sm,
             ),
@@ -302,18 +283,18 @@ class _FrontSection extends StatelessWidget {
                   size: 20,
                   color: SaoColors.gray600,
                 ),
-                SizedBox(width: SaoSpacing.xs),
+                const SizedBox(width: SaoSpacing.xs),
                 Expanded(
                   child: Text(
                     'Frente: $frontName',
-                    style: SaoTypography.body.copyWith(
+                    style: SaoTypography.bodyText.copyWith(
                       fontWeight: FontWeight.w600,
                       color: SaoColors.gray700,
                     ),
                   ),
                 ),
                 Container(
-                  padding: EdgeInsets.symmetric(
+                  padding: const EdgeInsets.symmetric(
                     horizontal: SaoSpacing.sm,
                     vertical: 2,
                   ),
@@ -341,7 +322,7 @@ class _FrontSection extends StatelessWidget {
             final df = DateFormat('HH:mm', 'es');
 
             return Padding(
-              padding: EdgeInsets.only(
+              padding: const EdgeInsets.only(
                 left: SaoSpacing.md,
                 right: 0,
                 bottom: SaoSpacing.sm,
@@ -359,7 +340,7 @@ class _FrontSection extends StatelessWidget {
                 onTap: () => onSelectActivity(activity),
                 badge: activity.activity.executedAt != null
                     ? Container(
-                        padding: EdgeInsets.symmetric(
+                        padding: const EdgeInsets.symmetric(
                           horizontal: 8,
                           vertical: 4,
                         ),
@@ -377,9 +358,9 @@ class _FrontSection extends StatelessWidget {
                     : null,
               ),
             );
-          }).toList(),
+          }),
 
-        SizedBox(height: SaoSpacing.sm),
+        const SizedBox(height: SaoSpacing.sm),
       ],
     );
   }

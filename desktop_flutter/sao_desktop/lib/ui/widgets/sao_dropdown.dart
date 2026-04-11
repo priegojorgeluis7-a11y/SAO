@@ -57,7 +57,9 @@ class SaoDropdown<T> extends StatelessWidget {
           borderSide: const BorderSide(color: SaoColors.error),
         ),
         filled: true,
-        fillColor: enabled ? SaoColors.surface : SaoColors.gray100,
+        fillColor: enabled
+          ? SaoColors.surfaceFor(context)
+          : SaoColors.surfaceRaisedFor(context),
         contentPadding: EdgeInsets.symmetric(
           horizontal: SaoSpacing.lg,
           vertical: isDense ? SaoSpacing.sm : SaoSpacing.md,
@@ -65,11 +67,11 @@ class SaoDropdown<T> extends StatelessWidget {
       ),
       isDense: isDense,
       isExpanded: true,
-      icon: const Icon(Icons.arrow_drop_down, color: SaoColors.gray600),
-      dropdownColor: SaoColors.surface,
-      style: const TextStyle(
+      icon: Icon(Icons.arrow_drop_down, color: SaoColors.textMutedFor(context)),
+      dropdownColor: SaoColors.surfaceFor(context),
+      style: TextStyle(
         fontSize: 14,
-        color: SaoColors.gray900,
+        color: SaoColors.textFor(context),
       ),
     );
   }
@@ -102,14 +104,15 @@ class SaoSimpleDropdown<T> extends StatelessWidget {
         vertical: isDense ? SaoSpacing.xs : SaoSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
-        border: Border.all(color: SaoColors.border),
+        color: SaoColors.surfaceFor(context),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
       child: Row(
         children: [
           if (icon != null) ...[
             Icon(icon, size: 16, color: SaoColors.gray600),
+            Icon(icon, size: 16, color: SaoColors.textMutedFor(context)),
             const SizedBox(width: SaoSpacing.sm),
           ],
           Expanded(
@@ -130,11 +133,11 @@ class SaoSimpleDropdown<T> extends StatelessWidget {
                 isDense: isDense,
                 isExpanded: true,
                 icon: const Icon(Icons.arrow_drop_down, size: 20),
-                iconEnabledColor: SaoColors.gray600,
-                dropdownColor: SaoColors.surface,
-                style: const TextStyle(
+                iconEnabledColor: SaoColors.textMutedFor(context),
+                dropdownColor: SaoColors.surfaceFor(context),
+                style: TextStyle(
                   fontSize: 14,
-                  color: SaoColors.gray900,
+                  color: SaoColors.textFor(context),
                 ),
               ),
             ),
@@ -202,14 +205,14 @@ class _SaoMultiDropdownState<T> extends State<SaoMultiDropdown<T>> {
           child: Container(
             padding: const EdgeInsets.all(SaoSpacing.md),
             decoration: BoxDecoration(
-              color: SaoColors.surface,
-              border: Border.all(color: SaoColors.border),
+              color: SaoColors.surfaceFor(context),
+              border: Border.all(color: SaoColors.borderFor(context)),
               borderRadius: BorderRadius.circular(SaoRadii.md),
             ),
             child: Row(
               children: [
                 if (widget.icon != null) ...[
-                  Icon(widget.icon, size: 16, color: SaoColors.gray600),
+                  Icon(widget.icon, size: 16, color: SaoColors.textMutedFor(context)),
                   const SizedBox(width: SaoSpacing.sm),
                 ],
                 Expanded(
@@ -244,7 +247,7 @@ class _SaoMultiDropdownState<T> extends State<SaoMultiDropdown<T>> {
                 ),
                 Icon(
                   _isOpen ? Icons.arrow_drop_up : Icons.arrow_drop_down,
-                  color: SaoColors.gray600,
+                  color: SaoColors.textMutedFor(context),
                 ),
               ],
             ),
@@ -255,8 +258,8 @@ class _SaoMultiDropdownState<T> extends State<SaoMultiDropdown<T>> {
           Container(
             constraints: const BoxConstraints(maxHeight: 200),
             decoration: BoxDecoration(
-              color: SaoColors.surface,
-              border: Border.all(color: SaoColors.border),
+              color: SaoColors.surfaceFor(context),
+              border: Border.all(color: SaoColors.borderFor(context)),
               borderRadius: BorderRadius.circular(SaoRadii.md),
             ),
             child: ListView.builder(

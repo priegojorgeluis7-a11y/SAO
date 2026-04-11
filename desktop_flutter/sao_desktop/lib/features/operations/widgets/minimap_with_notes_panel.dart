@@ -33,7 +33,6 @@ class MinimapWithNotesPanel extends StatefulWidget {
 class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
   final TextEditingController _noteController = TextEditingController();
   final List<InternalNote> _notes = [];
-  bool _isExpanded = false;
 
   @override
   void initState() {
@@ -44,15 +43,15 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
         id: '1',
         text: 'Terreno inestable en el costado norte - verificar despues de lluvia',
         author: 'Juan Perez',
-        timestamp: DateTime.now().subtract(Duration(hours: 2)),
-        attachments: [],
+        timestamp: DateTime.now().subtract(const Duration(hours: 2)),
+        attachments: const [],
       ),
       InternalNote(
         id: '2',
         text: 'Coordinador de municipio requiere presentacion en terreno - agendar para jueves',
         author: 'Maria Garcia',
-        timestamp: DateTime.now().subtract(Duration(hours: 1)),
-        attachments: [],
+        timestamp: DateTime.now().subtract(const Duration(hours: 1)),
+        attachments: const [],
       ),
     ]);
   }
@@ -85,8 +84,6 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
 
   @override
   Widget build(BuildContext context) {
-    final hasLocation = widget.latitude != null && widget.longitude != null;
-
     return Container(
       decoration: BoxDecoration(
         color: SaoColors.surface,
@@ -97,15 +94,15 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
         children: [
           // Header
           Container(
-            padding: EdgeInsets.all(SaoSpacing.md),
+            padding: const EdgeInsets.all(SaoSpacing.md),
             decoration: BoxDecoration(
-              border: Border(bottom: BorderSide(color: SaoColors.border)),
-              color: SaoColors.primary.withOpacity(0.05),
+              border: const Border(bottom: BorderSide(color: SaoColors.border)),
+              color: SaoColors.primary.withValues(alpha: 0.05),
             ),
             child: Row(
               children: [
-                Icon(Icons.note_rounded, color: SaoColors.primary, size: 20),
-                SizedBox(width: SaoSpacing.sm),
+                const Icon(Icons.note_rounded, color: SaoColors.primary, size: 20),
+                const SizedBox(width: SaoSpacing.sm),
                 Text(
                   'Notas Internas',
                   style: SaoTypography.sectionTitle.copyWith(color: SaoColors.primary),
@@ -120,8 +117,8 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
               children: [
                 // Input de notas
                 Container(
-                  padding: EdgeInsets.all(SaoSpacing.md),
-                  decoration: BoxDecoration(
+                  padding: const EdgeInsets.all(SaoSpacing.md),
+                  decoration: const BoxDecoration(
                     border: Border(
                       bottom: BorderSide(color: SaoColors.border),
                     ),
@@ -137,7 +134,7 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                           color: SaoColors.gray700,
                         ),
                       ),
-                      SizedBox(height: SaoSpacing.sm),
+                      const SizedBox(height: SaoSpacing.sm),
                       Row(
                         children: [
                           Expanded(
@@ -145,20 +142,22 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                               controller: _noteController,
                               decoration: InputDecoration(
                                 hintText: 'Escribe una nota...',
-                                hintStyle: TextStyle(color: SaoColors.gray400),
+                                hintStyle: const TextStyle(color: SaoColors.gray400),
                                 border: OutlineInputBorder(
                                   borderRadius:
                                       BorderRadius.circular(SaoRadii.sm),
                                   borderSide:
-                                      BorderSide(color: SaoColors.border),
+                                      const BorderSide(color: SaoColors.border),
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius:
                                       BorderRadius.circular(SaoRadii.sm),
-                                  borderSide:
-                                      BorderSide(color: SaoColors.primary, width: 2),
+                                  borderSide: const BorderSide(
+                                    color: SaoColors.primary,
+                                    width: 2,
+                                  ),
                                 ),
-                                contentPadding: EdgeInsets.symmetric(
+                                contentPadding: const EdgeInsets.symmetric(
                                   horizontal: SaoSpacing.sm,
                                   vertical: 8,
                                 ),
@@ -169,10 +168,10 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                               style: SaoTypography.bodyText,
                             ),
                           ),
-                          SizedBox(width: SaoSpacing.sm),
+                          const SizedBox(width: SaoSpacing.sm),
                           IconButton(
                             onPressed: _addNote,
-                            icon: Icon(Icons.send_rounded),
+                            icon: const Icon(Icons.send_rounded),
                             color: SaoColors.primary,
                             tooltip: 'Enviar nota',
                           ),
@@ -187,16 +186,16 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                   child: _notes.isEmpty
                       ? Center(
                           child: Padding(
-                            padding: EdgeInsets.all(SaoSpacing.lg),
+                            padding: const EdgeInsets.all(SaoSpacing.lg),
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(
+                                const Icon(
                                   Icons.note_outlined,
                                   size: 48,
                                   color: SaoColors.gray300,
                                 ),
-                                SizedBox(height: SaoSpacing.md),
+                                const SizedBox(height: SaoSpacing.md),
                                 Text(
                                   'Sin notas aún',
                                   style: SaoTypography.bodyText.copyWith(
@@ -208,13 +207,13 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                           ),
                         )
                       : ListView.builder(
-                          padding: EdgeInsets.all(SaoSpacing.md),
+                          padding: const EdgeInsets.all(SaoSpacing.md),
                           itemCount: _notes.length,
                           itemBuilder: (context, index) {
                             final note = _notes[index];
                             return Container(
-                              margin: EdgeInsets.only(bottom: SaoSpacing.sm),
-                              padding: EdgeInsets.all(SaoSpacing.md),
+                              margin: const EdgeInsets.only(bottom: SaoSpacing.sm),
+                              padding: const EdgeInsets.all(SaoSpacing.md),
                               decoration: BoxDecoration(
                                 color: SaoColors.surface,
                                 border: Border.all(color: SaoColors.border),
@@ -229,14 +228,14 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                                         width: 24,
                                         height: 24,
                                         decoration: BoxDecoration(
-                                          color: SaoColors.info.withOpacity(0.1),
+                                          color: SaoColors.info.withValues(alpha: 0.1),
                                           borderRadius:
                                               BorderRadius.circular(SaoRadii.full),
                                         ),
-                                        child: Icon(Icons.person_rounded,
+                                        child: const Icon(Icons.person_rounded,
                                             size: 12, color: SaoColors.info),
                                       ),
-                                      SizedBox(width: SaoSpacing.sm),
+                                      const SizedBox(width: SaoSpacing.sm),
                                       Expanded(
                                         child: Text(
                                           note.author,
@@ -255,7 +254,7 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
                                       ),
                                     ],
                                   ),
-                                  SizedBox(height: SaoSpacing.sm),
+                                  const SizedBox(height: SaoSpacing.sm),
                                   Text(
                                     note.text,
                                     style: SaoTypography.bodyText
@@ -283,7 +282,7 @@ class InternalNote {
   final DateTime timestamp;
   final List<String> attachments;
 
-  InternalNote({
+  const InternalNote({
     required this.id,
     required this.text,
     required this.author,

@@ -23,7 +23,7 @@ class ReviewActions extends StatelessWidget {
     final enabled = activity != null;
 
     return Container(
-      padding: EdgeInsets.all(AppSpacing.lg),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
         color: SaoColors.surface,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
@@ -45,7 +45,7 @@ class ReviewActions extends StatelessWidget {
                   ),
                 ),
                 icon: const Icon(Icons.check_circle_rounded, size: 24),
-                label: const Column(
+                label: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
@@ -65,7 +65,7 @@ class ReviewActions extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
           
           // Rechazar
           Expanded(
@@ -75,16 +75,16 @@ class ReviewActions extends StatelessWidget {
                 onPressed: enabled ? onReject : null,
                 style: OutlinedButton.styleFrom(
                   foregroundColor: SaoColors.error,
-                  side: BorderSide(color: SaoColors.error, width: 2),
+                  side: const BorderSide(color: SaoColors.error, width: 2),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                   ),
                 ),
                 icon: const Icon(Icons.cancel_rounded),
-                label: const Column(
+                label: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Text(
+                    const Text(
                       'RECHAZAR',
                       style: TextStyle(fontWeight: FontWeight.bold),
                     ),
@@ -99,7 +99,7 @@ class ReviewActions extends StatelessWidget {
               ),
             ),
           ),
-          SizedBox(width: AppSpacing.md),
+          const SizedBox(width: AppSpacing.md),
           
           // Saltar
           SizedBox(

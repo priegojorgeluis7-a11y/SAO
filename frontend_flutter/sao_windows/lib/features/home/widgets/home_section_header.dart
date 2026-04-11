@@ -222,13 +222,25 @@ class TaskSectionHeaderWithProgress extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Text(
-                      metrics.progressDisplay,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        fontSize: 11,
-                        color: Colors.grey.shade600,
+                    Expanded(
+                      child: Text(
+                        metrics.progressDisplay,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
                       ),
                     ),
+                    if (metrics.timeDisplay != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        metrics.timeDisplay!,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          fontSize: 11,
+                          color: Colors.grey.shade600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ],

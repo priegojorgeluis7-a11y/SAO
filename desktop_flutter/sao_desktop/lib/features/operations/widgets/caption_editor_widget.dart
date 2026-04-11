@@ -62,7 +62,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
 
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
+            content: const Row(
               children: [
                 Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary, size: 18),
                 SizedBox(width: SaoSpacing.sm),
@@ -110,13 +110,13 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
         boxShadow: [
           if (_isEditing)
             BoxShadow(
-              color: SaoColors.primary.withOpacity(0.15),
+              color: SaoColors.primary.withValues(alpha: 0.15),
               blurRadius: 12,
               offset: const Offset(0, 4),
             ),
         ],
       ),
-      padding: EdgeInsets.all(SaoSpacing.md),
+      padding: const EdgeInsets.all(SaoSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -124,7 +124,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
+              const Text(
                 'Pie de Foto',
                 style: SaoTypography.sectionTitle,
               ),
@@ -132,11 +132,11 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
                 Tooltip(
                   message: 'Editar pie de foto',
                   child: Material(
-                    color: Theme.of(context).colorScheme.surface.withOpacity(0),
+                    color: Theme.of(context).colorScheme.surface.withValues(alpha: 0),
                     child: InkWell(
                       onTap: () => setState(() => _isEditing = true),
-                      borderRadius: BorderRadius.circular(4),
-                      child: Padding(
+                      borderRadius: const BorderRadius.all(Radius.circular(4)),
+                      child: const Padding(
                         padding: EdgeInsets.all(SaoSpacing.xs),
                         child: Icon(
                           Icons.edit_rounded,
@@ -150,7 +150,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
             ],
           ),
 
-          SizedBox(height: SaoSpacing.sm),
+            const SizedBox(height: SaoSpacing.sm),
 
           // Content
           if (_isEditing)
@@ -163,51 +163,51 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
                     hintText: 'Describe lo que ves en esta imagen...',
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(SaoRadii.sm),
-                      borderSide: BorderSide(
+                      borderSide: const BorderSide(
                         color: SaoColors.border,
                         width: 1,
                       ),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(SaoRadii.sm),
-                      borderSide: BorderSide(
+                      borderSide: const BorderSide(
                         color: SaoColors.border,
                         width: 1,
                       ),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(SaoRadii.sm),
-                      borderSide: BorderSide(
+                      borderSide: const BorderSide(
                         color: SaoColors.primary,
                         width: 2,
                       ),
                     ),
-                    contentPadding: EdgeInsets.all(SaoSpacing.sm),
+                    contentPadding: const EdgeInsets.all(SaoSpacing.sm),
                     filled: true,
                     fillColor: SaoColors.gray50,
                   ),
                   style: SaoTypography.bodyText,
                 ),
-                SizedBox(height: SaoSpacing.sm),
+                const SizedBox(height: SaoSpacing.sm),
                 // Action buttons
                 Row(
-                  mainAxisAlignment: MainAxisAlignment.flex-end,
+                  mainAxisAlignment: MainAxisAlignment.end,
                   children: [
                     TextButton(
                       onPressed: _isSaving ? null : _cancelEdit,
                       style: TextButton.styleFrom(
                         foregroundColor: SaoColors.gray600,
                       ),
-                      child: Text('Cancelar'),
+                      child: const Text('Cancelar'),
                     ),
-                    SizedBox(width: SaoSpacing.sm),
+                    const SizedBox(width: SaoSpacing.sm),
                     FilledButton(
                       onPressed: _isSaving ? null : _saveCaption,
                       style: FilledButton.styleFrom(
                         backgroundColor: SaoColors.primary,
                       ),
                       child: _isSaving
-                          ? Row(
+                          ? const Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 SizedBox(
@@ -224,7 +224,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
                                 Text('Guardando...'),
                               ],
                             )
-                          : Text('Guardar'),
+                          : const Text('Guardar'),
                     ),
                   ],
                 ),
@@ -233,7 +233,7 @@ class _CaptionEditorWidgetState extends State<CaptionEditorWidget> {
           else
             Container(
               width: double.infinity,
-              padding: EdgeInsets.all(SaoSpacing.sm),
+              padding: const EdgeInsets.all(SaoSpacing.sm),
               decoration: BoxDecoration(
                 color: SaoColors.gray50,
                 borderRadius: BorderRadius.circular(SaoRadii.sm),
@@ -315,18 +315,18 @@ class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
             hintText: 'Descripción de la imagen...',
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(SaoRadii.sm),
-              borderSide: BorderSide(
+              borderSide: const BorderSide(
                 color: SaoColors.primary,
                 width: 2,
               ),
             ),
-            contentPadding: EdgeInsets.all(SaoSpacing.sm),
+            contentPadding: const EdgeInsets.all(SaoSpacing.sm),
             filled: true,
             fillColor: Theme.of(context).colorScheme.surface,
             suffixIcon: Padding(
-              padding: EdgeInsets.all(SaoSpacing.xs),
+              padding: const EdgeInsets.all(SaoSpacing.xs),
               child: IconButton(
-                icon: Icon(
+                icon: const Icon(
                   Icons.check_rounded,
                   color: SaoColors.success,
                   size: 20,
@@ -343,7 +343,7 @@ class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
     return GestureDetector(
       onTap: _toggleEdit,
       child: Container(
-        padding: EdgeInsets.all(SaoSpacing.sm),
+        padding: const EdgeInsets.all(SaoSpacing.sm),
         decoration: BoxDecoration(
           color: SaoColors.gray50,
           borderRadius: BorderRadius.circular(SaoRadii.sm),
@@ -369,8 +369,8 @@ class _InlineCaptionEditorState extends State<InlineCaptionEditor> {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  SizedBox(width: SaoSpacing.xs),
-                  Icon(
+                  const SizedBox(width: SaoSpacing.xs),
+                  const Icon(
                     Icons.edit_rounded,
                     size: 14,
                     color: SaoColors.gray600,

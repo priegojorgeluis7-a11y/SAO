@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/theme/app_colors.dart';
 import '../auth/session_controller.dart';
 import '../data/admin_repositories.dart';
 
@@ -77,7 +78,12 @@ class _AdminAuditPageState extends ConsumerState<AdminAuditPage> {
       return const Center(child: CircularProgressIndicator());
     }
     if (_error != null) {
-      return Center(child: Text('No se pudo cargar auditoría: $_error'));
+      return Center(
+        child: Text(
+          'No se pudo cargar auditoría: $_error',
+          style: TextStyle(color: AppColors.textFor(context)),
+        ),
+      );
     }
 
     return Padding(
@@ -112,10 +118,16 @@ class _AdminAuditPageState extends ConsumerState<AdminAuditPage> {
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: Card(
+            child: Container(
+              decoration: BoxDecoration(
+                color: AppColors.surfaceFor(context),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: AppColors.borderFor(context)),
+              ),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(12),
                 child: DataTable(
+                  headingRowColor: WidgetStatePropertyAll(AppColors.surfaceMutedFor(context)),
                   columns: const [
                     DataColumn(label: Text('Fecha')),
                     DataColumn(label: Text('Actor')),

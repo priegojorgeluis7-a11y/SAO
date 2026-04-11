@@ -36,7 +36,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final dashboardAsync = ref.watch(dashboardProvider);
 
     return Scaffold(
-      backgroundColor: SaoColors.gray50,
+      backgroundColor: SaoColors.scaffoldBackgroundFor(context),
       body: dashboardAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => Center(
@@ -250,7 +250,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           physics: const NeverScrollableScrollPhysics(),
           children: [
             _kpiCard(
-              title: data.range == DashboardRange.today ? 'Aprobados hoy' : 'Aprobados periodo',
+              title: data.range == DashboardRange.today ? 'Completadas hoy' : 'Completadas periodo',
               value: data.approvedCount,
               subtitle: _trendSubtitle(data.approvedTrend),
               trend: data.approvedTrend,
@@ -318,10 +318,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: SaoColors.surface,
+          color: SaoColors.surfaceFor(context),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: selected ? color : SaoColors.border,
+            color: selected ? color : SaoColors.borderFor(context),
             width: selected ? 2 : 1,
           ),
           boxShadow: [
@@ -366,9 +366,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -405,9 +405,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -436,7 +436,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: SaoColors.gray100,
+                        color: SaoColors.surfaceRaisedFor(context),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text('${item.count}', style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -530,15 +530,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     required double mapHeight,
     required double minCardHeight,
   }) {
+    final groupedPoints = _groupMapPoints(points);
     final locationCounts = _locationCountsFor(points);
     return ConstrainedBox(
       constraints: BoxConstraints(minHeight: minCardHeight),
       child: Container(
         padding: const EdgeInsets.all(18),
         decoration: BoxDecoration(
-          color: SaoColors.surface,
+          color: SaoColors.surfaceFor(context),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: SaoColors.border),
+          border: Border.all(color: SaoColors.borderFor(context)),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -557,29 +558,29 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     ? Container(
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(12),
-                          color: SaoColors.gray50,
-                          border: Border.all(color: SaoColors.gray300),
+                          color: SaoColors.surfaceMutedFor(context),
+                          border: Border.all(color: SaoColors.borderFor(context)),
                         ),
                         child: Center(
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.map_rounded, size: 42, color: SaoColors.gray400),
+                              Icon(Icons.map_rounded, size: 42, color: SaoColors.textMutedFor(context)),
                               const SizedBox(height: 8),
-                              Text(summary, style: const TextStyle(fontWeight: FontWeight.w700, color: SaoColors.gray700)),
+                              Text(summary, style: TextStyle(fontWeight: FontWeight.w700, color: SaoColors.textFor(context))),
                               const SizedBox(height: 4),
-                              Text(emptyMessage, style: const TextStyle(fontSize: 12, color: SaoColors.gray500)),
+                              Text(emptyMessage, style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context))),
                             ],
                           ),
                         ),
                       )
                     : FlutterMap(
                         options: MapOptions(
-                          initialCenter: _mapCenter(points),
-                          initialZoom: points.length == 1 ? 11.0 : 8.0,
-                          initialCameraFit: points.length > 1
+                          initialCenter: _mapCenter(groupedPoints),
+                          initialZoom: groupedPoints.length == 1 ? 11.0 : 8.0,
+                          initialCameraFit: groupedPoints.length > 1
                               ? CameraFit.bounds(
-                                  bounds: _mapBounds(points),
+                                  bounds: _mapBounds(groupedPoints),
                                   padding: const EdgeInsets.all(40),
                                 )
                               : null,
@@ -590,14 +591,67 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                             userAgentPackageName: 'mx.sao.desktop',
                           ),
                           CircleLayer(
-                            circles: points.map((item) {
-                              final color = SaoColors.getRiskColor(item.risk);
+                            circles: groupedPoints.map((entry) {
+                              final color = SaoColors.getRiskColor(entry.items.first.risk);
                               return CircleMarker(
-                                point: LatLng(item.lat, item.lon),
-                                radius: 9,
+                                point: LatLng(entry.lat, entry.lon),
+                                radius: entry.items.length > 1 ? 12 : 9,
                                 color: color.withValues(alpha: 0.65),
                                 borderColor: color,
                                 borderStrokeWidth: 1.5,
+                              );
+                            }).toList(),
+                          ),
+                          MarkerLayer(
+                            markers: groupedPoints.map((entry) {
+                              final item = entry.items.first;
+                              final color = SaoColors.getRiskColor(item.risk);
+                              return Marker(
+                                point: LatLng(entry.lat, entry.lon),
+                                width: 38,
+                                height: 42,
+                                child: Tooltip(
+                                  message: _groupedTooltip(entry),
+                                  child: Stack(
+                                    clipBehavior: Clip.none,
+                                    alignment: Alignment.topCenter,
+                                    children: [
+                                      Icon(
+                                        Icons.location_on_rounded,
+                                        size: 30,
+                                        color: color,
+                                        shadows: const [
+                                          Shadow(
+                                            blurRadius: 8,
+                                            color: Color(0x66000000),
+                                            offset: Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      if (entry.items.length > 1)
+                                        Positioned(
+                                          top: -2,
+                                          right: -2,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: SaoColors.gray900,
+                                              borderRadius: BorderRadius.circular(999),
+                                              border: Border.all(color: Colors.white, width: 1.5),
+                                            ),
+                                            child: Text(
+                                              '${entry.items.length}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w700,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
                               );
                             }).toList(),
                           ),
@@ -605,6 +659,39 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       ),
               ),
             ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: points
+                  .take(6)
+                  .map((item) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: SaoColors.surfaceRaisedFor(context),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: SaoColors.borderFor(context)),
+                        ),
+                        child: Text(
+                          item.municipality.isNotEmpty || item.state.isNotEmpty
+                              ? '${item.municipality}${item.state.isNotEmpty ? ' / ${item.state}' : ''}'
+                              : (item.front.isNotEmpty ? item.front : item.label),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: SaoColors.gray700,
+                          ),
+                        ),
+                      ))
+                  .toList(growable: false),
+            ),
+            if (points.length > 6) ...[
+              const SizedBox(height: 8),
+              Text(
+                '+${points.length - 6} ubicaciones adicionales',
+                style: const TextStyle(fontSize: 12, color: SaoColors.gray500),
+              ),
+            ],
             const SizedBox(height: 12),
             const Text('Conteo por estado/municipio', style: TextStyle(fontWeight: FontWeight.w700)),
             const SizedBox(height: 6),
@@ -725,16 +812,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       width: 280,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: SaoColors.gray50,
+        color: SaoColors.surfaceMutedFor(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: SaoColors.gray200),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: SaoColors.gray600),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: SaoColors.textMutedFor(context)),
           ),
           const SizedBox(height: 6),
           Wrap(spacing: 8, runSpacing: 8, children: chips),
@@ -743,13 +830,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  LatLng _mapCenter(List<DashboardGeoPoint> points) {
+  LatLng _mapCenter(List<_GroupedGeoPoint> points) {
     final lat = points.map((p) => p.lat).reduce((a, b) => a + b) / points.length;
     final lon = points.map((p) => p.lon).reduce((a, b) => a + b) / points.length;
     return LatLng(lat, lon);
   }
 
-  LatLngBounds _mapBounds(List<DashboardGeoPoint> points) {
+  LatLngBounds _mapBounds(List<_GroupedGeoPoint> points) {
     double minLat = points.first.lat;
     double maxLat = points.first.lat;
     double minLon = points.first.lon;
@@ -766,10 +853,48 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
+  List<_GroupedGeoPoint> _groupMapPoints(List<DashboardGeoPoint> points) {
+    final grouped = <String, List<DashboardGeoPoint>>{};
+    for (final point in points) {
+      final key = '${point.lat.toStringAsFixed(6)}|${point.lon.toStringAsFixed(6)}';
+      grouped.putIfAbsent(key, () => <DashboardGeoPoint>[]).add(point);
+    }
+
+    return grouped.values
+        .map(
+          (items) => _GroupedGeoPoint(
+            lat: items.first.lat,
+            lon: items.first.lon,
+            items: items,
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  String _groupedTooltip(_GroupedGeoPoint entry) {
+    final lines = <String>[];
+    final first = entry.items.first;
+    final location = [
+      if (first.municipality.isNotEmpty || first.state.isNotEmpty)
+        '${first.municipality}${first.state.isNotEmpty ? ' / ${first.state}' : ''}',
+      if (first.front.isNotEmpty) 'Frente: ${first.front}',
+    ];
+    if (location.isNotEmpty) {
+      lines.addAll(location);
+    }
+    if (entry.items.length > 1) {
+      lines.add('${entry.items.length} actividades en esta ubicación:');
+    }
+    for (final item in entry.items) {
+      lines.add('• ${item.label} (${_normalizeExecutionStatus(item.status)})');
+    }
+    return lines.join('\n');
+  }
+
   Widget _mapFilterChip(String label, bool active, VoidCallback onTap, Color color) {
     final inactiveBorder = color == SaoColors.gray600 ? SaoColors.gray300 : color.withValues(alpha: 0.55);
     final inactiveText = color == SaoColors.gray600 ? SaoColors.gray600 : color.withValues(alpha: 0.95);
-    final inactiveBg = color == SaoColors.gray600 ? SaoColors.gray100 : color.withValues(alpha: 0.06);
+    final inactiveBg = color == SaoColors.gray600 ? SaoColors.surfaceRaisedFor(context) : color.withValues(alpha: 0.06);
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(999),
@@ -778,7 +903,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         decoration: BoxDecoration(
           color: active ? color.withValues(alpha: 0.16) : inactiveBg,
           borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: active ? color : inactiveBorder),
+          border: Border.all(
+            color: active ? color : (color == SaoColors.gray600 ? SaoColors.borderFor(context) : inactiveBorder),
+          ),
         ),
         child: Text(
           label,
@@ -804,9 +931,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -828,7 +955,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: DataTable(
-                headingRowColor: const WidgetStatePropertyAll(SaoColors.gray100),
+                headingRowColor: WidgetStatePropertyAll(SaoColors.surfaceRaisedFor(context)),
                 columns: const [
                   DataColumn(label: Text('ID')),
                   DataColumn(label: Text('Proyecto')),
@@ -966,6 +1093,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       ),
     );
   }
+}
+
+class _GroupedGeoPoint {
+  final double lat;
+  final double lon;
+  final List<DashboardGeoPoint> items;
+
+  const _GroupedGeoPoint({
+    required this.lat,
+    required this.lon,
+    required this.items,
+  });
 }
 
 class _SparklinePainter extends CustomPainter {

@@ -15,7 +15,7 @@ class SettingsPage extends ConsumerWidget {
     final themeMode = ref.watch(themeModeProvider);
     final isDark    = themeMode == ThemeMode.dark;
     final cs        = Theme.of(context).colorScheme;
-    final backendUrl = AppDataMode.backendBaseUrl;
+    const backendUrl = AppDataMode.backendBaseUrl;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
@@ -26,7 +26,7 @@ class SettingsPage extends ConsumerWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               // ── Apariencia ───────────────────────────────────────────────
-              _SectionHeader(
+              const _SectionHeader(
                   title: 'Apariencia', icon: Icons.palette_rounded),
               const SizedBox(height: 12),
               _SettingsCard(
@@ -42,7 +42,7 @@ class SettingsPage extends ConsumerWidget {
                             'Tema',
                             style: TextStyle(
                               fontSize: 13,
-                              color: cs.onSurface.withOpacity(0.55),
+                              color: cs.onSurface.withValues(alpha: 0.55),
                             ),
                           ),
                         ),
@@ -93,7 +93,7 @@ class SettingsPage extends ConsumerWidget {
                             'Acceso rápido',
                             style: TextStyle(
                               fontSize: 13,
-                              color: cs.onSurface.withOpacity(0.55),
+                              color: cs.onSurface.withValues(alpha: 0.55),
                             ),
                           ),
                         ),
@@ -130,11 +130,12 @@ class SettingsPage extends ConsumerWidget {
               const SizedBox(height: 28),
 
               // ── Conexión ─────────────────────────────────────────────────
-              _SectionHeader(title: 'Conexión', icon: Icons.cloud_rounded),
+                const _SectionHeader(
+                  title: 'Conexión', icon: Icons.cloud_rounded),
               const SizedBox(height: 12),
               _SettingsCard(
                 children: [
-                  _CopyRow(label: 'Backend URL', value: backendUrl),
+                  const _CopyRow(label: 'Backend URL', value: backendUrl),
                   const _Divider(),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -157,7 +158,7 @@ class SettingsPage extends ConsumerWidget {
                                 'Recarga la vista actual y datos en módulos abiertos.',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: cs.onSurface.withOpacity(0.5),
+                                  color: cs.onSurface.withValues(alpha: 0.5),
                                 ),
                               ),
                             ],
@@ -178,7 +179,7 @@ class SettingsPage extends ConsumerWidget {
                     ),
                   ),
                   const _Divider(),
-                  _InfoRow(
+                  const _InfoRow(
                     label: 'Configuración',
                     value: 'dart-define',
                     hint: '--dart-define=SAO_BACKEND_URL=https://…',
@@ -188,24 +189,26 @@ class SettingsPage extends ConsumerWidget {
               const SizedBox(height: 28),
 
               // ── Acerca de ────────────────────────────────────────────────
-              _SectionHeader(
+              const _SectionHeader(
                   title: 'Acerca de', icon: Icons.info_outline_rounded),
               const SizedBox(height: 12),
-              _SettingsCard(
+              const _SettingsCard(
                 children: [
                   _InfoRow(label: 'Sistema', value: 'SAO Desktop'),
-                  const _Divider(),
+                  _Divider(),
                   _InfoRow(label: 'Versión', value: '1.0.0'),
-                  const _Divider(),
-                  _InfoRow(label: 'Organización', value: 'Tren Maya — TMQ / SAO'),
-                  const _Divider(),
+                  _Divider(),
+                  _InfoRow(
+                      label: 'Organización', value: 'Tren Maya — TMQ / SAO'),
+                  _Divider(),
                   _InfoRow(label: 'Plataforma', value: 'Windows Desktop'),
                 ],
               ),
               const SizedBox(height: 28),
 
               // ── Sesión ───────────────────────────────────────────────────
-              _SectionHeader(title: 'Sesión', icon: Icons.logout_rounded),
+              const _SectionHeader(
+                  title: 'Sesión', icon: Icons.logout_rounded),
               const SizedBox(height: 12),
               _SettingsCard(
                 children: [
@@ -230,7 +233,7 @@ class SettingsPage extends ConsumerWidget {
                                 'Termina la sesión actual en este dispositivo.',
                                 style: TextStyle(
                                     fontSize: 12,
-                                    color: cs.onSurface.withOpacity(0.5)),
+                                    color: cs.onSurface.withValues(alpha: 0.5)),
                               ),
                             ],
                           ),
@@ -292,7 +295,7 @@ class _SectionHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = Theme.of(context).colorScheme.onSurface.withOpacity(0.45);
+    final color = Theme.of(context).colorScheme.onSurface.withValues(alpha: 0.45);
     return Row(
       children: [
         Icon(icon, size: 16, color: color),
@@ -332,16 +335,12 @@ class _SettingsCard extends StatelessWidget {
 class _InfoRow extends StatelessWidget {
   final String label;
   final String value;
-  final bool monospace;
   final String? hint;
-  final Widget? valueWidget;
 
   const _InfoRow({
     required this.label,
     required this.value,
-    this.monospace = false,
     this.hint,
-    this.valueWidget,
   });
 
   @override
@@ -357,36 +356,34 @@ class _InfoRow extends StatelessWidget {
             child: Text(
               label,
               style: TextStyle(
-                  fontSize: 13, color: cs.onSurface.withOpacity(0.5)),
+                  fontSize: 13, color: cs.onSurface.withValues(alpha: 0.5)),
             ),
           ),
           Expanded(
-            child: valueWidget ??
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      value,
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: cs.onSurface,
-                        fontFamily: monospace ? 'monospace' : null,
-                      ),
-                    ),
-                    if (hint != null) ...[
-                      const SizedBox(height: 2),
-                      Text(
-                        hint!,
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: cs.onSurface.withOpacity(0.35),
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ],
-                  ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: cs.onSurface,
+                  ),
                 ),
+                if (hint != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    hint!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: cs.onSurface.withValues(alpha: 0.35),
+                      fontFamily: 'monospace',
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
       ),
@@ -426,7 +423,7 @@ class _CopyRowState extends State<_CopyRow> {
             child: Text(
               widget.label,
               style: TextStyle(
-                  fontSize: 13, color: cs.onSurface.withOpacity(0.5)),
+                  fontSize: 13, color: cs.onSurface.withValues(alpha: 0.5)),
             ),
           ),
           Expanded(
@@ -446,7 +443,7 @@ class _CopyRowState extends State<_CopyRow> {
             icon: Icon(
               _copied ? Icons.check_rounded : Icons.copy_rounded,
               size: 16,
-              color: _copied ? Colors.green : cs.onSurface.withOpacity(0.4),
+              color: _copied ? Colors.green : cs.onSurface.withValues(alpha: 0.4),
             ),
             tooltip: _copied ? 'Copiado' : 'Copiar',
             onPressed: _copy,
@@ -454,33 +451,6 @@ class _CopyRowState extends State<_CopyRow> {
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _RoleBadge extends StatelessWidget {
-  final String role;
-  const _RoleBadge({required this.role});
-
-  @override
-  Widget build(BuildContext context) {
-    final (bg, fg) = switch (role.toLowerCase()) {
-      'admin'                    => (const Color(0xFF111827), Colors.white),
-      'supervisor'               => (const Color(0xFF3B82F6), Colors.white),
-      'tecnico' || 'técnico'     => (const Color(0xFF10B981), Colors.white),
-      _                          => (const Color(0xFF94A3B8), Colors.white),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Text(
-        role,
-        style: TextStyle(
-            fontSize: 11, fontWeight: FontWeight.w600, color: fg),
       ),
     );
   }
@@ -526,7 +496,7 @@ class _ThemePreviewTile extends StatelessWidget {
               width: 32,
               height: 8,
               decoration: BoxDecoration(
-                color: fg.withOpacity(0.25),
+                color: fg.withValues(alpha: 0.25),
                 borderRadius: BorderRadius.circular(4),
               ),
             ),
@@ -535,7 +505,7 @@ class _ThemePreviewTile extends StatelessWidget {
               width: 48,
               height: 6,
               decoration: BoxDecoration(
-                color: fg.withOpacity(0.12),
+                color: fg.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(3),
               ),
             ),

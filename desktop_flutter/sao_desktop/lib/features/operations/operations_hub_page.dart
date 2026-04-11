@@ -28,8 +28,8 @@ class OperationsHubPage extends StatelessWidget {
                       text: 'Validacion',
                     ),
                     Tab(
-                      icon: Icon(Icons.task_alt_rounded),
-                      text: 'Completadas',
+                      icon: Icon(Icons.folder_copy_rounded),
+                      text: 'Expediente',
                     ),
                     Tab(
                       icon: Icon(Icons.insert_drive_file_rounded),

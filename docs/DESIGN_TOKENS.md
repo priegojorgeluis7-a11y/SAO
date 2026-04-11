@@ -8,6 +8,8 @@
 > **Ningún archivo en `features/` puede usar `Color(0xFF...)`, `Colors.red`, `Colors.green`, ni ningún valor de color directo.**
 >
 > **Todo color debe venir de `SaoColors.*` o de un token semántico del catálogo.**
+>
+> **En Desktop, los neutros de layout deben salir de helpers theme-aware (`SaoColors.scaffoldBackgroundFor`, `surfaceFor`, `surfaceMutedFor`, `surfaceRaisedFor`, `borderFor`, `textFor`, `textMutedFor`) y no de `surface`, `gray50` o `gray100` directos cuando el widget deba responder a dark mode.**
 
 Violaciones detectadas: ver [AUDIT_REPORT.md §1.2](AUDIT_REPORT.md).
 
@@ -52,6 +54,15 @@ static const Color surface       = Colors.white;
 static const Color surfaceAlt    = _gray50;
 static const Color border        = _gray200;
 static const Color borderStrong  = _gray400;
+
+// Desktop dark-mode aware helpers
+static Color scaffoldBackgroundFor(BuildContext context) { /* dark/light */ }
+static Color surfaceFor(BuildContext context) { /* dark/light */ }
+static Color surfaceMutedFor(BuildContext context) { /* dark/light */ }
+static Color surfaceRaisedFor(BuildContext context) { /* dark/light */ }
+static Color borderFor(BuildContext context) { /* dark/light */ }
+static Color textFor(BuildContext context) { /* dark/light */ }
+static Color textMutedFor(BuildContext context) { /* dark/light */ }
 
 // Feedback (semánticos)
 static const Color success       = _green600;

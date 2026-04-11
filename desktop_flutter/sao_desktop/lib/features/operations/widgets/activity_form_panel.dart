@@ -6,8 +6,6 @@ import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../ui/widgets/activity_diff_field.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/status_badge.dart';
 
 /// Panel de detalles de actividad con diff view interactivo
@@ -120,13 +118,13 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      padding: EdgeInsets.all(SaoSpacing.sm),
+      padding: const EdgeInsets.all(SaoSpacing.sm),
       decoration: BoxDecoration(
         color: isAccepted
-            ? SaoColors.success.withOpacity(0.12)
+            ? SaoColors.success.withValues(alpha: 0.12)
             : isModified
-                ? SaoColors.warning.withOpacity(0.08)
-                : Theme.of(context).colorScheme.surface.withOpacity(0),
+                ? SaoColors.warning.withValues(alpha: 0.08)
+                : Theme.of(context).colorScheme.surface.withValues(alpha: 0),
         border: Border.all(
           color: isModified ? SaoColors.warning : SaoColors.border,
         ),
@@ -138,8 +136,8 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
           if (isModified) ...[
             Row(
               children: [
-                Icon(Icons.warning_amber_rounded, size: 14, color: SaoColors.warning),
-                SizedBox(width: SaoSpacing.xs),
+                const Icon(Icons.warning_amber_rounded, size: 14, color: SaoColors.warning),
+                const SizedBox(width: SaoSpacing.xs),
                 Text(
                   'Catalogo:',
                   style: SaoTypography.caption.copyWith(
@@ -147,7 +145,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                SizedBox(width: SaoSpacing.xs),
+                const SizedBox(width: SaoSpacing.xs),
                 Expanded(
                   child: Text(
                     catalogValue.isEmpty ? 'SIN DATO' : catalogValue,
@@ -160,7 +158,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                 ),
               ],
             ),
-            SizedBox(height: SaoSpacing.xs),
+            const SizedBox(height: SaoSpacing.xs),
           ],
           ActivityDiffField(
             label: label,
@@ -204,12 +202,12 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
         children: [
           // Header
           Padding(
-            padding: EdgeInsets.all(SaoSpacing.lg),
+            padding: const EdgeInsets.all(SaoSpacing.lg),
             child: Row(
               children: [
-                Icon(Icons.assignment_rounded, size: 20, color: SaoColors.primary),
-                SizedBox(width: SaoSpacing.sm),
-                Text(
+                const Icon(Icons.assignment_rounded, size: 20, color: SaoColors.primary),
+                const SizedBox(width: SaoSpacing.sm),
+                const Text(
                   'Detalles de Actividad',
                   style: SaoTypography.pageTitle,
                 ),
@@ -218,12 +216,12 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
               ],
             ),
           ),
-          Divider(height: 1, color: SaoColors.border),
+          const Divider(height: 1, color: SaoColors.border),
           
           // Contenido con scroll
           Expanded(
             child: SingleChildScrollView(
-              padding: EdgeInsets.all(SaoSpacing.lg),
+              padding: const EdgeInsets.all(SaoSpacing.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -237,7 +235,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                     onRevert: () => _handleRevertChange('activityType'),
                     onEdit: (value) => _handleEdit('activityType', value),
                   ),
-                  SizedBox(height: SaoSpacing.lg),
+                  const SizedBox(height: SaoSpacing.lg),
 
                   // ActivityDiffField para Título
                   _buildDiffField(
@@ -249,7 +247,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                     onRevert: () => _handleRevertChange('title'),
                     onEdit: (value) => _handleEdit('title', value),
                   ),
-                  SizedBox(height: SaoSpacing.lg),
+                  const SizedBox(height: SaoSpacing.lg),
 
                   // ActivityDiffField para Descripción
                   if (widget.activity!.activity.description != null) ...[
@@ -262,7 +260,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                       onRevert: () => _handleRevertChange('description'),
                       onEdit: (value) => _handleEdit('description', value),
                     ),
-                    SizedBox(height: SaoSpacing.lg),
+                    const SizedBox(height: SaoSpacing.lg),
                   ],
 
                   // Fila: Frente y Proyecto (campos de solo lectura)
@@ -275,7 +273,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                           Icons.account_tree_rounded,
                         ),
                       ),
-                      SizedBox(width: SaoSpacing.lg),
+                      const SizedBox(width: SaoSpacing.lg),
                       Expanded(
                         child: _buildReadOnlyField(
                           'PROYECTO',
@@ -285,7 +283,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.lg),
+                  const SizedBox(height: SaoSpacing.lg),
 
                   // Fila: Municipio y Estado
                   Row(
@@ -297,7 +295,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                           Icons.location_city_rounded,
                         ),
                       ),
-                      SizedBox(width: SaoSpacing.lg),
+                      const SizedBox(width: SaoSpacing.lg),
                       Expanded(
                         child: _buildReadOnlyField(
                           'ESTADO',
@@ -307,7 +305,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.lg),
+                  const SizedBox(height: SaoSpacing.lg),
 
                   // Ingeniero asignado
                   _buildReadOnlyField(
@@ -315,7 +313,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                     widget.activity!.assignedUser?.fullName ?? 'N/A',
                     Icons.person_rounded,
                   ),
-                  SizedBox(height: SaoSpacing.lg),
+                  const SizedBox(height: SaoSpacing.lg),
 
                   // Fila: Fecha y Evidencias
                   Row(
@@ -330,7 +328,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                           Icons.calendar_today_rounded,
                         ),
                       ),
-                      SizedBox(width: SaoSpacing.lg),
+                      const SizedBox(width: SaoSpacing.lg),
                       Expanded(
                         child: _buildReadOnlyField(
                           'EVIDENCIAS',
@@ -340,13 +338,13 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.lg),
+                  const SizedBox(height: SaoSpacing.lg),
 
                   // Ubicación GPS (si existe)
                   if (widget.activity!.activity.latitude != null &&
                       widget.activity!.activity.longitude != null) ...[
                     Container(
-                      padding: EdgeInsets.all(SaoSpacing.md),
+                      padding: const EdgeInsets.all(SaoSpacing.md),
                       decoration: BoxDecoration(
                         color: SaoColors.gray50,
                         border: Border.all(color: SaoColors.border),
@@ -357,12 +355,12 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                         children: [
                           Row(
                             children: [
-                              Icon(
+                              const Icon(
                                 Icons.location_on_rounded,
                                 size: 16,
                                 color: SaoColors.error,
                               ),
-                              SizedBox(width: SaoSpacing.xs),
+                              const SizedBox(width: SaoSpacing.xs),
                               Text(
                                 'UBICACIÓN GPS',
                                 style: SaoTypography.caption.copyWith(
@@ -376,10 +374,10 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                                 onPressed: () {
                                   // TODO: Abrir en mapa
                                 },
-                                icon: Icon(Icons.open_in_new_rounded, size: 14),
-                                label: Text('Ver en mapa'),
+                                icon: const Icon(Icons.open_in_new_rounded, size: 14),
+                                label: const Text('Ver en mapa'),
                                 style: TextButton.styleFrom(
-                                  padding: EdgeInsets.symmetric(
+                                  padding: const EdgeInsets.symmetric(
                                     horizontal: SaoSpacing.sm,
                                     vertical: 4,
                                   ),
@@ -387,7 +385,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                               ),
                             ],
                           ),
-                          SizedBox(height: SaoSpacing.xs),
+                          const SizedBox(height: SaoSpacing.xs),
                           Text(
                             'Lat: ${widget.activity!.activity.latitude!.toStringAsFixed(6)}, '
                             'Lng: ${widget.activity!.activity.longitude!.toStringAsFixed(6)}',
@@ -419,10 +417,10 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
             letterSpacing: 0.3,
           ),
         ),
-        SizedBox(height: SaoSpacing.xs),
+        const SizedBox(height: SaoSpacing.xs),
         Container(
           width: double.infinity,
-          padding: EdgeInsets.all(SaoSpacing.md),
+          padding: const EdgeInsets.all(SaoSpacing.md),
           decoration: BoxDecoration(
             color: SaoColors.gray50,
             border: Border.all(color: SaoColors.border),
@@ -431,7 +429,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
           child: Row(
             children: [
               Icon(icon, size: 16, color: SaoColors.gray500),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Text(
                   value,

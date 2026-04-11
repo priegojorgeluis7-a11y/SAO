@@ -372,9 +372,9 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 48, color: AppColors.error),
+            const Icon(Icons.error_outline, size: 48, color: AppColors.error),
             const SizedBox(height: 12),
-            Text(_error!, style: TextStyle(color: AppColors.gray700)),
+            Text(_error!, style: const TextStyle(color: AppColors.gray700)),
             const SizedBox(height: 12),
             FilledButton(onPressed: _loadUsers, child: const Text('Reintentar')),
           ],
@@ -386,7 +386,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
     final selectedUser = _selectedUser;
 
     return Container(
-      color: AppColors.gray50,
+      color: AppColors.scaffoldBackgroundFor(context),
       padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,12 +462,12 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
                     curve: Curves.easeOutCubic,
                     margin: EdgeInsets.only(right: selectedUser == null ? 0 : 12),
                     decoration: BoxDecoration(
-                      color: AppColors.surface,
+                      color: AppColors.surfaceFor(context),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: AppColors.borderFor(context)),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
+                          color: Colors.black.withValues(alpha: 0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -477,7 +477,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
                     child: Column(
                       children: [
                         _TableHeader(showActionsHint: selectedUser == null),
-                        Divider(height: 1, color: AppColors.border),
+                        const Divider(height: 1, color: AppColors.border),
                         Expanded(
                           child: displayed.isEmpty
                               ? _EmptyState(
@@ -490,7 +490,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
                                 )
                               : ListView.separated(
                                   itemCount: displayed.length,
-                                  separatorBuilder: (_, __) => Divider(
+                                  separatorBuilder: (_, __) => const Divider(
                                     height: 1,
                                     color: AppColors.border,
                                     indent: 56,
@@ -562,12 +562,12 @@ class _SearchToolbar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: AppColors.surface,
-        border: Border.all(color: AppColors.border),
+        color: AppColors.surfaceFor(context),
+        border: Border.all(color: AppColors.borderFor(context)),
         borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.02),
+            color: Colors.black.withValues(alpha: 0.02),
             blurRadius: 4,
             offset: const Offset(0, 1),
           ),
@@ -575,17 +575,17 @@ class _SearchToolbar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          Icon(Icons.search_rounded, size: 18, color: AppColors.gray400),
+          const Icon(Icons.search_rounded, size: 18, color: AppColors.gray400),
           const SizedBox(width: 8),
           Expanded(
             child: TextField(
               controller: controller,
               onChanged: onSearch,
               style: TextStyle(
-                  fontSize: 13, color: AppColors.gray800),
+                  fontSize: 13, color: AppColors.textFor(context)),
               decoration: InputDecoration(
                 hintText: 'Buscar por nombre, correo, rol o proyecto…',
-                hintStyle: TextStyle(color: AppColors.gray400, fontSize: 13),
+                hintStyle: TextStyle(color: AppColors.textMutedFor(context), fontSize: 13),
                 border: InputBorder.none,
                 isDense: true,
                 contentPadding: EdgeInsets.zero,
@@ -607,7 +607,7 @@ class _SearchToolbar extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
-                color: _roleColor(roleFilter).withOpacity(0.10),
+                color: _roleColor(roleFilter).withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: _roleColor(roleFilter).withOpacity(0.3)),
               ),
@@ -637,14 +637,14 @@ class _SearchToolbar extends StatelessWidget {
                 : '$totalAll',
             style: TextStyle(
                 fontSize: 12,
-                color: AppColors.gray500,
+                color: AppColors.textMutedFor(context),
                 fontWeight: FontWeight.w500),
           ),
           const SizedBox(width: 4),
           Text('usuarios',
-              style: TextStyle(fontSize: 12, color: AppColors.gray400)),
+              style: TextStyle(fontSize: 12, color: AppColors.textMutedFor(context))),
           const SizedBox(width: 8),
-          Container(width: 1, height: 18, color: AppColors.border),
+          Container(width: 1, height: 18, color: AppColors.borderFor(context)),
           const SizedBox(width: 4),
           _ToolbarAction(
             icon: Icons.refresh_rounded,
@@ -674,7 +674,7 @@ class _ToolbarAction extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         child: Padding(
           padding: const EdgeInsets.all(4),
-          child: Icon(icon, size: 16, color: AppColors.gray500),
+          child: Icon(icon, size: 16, color: AppColors.textMutedFor(context)),
         ),
       ),
     );
@@ -710,9 +710,9 @@ class _StatCardState extends State<_StatCard> {
   @override
   Widget build(BuildContext context) {
     final palette = widget.rolePalette;
-    final accentColor = palette?.fg ?? AppColors.gray700;
+    final accentColor = palette?.fg ?? AppColors.textFor(context);
     final bgColor =
-        widget.active ? (palette?.bg ?? AppColors.gray100) : AppColors.surface;
+      widget.active ? (palette?.bg ?? AppColors.surfaceRaisedFor(context)) : AppColors.surfaceFor(context);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
@@ -729,7 +729,7 @@ class _StatCardState extends State<_StatCard> {
             border: Border.all(
               color: widget.active
                   ? accentColor.withOpacity(0.4)
-                  : (_hovered ? AppColors.borderStrong : AppColors.border),
+                  : (_hovered ? AppColors.borderFor(context) : AppColors.borderFor(context)),
               width: widget.active ? 1.5 : 1,
             ),
             boxShadow: _hovered || widget.active
@@ -762,7 +762,7 @@ class _StatCardState extends State<_StatCard> {
                 widget.label,
                 style: TextStyle(
                   fontSize: 12,
-                  color: widget.active ? accentColor : AppColors.gray500,
+                    color: widget.active ? accentColor : AppColors.textMutedFor(context),
                   fontWeight:
                       widget.active ? FontWeight.w600 : FontWeight.w400,
                 ),
@@ -784,27 +784,22 @@ class _TableHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const style = TextStyle(
-        fontSize: 11,
-        fontWeight: FontWeight.w600,
-        color: AppColors.gray500,
-        letterSpacing: 0.5);
     return Container(
-      color: AppColors.gray50,
+      color: AppColors.surfaceMutedFor(context),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       child: Row(
         children: [
           const SizedBox(width: 40),
-          const Expanded(flex: 3, child: Text('NOMBRE', style: style)),
-          const Expanded(flex: 2, child: Text('ROL', style: style)),
-          const Expanded(flex: 2, child: Text('PROYECTO', style: style)),
-          const Expanded(flex: 2, child: Text('ESTADO', style: style)),
+          Expanded(flex: 3, child: Text('NOMBRE', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMutedFor(context), letterSpacing: 0.5))),
+          Expanded(flex: 2, child: Text('ROL', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMutedFor(context), letterSpacing: 0.5))),
+          Expanded(flex: 2, child: Text('PROYECTO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMutedFor(context), letterSpacing: 0.5))),
+          Expanded(flex: 2, child: Text('ESTADO', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMutedFor(context), letterSpacing: 0.5))),
           SizedBox(
             width: 88,
             child: Text(
               showActionsHint ? 'ACCIONES' : '',
               textAlign: TextAlign.right,
-              style: style,
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.textMutedFor(context), letterSpacing: 0.5),
             ),
           ),
         ],
@@ -850,8 +845,8 @@ class _UserRowState extends State<_UserRow> {
           duration: const Duration(milliseconds: 100),
           decoration: BoxDecoration(
             color: widget.selected
-                ? const Color(0xFFF0F7FF)
-                : (_hovered ? const Color(0xFFF8FAFC) : AppColors.surface),
+              ? const Color(0xFFF0F7FF)
+              : (_hovered ? AppColors.surfaceMutedFor(context) : AppColors.surfaceFor(context)),
             border: widget.selected
                 ? const Border(
                     left: BorderSide(color: Color(0xFF3B82F6), width: 3),
@@ -883,12 +878,12 @@ class _UserRowState extends State<_UserRow> {
                         style: TextStyle(
                             fontWeight: FontWeight.w600,
                             fontSize: 13,
-                            color: AppColors.gray800),
+                          color: AppColors.textFor(context)),
                         overflow: TextOverflow.ellipsis),
                     const SizedBox(height: 1),
                     Text(widget.user.email,
                         style: TextStyle(
-                            color: AppColors.gray500, fontSize: 11),
+                          color: AppColors.textMutedFor(context), fontSize: 11),
                         overflow: TextOverflow.ellipsis),
                   ],
                 ),
@@ -946,7 +941,7 @@ class _RowAction extends StatelessWidget {
         borderRadius: BorderRadius.circular(6),
         child: Padding(
           padding: const EdgeInsets.all(6),
-          child: Icon(icon, size: 16, color: AppColors.gray600),
+          child: Icon(icon, size: 16, color: AppColors.textMutedFor(context)),
         ),
       ),
     );
@@ -975,15 +970,15 @@ class _DetailsSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = _kRolePalette[user.roleName.toUpperCase()];
-    final roleColor = palette?.fg ?? AppColors.gray700;
-    final roleBg = palette?.bg ?? AppColors.gray100;
+    final roleColor = palette?.fg ?? AppColors.textFor(context);
+    final roleBg = palette?.bg ?? AppColors.surfaceRaisedFor(context);
     final active = user.status.toLowerCase() == 'active';
 
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderFor(context)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.05),
@@ -997,10 +992,10 @@ class _DetailsSidebar extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.fromLTRB(18, 18, 12, 16),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
+            decoration: BoxDecoration(
+              color: AppColors.surfaceMutedFor(context),
               border: Border(
-                bottom: BorderSide(color: AppColors.border),
+                bottom: BorderSide(color: AppColors.borderFor(context)),
               ),
             ),
             child: Row(
@@ -1033,10 +1028,10 @@ class _DetailsSidebar extends StatelessWidget {
                         user.fullName,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.gray900,
+                          color: AppColors.textFor(context),
                         ),
                       ),
                       const SizedBox(height: 4),
@@ -1044,9 +1039,9 @@ class _DetailsSidebar extends StatelessWidget {
                         user.email,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: AppColors.gray500,
+                          color: AppColors.textMutedFor(context),
                         ),
                       ),
                       const SizedBox(height: 8),
@@ -1066,7 +1061,7 @@ class _DetailsSidebar extends StatelessWidget {
                   onPressed: onClose,
                   tooltip: 'Cerrar',
                   icon: const Icon(Icons.close_rounded, size: 18),
-                  color: AppColors.gray600,
+                  color: AppColors.textMutedFor(context),
                   visualDensity: VisualDensity.compact,
                 ),
               ],
@@ -1135,34 +1130,34 @@ class _DetailsSidebar extends StatelessWidget {
                     width: double.infinity,
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: AppColors.gray50,
+                      color: AppColors.surfaceMutedFor(context),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
+                      border: Border.all(color: AppColors.borderFor(context)),
                     ),
                     child: FutureBuilder<List<AuditItem>>(
                       future: activityFuture,
                       builder: (context, snapshot) {
                         if (snapshot.connectionState == ConnectionState.waiting) {
-                          return const Row(
+                          return Row(
                             children: [
-                              SizedBox(
+                              const SizedBox(
                                 width: 14,
                                 height: 14,
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               ),
-                              SizedBox(width: 10),
+                              const SizedBox(width: 10),
                               Text(
                                 'Cargando actividad reciente…',
-                                style: TextStyle(fontSize: 12, color: AppColors.gray500),
+                                style: TextStyle(fontSize: 12, color: AppColors.textMutedFor(context)),
                               ),
                             ],
                           );
                         }
 
                         if (snapshot.hasError) {
-                          return const Text(
+                          return Text(
                             'No se pudo cargar la actividad.',
-                            style: TextStyle(fontSize: 12, color: AppColors.gray500),
+                            style: TextStyle(fontSize: 12, color: AppColors.textMutedFor(context)),
                           );
                         }
 
@@ -1173,30 +1168,30 @@ class _DetailsSidebar extends StatelessWidget {
                               Container(
                                 width: 40,
                                 height: 40,
-                                decoration: const BoxDecoration(
-                                  color: AppColors.gray100,
+                                decoration: BoxDecoration(
+                                  color: AppColors.surfaceRaisedFor(context),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(
+                                child: Icon(
                                   Icons.timeline_rounded,
                                   size: 20,
-                                  color: AppColors.gray400,
+                                  color: AppColors.textMutedFor(context),
                                 ),
                               ),
                               const SizedBox(height: 10),
-                              const Text(
+                              Text(
                                 'Sin actividad reciente',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  color: AppColors.gray700,
+                                  color: AppColors.textFor(context),
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              const Text(
+                              Text(
                                 'Las acciones del usuario aparecerán en esta línea de tiempo.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(fontSize: 12, color: AppColors.gray500),
+                                style: TextStyle(fontSize: 12, color: AppColors.textMutedFor(context)),
                               ),
                             ],
                           );
@@ -1220,7 +1215,7 @@ class _DetailsSidebar extends StatelessWidget {
                                   padding: EdgeInsets.zero,
                                   minimumSize: Size.zero,
                                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                  foregroundColor: AppColors.gray700,
+                                  foregroundColor: AppColors.textFor(context),
                                 ),
                               ),
                             ),
@@ -1338,9 +1333,9 @@ class _DetailMetricCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1415,18 +1410,18 @@ class _TimelineEntry extends StatelessWidget {
               children: [
                 Text(
                   item.action,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.gray800,
+                    color: AppColors.textFor(context),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   '${item.entity} · ${item.entityId}',
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 11,
-                    color: AppColors.gray600,
+                    color: AppColors.textMutedFor(context),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -1490,7 +1485,7 @@ class _EmptyState extends StatelessWidget {
         children: [
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               color: AppColors.gray100,
               shape: BoxShape.circle,
             ),
@@ -1506,14 +1501,14 @@ class _EmptyState extends StatelessWidget {
                 ? 'Sin resultados para los filtros aplicados'
                 : 'No hay usuarios registrados',
             style: TextStyle(
-                color: AppColors.gray700,
+                color: AppColors.textFor(context),
                 fontWeight: FontWeight.w500,
                 fontSize: 14),
           ),
           const SizedBox(height: 4),
           Text(
             hasFilter ? 'Intenta con otros términos de búsqueda' : '',
-            style: TextStyle(color: AppColors.gray500, fontSize: 12),
+            style: TextStyle(color: AppColors.textMutedFor(context), fontSize: 12),
           ),
           if (hasFilter) ...[
             const SizedBox(height: 12),
@@ -1619,7 +1614,7 @@ class _UserModalState extends State<_UserModal>
           borderRadius: BorderRadius.circular(16),
           clipBehavior: Clip.antiAlias,
           elevation: 32,
-          shadowColor: Colors.black.withOpacity(0.15),
+          shadowColor: Colors.black.withValues(alpha: 0.15),
           child: SizedBox(
             width: 780,
             height: MediaQuery.of(context).size.height * 0.80,
@@ -1629,9 +1624,9 @@ class _UserModalState extends State<_UserModal>
                 Container(
                   padding: const EdgeInsets.fromLTRB(24, 22, 16, 18),
                   decoration: BoxDecoration(
-                    color: AppColors.surface,
+                    color: AppColors.surfaceFor(context),
                     border: Border(
-                        bottom: BorderSide(color: AppColors.border)),
+                        bottom: BorderSide(color: AppColors.borderFor(context))),
                   ),
                   child: Row(
                     children: [
@@ -1664,9 +1659,10 @@ class _UserModalState extends State<_UserModal>
                                 Text(
                                   widget.user.fullName,
                                   style: TextStyle(
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppColors.gray800),
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: AppColors.textFor(context),
+                                  ),
                                 ),
                                 const SizedBox(width: 8),
                                 _StatusBadge(widget.user.status),
@@ -1675,7 +1671,7 @@ class _UserModalState extends State<_UserModal>
                             const SizedBox(height: 3),
                             Text(widget.user.email,
                                 style: TextStyle(
-                                    color: AppColors.gray500,
+                                  color: AppColors.textMutedFor(context),
                                     fontSize: 13)),
                           ],
                         ),
@@ -1683,14 +1679,14 @@ class _UserModalState extends State<_UserModal>
                       // Close button
                       Container(
                         decoration: BoxDecoration(
-                          color: AppColors.gray100,
+                          color: AppColors.surfaceRaisedFor(context),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: IconButton(
                           icon: const Icon(Icons.close_rounded, size: 18),
                           onPressed: () => Navigator.of(context).pop(false),
                           tooltip: 'Cerrar (ESC)',
-                          color: AppColors.gray600,
+                          color: AppColors.textMutedFor(context),
                           visualDensity: VisualDensity.compact,
                         ),
                       ),
@@ -1699,15 +1695,15 @@ class _UserModalState extends State<_UserModal>
                 ),
                 // ── Tabs ─────────────────────────────────────────────────
                 Container(
-                  color: AppColors.surface,
+                  color: AppColors.surfaceFor(context),
                   child: TabBar(
                     controller: _tabs,
-                    labelColor: AppColors.gray800,
-                    unselectedLabelColor: AppColors.gray500,
+                    labelColor: AppColors.textFor(context),
+                    unselectedLabelColor: AppColors.textMutedFor(context),
                     labelStyle: const TextStyle(
                         fontWeight: FontWeight.w600, fontSize: 13),
                     unselectedLabelStyle: const TextStyle(fontSize: 13),
-                    indicatorColor: AppColors.gray800,
+                    indicatorColor: AppColors.textFor(context),
                     indicatorWeight: 2,
                     tabs: const [
                       Tab(text: 'Perfil'),
@@ -1716,7 +1712,7 @@ class _UserModalState extends State<_UserModal>
                     ],
                   ),
                 ),
-                Divider(height: 1, color: AppColors.border),
+                const Divider(height: 1, color: AppColors.border),
                 // ── Content ──────────────────────────────────────────────
                 Expanded(
                   child: TabBarView(
@@ -1740,7 +1736,7 @@ class _UserModalState extends State<_UserModal>
 
   Widget _buildPerfilTab() {
     return Container(
-      color: AppColors.gray50,
+      color: AppColors.scaffoldBackgroundFor(context),
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -1751,7 +1747,7 @@ class _UserModalState extends State<_UserModal>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ModalSectionLabel('Información básica'),
+                  const _ModalSectionLabel('Información básica'),
                   const SizedBox(height: 14),
                   Row(
                     children: [
@@ -1761,6 +1757,7 @@ class _UserModalState extends State<_UserModal>
                           child: TextField(
                             controller: _nameCtrl,
                             decoration: _inputDeco(
+                                context,
                                 hint: widget.user.fullName,
                                 icon: Icons.person_outline),
                           ),
@@ -1773,6 +1770,7 @@ class _UserModalState extends State<_UserModal>
                           child: TextField(
                             readOnly: true,
                             decoration: _inputDeco(
+                              context,
                               hint: widget.user.email,
                               icon: Icons.email_outlined,
                               filled: true,
@@ -1799,7 +1797,8 @@ class _UserModalState extends State<_UserModal>
                             onChanged: (v) {
                               if (v != null) setState(() => _role = v);
                             },
-                            decoration: _inputDeco(icon: Icons.badge_outlined),
+                            decoration: _inputDeco(context,
+                                icon: Icons.badge_outlined),
                           ),
                         ),
                       ),
@@ -1810,6 +1809,7 @@ class _UserModalState extends State<_UserModal>
                           child: TextField(
                             controller: _projectCtrl,
                             decoration: _inputDeco(
+                              context,
                                 hint: 'TMQ (opcional)',
                                 icon: Icons.folder_outlined),
                           ),
@@ -1834,7 +1834,8 @@ class _UserModalState extends State<_UserModal>
                               if (v != null) setState(() => _status = v);
                             },
                             decoration:
-                                _inputDeco(icon: Icons.toggle_on_outlined),
+                                _inputDeco(context,
+                                    icon: Icons.toggle_on_outlined),
                           ),
                         ),
                       ),
@@ -1894,7 +1895,7 @@ class _UserModalState extends State<_UserModal>
                   onPressed: () => Navigator.of(context).pop(false),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: AppColors.gray600,
-                    side: BorderSide(color: AppColors.border),
+                    side: const BorderSide(color: AppColors.border),
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 11),
                   ),
@@ -1943,7 +1944,7 @@ class _UserModalState extends State<_UserModal>
                 children: [
                   Row(
                     children: [
-                      _ModalSectionLabel('Permisos efectivos'),
+                      const _ModalSectionLabel('Permisos efectivos'),
                       const Spacer(),
                       OutlinedButton.icon(
                         onPressed: null,
@@ -1951,7 +1952,7 @@ class _UserModalState extends State<_UserModal>
                         label: const Text('Agregar'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.gray600,
-                          side: BorderSide(color: AppColors.border),
+                          side: const BorderSide(color: AppColors.border),
                           padding: const EdgeInsets.symmetric(
                               horizontal: 12, vertical: 8),
                           textStyle: const TextStyle(fontSize: 12),
@@ -1966,7 +1967,7 @@ class _UserModalState extends State<_UserModal>
                       color: roleBg,
                       borderRadius: BorderRadius.circular(8),
                       border:
-                          Border.all(color: roleColor.withOpacity(0.2)),
+                          Border.all(color: roleColor.withValues(alpha: 0.2)),
                     ),
                     child: Row(
                       children: [
@@ -1975,19 +1976,19 @@ class _UserModalState extends State<_UserModal>
                         const SizedBox(width: 8),
                         _RoleBadge(widget.user.roleName),
                         const SizedBox(width: 8),
-                        Text('Permisos heredados del rol',
-                            style: TextStyle(
+                        const Text('Permisos heredados del rol',
+                          style: TextStyle(
                                 fontSize: 12, color: AppColors.gray600)),
                       ],
                     ),
                   ),
                   const SizedBox(height: 20),
-                  Center(
+                  const Center(
                     child: Column(
                       children: [
                         Icon(Icons.security_outlined,
                             size: 40, color: AppColors.gray300),
-                        const SizedBox(height: 10),
+                        SizedBox(height: 10),
                         Text('Gestión de permisos disponible próximamente',
                             style: TextStyle(
                                 color: AppColors.gray500, fontSize: 13)),
@@ -2014,7 +2015,7 @@ class _UserModalState extends State<_UserModal>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _ModalSectionLabel('Actividades asignadas'),
+              const _ModalSectionLabel('Actividades asignadas'),
               const SizedBox(height: 20),
               FutureBuilder<List<AdminAssignmentItem>>(
                 future: widget.assignmentsFuture,
@@ -2097,7 +2098,7 @@ class _UserModalState extends State<_UserModal>
             Text('¿Eliminar permanentemente a ${widget.user.fullName}?'),
             const SizedBox(height: 8),
             Text(widget.user.email,
-                style: TextStyle(color: AppColors.gray500, fontSize: 13)),
+              style: const TextStyle(color: AppColors.gray500, fontSize: 13)),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(10),
@@ -2158,9 +2159,9 @@ class _ModalCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: AppColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
+        border: Border.all(color: AppColors.borderFor(context)),
       ),
       child: child,
     );
@@ -2174,7 +2175,7 @@ class _ModalSectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(text,
-        style: TextStyle(
+        style: const TextStyle(
             fontSize: 13,
             fontWeight: FontWeight.w600,
             color: AppColors.gray700));
@@ -2193,7 +2194,7 @@ class _LabeledField extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(label,
-            style: TextStyle(
+            style: const TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
                 color: AppColors.gray500,
@@ -2205,7 +2206,8 @@ class _LabeledField extends StatelessWidget {
   }
 }
 
-InputDecoration _inputDeco({
+InputDecoration _inputDeco(
+  BuildContext context, {
   String? hint,
   IconData? icon,
   bool filled = false,
@@ -2215,20 +2217,20 @@ InputDecoration _inputDeco({
     prefixIcon: icon != null ? Icon(icon, size: 16) : null,
     isDense: true,
     filled: filled,
-    fillColor: filled ? AppColors.gray50 : null,
+    fillColor: filled ? AppColors.surfaceMutedFor(context) : null,
     contentPadding:
         const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppColors.border),
+      borderSide: BorderSide(color: AppColors.borderFor(context)),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppColors.border),
+      borderSide: BorderSide(color: AppColors.borderFor(context)),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(8),
-      borderSide: BorderSide(color: AppColors.gray700, width: 1.5),
+      borderSide: BorderSide(color: AppColors.textFor(context), width: 1.5),
     ),
   );
 }
@@ -2254,7 +2256,7 @@ class _Field extends StatelessWidget {
     return TextField(
       controller: ctrl,
       keyboardType: keyboard,
-      decoration: _inputDeco(hint: hint ?? label, icon: icon),
+      decoration: _inputDeco(context, hint: hint ?? label, icon: icon),
     );
   }
 }
@@ -2362,8 +2364,8 @@ class _ProjectChip extends StatelessWidget {
                 fontWeight: FontWeight.w600)),
       );
     }
-    return Text('Sin asignar',
-        style: TextStyle(color: AppColors.gray400, fontSize: 12));
+    return const Text('Sin asignar',
+      style: TextStyle(color: AppColors.gray400, fontSize: 12));
   }
 }
 
@@ -2432,7 +2434,7 @@ class _AssignmentCard extends StatelessWidget {
                 Row(
                   children: [
                     if (item.frente != null && item.frente!.isNotEmpty) ...[
-                      Icon(Icons.route_rounded,
+                      const Icon(Icons.route_rounded,
                           size: 12, color: AppColors.gray500),
                       const SizedBox(width: 4),
                       Text(item.frente!,
@@ -2440,7 +2442,7 @@ class _AssignmentCard extends StatelessWidget {
                               fontSize: 11, color: AppColors.gray500)),
                       const SizedBox(width: 10),
                     ],
-                    Icon(Icons.calendar_today_rounded,
+                    const Icon(Icons.calendar_today_rounded,
                         size: 12, color: AppColors.gray500),
                     const SizedBox(width: 4),
                     Text(fmt.format(item.startAt),
@@ -2455,7 +2457,7 @@ class _AssignmentCard extends StatelessWidget {
             padding:
                 const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: _statusColor.withOpacity(0.12),
+              color: _statusColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Text(

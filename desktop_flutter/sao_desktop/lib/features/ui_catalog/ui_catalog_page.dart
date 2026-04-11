@@ -27,11 +27,11 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(SaoSpacing.pagePadding),
-                  child: Column(
+                  child: const Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Catálogo de Diseño', style: SaoTypography.pageTitle),
-                      const SizedBox(height: SaoSpacing.xs),
+                      SizedBox(height: SaoSpacing.xs),
                       Text('Sistema de Diseño', style: SaoTypography.caption),
                     ],
                   ),
@@ -47,7 +47,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
                       return ListTile(
                         title: Text(section.title),
                         selected: isSelected,
-                        selectedTileColor: SaoColors.primary.withOpacity(0.1),
+                        selectedTileColor: SaoColors.primary.withValues(alpha: 0.1),
                         onTap: () => setState(() => _selectedTabIndex = index),
                       );
                     },
@@ -80,54 +80,54 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
   }
 
   Widget _buildSection(CatalogSection section) {
-    return section.builder(context);
+    return section.builder();
   }
 
-  static final List<CatalogSection> _catalogSections = [
+  static const List<CatalogSection> _catalogSections = [
     CatalogSection(
       title: 'Tokens',
-      builder: (context) => _buildTokensSection(),
+      builder: _buildTokensSection,
     ),
     CatalogSection(
       title: 'Colores',
-      builder: (context) => _buildColorsSection(),
+      builder: _buildColorsSection,
     ),
     CatalogSection(
       title: 'Tipografía',
-      builder: (context) => _buildTypographySection(),
+      builder: _buildTypographySection,
     ),
     CatalogSection(
       title: 'Botones',
-      builder: (context) => _buildButtonsSection(),
+      builder: _buildButtonsSection,
     ),
     CatalogSection(
       title: 'Tarjetas',
-      builder: (context) => _buildCardsSection(),
+      builder: _buildCardsSection,
     ),
     CatalogSection(
       title: 'Actividades',
-      builder: (context) => _buildActivitiesSection(),
+      builder: _buildActivitiesSection,
     ),
     CatalogSection(
       title: 'Entradas',
-      builder: (context) => _buildInputsSection(),
+      builder: _buildInputsSection,
     ),
     CatalogSection(
       title: 'Chips y Badges',
-      builder: (context) => _buildChipsBadgesSection(),
+      builder: _buildChipsBadgesSection,
     ),
     CatalogSection(
       title: 'Estados',
-      builder: (context) => _buildStatesSection(),
+      builder: _buildStatesSection,
     ),
   ];
 
   static Widget _buildTokensSection() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Tokens de Espaciado', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.lg,
           runSpacing: SaoSpacing.lg,
@@ -142,9 +142,9 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
             _TokenCard('xxxl', SaoSpacing.xxxl),
           ],
         ),
-        const SizedBox(height: SaoSpacing.xxxl),
+        SizedBox(height: SaoSpacing.xxxl),
         Text('Tokens de Radios', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.lg,
           runSpacing: SaoSpacing.lg,
@@ -160,11 +160,11 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
   }
 
   static Widget _buildColorsSection() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Grises', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.sm,
           runSpacing: SaoSpacing.sm,
@@ -181,9 +181,9 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
             _ColorCard('gray900', SaoColors.gray900),
           ],
         ),
-        const SizedBox(height: SaoSpacing.xxxl),
+        SizedBox(height: SaoSpacing.xxxl),
         Text('Colores de Riesgo', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.sm,
           runSpacing: SaoSpacing.sm,
@@ -199,11 +199,11 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
   }
 
   static Widget _buildTypographySection() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Estilos de Tipografía', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -222,11 +222,11 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
   }
 
   static Widget _buildButtonsSection() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Variantes de Botones', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.lg,
           runSpacing: SaoSpacing.lg,
@@ -237,7 +237,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
             SaoButton.success(label: 'Éxito'),
           ],
         ),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.lg,
           runSpacing: SaoSpacing.lg,
@@ -254,17 +254,17 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Ejemplos de Tarjetas', style: SaoTypography.sectionTitle),
+        const Text('Ejemplos de Tarjetas', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.lg),
         Row(
           children: [
-            Expanded(
+            const Expanded(
               child: SaoCard(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Tarjeta Básica', style: SaoTypography.cardTitle),
-                    const SizedBox(height: SaoSpacing.xs),
+                    SizedBox(height: SaoSpacing.xs),
                     Text('Este es un ejemplo de tarjeta básica', style: SaoTypography.caption),
                   ],
                 ),
@@ -274,11 +274,11 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
             Expanded(
               child: SaoCard(
                 onTap: () {},
-                child: Column(
+                child: const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Tarjeta Clickeable', style: SaoTypography.cardTitle),
-                    const SizedBox(height: SaoSpacing.xs),
+                    SizedBox(height: SaoSpacing.xs),
                     Text('Esta tarjeta tiene interacción', style: SaoTypography.caption),
                   ],
                 ),
@@ -291,12 +291,12 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
   }
 
   static Widget _buildInputsSection() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Ejemplos de Entrada', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
-        const Column(
+        SizedBox(height: SaoSpacing.lg),
+        Column(
           children: [
             SaoInput(label: 'Entrada Básica', hint: 'Ingrese algún texto'),
             SizedBox(height: SaoSpacing.lg),
@@ -315,9 +315,9 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Chips', style: SaoTypography.sectionTitle),
+        const Text('Chips', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.lg),
-        Wrap(
+        const Wrap(
           spacing: SaoSpacing.sm,
           children: [
             SaoChip(label: 'Predeterminado'),
@@ -326,7 +326,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
           ],
         ),
         const SizedBox(height: SaoSpacing.xxxl),
-        Text('Badges', style: SaoTypography.sectionTitle),
+        const Text('Badges', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.lg),
         Wrap(
           spacing: SaoSpacing.sm,
@@ -345,19 +345,19 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
   }
 
   static Widget _buildStatesSection() {
-    return Column(
+    return const Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text('Estado Vacío', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         SaoEmptyState(
           icon: Icons.inbox,
           message: 'No hay actividades',
           subtitle: 'Selecciona un filtro diferente',
         ),
-        const SizedBox(height: SaoSpacing.xxxl),
+        SizedBox(height: SaoSpacing.xxxl),
         Text('Tarjeta de Alerta', style: SaoTypography.sectionTitle),
-        const SizedBox(height: SaoSpacing.lg),
+        SizedBox(height: SaoSpacing.lg),
         SaoAlertCard(
           message: 'R10 - Proceso en revisión / sin acuerdo final',
           icon: Icons.warning_amber_rounded,
@@ -409,9 +409,9 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Tarjetas por Estado', style: SaoTypography.sectionTitle),
+        const Text('Tarjetas por Estado', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.xs),
-        Text(
+        const Text(
           'Se muestra 1 ejemplo por cada estado de StatusCatalog',
           style: SaoTypography.caption,
         ),
@@ -419,7 +419,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
         ...cardsByStatus,
         
         const SizedBox(height: SaoSpacing.lg),
-        Text('Variantes de Riesgo', style: SaoTypography.sectionTitle),
+        const Text('Variantes de Riesgo', style: SaoTypography.sectionTitle),
         const SizedBox(height: SaoSpacing.lg),
 
         ...['bajo', 'medio', 'alto', 'prioritario'].map((riskId) {
@@ -460,7 +460,7 @@ class _UiCatalogPageState extends State<UiCatalogPage> {
       decoration: BoxDecoration(
         color: status.backgroundColor,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: status.color.withOpacity(0.45)),
+        border: Border.all(color: status.color.withValues(alpha: 0.45)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -606,9 +606,9 @@ class _TypographyCard extends StatelessWidget {
 
 class CatalogSection {
   final String title;
-  final Widget Function(BuildContext) builder;
+  final Widget Function() builder;
 
-  CatalogSection({required this.title, required this.builder});
+  const CatalogSection({required this.title, required this.builder});
 }
 
 class _RailwayCatalogSample {

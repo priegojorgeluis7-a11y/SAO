@@ -102,9 +102,9 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: SaoColors.gray50,
+              color: SaoColors.surfaceFor(context),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: SaoColors.gray200),
+              border: Border.all(color: SaoColors.borderFor(context)),
             ),
             child: Row(
               children: [
@@ -118,7 +118,10 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
                       ),
                       Text(
                         dateLabel,
-                        style: const TextStyle(fontSize: 12, color: SaoColors.gray500),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: SaoColors.textMutedFor(context),
+                        ),
                       ),
                     ],
                   ),
@@ -252,32 +255,32 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
                           constraints: const BoxConstraints(maxWidth: 520),
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: SaoColors.surfaceFor(context),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: SaoColors.gray200),
+                            border: Border.all(color: SaoColors.borderFor(context)),
                           ),
                           child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(
+                              Icon(
                                 Icons.event_busy_rounded,
                                 size: 64,
-                                color: SaoColors.gray400,
+                                color: SaoColors.textMutedFor(context),
                               ),
                               const SizedBox(height: 12),
                               Text(
                                 'Sin actividades para $dateLabel',
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w700,
-                                  color: SaoColors.gray700,
+                                  color: SaoColors.textFor(context),
                                 ),
                               ),
                               const SizedBox(height: 6),
-                              const Text(
+                              Text(
                                 'Crea la primera actividad para comenzar la planeación del dia.',
                                 textAlign: TextAlign.center,
-                                style: TextStyle(color: SaoColors.gray500),
+                                style: TextStyle(color: SaoColors.textMutedFor(context)),
                               ),
                               const SizedBox(height: 14),
                               FilledButton.icon(
@@ -1119,8 +1122,8 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         ),
         const SizedBox(height: 10),
         if (_estadoOptions.isEmpty)
-          InputDecorator(
-            decoration: const InputDecoration(
+          const InputDecorator(
+            decoration: InputDecoration(
               labelText: 'Estado',
               border: OutlineInputBorder(),
             ),
@@ -1170,7 +1173,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
               _selectedEstado == null
                   ? 'Selecciona estado primero'
                   : 'Sin municipios para el estado seleccionado',
-              style: TextStyle(color: SaoColors.gray500),
+              style: const TextStyle(color: SaoColors.gray500),
             ),
           )
         else
@@ -1660,8 +1663,6 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     });
     try {
       final pkInicio = _parsePkMeters(_pkController.text);
-      final pkFin = _parsePkMeters(_pkFinController.text);
-      final lugar = _lugarController.text.trim();
       final conflict = _checkConflict();
       if (conflict != null) {
         setState(() {
@@ -1876,7 +1877,7 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
 
     setState(() => _loading = true);
     try {
-      final apiClient = const BackendApiClient();
+      const apiClient = BackendApiClient();
       try {
         await apiClient.deleteJson('/api/v1/activities/${widget.item.id}');
       } catch (_) {
@@ -1962,14 +1963,12 @@ class _HoverAssignmentActions extends StatefulWidget {
   final VoidCallback onEdited;
   final VoidCallback onDuplicated;
   final ValueChanged<String> onDeleted;
-  final bool forceVisible;
 
   const _HoverAssignmentActions({
     required this.item,
     required this.onEdited,
     required this.onDuplicated,
     required this.onDeleted,
-    this.forceVisible = false,
   });
 
   @override
@@ -1989,9 +1988,9 @@ class _HoverAssignmentActionsState extends State<_HoverAssignmentActions> {
         height: 28,
         child: AnimatedOpacity(
           duration: const Duration(milliseconds: 140),
-          opacity: (widget.forceVisible || _hovered) ? 1 : 0,
+          opacity: _hovered ? 1 : 0,
           child: IgnorePointer(
-            ignoring: !(widget.forceVisible || _hovered),
+            ignoring: !_hovered,
             child: _AssignmentActionsMenu(
               item: widget.item,
               onEdited: widget.onEdited,
@@ -2445,98 +2444,6 @@ class _CollapsedCalendarRail extends StatelessWidget {
   }
 }
 
-class _QuickStatusFilterDot extends StatelessWidget {
-  final String tooltip;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-  final bool alert;
-  final bool blinkOn;
-
-  const _QuickStatusFilterDot({
-    required this.tooltip,
-    required this.color,
-    required this.selected,
-    required this.onTap,
-    this.alert = false,
-    this.blinkOn = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(999),
-        onTap: onTap,
-        child: Container(
-          width: 20,
-          height: 20,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: (alert && blinkOn ? SaoColors.warning : color)
-                .withValues(alpha: selected ? 0.9 : 0.25),
-            border: Border.all(
-              color: alert && blinkOn
-                  ? SaoColors.warning
-                  : (selected ? color : SaoColors.gray300),
-              width: selected ? 1.8 : 1,
-            ),
-            boxShadow: alert && blinkOn
-                ? const [
-                    BoxShadow(
-                      color: Color(0x33F59E0B),
-                      blurRadius: 6,
-                      spreadRadius: 1,
-                    ),
-                  ]
-                : null,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _DragAssignmentPayload {
-  final AssignmentItem item;
-  final DateTime start;
-  final DateTime end;
-  final int sourceHour;
-
-  const _DragAssignmentPayload({
-    required this.item,
-    required this.start,
-    required this.end,
-    required this.sourceHour,
-  });
-}
-
-class _HourAssignmentRowPlaceholder extends StatelessWidget {
-  final String itemName;
-
-  const _HourAssignmentRowPlaceholder({required this.itemName});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: SaoColors.gray50,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        itemName,
-        style: const TextStyle(
-          color: SaoColors.gray500,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
-    );
-  }
-}
-
 class _HourlyAssignmentsView extends StatefulWidget {
   final String projectId;
   final List<AssignmentItem> assignments;
@@ -2571,7 +2478,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
   final Map<String, List<AssignmentFrontCoverageOption>> _coverageByFront =
       <String, List<AssignmentFrontCoverageOption>>{};
   final TextEditingController _pkFilterController = TextEditingController();
-  bool _isDragging = false;
   bool _overdueBlinkOn = false;
   String? _hoveredAssignmentId;
   Timer? _overdueBlinkTimer;
@@ -2608,7 +2514,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
 
   Future<void> _loadLocationMetadata() async {
     if (widget.projectId.trim().isEmpty) return;
-    final repo = const AssignmentsRepository(BackendApiClient());
+    const repo = AssignmentsRepository(BackendApiClient());
     var fronts = const <AssignmentFrontOption>[];
     var coverage = const <String, List<AssignmentFrontCoverageOption>>{};
 
@@ -2692,14 +2598,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     return value >= start && value <= end;
   }
 
-  bool _isOverdueScheduled(AssignmentItem item, DateTime itemStart) {
-    if (!_isTodaySelected()) return false;
-    final now = DateTime.now();
-    final group = _statusGroup(_effectiveStatus(item));
-    final isScheduled = group == 'asignada';
-    return isScheduled && itemStart.isBefore(now);
-  }
-
   Future<void> _updateStatus(AssignmentItem item, String newStatus) async {
     setState(() {
       _statusOverrideByAssignmentId[item.id] = newStatus;
@@ -2774,7 +2672,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     if (!dir.existsSync()) {
       dir.createSync(recursive: true);
     }
-    final file = File('${dir.path}\\reporte_planeacion_$dateStamp\_$nowStamp.csv');
+    final file = File('${dir.path}\\reporte_planeacion_${dateStamp}_$nowStamp.csv');
     file.writeAsStringSync(csv.toString());
 
     if (!mounted) return;
@@ -2864,10 +2762,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     return '$hh:$mm';
   }
 
-  Color _statusColor(String status) {
-    return _planningStatusColor(status);
-  }
-
   String _statusGroup(String status) {
     final normalized = _planningNormalizedStatus(status);
     switch (normalized) {
@@ -2923,32 +2817,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
       default:
         return SaoColors.gray500;
     }
-  }
-
-  IconData _activityTypeIcon(String activityTypeName) {
-    final normalized = activityTypeName
-        .trim()
-        .toLowerCase()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u');
-    if (normalized.contains('tren') || normalized.contains('mov') || normalized.contains('traslado')) {
-      return Icons.train_rounded;
-    }
-    if (normalized.contains('obra') || normalized.contains('civil') || normalized.contains('excav')) {
-      return Icons.construction_rounded;
-    }
-    if (normalized.contains('inspe') || normalized.contains('rev')) {
-      return Icons.fact_check_rounded;
-    }
-    return Icons.work_outline_rounded;
-  }
-
-  bool _isTodaySelected() {
-    final now = DateTime.now();
-    return _sameDay(widget.selectedDate, now);
   }
 
   void _openGpsMapDialog(AssignmentItem item) {
@@ -3073,33 +2941,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     });
   }
 
-  void _moveAssignmentToHour(
-    _DragAssignmentPayload payload,
-    int targetHour,
-  ) {
-    final duration = payload.end.difference(payload.start);
-    final newStart = DateTime(
-      widget.selectedDate.year,
-      widget.selectedDate.month,
-      widget.selectedDate.day,
-      targetHour,
-      payload.start.minute,
-    );
-    final newEnd = newStart.add(duration);
-
-    setState(() {
-      _manualScheduleById[payload.item.id] = (start: newStart, end: newEnd);
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          'Actividad movida a ${targetHour.toString().padLeft(2, '0')}:${payload.start.minute.toString().padLeft(2, '0')}.',
-        ),
-      ),
-    );
-  }
-
   void _handleAssignmentDeleted(String assignmentId) {
     setState(() {
       _dismissedAssignmentIds.add(assignmentId);
@@ -3135,11 +2976,11 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     if (confirmed != true || !mounted) return;
 
     try {
-      final apiClient = const BackendApiClient();
+      const apiClient = BackendApiClient();
       try {
         await apiClient.deleteJson('/api/v1/activities/${item.id}');
       } catch (_) {
-        final assignmentsRepo = const AssignmentsRepository(BackendApiClient());
+        const assignmentsRepo = AssignmentsRepository(BackendApiClient());
         await assignmentsRepo.cancelAssignment(item.id, reason: 'deleted_from_planning');
       }
       if (!mounted) return;
@@ -3180,8 +3021,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     final estadoVal = _valueOrDash(_locationEstado(item));
     final municipioVal = _valueOrDash(_locationMunicipio(item));
     final pkVal = _locationPk(item);
-    final cs = Theme.of(context).colorScheme;
-    
     // Extraer coords GPS
     final mapPoint = (item.latitude != null && item.longitude != null)
         ? LatLng(item.latitude!, item.longitude!)
@@ -3192,11 +3031,11 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     final saved = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Row(
+        title: const Row(
           children: [
-            const Icon(Icons.edit_rounded, size: 18),
-            const SizedBox(width: 8),
-            const Text(
+            Icon(Icons.edit_rounded, size: 18),
+            SizedBox(width: 8),
+            Text(
               'Editar Actividad',
               style: TextStyle(fontSize: 14),
             ),
@@ -3239,7 +3078,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                     // Location rows with icons
                     Row(
                       children: [
-                        Icon(Icons.place_rounded, size: 14, color: SaoColors.primary),
+                        const Icon(Icons.place_rounded, size: 14, color: SaoColors.primary),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
@@ -3253,7 +3092,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                     ),
                     Row(
                       children: [
-                        Icon(Icons.straighten_rounded, size: 14, color: SaoColors.gray600),
+                        const Icon(Icons.straighten_rounded, size: 14, color: SaoColors.gray600),
                         const SizedBox(width: 6),
                         Text(
                           'PK: $pkVal',
@@ -3264,7 +3103,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                     // Date row with icon
                     Row(
                       children: [
-                        Icon(Icons.calendar_today_rounded, size: 14, color: SaoColors.gray600),
+                        const Icon(Icons.calendar_today_rounded, size: 14, color: SaoColors.gray600),
                         const SizedBox(width: 6),
                         Text(
                           DateFormat('d \'de\' MMMM, yyyy', 'es').format(currentStart),
@@ -3357,7 +3196,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                   padding: const EdgeInsets.only(top: 6),
                   child: Row(
                     children: [
-                      Icon(Icons.gps_fixed_rounded, size: 12, color: SaoColors.gray500),
+                      const Icon(Icons.gps_fixed_rounded, size: 12, color: SaoColors.gray500),
                       const SizedBox(width: 4),
                       Text(
                         '${mapPoint.latitude.toStringAsFixed(6)}, ${mapPoint.longitude.toStringAsFixed(6)}',
@@ -3367,8 +3206,8 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                   ),
                 )
               else
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
                   child: Text(
                     'Sin ubicación GPS - se muestra región general',
                     style: TextStyle(fontSize: 10, color: SaoColors.gray500, fontStyle: FontStyle.italic),
@@ -3413,6 +3252,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     }
 
     if (saved != true) return;
+    if (!mounted) return;
 
     final startParsed = _parseHourMinute(startController.text);
     final endParsed = _parseHourMinute(endController.text);
@@ -3565,10 +3405,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     return 'Sin municipio';
   }
 
-  String _locationEstadoMunicipio(AssignmentItem item) {
-    return '${_locationEstado(item)} / ${_locationMunicipio(item)}';
-  }
-
   String _displayActivityName(AssignmentItem item) {
     String normalizeActivityText(String input) {
       var value = input.trim();
@@ -3692,16 +3528,6 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
   }
 
   /// Returns estado / municipio line, empty string when both are missing.
-  String _locationLine2(AssignmentItem item) {
-    final estado = _locationEstado(item);
-    final municipio = _locationMunicipio(item);
-    final hasEstado = !estado.trim().toLowerCase().startsWith('sin ');
-    final hasMunicipio = !municipio.trim().toLowerCase().startsWith('sin ');
-    if (!hasEstado && !hasMunicipio) return '';
-    if (hasEstado && hasMunicipio) return '$estado / $municipio';
-    return hasEstado ? estado : municipio;
-  }
-
   String _initials(String fullName) {
     final parts = fullName
         .trim()
@@ -3879,13 +3705,13 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                             Container(
                               width: double.infinity,
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFFF8F9FA),
-                                borderRadius: const BorderRadius.only(
+                              decoration: const BoxDecoration(
+                                color: Color(0xFFF8F9FA),
+                                borderRadius: BorderRadius.only(
                                   topLeft: Radius.circular(12),
                                   topRight: Radius.circular(12),
                                 ),
-                                border: const Border(
+                                border: Border(
                                   bottom: BorderSide(color: SaoColors.gray200),
                                   left: BorderSide(color: SaoColors.primary, width: 3),
                                 ),
@@ -3985,7 +3811,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                       ),
                                       decoration: BoxDecoration(
                                         color: isHovered
-                                            ? Color.alphaBlend(cs.onSurface.withOpacity(0.06), cs.surface)
+                                            ? Color.alphaBlend(cs.onSurface.withValues(alpha: 0.06), cs.surface)
                                             : cs.surface,
                                         borderRadius: BorderRadius.circular(8),
                                         border: Border.all(
@@ -4020,7 +3846,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                       Text(
                                                         _formatHour(row.start),
                                                         style: TextStyle(
-                                                          color: cs.onSurface.withOpacity(0.5),
+                                                          color: cs.onSurface.withValues(alpha: 0.5),
                                                           fontSize: 10.5,
                                                         ),
                                                       ),
@@ -4052,7 +3878,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                       maxLines: 1,
                                                       overflow: TextOverflow.ellipsis,
                                                       style: TextStyle(
-                                                        color: cs.onSurface.withOpacity(0.78),
+                                                        color: cs.onSurface.withValues(alpha: 0.78),
                                                         fontSize: 11.3,
                                                         fontWeight: FontWeight.w600,
                                                       ),
@@ -4065,7 +3891,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                 maxLines: 1,
                                                 overflow: TextOverflow.ellipsis,
                                                 style: TextStyle(
-                                                  color: cs.onSurface.withOpacity(0.58),
+                                                  color: cs.onSurface.withValues(alpha: 0.58),
                                                   fontSize: 10,
                                                   fontFeatures: const [
                                                     FontFeature.tabularFigures(),
@@ -4121,7 +3947,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                   maxLines: 1,
                                                   overflow: TextOverflow.ellipsis,
                                                   style: TextStyle(
-                                                    color: cs.onSurface.withOpacity(0.7),
+                                                    color: cs.onSurface.withValues(alpha: 0.7),
                                                     fontSize: 11.5,
                                                   ),
                                                 ),
@@ -4214,7 +4040,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                               ],
                                               icon: Icon(
                                                 Icons.more_horiz_rounded,
-                                                color: cs.onSurface.withOpacity(0.5),
+                                                color: cs.onSurface.withValues(alpha: 0.5),
                                               ),
                                             ),
                                           ],

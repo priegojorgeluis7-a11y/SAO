@@ -141,7 +141,7 @@ class SaoActivityCard extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.only(bottom: SaoSpacing.md),
           child: Material(
-            color: SaoColors.surface,
+            color: SaoColors.surfaceFor(context),
             borderRadius: BorderRadius.circular(14),
             elevation: 0,
             child: InkWell(
@@ -185,12 +185,12 @@ class SaoActivityCard extends StatelessWidget {
                           ),
                         ],
                   color: compact
-                      ? SaoColors.surface
+                          ? SaoColors.surfaceFor(context)
                       : isHover && !isSelected
-                          ? SaoColors.gray50
+                            ? SaoColors.surfaceMutedFor(context)
                           : isSelected
                               ? SaoColors.primary.withOpacity(0.06)
-                              : SaoColors.surface,
+                              : SaoColors.surfaceFor(context),
                 ),
                 child: compact
                     ? Row(
@@ -217,8 +217,8 @@ class SaoActivityCard extends StatelessWidget {
                     : Padding(
                         padding: const EdgeInsets.all(12),
                         child: _useRailwayLayout
-                            ? _buildRailwayLayout()
-                            : _buildDefaultLayout(),
+                          ? _buildRailwayLayout(context)
+                          : _buildDefaultLayout(context),
                       ),
               ),
             ),
@@ -321,7 +321,7 @@ class SaoActivityCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: pkNotRegistered
                       ? SaoColors.alertBg
-                      : Colors.white.withOpacity(0.70),
+                      : SaoColors.surfaceRaisedFor(context).withOpacity(0.85),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: resolvedStatus.color.withOpacity(0.25),
@@ -406,7 +406,7 @@ class SaoActivityCard extends StatelessWidget {
     return 'hace ${diff.inDays}d';
   }
 
-  Widget _buildDefaultLayout() {
+  Widget _buildDefaultLayout(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -433,9 +433,9 @@ class SaoActivityCard extends StatelessWidget {
                   vertical: 6,
                 ),
                 decoration: BoxDecoration(
-                  color: SaoColors.gray100,
+                  color: SaoColors.surfaceRaisedFor(context),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: SaoColors.border),
+                  border: Border.all(color: SaoColors.borderFor(context)),
                 ),
                 child: Text(
                   pkLabel!,
@@ -494,7 +494,7 @@ class SaoActivityCard extends StatelessWidget {
     );
   }
 
-  Widget _buildRailwayLayout() {
+  Widget _buildRailwayLayout(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -533,9 +533,9 @@ class SaoActivityCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: SaoColors.gray100,
+                  color: SaoColors.surfaceRaisedFor(context),
                   borderRadius: BorderRadius.circular(SaoRadii.sm),
-                  border: Border.all(color: SaoColors.border),
+                  border: Border.all(color: SaoColors.borderFor(context)),
                 ),
                 child: Text(
                   activityCode!,

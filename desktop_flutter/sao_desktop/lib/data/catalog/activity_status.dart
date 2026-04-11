@@ -29,12 +29,10 @@ class ActivityStatus {
         return 'Aprobada';
       
       case rejected:
-      case 'REJECTED':
       case rechazado:
         return 'Rechazada';
       
       case needsFix:
-      case 'NEEDS_FIX':
         return 'Necesita corrección';
 
       case corrected:
@@ -42,7 +40,6 @@ class ActivityStatus {
         return 'Corregida';
 
       case conflict:
-      case 'PENDIENTE':
         return 'Pendiente de revisión';
       
       default:
@@ -73,7 +70,6 @@ class ActivityStatus {
         return corrected;
 
       case 'conflict':
-      case 'pendiente':
         return conflict;
       
       default:

@@ -1,11 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import '../../data/catalog/activity_status.dart';
-import '../../data/database/app_database.dart' as db;
 import '../../core/config/data_mode.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
@@ -32,19 +28,15 @@ class ValidationPageNewDesign extends ConsumerStatefulWidget {
 class _ValidationPageNewDesignState
     extends ConsumerState<ValidationPageNewDesign>
     with SingleTickerProviderStateMixin {
-  static const _kDismissedStorageKey = 'sao_validation_dismissed_ids_v1';
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
-  String _dismissedProjectScope = '';
-
   ActivityWithDetails? _selectedActivity;
   List<ActivityWithDetails> _visibleActivities = const [];
   int _selectedEvidenceIndex = 0;
   String _searchQuery = '';
   String _queueTab = 'PENDING';
-  bool _filterPending = false;
-  bool _filterRejected = false;
-  bool _filterChanges = false;
-  bool _filterOnlyConflicts = false; // "Solo conflictos" quick-switch
+  final bool _filterPending = false;
+  final bool _filterRejected = false;
+  final bool _filterChanges = false;
+  final bool _filterOnlyConflicts = false; // "Solo conflictos" quick-switch
   String? _selectedRejectReasonCode;
   late TextEditingController _reviewCommentsController;
   List<ActivityTimelineEntry> _timelineEntries = const [];
@@ -67,10 +59,8 @@ class _ValidationPageNewDesignState
   late Animation<Offset> _slideC; // columna C: empieza 80ms después
   late Animation<double> _fadePanel; // fade del contenedor
   late Animation<double> _fadeContent; // fade del contenido (cascada)
-  late Animation<double> _fadeScrim; // scrim sobre la cola
 
   static const _kOpen = Duration(milliseconds: 280);
-  static const _kClose = Duration(milliseconds: 180);
 
   // Auto-refresh
   static const _autoRefreshInterval = Duration(hours: 4);
@@ -84,7 +74,6 @@ class _ValidationPageNewDesignState
     _reviewCommentsController = TextEditingController();
     final initialProjectId =
         ref.read(activeProjectIdProvider).trim().toUpperCase();
-    _dismissedProjectScope = initialProjectId;
 
     // Avoid mutating providers during build-related lifecycle callbacks.
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -129,32 +118,16 @@ class _ValidationPageNewDesignState
       curve: const Interval(0.35, 1.0, curve: Curves.easeOut),
     );
 
-    _fadeScrim = CurvedAnimation(
-      parent: _panelAnim,
-      curve: Curves.easeOut,
-    );
-
     _startAutoRefresh();
-  }
-
-  String _dismissedStorageKeyForScope(String projectId) {
-    final scope = projectId.trim().isEmpty ? 'global' : projectId.trim();
-    return '$_kDismissedStorageKey:$scope';
   }
 
   Future<void> _handleProjectScopeChanged(String projectId) async {
     setState(() {
-      _dismissedProjectScope = projectId;
       _dismissedActivityIds.clear();
       _bulkSelectedIds.clear();
       _selectedActivity = null;
       _selectedEvidenceIndex = 0;
     });
-  }
-
-  Future<void> _loadDismissedActivityIds() async {
-    // Persisted hidden queue entries disabled to avoid project views appearing empty.
-    return;
   }
 
   Future<void> _persistDismissedActivityIds() async {
@@ -179,10 +152,6 @@ class _ValidationPageNewDesignState
     });
     _loadTimelineForActivity(activity.activity.id);
     unawaited(_hydrateSelectedActivity(activity));
-  }
-
-  void _deselectActivity() {
-    setState(() => _selectedActivity = null);
   }
 
   void _startAutoRefresh() {
@@ -230,6 +199,10 @@ class _ValidationPageNewDesignState
 
   @override
   Widget build(BuildContext context) {
+    final textColor = SaoColors.textFor(context);
+    final mutedTextColor = SaoColors.textMutedFor(context);
+    final surfaceRaisedColor = SaoColors.surfaceRaisedFor(context);
+    final borderColor = SaoColors.borderFor(context);
     final selectedProjectFilter =
         ref.watch(operationsProjectFilterProvider).trim().toUpperCase();
     final availableProjectsAsync = ref.watch(availableProjectsProvider);
@@ -267,15 +240,15 @@ class _ValidationPageNewDesignState
           children: [
             // Top bar con nueva busqueda inteligente
             Container(
-              padding: EdgeInsets.all(24),
+              padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
                 color: Theme.of(context).colorScheme.surface,
                 boxShadow: [
                   BoxShadow(
                     color:
-                        Theme.of(context).colorScheme.shadow.withOpacity(0.05),
+                        Theme.of(context).colorScheme.shadow.withValues(alpha: 0.05),
                     blurRadius: 8,
-                    offset: Offset(0, 2),
+                    offset: const Offset(0, 2),
                   ),
                 ],
               ),
@@ -286,16 +259,16 @@ class _ValidationPageNewDesignState
                   Row(
                     children: [
                       Icon(Icons.verified_rounded,
-                          color: SaoColors.primary, size: 28),
-                      SizedBox(width: 12),
+                          color: textColor, size: 28),
+                      const SizedBox(width: 12),
                       Text(
                         'Validación de Actividades',
                         style: SaoTypography.pageTitle.copyWith(
-                          color: SaoColors.primary,
+                          color: textColor,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
-                      Spacer(),
+                      const Spacer(),
                       // Auto-refresh indicator
                       Tooltip(
                         message: 'Actualización automática cada 4 h',
@@ -306,9 +279,9 @@ class _ValidationPageNewDesignState
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: SaoColors.gray100,
+                              color: surfaceRaisedColor,
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: SaoColors.border),
+                              border: Border.all(color: borderColor),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -320,15 +293,15 @@ class _ValidationPageNewDesignState
                                     value: _secondsUntilRefresh /
                                         _autoRefreshInterval.inSeconds,
                                     strokeWidth: 2,
-                                    color: SaoColors.primary,
-                                    backgroundColor: SaoColors.gray300,
+                                    color: textColor,
+                                    backgroundColor: borderColor,
                                   ),
                                 ),
-                                SizedBox(width: 6),
+                                const SizedBox(width: 6),
                                 Text(
                                   _formatRefreshCountdown(),
                                   style: SaoTypography.caption.copyWith(
-                                    color: SaoColors.gray600,
+                                    color: mutedTextColor,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -339,7 +312,7 @@ class _ValidationPageNewDesignState
                       ),
                     ],
                   ),
-                  SizedBox(height: 16),
+                  const SizedBox(height: 16),
 
                   // Barra de busqueda inteligente
                   SaoValidationSearchBar(
@@ -629,8 +602,8 @@ class _ValidationPageNewDesignState
                           onPressed: _selectedActivity == null
                               ? null
                               : () => _deleteSelectedActivity(),
-                          icon: Icon(Icons.delete_outline_rounded),
-                          label: Text('Eliminar'),
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          label: const Text('Eliminar'),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: SaoColors.gray700,
                             foregroundColor: SaoColors.onPrimary,
@@ -641,12 +614,12 @@ class _ValidationPageNewDesignState
                           onPressed: _selectedActivity == null
                               ? null
                               : () => _showRejectDialog(),
-                          icon: Icon(Icons.cancel_rounded),
+                          icon: const Icon(Icons.cancel_rounded),
                           label: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('Rechazar'),
-                              SizedBox(width: SaoSpacing.xs),
+                              const Text('Rechazar'),
+                              const SizedBox(width: SaoSpacing.xs),
                               _buildShortcutPill('R'),
                             ],
                           ),
@@ -660,12 +633,12 @@ class _ValidationPageNewDesignState
                           onPressed: _selectedActivity == null
                               ? null
                               : () => _approveActivity(),
-                          icon: Icon(Icons.check_circle_rounded),
+                          icon: const Icon(Icons.check_circle_rounded),
                           label: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Text('Validar y enviar'),
-                              SizedBox(width: SaoSpacing.xs),
+                              const Text('Validar y enviar'),
+                              const SizedBox(width: SaoSpacing.xs),
                               _buildShortcutPill('Enter'),
                             ],
                           ),
@@ -730,11 +703,11 @@ class _ValidationPageNewDesignState
           return AlertDialog(
             shape:
                 RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-            title: Row(
+            title: const Row(
               children: [
                 Icon(Icons.filter_alt_rounded, color: SaoColors.primary),
-                const SizedBox(width: 10),
-                const Text('Filtros avanzados'),
+                SizedBox(width: 10),
+                Text('Filtros avanzados'),
               ],
             ),
             content: SizedBox(
@@ -749,7 +722,7 @@ class _ValidationPageNewDesignState
                           .copyWith(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
                   DropdownButtonFormField<String>(
-                    value: tempFront,
+                    initialValue: tempFront,
                     isExpanded: true,
                     decoration: InputDecoration(
                       hintText: 'Todos los frentes',
@@ -804,7 +777,7 @@ class _ValidationPageNewDesignState
                   Navigator.pop(ctx);
                 },
                 child:
-                    Text('Limpiar', style: TextStyle(color: SaoColors.gray600)),
+                  const Text('Limpiar', style: TextStyle(color: SaoColors.gray600)),
               ),
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
@@ -848,10 +821,11 @@ class _ValidationPageNewDesignState
         _timelineError = 'No se pudo cargar el historial';
       });
     } finally {
-      if (!mounted || _selectedActivity?.activity.id != activityId) return;
-      setState(() {
-        _timelineLoading = false;
-      });
+      if (mounted && _selectedActivity?.activity.id == activityId) {
+        setState(() {
+          _timelineLoading = false;
+        });
+      }
     }
   }
 
@@ -871,14 +845,14 @@ class _ValidationPageNewDesignState
 
   Widget _buildShortcutPill(String label) {
     return Container(
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.xs,
         vertical: 2,
       ),
       decoration: BoxDecoration(
-        color: SaoColors.onPrimary.withOpacity(0.2),
+        color: SaoColors.onPrimary.withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
-        border: Border.all(color: SaoColors.onPrimary.withOpacity(0.6)),
+        border: Border.all(color: SaoColors.onPrimary.withValues(alpha: 0.6)),
       ),
       child: Text(
         label,
@@ -933,8 +907,8 @@ class _ValidationPageNewDesignState
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: BoxDecoration(
         color: conflicts > 0
-            ? SaoColors.warning.withOpacity(0.08)
-            : SaoColors.success.withOpacity(0.08),
+            ? SaoColors.warning.withValues(alpha: 0.08)
+            : SaoColors.success.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: conflicts > 0 ? SaoColors.warning : SaoColors.success,
@@ -972,29 +946,6 @@ class _ValidationPageNewDesignState
     );
   }
 
-  Widget _buildFilterChip({
-    required String label,
-    required bool selected,
-    required ValueChanged<bool> onSelected,
-  }) {
-    return FilterChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: onSelected,
-      selectedColor: SaoColors.primary.withOpacity(0.15),
-      labelStyle: SaoTypography.caption.copyWith(
-        color: selected ? SaoColors.primary : SaoColors.gray600,
-        fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-      ),
-      shape: StadiumBorder(
-        side: BorderSide(
-          color: selected ? SaoColors.primary : SaoColors.border,
-        ),
-      ),
-      backgroundColor: SaoColors.surface,
-    );
-  }
-
   /// Aprueba la actividad seleccionada y carga la siguiente
   Future<void> _approveActivity() async {
     if (_selectedActivity == null) return;
@@ -1007,7 +958,7 @@ class _ValidationPageNewDesignState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
+            content: const Row(
               children: [
                 Icon(Icons.check_circle_rounded, color: SaoColors.onPrimary),
                 SizedBox(width: SaoSpacing.md),
@@ -1023,7 +974,7 @@ class _ValidationPageNewDesignState
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(SaoRadii.sm)),
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
 
@@ -1050,11 +1001,12 @@ class _ValidationPageNewDesignState
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
+        backgroundColor: SaoColors.surfaceFor(ctx),
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(SaoRadii.xl)),
         child: Container(
           width: 550,
-          padding: EdgeInsets.all(SaoSpacing.xxl),
+          padding: const EdgeInsets.all(SaoSpacing.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1062,38 +1014,42 @@ class _ValidationPageNewDesignState
               Row(
                 children: [
                   Container(
-                    padding: EdgeInsets.all(SaoSpacing.md),
+                    padding: const EdgeInsets.all(SaoSpacing.md),
                     decoration: BoxDecoration(
-                      color: SaoColors.error.withOpacity(0.1),
+                      color: SaoColors.error.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(SaoRadii.md),
                     ),
-                    child: Icon(Icons.cancel_rounded,
+                    child: const Icon(Icons.cancel_rounded,
                         color: SaoColors.error, size: 28),
                   ),
-                  SizedBox(width: SaoSpacing.lg),
+                  const SizedBox(width: SaoSpacing.lg),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
                           'Rechazar Actividad',
-                          style: SaoTypography.pageTitle,
+                          style: SaoTypography.pageTitle.copyWith(
+                            color: SaoColors.textFor(ctx),
+                          ),
                         ),
                         Text(
                           'Se enviará solicitud de corrección al móvil',
-                          style: SaoTypography.caption,
+                          style: SaoTypography.caption.copyWith(
+                            color: SaoColors.textMutedFor(ctx),
+                          ),
                         ),
                       ],
                     ),
                   ),
                 ],
               ),
-              SizedBox(height: SaoSpacing.xxl),
-              Text(
+              const SizedBox(height: SaoSpacing.xxl),
+              const Text(
                 'Motivo del rechazo:',
                 style: SaoTypography.bodyTextBold,
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               TextField(
                 controller: _reviewCommentsController,
                 maxLines: 4,
@@ -1103,16 +1059,16 @@ class _ValidationPageNewDesignState
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(SaoRadii.md)),
                   filled: true,
-                  fillColor: SaoColors.gray50,
+                  fillColor: SaoColors.surfaceMutedFor(ctx),
                 ),
               ),
-              SizedBox(height: SaoSpacing.lg),
+              const SizedBox(height: SaoSpacing.lg),
               Text(
                 'Motivos comunes:',
                 style:
                     SaoTypography.caption.copyWith(fontWeight: FontWeight.w600),
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               FutureBuilder<List<RejectionPlaybookItem>>(
                 future: repo.getRejectPlaybook(
                     projectId: _selectedActivity?.activity.projectId),
@@ -1153,7 +1109,7 @@ class _ValidationPageNewDesignState
                   );
                 },
               ),
-              SizedBox(height: SaoSpacing.xxl),
+              const SizedBox(height: SaoSpacing.xxl),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
@@ -1162,9 +1118,9 @@ class _ValidationPageNewDesignState
                       _reviewCommentsController.clear();
                       Navigator.pop(ctx);
                     },
-                    child: Text('Cancelar'),
+                    child: const Text('Cancelar'),
                   ),
-                  SizedBox(width: SaoSpacing.md),
+                  const SizedBox(width: SaoSpacing.md),
                   FilledButton.icon(
                     onPressed: () async {
                       if (_reviewCommentsController.text.trim().isEmpty) return;
@@ -1173,11 +1129,11 @@ class _ValidationPageNewDesignState
                     },
                     style: FilledButton.styleFrom(
                       backgroundColor: SaoColors.error,
-                      padding: EdgeInsets.symmetric(
+                      padding: const EdgeInsets.symmetric(
                           horizontal: SaoSpacing.xxl, vertical: SaoSpacing.md),
                     ),
-                    icon: Icon(Icons.send_rounded, size: 18),
-                    label: Text('Enviar Rechazo'),
+                    icon: const Icon(Icons.send_rounded, size: 18),
+                    label: const Text('Enviar Rechazo'),
                   ),
                 ],
               ),
@@ -1196,10 +1152,10 @@ class _ValidationPageNewDesignState
         _selectedRejectReasonCode = reasonCode;
         _reviewCommentsController.text = reason;
       },
-      backgroundColor: SaoColors.gray100,
+      backgroundColor: SaoColors.surfaceRaisedFor(context),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
-        side: BorderSide(color: SaoColors.gray300),
+        side: BorderSide(color: SaoColors.borderFor(context)),
       ),
     );
   }
@@ -1224,7 +1180,7 @@ class _ValidationPageNewDesignState
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Row(
+            content: const Row(
               children: [
                 Icon(Icons.cancel_rounded, color: SaoColors.onPrimary),
                 SizedBox(width: SaoSpacing.md),
@@ -1240,7 +1196,7 @@ class _ValidationPageNewDesignState
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(SaoRadii.sm)),
-            duration: Duration(seconds: 2),
+            duration: const Duration(seconds: 2),
           ),
         );
 
@@ -1272,7 +1228,7 @@ class _ValidationPageNewDesignState
       await repo.updateEvidenceCaption(evidenceId, caption);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
+        const SnackBar(
           content: Text('Pie de foto guardado'),
           duration: Duration(seconds: 1),
           backgroundColor: SaoColors.success,
@@ -1839,24 +1795,6 @@ class _ValidationPageNewDesignState
     }
   }
 
-  /// Maneja cuando se arrastra una tarjeta a la zona de revisar
-  void _handleDropForReview(ActivityWithDetails activity) {
-    setState(() => _selectedActivity = activity);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            Icon(Icons.edit_rounded, color: SaoColors.onPrimary),
-            SizedBox(width: SaoSpacing.md),
-            Text('Revisando: ${activity.activity.title}'),
-          ],
-        ),
-        backgroundColor: SaoColors.info,
-        duration: Duration(seconds: 1),
-      ),
-    );
-  }
-
   List<String> _buildProjectOptions(
       List<String> projects, String selectedProjectId) {
     final normalized = <String>{
@@ -1878,56 +1816,6 @@ class _ValidationPageNewDesignState
     ref.read(operationsProjectFilterProvider.notifier).state =
         normalizedProjectId;
     await _handleProjectScopeChanged(normalizedProjectId);
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// "SOLO CONFLICTOS" TOGGLE
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _SoloConflictosSwitch extends StatelessWidget {
-  final bool value;
-  final ValueChanged<bool> onChanged;
-
-  const _SoloConflictosSwitch({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => onChanged(!value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(
-            horizontal: SaoSpacing.sm, vertical: SaoSpacing.xxs),
-        decoration: BoxDecoration(
-          color: value
-              ? SaoColors.warning.withValues(alpha: 0.12)
-              : SaoColors.gray100,
-          borderRadius: BorderRadius.circular(SaoRadii.full),
-          border: Border.all(
-            color: value ? SaoColors.warning : SaoColors.border,
-          ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.warning_amber_rounded,
-              size: 14,
-              color: value ? SaoColors.warning : SaoColors.gray400,
-            ),
-            const SizedBox(width: SaoSpacing.xs),
-            Text(
-              'Solo conflictos',
-              style: SaoTypography.caption.copyWith(
-                color: value ? SaoColors.warning : SaoColors.gray600,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 }
 
@@ -1959,9 +1847,9 @@ class _OperationsHealthStrip extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
-        color: SaoColors.gray50,
+        color: SaoColors.surfaceMutedFor(context),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Row(
         children: [
@@ -2080,12 +1968,14 @@ class _OpsMiniPieChart extends StatelessWidget {
       return Container(
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: SaoColors.gray200),
+          border: Border.all(color: SaoColors.borderFor(context)),
         ),
         child: Center(
           child: Text(
             '0',
-            style: SaoTypography.caption.copyWith(color: SaoColors.gray400),
+            style: SaoTypography.caption.copyWith(
+              color: SaoColors.textMutedFor(context),
+            ),
           ),
         ),
       );
@@ -2102,14 +1992,14 @@ class _OpsMiniPieChart extends StatelessWidget {
               value: readyToApprove / total, color: SaoColors.success),
         ],
       ),
-      child: const Center(
+      child: Center(
         child: SizedBox(
           width: 24,
           height: 24,
           child: DecoratedBox(
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: Colors.white,
+              color: SaoColors.surfaceFor(context),
             ),
           ),
         ),
@@ -2378,7 +2268,7 @@ class _DatePickerField extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.calendar_today_rounded,
+            const Icon(Icons.calendar_today_rounded,
                 size: 16, color: SaoColors.gray600),
             const SizedBox(width: 8),
             Expanded(
@@ -2392,7 +2282,7 @@ class _DatePickerField extends StatelessWidget {
             if (value != null)
               GestureDetector(
                 onTap: onCleared,
-                child: Icon(Icons.close_rounded,
+                child: const Icon(Icons.close_rounded,
                     size: 16, color: SaoColors.gray400),
               ),
           ],

@@ -21,11 +21,16 @@ class ProjectDto {
   });
 
   factory ProjectDto.fromJson(Map<String, dynamic> json) {
+    final rawId = json['id'] ?? json['code'] ?? '';
+    final rawCode = json['code'] ?? '';
+    final rawName = json['name'] ?? json['displayName'] ?? '';
+    final rawIsActive = json['isActive'] ?? json['is_active'] ?? true;
+
     return ProjectDto(
-      id: json['id'] ?? json['code'] ?? '',
-      code: (json['code'] ?? '').toUpperCase(),
-      name: json['name'] ?? json['displayName'] ?? '',
-      isActive: json['isActive'] ?? json['is_active'] ?? true,
+      id: rawId.toString(),
+      code: rawCode.toString().toUpperCase(),
+      name: rawName.toString(),
+      isActive: rawIsActive is bool ? rawIsActive : rawIsActive.toString().toLowerCase() == 'true',
       scopes: json['scopes'] != null ? List<String>.from(json['scopes'] as List) : null,
     );
   }

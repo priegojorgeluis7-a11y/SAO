@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../auth/session_controller.dart';
 import '../data/admin_repositories.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../auth/app_session_controller.dart' as app_session;
 
 const Map<String, List<String>> _mxStatesMunicipalities = {
@@ -1268,10 +1269,10 @@ class _AdminProjectsPageState extends ConsumerState<AdminProjectsPage> {
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.white,
+                                color: AppColors.surfaceFor(context),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                    color: const Color(0xFFE2E8F0)),
+                                    color: AppColors.borderFor(context)),
                               ),
                               child: Row(
                                 children: [
@@ -1296,7 +1297,7 @@ class _AdminProjectsPageState extends ConsumerState<AdminProjectsPage> {
                                           : '${frontEntries.length} frente(s)  ·  $totalMunicipios municipio(s)',
                                       style: const TextStyle(
                                         fontWeight: FontWeight.w600,
-                                        color: Color(0xFF0F172A),
+                                        color: AppColors.gray900,
                                       ),
                                     ),
                                   ),
@@ -2017,9 +2018,9 @@ class _FrontCoverageCard extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: AppColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

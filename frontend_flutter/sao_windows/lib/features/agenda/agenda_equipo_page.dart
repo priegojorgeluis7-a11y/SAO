@@ -44,10 +44,12 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
       final isOffline = ref.read(offlineModeProvider);
       final authUser = ref.read(currentUserProvider);
       final selfResource = _toSelfResource(authUser);
+      final preferSelfFilter = _shouldPreferSelfFilter(authUser);
       ref.read(agendaControllerProvider.notifier).initialize(
             projectId: projectId,
             isOffline: isOffline,
             selfResource: selfResource,
+        preferSelfFilter: preferSelfFilter,
           );
     });
   }
@@ -64,6 +66,14 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     );
   }
 
+  bool _shouldPreferSelfFilter(User? authUser) {
+    final email = authUser?.email.trim().toLowerCase() ?? '';
+    if (email == 'admin@sao.mx' || email.startsWith('admin.')) {
+      return false;
+    }
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     ref.listen<User?>(currentUserProvider, (previous, next) {
@@ -71,7 +81,6 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
       ref.read(agendaControllerProvider.notifier).ensureSelfResource(selfResource);
     });
 
-    final authUser = ref.watch(currentUserProvider);
     final state = ref.watch(agendaControllerProvider);
     final controller = ref.read(agendaControllerProvider.notifier);
     final isOffline = ref.watch(offlineModeProvider);

@@ -9,7 +9,6 @@ import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
-import '../../../ui/widgets/activity_diff_field.dart';
 import '../activity_queue_projection.dart';
 import 'catalog_substitution_modal.dart';
 
@@ -89,7 +88,6 @@ class _ActivityDetailsPanelProState
     final projectId = activity.activity.projectId.trim();
     if (projectId.isEmpty) return;
     final catalogRepo = ref.read(catalogRepositoryProvider);
-    // Only reload if not yet ready or project changed
     if (!catalogRepo.isReady ||
         catalogRepo.projectId != projectId.toUpperCase()) {
       await catalogRepo.loadProject(projectId);
@@ -206,7 +204,7 @@ class _ActivityDetailsPanelProState
           _buildStatusRow(activity),
           // Header con Tabs
           Container(
-            decoration: BoxDecoration(
+            decoration: const BoxDecoration(
               border: Border(bottom: BorderSide(color: SaoColors.border)),
             ),
             child: TabBar(
@@ -262,14 +260,6 @@ class _ActivityDetailsPanelProState
     final statusColor = _statusColor(statusKey);
     final statusLabel = deriveActivityQueueStatusLabel(activity).toUpperCase();
     final statusMessage = deriveActivityQueueStatusMessage(activity);
-    final reviewComments = (activity.activity.reviewComments ?? '').trim();
-    final reviewedBy = (activity.activity.reviewedBy ?? '').trim();
-    final reviewedAt = activity.activity.reviewedAt;
-    final reviewedMeta = [
-      if (reviewedBy.isNotEmpty) 'Revisó: $reviewedBy',
-      if (reviewedAt != null)
-        'Fecha: ${DateFormat('dd/MM/yyyy HH:mm').format(reviewedAt.toLocal())}',
-    ].join('  ·  ');
     final statusIcon = switch (normalizedStatus) {
       ActivityStatus.approved => Icons.check_circle_rounded,
       ActivityStatus.rejected => Icons.cancel_rounded,
@@ -281,135 +271,117 @@ class _ActivityDetailsPanelProState
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.lg,
         vertical: SaoSpacing.md,
       ),
       decoration: BoxDecoration(
-        color: statusColor.withOpacity(0.08),
-        border: Border(
+        color: statusColor.withValues(alpha: 0.08),
+        border: const Border(
           bottom: BorderSide(color: SaoColors.border),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              Container(
-                padding: EdgeInsets.all(SaoSpacing.xs),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(SaoRadii.md),
-                ),
-                child: Icon(statusIcon, size: 18, color: statusColor),
-              ),
-              SizedBox(width: SaoSpacing.sm),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Validación Técnica',
-                      style: SaoTypography.caption.copyWith(
-                        color: SaoColors.gray600,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      statusMessage,
-                      style: SaoTypography.caption.copyWith(
-                        color: SaoColors.gray700,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                padding: EdgeInsets.symmetric(
-                  horizontal: SaoSpacing.sm,
-                  vertical: SaoSpacing.xs,
-                ),
-                decoration: BoxDecoration(
-                  color: statusColor.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(SaoRadii.full),
-                  border: Border.all(color: statusColor),
-                ),
-                child: Text(
-                  statusLabel,
+          Container(
+            padding: const EdgeInsets.all(SaoSpacing.xs),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(SaoRadii.md),
+            ),
+            child: Icon(statusIcon, size: 18, color: statusColor),
+          ),
+          const SizedBox(width: SaoSpacing.sm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Validación Técnica',
                   style: SaoTypography.caption.copyWith(
-                    color: statusColor,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
+                    color: SaoColors.gray600,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
-              ),
-            ],
+                const SizedBox(height: 2),
+                Text(
+                  statusMessage,
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.gray700,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
           ),
-          if (reviewComments.isNotEmpty || reviewedMeta.isNotEmpty) ...[
-            SizedBox(height: SaoSpacing.sm),
-            if (reviewComments.isNotEmpty)
-              Text(
-                'Motivo: $reviewComments',
-                style: SaoTypography.caption.copyWith(
-                  color: SaoColors.gray700,
-                  fontWeight: FontWeight.w600,
-                ),
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: SaoSpacing.sm,
+              vertical: SaoSpacing.xs,
+            ),
+            decoration: BoxDecoration(
+              color: statusColor.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(SaoRadii.full),
+              border: Border.all(color: statusColor),
+            ),
+            child: Text(
+              statusLabel,
+              style: SaoTypography.caption.copyWith(
+                color: statusColor,
+                fontWeight: FontWeight.w700,
               ),
-            if (reviewComments.isNotEmpty && reviewedMeta.isNotEmpty)
-              SizedBox(height: 2),
-            if (reviewedMeta.isNotEmpty)
-              Text(
-                reviewedMeta,
-                style: SaoTypography.caption.copyWith(
-                  color: SaoColors.gray500,
-                ),
-              ),
-          ],
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildDecisionPill(List<String> issues) {
-    final preview = issues.take(2).join(' · ');
     final totalIssues = issues.length;
+    final preview = issues.take(2).join(' · ');
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.lg,
         vertical: SaoSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: SaoColors.error.withOpacity(0.06),
+        color: SaoColors.error.withValues(alpha: 0.08),
         border: Border(
-          bottom: BorderSide(color: SaoColors.border),
+          bottom: BorderSide(
+            color: SaoColors.error.withValues(alpha: 0.18),
+          ),
         ),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.warning_amber_rounded, size: 18, color: SaoColors.error),
-          SizedBox(width: SaoSpacing.sm),
+          const Icon(
+            Icons.warning_amber_rounded,
+            color: SaoColors.error,
+            size: 18,
+          ),
+          const SizedBox(width: SaoSpacing.sm),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Atención requerida',
+                  totalIssues == 1
+                      ? 'Hay 1 pendiente por resolver.'
+                      : 'Hay $totalIssues pendientes por resolver.',
                   style: SaoTypography.caption.copyWith(
                     color: SaoColors.error,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                SizedBox(height: SaoSpacing.xs),
+                const SizedBox(height: SaoSpacing.xs),
                 Text(
-                  totalIssues == 0
+                  preview.isEmpty
                       ? 'Faltan validaciones técnicas por resolver antes de aprobar.'
-                      : '$totalIssues pendiente(s) antes de validar.${preview.isEmpty ? '' : ' $preview'}',
+                      : 'Faltan validaciones técnicas por resolver antes de aprobar. $preview',
                   style: SaoTypography.caption.copyWith(
                     color: SaoColors.error,
                     fontWeight: FontWeight.w600,
@@ -438,20 +410,20 @@ class _ActivityDetailsPanelProState
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.lg,
         vertical: SaoSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: accentColor.withOpacity(0.05),
-        border: Border(
+        color: accentColor.withValues(alpha: 0.05),
+        border: const Border(
           bottom: BorderSide(color: SaoColors.border),
         ),
       ),
       child: Row(
         children: [
           Icon(Icons.route_rounded, size: 16, color: accentColor),
-          SizedBox(width: SaoSpacing.sm),
+          const SizedBox(width: SaoSpacing.sm),
           Expanded(
             child: Text(
               'Qué hacer ahora: $nextAction',
@@ -463,14 +435,14 @@ class _ActivityDetailsPanelProState
               ),
             ),
           ),
-          SizedBox(width: SaoSpacing.sm),
+          const SizedBox(width: SaoSpacing.sm),
           Container(
-            padding: EdgeInsets.symmetric(
+            padding: const EdgeInsets.symmetric(
               horizontal: SaoSpacing.sm,
               vertical: SaoSpacing.xs,
             ),
             decoration: BoxDecoration(
-              color: accentColor.withOpacity(0.14),
+              color: accentColor.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(SaoRadii.full),
             ),
             child: Text(
@@ -486,70 +458,6 @@ class _ActivityDetailsPanelProState
     );
   }
 
-  Widget _buildActionChip({
-    required String step,
-    required String title,
-    required String state,
-    required bool done,
-  }) {
-    final color = done ? SaoColors.success : SaoColors.warning;
-    return Container(
-      constraints: const BoxConstraints(minWidth: 160),
-      padding: EdgeInsets.all(SaoSpacing.sm),
-      decoration: BoxDecoration(
-        color: SaoColors.surface,
-        borderRadius: BorderRadius.circular(SaoRadii.md),
-        border: Border.all(color: SaoColors.border),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.14),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: done
-                  ? Icon(Icons.check_rounded, size: 14, color: color)
-                  : Text(
-                      step,
-                      style: SaoTypography.caption.copyWith(
-                        color: color,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-            ),
-          ),
-          SizedBox(width: SaoSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: SaoTypography.caption.copyWith(
-                    color: SaoColors.gray700,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                SizedBox(height: 2),
-                Text(
-                  state,
-                  style: SaoTypography.caption.copyWith(
-                    color: done ? SaoColors.success : SaoColors.gray600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildValidationStepper(ActivityWithDetails activity) {
     final hasOperationalData = activity.activity.title.trim().isNotEmpty &&
         activity.activity.description?.trim().isNotEmpty == true;
@@ -558,11 +466,11 @@ class _ActivityDetailsPanelProState
 
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(
+      padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.lg,
         vertical: SaoSpacing.sm,
       ),
-      decoration: BoxDecoration(
+      decoration: const BoxDecoration(
         color: SaoColors.gray50,
         border: Border(bottom: BorderSide(color: SaoColors.border)),
       ),
@@ -604,7 +512,7 @@ class _ActivityDetailsPanelProState
             width: 20,
             height: 20,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
               shape: BoxShape.circle,
               border: Border.all(color: color),
             ),
@@ -620,16 +528,16 @@ class _ActivityDetailsPanelProState
                     ),
             ),
           ),
-          SizedBox(width: SaoSpacing.xs),
-          Expanded(
+          const SizedBox(width: SaoSpacing.xs),
+          Flexible(
             child: Text(
               title,
-              style: SaoTypography.caption.copyWith(
-                color: SaoColors.gray700,
-                fontWeight: FontWeight.w600,
-              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: SaoTypography.caption.copyWith(
+                color: done ? SaoColors.gray700 : SaoColors.gray600,
+                fontWeight: done ? FontWeight.w700 : FontWeight.w600,
+              ),
             ),
           ),
         ],
@@ -641,7 +549,7 @@ class _ActivityDetailsPanelProState
     return Container(
       width: 16,
       height: 2,
-      margin: EdgeInsets.symmetric(horizontal: SaoSpacing.xs),
+      margin: const EdgeInsets.symmetric(horizontal: SaoSpacing.xs),
       color: done ? SaoColors.success : SaoColors.border,
     );
   }
@@ -700,7 +608,7 @@ class _ActivityDetailsPanelProState
             : availableWidth;
 
         return SingleChildScrollView(
-          padding: EdgeInsets.all(SaoSpacing.md),
+          padding: const EdgeInsets.all(SaoSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -711,7 +619,7 @@ class _ActivityDetailsPanelProState
                   color: SaoColors.gray600,
                 ),
               ),
-              SizedBox(height: SaoSpacing.sm),
+              const SizedBox(height: SaoSpacing.sm),
               Wrap(
                 spacing: SaoSpacing.md,
                 runSpacing: SaoSpacing.md,
@@ -728,7 +636,7 @@ class _ActivityDetailsPanelProState
                             color: SaoColors.gray600,
                           ),
                         ),
-                        SizedBox(height: SaoSpacing.sm),
+                        const SizedBox(height: SaoSpacing.sm),
                         _buildSummaryGroup(
                           title: 'Edición rápida',
                           subtitle: 'Ajusta el texto capturado y guarda al momento.',
@@ -848,9 +756,9 @@ class _ActivityDetailsPanelProState
                   ),
                 ],
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               _buildCatalogDecisionModule(activity),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               _buildSummaryGroup(
                 title: 'Seguimiento y evidencia',
                 subtitle: 'Lo clave para decidir rápido.',
@@ -878,7 +786,7 @@ class _ActivityDetailsPanelProState
               ),
               if (activity.activity.latitude != null &&
                   activity.activity.longitude != null) ...[
-                SizedBox(height: SaoSpacing.md),
+                const SizedBox(height: SaoSpacing.md),
                 _buildGPSValidationBanner(activity),
               ],
             ],
@@ -915,7 +823,7 @@ class _ActivityDetailsPanelProState
     }
 
     return SingleChildScrollView(
-      padding: EdgeInsets.all(SaoSpacing.lg),
+      padding: const EdgeInsets.all(SaoSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -949,21 +857,35 @@ class _ActivityDetailsPanelProState
 
   IconData _timelineIcon(String action) {
     final key = action.toUpperCase();
-    if (key.contains('APPROVE')) return Icons.check_circle_rounded;
-    if (key.contains('REJECT')) return Icons.cancel_rounded;
-    if (key.contains('CREATE')) return Icons.create_rounded;
-    if (key.contains('UPDATE') || key.contains('PATCH'))
+    if (key.contains('APPROVE')) {
+      return Icons.check_circle_rounded;
+    }
+    if (key.contains('REJECT')) {
+      return Icons.cancel_rounded;
+    }
+    if (key.contains('CREATE')) {
+      return Icons.create_rounded;
+    }
+    if (key.contains('UPDATE') || key.contains('PATCH')) {
       return Icons.edit_rounded;
+    }
     return Icons.history_rounded;
   }
 
   Color _timelineColor(String action) {
     final key = action.toUpperCase();
-    if (key.contains('APPROVE')) return SaoColors.success;
-    if (key.contains('REJECT')) return SaoColors.error;
-    if (key.contains('CREATE')) return SaoColors.info;
-    if (key.contains('UPDATE') || key.contains('PATCH'))
+    if (key.contains('APPROVE')) {
+      return SaoColors.success;
+    }
+    if (key.contains('REJECT')) {
+      return SaoColors.error;
+    }
+    if (key.contains('CREATE')) {
+      return SaoColors.info;
+    }
+    if (key.contains('UPDATE') || key.contains('PATCH')) {
       return SaoColors.warning;
+    }
     return SaoColors.gray500;
   }
 
@@ -1008,7 +930,7 @@ class _ActivityDetailsPanelProState
     ];
 
     return SingleChildScrollView(
-      padding: EdgeInsets.all(SaoSpacing.lg),
+      padding: const EdgeInsets.all(SaoSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1017,11 +939,11 @@ class _ActivityDetailsPanelProState
             style: SaoTypography.caption.copyWith(
                 fontWeight: FontWeight.w600, color: SaoColors.gray600),
           ),
-          SizedBox(height: SaoSpacing.md),
+            const SizedBox(height: SaoSpacing.md),
           ...checklist.map(
               (item) => _buildChecklistItem(item.label, isChecked: item.ok)),
 
-          SizedBox(height: SaoSpacing.xl),
+            const SizedBox(height: SaoSpacing.xl),
 
           // ALERTA GPS
           _buildGPSWarningPanel(),
@@ -1042,11 +964,11 @@ class _ActivityDetailsPanelProState
     required List<Widget> children,
   }) {
     return Container(
-      padding: EdgeInsets.all(SaoSpacing.sm),
+      padding: const EdgeInsets.all(SaoSpacing.sm),
       decoration: BoxDecoration(
-        color: accentColor.withOpacity(0.06),
+        color: accentColor.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
-        border: Border.all(color: accentColor.withOpacity(0.18)),
+        border: Border.all(color: accentColor.withValues(alpha: 0.18)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1055,14 +977,14 @@ class _ActivityDetailsPanelProState
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                padding: EdgeInsets.all(SaoSpacing.xs),
+                padding: const EdgeInsets.all(SaoSpacing.xs),
                 decoration: BoxDecoration(
-                  color: accentColor.withOpacity(0.12),
+                  color: accentColor.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(SaoRadii.md),
                 ),
                 child: Icon(icon, size: 16, color: accentColor),
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1074,7 +996,7 @@ class _ActivityDetailsPanelProState
                         color: SaoColors.gray900,
                       ),
                     ),
-                    SizedBox(height: SaoSpacing.xxs),
+                    const SizedBox(height: SaoSpacing.xxs),
                     Text(
                       subtitle,
                       style: SaoTypography.caption.copyWith(
@@ -1086,10 +1008,10 @@ class _ActivityDetailsPanelProState
               ),
             ],
           ),
-          SizedBox(height: SaoSpacing.sm),
+          const SizedBox(height: SaoSpacing.sm),
           for (int i = 0; i < children.length; i++) ...[
             children[i],
-            if (i < children.length - 1) SizedBox(height: SaoSpacing.sm),
+            if (i < children.length - 1) const SizedBox(height: SaoSpacing.sm),
           ],
         ],
       ),
@@ -1217,19 +1139,19 @@ class _ActivityDetailsPanelProState
     final accent = toneColor ?? SaoColors.gray600;
     if (dense) {
       return Container(
-        padding: EdgeInsets.symmetric(
+        padding: const EdgeInsets.symmetric(
           horizontal: SaoSpacing.sm,
           vertical: SaoSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: accent.withOpacity(0.05),
-          border: Border.all(color: accent.withOpacity(0.18)),
+          color: accent.withValues(alpha: 0.05),
+          border: Border.all(color: accent.withValues(alpha: 0.18)),
           borderRadius: BorderRadius.circular(SaoRadii.md),
         ),
         child: Row(
           children: [
             Icon(icon, size: 16, color: accent),
-            SizedBox(width: SaoSpacing.sm),
+            const SizedBox(width: SaoSpacing.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1242,7 +1164,7 @@ class _ActivityDetailsPanelProState
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  SizedBox(height: SaoSpacing.xxs),
+                  const SizedBox(height: SaoSpacing.xxs),
                   Text(
                     value,
                     style: SaoTypography.bodyText,
@@ -1267,18 +1189,18 @@ class _ActivityDetailsPanelProState
             fontWeight: FontWeight.w600,
           ),
         ),
-        SizedBox(height: SaoSpacing.xs),
+        const SizedBox(height: SaoSpacing.xs),
         Container(
-          padding: EdgeInsets.all(SaoSpacing.md),
+          padding: const EdgeInsets.all(SaoSpacing.md),
           decoration: BoxDecoration(
-            color: SaoColors.gray50,
-            border: Border.all(color: SaoColors.border),
+            color: SaoColors.surfaceMutedFor(context),
+            border: Border.all(color: SaoColors.borderFor(context)),
             borderRadius: BorderRadius.circular(SaoRadii.md),
           ),
           child: Row(
             children: [
-              Icon(icon, size: 18, color: SaoColors.gray600),
-              SizedBox(width: SaoSpacing.sm),
+              Icon(icon, size: 18, color: SaoColors.textMutedFor(context)),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Text(
                   value,
@@ -1307,13 +1229,13 @@ class _ActivityDetailsPanelProState
     final accent = toneColor ?? SaoColors.gray600;
     if (dense) {
       return Container(
-        padding: EdgeInsets.symmetric(
+        padding: const EdgeInsets.symmetric(
           horizontal: SaoSpacing.sm,
           vertical: SaoSpacing.xs,
         ),
         decoration: BoxDecoration(
-          color: accent.withOpacity(0.05),
-          border: Border.all(color: accent.withOpacity(0.18)),
+          color: accent.withValues(alpha: 0.05),
+          border: Border.all(color: accent.withValues(alpha: 0.18)),
           borderRadius: BorderRadius.circular(SaoRadii.md),
         ),
         child: Row(
@@ -1323,7 +1245,7 @@ class _ActivityDetailsPanelProState
               padding: const EdgeInsets.only(top: 10),
               child: Icon(icon, size: 16, color: accent),
             ),
-            SizedBox(width: SaoSpacing.sm),
+            const SizedBox(width: SaoSpacing.sm),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1335,7 +1257,7 @@ class _ActivityDetailsPanelProState
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  SizedBox(height: SaoSpacing.xxs),
+                  const SizedBox(height: SaoSpacing.xxs),
                   TextField(
                     controller: controller,
                     minLines: minLines,
@@ -1369,16 +1291,16 @@ class _ActivityDetailsPanelProState
         Text(
           label,
           style: SaoTypography.caption.copyWith(
-            color: SaoColors.gray600,
+            color: SaoColors.textMutedFor(context),
             fontWeight: FontWeight.w600,
           ),
         ),
-        SizedBox(height: SaoSpacing.xs),
+        const SizedBox(height: SaoSpacing.xs),
         Container(
-          padding: EdgeInsets.all(SaoSpacing.sm),
+          padding: const EdgeInsets.all(SaoSpacing.sm),
           decoration: BoxDecoration(
-            color: SaoColors.gray50,
-            border: Border.all(color: SaoColors.border),
+            color: SaoColors.surfaceMutedFor(context),
+            border: Border.all(color: SaoColors.borderFor(context)),
             borderRadius: BorderRadius.circular(SaoRadii.md),
           ),
           child: Row(
@@ -1386,9 +1308,10 @@ class _ActivityDetailsPanelProState
             children: [
               Padding(
                 padding: const EdgeInsets.only(top: 10),
-                child: Icon(icon, size: 18, color: SaoColors.gray600),
+                child: Icon(icon,
+                    size: 18, color: SaoColors.textMutedFor(context)),
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: TextField(
                   controller: controller,
@@ -1451,10 +1374,10 @@ class _ActivityDetailsPanelProState
     final catalogRepo = ref.read(catalogRepositoryProvider);
     if (!_isCatalogReadyForActivityProject(catalogRepo, activity)) {
       return Container(
-        padding: EdgeInsets.all(SaoSpacing.md),
+        padding: const EdgeInsets.all(SaoSpacing.md),
         decoration: BoxDecoration(
-          color: SaoColors.info.withOpacity(0.06),
-          border: Border.all(color: SaoColors.info.withOpacity(0.4)),
+          color: SaoColors.info.withValues(alpha: 0.06),
+          border: Border.all(color: SaoColors.info.withValues(alpha: 0.4)),
           borderRadius: BorderRadius.circular(SaoRadii.md),
         ),
         child: Row(
@@ -1464,7 +1387,7 @@ class _ActivityDetailsPanelProState
               height: 16,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-            SizedBox(width: SaoSpacing.sm),
+            const SizedBox(width: SaoSpacing.sm),
             Expanded(
               child: Text(
                 'Cargando catálogo del proyecto ${activity.activity.projectId}...',
@@ -1499,10 +1422,10 @@ class _ActivityDetailsPanelProState
     ];
 
     return Container(
-      padding: EdgeInsets.all(SaoSpacing.md),
+      padding: const EdgeInsets.all(SaoSpacing.md),
       decoration: BoxDecoration(
-        color: SaoColors.info.withOpacity(0.06),
-        border: Border.all(color: SaoColors.info.withOpacity(0.4)),
+        color: SaoColors.info.withValues(alpha: 0.06),
+        border: Border.all(color: SaoColors.info.withValues(alpha: 0.4)),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
       child: Column(
@@ -1510,8 +1433,8 @@ class _ActivityDetailsPanelProState
         children: [
           Row(
             children: [
-              Icon(Icons.hub_rounded, color: SaoColors.primary),
-              SizedBox(width: SaoSpacing.sm),
+              const Icon(Icons.hub_rounded, color: SaoColors.primary),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1522,7 +1445,7 @@ class _ActivityDetailsPanelProState
                         color: SaoColors.primary,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       pendingFields.isEmpty
                           ? 'Todos los campos coinciden con catálogo. Solo abre uno si deseas revisar.'
@@ -1535,13 +1458,13 @@ class _ActivityDetailsPanelProState
                 ),
               ),
               Container(
-                padding: EdgeInsets.symmetric(
+                padding: const EdgeInsets.symmetric(
                   horizontal: SaoSpacing.sm,
                   vertical: SaoSpacing.xs,
                 ),
                 decoration: BoxDecoration(
                   color: (pendingFields.isEmpty ? SaoColors.success : SaoColors.warning)
-                      .withOpacity(0.14),
+                      .withValues(alpha: 0.14),
                   borderRadius: BorderRadius.circular(SaoRadii.full),
                 ),
                 child: Text(
@@ -1554,7 +1477,7 @@ class _ActivityDetailsPanelProState
               ),
             ],
           ),
-          SizedBox(height: SaoSpacing.md),
+          const SizedBox(height: SaoSpacing.md),
           _buildCatalogDecisionRow(
             fieldLabel: 'Subcategoría',
             capturedValue: capturedSubcategoria,
@@ -1574,7 +1497,7 @@ class _ActivityDetailsPanelProState
                   ?.call('subcategoria', capturedSubcategoria);
             },
           ),
-          SizedBox(height: SaoSpacing.sm),
+          const SizedBox(height: SaoSpacing.sm),
           _buildCatalogDecisionRow(
             fieldLabel: 'Tema',
             capturedValue:
@@ -1592,7 +1515,7 @@ class _ActivityDetailsPanelProState
               await widget.onCatalogCorrection?.call('tema', capturedTema);
             },
           ),
-          SizedBox(height: SaoSpacing.sm),
+          const SizedBox(height: SaoSpacing.sm),
           _buildCatalogDecisionRow(
             fieldLabel: 'Propósito',
             capturedValue: capturedProposito.isEmpty
@@ -1613,7 +1536,7 @@ class _ActivityDetailsPanelProState
                   ?.call('proposito', capturedProposito);
             },
           ),
-          SizedBox(height: SaoSpacing.sm),
+          const SizedBox(height: SaoSpacing.sm),
           _buildCatalogDecisionRow(
             fieldLabel: 'Municipio',
             capturedValue: capturedMunicipio,
@@ -1633,11 +1556,11 @@ class _ActivityDetailsPanelProState
             },
           ),
           if (pendingFields.isNotEmpty) ...[
-            SizedBox(height: SaoSpacing.sm),
-            Wrap(
+            const SizedBox(height: SaoSpacing.sm),
+            const Wrap(
               spacing: 8,
               runSpacing: 8,
-              children: const [
+              children: [
                 _HotkeyPill(label: 'A', hint: 'Aceptar'),
                 _HotkeyPill(label: 'C', hint: 'Catálogo'),
                 _HotkeyPill(label: 'R', hint: 'Corrección'),
@@ -1682,13 +1605,15 @@ class _ActivityDetailsPanelProState
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
-      padding: EdgeInsets.all(SaoSpacing.sm),
+      padding: const EdgeInsets.all(SaoSpacing.sm),
       decoration: BoxDecoration(
         color: needsAttention
-            ? SaoColors.warning.withOpacity(0.12)
-            : SaoColors.surface,
+            ? SaoColors.warning.withValues(alpha: 0.12)
+            : SaoColors.surfaceFor(context),
         border: Border.all(
-          color: needsAttention ? SaoColors.warning : SaoColors.border,
+          color: needsAttention
+              ? SaoColors.warning
+              : SaoColors.borderFor(context),
         ),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
@@ -1709,7 +1634,7 @@ class _ActivityDetailsPanelProState
                     });
                   },
             child: Padding(
-              padding: EdgeInsets.symmetric(
+              padding: const EdgeInsets.symmetric(
                 horizontal: SaoSpacing.xs,
                 vertical: SaoSpacing.xs,
               ),
@@ -1722,7 +1647,7 @@ class _ActivityDetailsPanelProState
                     size: 18,
                     color: statusColor,
                   ),
-                  SizedBox(width: SaoSpacing.sm),
+                  const SizedBox(width: SaoSpacing.sm),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1730,29 +1655,29 @@ class _ActivityDetailsPanelProState
                         Text(
                           fieldLabel,
                           style: SaoTypography.caption.copyWith(
-                            color: SaoColors.gray700,
+                            color: SaoColors.textFor(context),
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        SizedBox(height: 2),
+                        const SizedBox(height: 2),
                         Text(
                           summaryText,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: SaoTypography.caption.copyWith(
-                            color: SaoColors.gray600,
+                            color: SaoColors.textMutedFor(context),
                           ),
                         ),
                       ],
                     ),
                   ),
                   Container(
-                    padding: EdgeInsets.symmetric(
+                    padding: const EdgeInsets.symmetric(
                       horizontal: SaoSpacing.sm,
                       vertical: SaoSpacing.xs,
                     ),
                     decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.14),
+                      color: statusColor.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(SaoRadii.full),
                     ),
                     child: Text(
@@ -1764,12 +1689,12 @@ class _ActivityDetailsPanelProState
                     ),
                   ),
                   if (!needsAttention) ...[
-                    SizedBox(width: SaoSpacing.xs),
+                    const SizedBox(width: SaoSpacing.xs),
                     Icon(
                       isExpanded
                           ? Icons.expand_less_rounded
                           : Icons.expand_more_rounded,
-                      color: SaoColors.gray500,
+                      color: SaoColors.textMutedFor(context),
                     ),
                   ],
                 ],
@@ -1777,29 +1702,29 @@ class _ActivityDetailsPanelProState
             ),
           ),
           if (isExpanded) ...[
-            SizedBox(height: SaoSpacing.sm),
+            const SizedBox(height: SaoSpacing.sm),
             Row(
               children: [
                 Expanded(
                   child: Container(
-                    padding: EdgeInsets.all(SaoSpacing.sm),
+                    padding: const EdgeInsets.all(SaoSpacing.sm),
                     decoration: BoxDecoration(
-                      color: SaoColors.gray50,
+                      color: SaoColors.surfaceMutedFor(context),
                       borderRadius: BorderRadius.circular(SaoRadii.sm),
-                      border: Border.all(color: SaoColors.border),
+                      border: Border.all(color: SaoColors.borderFor(context)),
                     ),
                     child: Text(
                       'Valor capturado: "$capturedValue"',
                       style: SaoTypography.caption.copyWith(
-                        color: SaoColors.gray700,
+                        color: SaoColors.textFor(context),
                       ),
                     ),
                   ),
                 ),
-                SizedBox(width: SaoSpacing.sm),
+                const SizedBox(width: SaoSpacing.sm),
                 Expanded(
                   child: DropdownButtonFormField<String>(
-                    value: effectiveLinkedValue,
+                    initialValue: effectiveLinkedValue,
                     isExpanded: true,
                     decoration: InputDecoration(
                       isDense: true,
@@ -1819,7 +1744,7 @@ class _ActivityDetailsPanelProState
                 ),
               ],
             ),
-            SizedBox(height: SaoSpacing.sm),
+            const SizedBox(height: SaoSpacing.sm),
             Wrap(
               spacing: SaoSpacing.sm,
               runSpacing: SaoSpacing.sm,
@@ -2284,12 +2209,12 @@ class _ActivityDetailsPanelProState
         : 'GPS consistente con el PK declarado';
 
     return Container(
-      padding: EdgeInsets.all(SaoSpacing.md),
-      margin: EdgeInsets.only(top: SaoSpacing.lg),
+      padding: const EdgeInsets.all(SaoSpacing.md),
+      margin: const EdgeInsets.only(top: SaoSpacing.lg),
       decoration: BoxDecoration(
         color: hasMismatch
-            ? SaoColors.warning.withOpacity(0.1)
-            : SaoColors.success.withOpacity(0.08),
+            ? SaoColors.warning.withValues(alpha: 0.1)
+            : SaoColors.success.withValues(alpha: 0.08),
         border: Border.all(
           color: hasMismatch ? SaoColors.warning : SaoColors.success,
         ),
@@ -2304,7 +2229,7 @@ class _ActivityDetailsPanelProState
                 Icons.location_on_rounded,
                 color: hasMismatch ? SaoColors.warning : SaoColors.success,
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Text(
                   message,
@@ -2315,27 +2240,27 @@ class _ActivityDetailsPanelProState
               ),
             ],
           ),
-          SizedBox(height: SaoSpacing.md),
+          const SizedBox(height: SaoSpacing.md),
           Row(
             children: [
               ElevatedButton.icon(
                 onPressed: () {
                   // TODO: Abrir mapa
                 },
-                icon: Icon(Icons.map_rounded),
-                label: Text('Ver en Mapa'),
+                icon: const Icon(Icons.map_rounded),
+                label: const Text('Ver en Mapa'),
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               if (hasMismatch)
                 Expanded(
                   child: ElevatedButton.icon(
                     onPressed: () {
                       // TODO: Abrir modal de justificación
                     },
-                    icon: Icon(Icons.note_add_rounded),
-                    label: Text('Agregar Justificación'),
+                    icon: const Icon(Icons.note_add_rounded),
+                    label: const Text('Agregar Justificación'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: SaoColors.error.withOpacity(0.1),
+                      backgroundColor: SaoColors.error.withValues(alpha: 0.1),
                       foregroundColor: SaoColors.error,
                     ),
                   ),
@@ -2349,9 +2274,9 @@ class _ActivityDetailsPanelProState
 
   Widget _buildGPSWarningPanel() {
     return Container(
-      padding: EdgeInsets.all(SaoSpacing.md),
+      padding: const EdgeInsets.all(SaoSpacing.md),
       decoration: BoxDecoration(
-        color: SaoColors.error.withOpacity(0.1),
+        color: SaoColors.error.withValues(alpha: 0.1),
         border: Border.all(color: SaoColors.error),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
@@ -2360,8 +2285,8 @@ class _ActivityDetailsPanelProState
         children: [
           Row(
             children: [
-              Icon(Icons.warning_rounded, color: SaoColors.error),
-              SizedBox(width: SaoSpacing.sm),
+              const Icon(Icons.warning_rounded, color: SaoColors.error),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Text(
                   'Discrepancia GPS crítica',
@@ -2371,20 +2296,20 @@ class _ActivityDetailsPanelProState
               ),
             ],
           ),
-          SizedBox(height: SaoSpacing.md),
+          const SizedBox(height: SaoSpacing.md),
           Text(
             'La ubicación GPS está a más de 800m del PK declarado. Se requiere justificación técnica antes de aprobar.',
             style: SaoTypography.bodyText.copyWith(color: SaoColors.gray700),
           ),
-          SizedBox(height: SaoSpacing.md),
+          const SizedBox(height: SaoSpacing.md),
           ElevatedButton.icon(
             onPressed: () {
               // TODO: Modal de justificación
             },
-            icon: Icon(Icons.check_circle_rounded),
-            label: Text('Agregar Justificación'),
+            icon: const Icon(Icons.check_circle_rounded),
+            label: const Text('Agregar Justificación'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: SaoColors.error.withOpacity(0.1),
+              backgroundColor: SaoColors.error.withValues(alpha: 0.1),
               foregroundColor: SaoColors.error,
             ),
           ),
@@ -2408,13 +2333,13 @@ class _ActivityDetailsPanelProState
           width: 40,
           height: 40,
           decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
+            color: color.withValues(alpha: 0.1),
             shape: BoxShape.circle,
             border: Border.all(color: color),
           ),
           child: Icon(icon, color: color, size: 20),
         ),
-        SizedBox(width: SaoSpacing.md),
+        const SizedBox(width: SaoSpacing.md),
         // Contenido
         Expanded(
           child: Column(
@@ -2428,7 +2353,7 @@ class _ActivityDetailsPanelProState
                 subtitle,
                 style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
               ),
-              SizedBox(height: SaoSpacing.xs),
+              const SizedBox(height: SaoSpacing.xs),
               Text(
                 timestamp,
                 style:
@@ -2443,7 +2368,7 @@ class _ActivityDetailsPanelProState
 
   Widget _buildTimelineConnector() {
     return Padding(
-      padding: EdgeInsets.only(left: 20, top: 4, bottom: 4),
+      padding: const EdgeInsets.only(left: 20, top: 4, bottom: 4),
       child: Container(
         width: 2,
         height: 20,
@@ -2454,14 +2379,14 @@ class _ActivityDetailsPanelProState
 
   Widget _buildChecklistItem(String label, {required bool isChecked}) {
     return Padding(
-      padding: EdgeInsets.only(bottom: SaoSpacing.sm),
+      padding: const EdgeInsets.only(bottom: SaoSpacing.sm),
       child: Row(
         children: [
           Icon(
             isChecked ? Icons.check_circle_rounded : Icons.cancel_rounded,
             color: isChecked ? SaoColors.success : SaoColors.gray400,
           ),
-          SizedBox(width: SaoSpacing.sm),
+          const SizedBox(width: SaoSpacing.sm),
           Expanded(
             child: Text(
               label,
@@ -2520,9 +2445,9 @@ class _HotkeyPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: SaoColors.gray100,
+        color: SaoColors.surfaceRaisedFor(context),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -2530,9 +2455,9 @@ class _HotkeyPill extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: SaoColors.surface,
+              color: SaoColors.surfaceFor(context),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SaoColors.border),
+              border: Border.all(color: SaoColors.borderFor(context)),
             ),
             child: Text(
               label,
@@ -2543,7 +2468,9 @@ class _HotkeyPill extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             hint,
-            style: SaoTypography.caption.copyWith(color: SaoColors.gray600),
+            style: SaoTypography.caption.copyWith(
+              color: SaoColors.textMutedFor(context),
+            ),
           ),
         ],
       ),

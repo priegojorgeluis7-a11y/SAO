@@ -60,7 +60,7 @@ class _EvidenceThumbnail extends StatelessWidget {
             decoration: BoxDecoration(
               color: SaoColors.gray200,
               borderRadius: BorderRadius.circular(SaoRadii.md),
-              border: Border.all(color: SaoColors.border),
+              border: Border.all(color: SaoColors.borderFor(context)),
             ),
             child: Center(
               child: Icon(Icons.photo, color: SaoColors.gray400, size: 40),

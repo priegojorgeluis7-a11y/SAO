@@ -49,7 +49,7 @@ class GpsValidationBanner extends StatelessWidget {
   }
 
   Color get _backgroundColor {
-    return _bannerColor.withOpacity(0.08);
+    return _bannerColor.withValues(alpha: 0.08);
   }
 
   IconData get _icon {
@@ -96,7 +96,7 @@ class GpsValidationBanner extends StatelessWidget {
     final showJustification = status == GpsValidationStatus.error;
 
     return Container(
-      padding: EdgeInsets.all(SaoSpacing.md),
+      padding: const EdgeInsets.all(SaoSpacing.md),
       decoration: BoxDecoration(
         color: _backgroundColor,
         border: Border(
@@ -105,15 +105,15 @@ class GpsValidationBanner extends StatelessWidget {
             width: 4,
           ),
           top: BorderSide(
-            color: _bannerColor.withOpacity(0.3),
+            color: _bannerColor.withValues(alpha: 0.3),
             width: 1,
           ),
           bottom: BorderSide(
-            color: _bannerColor.withOpacity(0.3),
+            color: _bannerColor.withValues(alpha: 0.3),
             width: 1,
           ),
           right: BorderSide(
-            color: _bannerColor.withOpacity(0.3),
+            color: _bannerColor.withValues(alpha: 0.3),
             width: 1,
           ),
         ),
@@ -130,7 +130,7 @@ class GpsValidationBanner extends StatelessWidget {
                 color: _bannerColor,
                 size: 20,
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -141,17 +141,17 @@ class GpsValidationBanner extends StatelessWidget {
                         color: _bannerColor,
                       ),
                     ),
-                    SizedBox(height: 2),
+                    const SizedBox(height: 2),
                     Text(
                       _subtitle,
                       style: SaoTypography.caption.copyWith(
-                        color: _bannerColor.withOpacity(0.8),
+                        color: _bannerColor.withValues(alpha: 0.8),
                       ),
                     ),
                   ],
                 ),
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               // Quick actions
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -160,12 +160,12 @@ class GpsValidationBanner extends StatelessWidget {
                     Tooltip(
                       message: 'Ver en mapa',
                       child: Material(
-                        color: Theme.of(context).colorScheme.surface.withOpacity(0),
+                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0),
                         child: InkWell(
                           onTap: onViewMap,
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: const BorderRadius.all(Radius.circular(6)),
                           child: Padding(
-                            padding: EdgeInsets.all(SaoSpacing.xs),
+                            padding: const EdgeInsets.all(SaoSpacing.xs),
                             child: Icon(
                               Icons.map_rounded,
                               color: _bannerColor,
@@ -176,16 +176,16 @@ class GpsValidationBanner extends StatelessWidget {
                       ),
                     ),
                   if (onEditGps != null) ...[
-                    SizedBox(width: SaoSpacing.xs),
+                    const SizedBox(width: SaoSpacing.xs),
                     Tooltip(
                       message: 'Editar GPS',
                       child: Material(
-                        color: Theme.of(context).colorScheme.surface.withOpacity(0),
+                        color: Theme.of(context).colorScheme.surface.withValues(alpha: 0),
                         child: InkWell(
                           onTap: onEditGps,
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: const BorderRadius.all(Radius.circular(6)),
                           child: Padding(
-                            padding: EdgeInsets.all(SaoSpacing.xs),
+                            padding: const EdgeInsets.all(SaoSpacing.xs),
                             child: Icon(
                               Icons.edit_location_rounded,
                               color: _bannerColor,
@@ -201,13 +201,13 @@ class GpsValidationBanner extends StatelessWidget {
             ],
           ),
 
-          SizedBox(height: SaoSpacing.md),
+          const SizedBox(height: SaoSpacing.md),
 
           // Details grid: PK y GPS
           Container(
-            padding: EdgeInsets.all(SaoSpacing.sm),
+            padding: const EdgeInsets.all(SaoSpacing.sm),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.surface.withOpacity(0.5),
+              color: Theme.of(context).colorScheme.surface.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(SaoRadii.sm),
             ),
             child: Row(
@@ -237,13 +237,13 @@ class GpsValidationBanner extends StatelessWidget {
 
           // Justification field if error status
           if (showJustification) ...[
-            SizedBox(height: SaoSpacing.md),
+            const SizedBox(height: SaoSpacing.md),
             Container(
-              padding: EdgeInsets.all(SaoSpacing.sm),
+              padding: const EdgeInsets.all(SaoSpacing.sm),
               decoration: BoxDecoration(
-                color: SaoColors.error.withOpacity(0.05),
+                color: SaoColors.error.withValues(alpha: 0.05),
                 border: Border.all(
-                  color: SaoColors.error.withOpacity(0.3),
+                  color: SaoColors.error.withValues(alpha: 0.3),
                   width: 1,
                 ),
                 borderRadius: BorderRadius.circular(SaoRadii.sm),
@@ -253,12 +253,12 @@ class GpsValidationBanner extends StatelessWidget {
                 children: [
                   Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.description_rounded,
                         size: 16,
                         color: SaoColors.error,
                       ),
-                      SizedBox(width: SaoSpacing.xs),
+                      const SizedBox(width: SaoSpacing.xs),
                       Text(
                         'Justificación requerida',
                         style: SaoTypography.caption.copyWith(
@@ -268,7 +268,7 @@ class GpsValidationBanner extends StatelessWidget {
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.sm),
+                  const SizedBox(height: SaoSpacing.sm),
                   TextField(
                     maxLines: 3,
                     minLines: 2,
@@ -276,26 +276,26 @@ class GpsValidationBanner extends StatelessWidget {
                       hintText: 'Explicar discrepancia de ubicación...',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(SaoRadii.sm),
-                        borderSide: BorderSide(
+                        borderSide: const BorderSide(
                           color: SaoColors.border,
                           width: 1,
                         ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(SaoRadii.sm),
-                        borderSide: BorderSide(
+                        borderSide: const BorderSide(
                           color: SaoColors.border,
                           width: 1,
                         ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(SaoRadii.sm),
-                        borderSide: BorderSide(
+                        borderSide: const BorderSide(
                           color: SaoColors.primary,
                           width: 2,
                         ),
                       ),
-                      contentPadding: EdgeInsets.all(SaoSpacing.sm),
+                      contentPadding: const EdgeInsets.all(SaoSpacing.sm),
                       filled: true,
                       fillColor: Theme.of(context).colorScheme.surface,
                     ),
@@ -332,7 +332,7 @@ class _DetailItem extends StatelessWidget {
             color: SaoColors.gray600,
           ),
         ),
-        SizedBox(height: 3),
+        const SizedBox(height: 3),
         Text(
           value,
           style: SaoTypography.mono.copyWith(

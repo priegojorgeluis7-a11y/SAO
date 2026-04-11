@@ -228,6 +228,7 @@ class StatusCatalog {
 
     final from = status.trim().toLowerCase();
     final result = <String>[];
+    var foundTransitionForState = false;
 
     for (final transition in transitions) {
       final transitionFrom = (transition['from'] ?? '')
@@ -235,6 +236,7 @@ class StatusCatalog {
           .trim()
           .toLowerCase();
       if (transitionFrom != from) continue;
+      foundTransitionForState = true;
       if (!_roleAllowed(transition, role)) continue;
       if (!_permissionsAllowed(transition, role)) continue;
 
@@ -245,8 +247,12 @@ class StatusCatalog {
       }
     }
 
-    // If no transitions matched the role/permissions, use defaults as fallback
+    // If the workflow defines transitions for this state but the role/permissions
+    // filter them out, respect that restriction and return empty.
     if (result.isEmpty) {
+      if (foundTransitionForState) {
+        return const <String>[];
+      }
       return _defaultTransitionsFor(status, role);
     }
 

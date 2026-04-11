@@ -1,19 +1,6 @@
 // lib/ui/widgets/widgets_index.dart
-/// Índice central de widgets del SAO
-/// Importa este archivo para acceder a todos los widgets reutilizables:
-/// 
-/// ```dart
-/// import 'package:sao_desktop/ui/widgets/widgets_index.dart';
-/// 
-/// // Uso:
-/// SaoCard(child: ...)
-/// SaoButton.primary(text: 'Guardar', onPressed: () {})
-/// SaoField(label: 'Nombre', ...)
-/// SaoDropdown(items: [...], ...)
-/// SaoPanel(title: 'Sección', child: ...)
-/// SaoActivityCard(title: 'Actividad', ...)
-/// SaoAppShell(title: 'App', body: ...)
-/// ```
+// Índice central de widgets del SAO.
+// Importa este archivo para acceder a los widgets reutilizables del paquete.
 
 // Contenedores y estructura
 export 'sao_app_shell.dart';

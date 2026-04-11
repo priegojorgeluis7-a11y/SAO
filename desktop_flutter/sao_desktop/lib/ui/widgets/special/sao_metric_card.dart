@@ -51,10 +51,10 @@ class _SaoMetricCardState extends State<SaoMetricCard> {
           curve: Curves.easeOutCubic,
           padding: EdgeInsets.all(SaoSpacing.cardPadding),
           decoration: BoxDecoration(
-            color: SaoColors.surface,
+            color: SaoColors.surfaceFor(context),
             borderRadius: BorderRadius.circular(SaoRadii.md),
             border: Border.all(
-              color: _isHovered ? widget.color.withOpacity(0.3) : SaoColors.border,
+              color: _isHovered ? widget.color.withOpacity(0.3) : SaoColors.borderFor(context),
             ),
             boxShadow: _isHovered ? SaoShadows.md : SaoShadows.sm,
           ),

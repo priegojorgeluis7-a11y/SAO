@@ -30,8 +30,8 @@ class SaoProjectSwitcher extends StatelessWidget {
         vertical: SaoSpacing.sm,
       ),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
-        border: Border.all(color: SaoColors.border),
+        color: SaoColors.surfaceFor(context),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
       child: Text(

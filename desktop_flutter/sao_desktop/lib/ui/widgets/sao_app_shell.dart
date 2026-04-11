@@ -92,10 +92,10 @@ class _MobileShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: backgroundColor ?? SaoColors.surfaceDim,
+      backgroundColor: backgroundColor ?? SaoColors.scaffoldBackgroundFor(context),
       appBar: AppBar(
-        backgroundColor: SaoColors.surface,
-        surfaceTintColor: SaoColors.surface,
+        backgroundColor: SaoColors.surfaceFor(context),
+        surfaceTintColor: SaoColors.surfaceFor(context),
         elevation: 0,
         scrolledUnderElevation: 0,
         leading: leading,
@@ -148,16 +148,16 @@ class _DesktopShell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: backgroundColor ?? SaoColors.surfaceDim,
+      backgroundColor: backgroundColor ?? SaoColors.scaffoldBackgroundFor(context),
       body: Column(
         children: [
           // TopBar
           Container(
             height: 64,
             decoration: BoxDecoration(
-              color: SaoColors.surface,
+              color: SaoColors.surfaceFor(context),
               border: Border(
-                bottom: BorderSide(color: SaoColors.border),
+                bottom: BorderSide(color: SaoColors.borderFor(context)),
               ),
             ),
             padding: const EdgeInsets.symmetric(
@@ -197,9 +197,9 @@ class _DesktopShell extends StatelessWidget {
           if (footer != null)
             Container(
               decoration: BoxDecoration(
-                color: SaoColors.surface,
+                color: SaoColors.surfaceFor(context),
                 border: Border(
-                  top: BorderSide(color: SaoColors.border),
+                  top: BorderSide(color: SaoColors.borderFor(context)),
                 ),
               ),
               padding: const EdgeInsets.symmetric(

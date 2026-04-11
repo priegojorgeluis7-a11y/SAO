@@ -1,39 +1,6 @@
 // lib/ui/sao_ui.dart
-/// Sistema de Diseño Completo del SAO (Design System + Catálogos Globales)
-/// 
-/// Este archivo exporta todo el ecosistema UI centralizado compartido entre
-/// SAO Mobile y SAO Desktop para garantizar consistencia visual y de datos.
-/// 
-/// Uso:
-/// ```dart
-/// import 'package:sao_desktop/ui/sao_ui.dart';
-/// 
-/// // Theme
-/// MaterialApp(theme: SaoTheme.lightTheme)
-/// 
-/// // Colors & Typography
-/// Container(color: SaoColors.actionPrimary)
-/// Text('Título', style: SaoTypography.titleMedium)
-/// 
-/// // Widgets
-/// SaoCard(child: ...)
-/// SaoButton.primary(text: 'Guardar', onPressed: () {})
-/// SaoField(label: 'Nombre', ...)
-/// SaoDropdown(items: [...], ...)
-/// SaoPanel(title: 'Sección', child: ...)
-/// 
-/// // Catálogos (fuentes únicas de verdad)
-/// ActivityCatalog.caminamiento
-/// StatusCatalog.aprobado
-/// RiskCatalog.prioritario  // ← Homologado con mobile
-/// RolesCatalog.coordinador
-/// ProjectsCatalog.tmq
-/// 
-/// // Helpers
-/// SaoFormat.date(DateTime.now())
-/// SaoValidators.requiredEmail(email)
-/// SaoPlatform.isDesktop
-/// ```
+// Sistema de diseño completo del SAO.
+// Este barrel exporta el ecosistema UI compartido entre mobile y desktop.
 
 // ============================================================
 // THEME: Colores, Tipografía, Espaciado, Radios, Sombras, Motion, Layout

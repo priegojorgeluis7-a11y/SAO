@@ -75,13 +75,14 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
       widget.projectOptions != null && widget.onProjectChanged != null;
     final effectiveProjectName =
       (widget.projectName ?? '').trim().isEmpty ? widget.allProjectsLabel : widget.projectName!.trim();
+    final borderColor = _hasFocus ? SaoColors.primary : SaoColors.borderFor(context);
 
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         border: Border.all(
-          color: _hasFocus ? SaoColors.primary : SaoColors.border,
+          color: borderColor,
           width: _hasFocus ? 2 : 1,
         ),
         borderRadius: BorderRadius.circular(SaoRadii.full),
@@ -170,7 +171,7 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
                     height: 24,
                     width: 1,
                     margin: const EdgeInsets.symmetric(horizontal: SaoSpacing.sm),
-                    color: SaoColors.border,
+                    color: SaoColors.borderFor(context),
                   ),
                 ],
               ),

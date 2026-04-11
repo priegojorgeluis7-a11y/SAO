@@ -140,10 +140,14 @@ class AppDb extends _$AppDb {
         RolesCompanion.insert(id: const Value(3), name: 'SUPERVISOR'),
         RolesCompanion.insert(id: const Value(4), name: 'OPERATIVO'),
         RolesCompanion.insert(id: const Value(5), name: 'LECTOR'),
-      ]);
+      ], mode: InsertMode.insertOrIgnore);
 
       // SyncState id=1 (único)
-      b.insert(syncState, SyncStateCompanion.insert(id: const Value(1)));
+      b.insert(
+        syncState,
+        SyncStateCompanion.insert(id: const Value(1)),
+        mode: InsertMode.insertOrIgnore,
+      );
     });
   }
 

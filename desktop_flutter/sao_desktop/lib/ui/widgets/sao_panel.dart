@@ -47,8 +47,8 @@ class SaoPanel extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: SaoColors.surface,
-        border: Border.all(color: SaoColors.border),
+        color: SaoColors.surfaceFor(context),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
       ),
       child: Column(
@@ -62,7 +62,7 @@ class SaoPanel extends StatelessWidget {
               padding: headerPadding,
             ),
           if ((title != null || trailing != null) && showDivider)
-            const Divider(height: 1, color: SaoColors.border),
+            Divider(height: 1, color: SaoColors.borderFor(context)),
           Padding(
             padding: padding ??
                 const EdgeInsets.all(SaoSpacing.lg),
@@ -163,8 +163,8 @@ class _CollapsiblePanelState extends State<_CollapsiblePanel> {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: SaoColors.surface,
-        border: Border.all(color: SaoColors.border),
+        color: SaoColors.surfaceFor(context),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
       ),
       child: Column(
@@ -172,7 +172,7 @@ class _CollapsiblePanelState extends State<_CollapsiblePanel> {
         children: [
           InkWell(
             onTap: () => setState(() => _isCollapsed = !_isCollapsed),
-            borderRadius: BorderRadius.vertical(
+            borderRadius: const BorderRadius.vertical(
               top: Radius.circular(SaoRadii.lg - 1),
             ),
             child: Padding(
@@ -184,7 +184,7 @@ class _CollapsiblePanelState extends State<_CollapsiblePanel> {
                     _isCollapsed
                         ? Icons.arrow_right
                         : Icons.arrow_drop_down,
-                    color: SaoColors.gray600,
+                    color: SaoColors.textMutedFor(context),
                   ),
                   const SizedBox(width: SaoSpacing.sm),
                   Expanded(
@@ -216,7 +216,7 @@ class _CollapsiblePanelState extends State<_CollapsiblePanel> {
           ),
           if (!_isCollapsed) ...[
             if (widget.showDivider)
-              const Divider(height: 1, color: SaoColors.border),
+              Divider(height: 1, color: SaoColors.borderFor(context)),
             Padding(
               padding: widget.padding ??
                   const EdgeInsets.all(SaoSpacing.lg),
@@ -254,8 +254,8 @@ class SaoExpandedPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: SaoColors.surface,
-        border: Border.all(color: SaoColors.border),
+        color: SaoColors.surfaceFor(context),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
       ),
       child: Column(
@@ -269,7 +269,7 @@ class SaoExpandedPanel extends StatelessWidget {
               padding: headerPadding,
             ),
           if ((title != null || trailing != null) && showDivider)
-            const Divider(height: 1, color: SaoColors.border),
+            Divider(height: 1, color: SaoColors.borderFor(context)),
           Expanded(
             child: Padding(
               padding: padding ??
@@ -301,8 +301,8 @@ class SaoSimplePanel extends StatelessWidget {
     return Container(
       padding: padding ?? const EdgeInsets.all(SaoSpacing.lg),
       decoration: BoxDecoration(
-        color: color ?? SaoColors.surface,
-        border: Border.all(color: SaoColors.border),
+        color: color ?? SaoColors.surfaceFor(context),
+        border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
       ),
       child: child,

@@ -6,6 +6,14 @@ import 'package:flutter/material.dart';
 class SaoColors {
   SaoColors._(); // Constructor privado para prevenir instanciación
 
+  static const _darkBg = Color(0xFF0F172A);
+  static const _darkSurface = Color(0xFF1E293B);
+  static const _darkSurfaceMuted = Color(0xFF162033);
+  static const _darkSurfaceRaised = Color(0xFF243244);
+  static const _darkBorder = Color(0xFF334155);
+  static const _darkOnSurface = Color(0xFFF1F5F9);
+  static const _darkSubtext = Color(0xFF94A3B8);
+
   // ============================================================
   // GRISES (Tailwind-inspired)
   // ============================================================
@@ -70,6 +78,30 @@ class SaoColors {
   static const surfaceDim = gray50;
   static const border = gray200;
   static const borderStrong = gray300;
+
+    static bool isDarkMode(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.dark;
+
+    static Color scaffoldBackgroundFor(BuildContext context) =>
+      isDarkMode(context) ? _darkBg : gray50;
+
+    static Color surfaceFor(BuildContext context) =>
+      isDarkMode(context) ? _darkSurface : surface;
+
+    static Color surfaceMutedFor(BuildContext context) =>
+      isDarkMode(context) ? _darkSurfaceMuted : gray50;
+
+    static Color surfaceRaisedFor(BuildContext context) =>
+      isDarkMode(context) ? _darkSurfaceRaised : gray100;
+
+    static Color borderFor(BuildContext context) =>
+      isDarkMode(context) ? _darkBorder : border;
+
+    static Color textFor(BuildContext context) =>
+      isDarkMode(context) ? _darkOnSurface : gray900;
+
+    static Color textMutedFor(BuildContext context) =>
+      isDarkMode(context) ? _darkSubtext : gray500;
 
   // ============================================================
   // ESTADOS OPERATIVOS (Workflow de SAO)

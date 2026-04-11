@@ -183,13 +183,6 @@ class _ScopeDraft {
 
   _ScopeDraft({required this.role, required this.projectId});
 
-  factory _ScopeDraft.fromScope(_UserScope scope) {
-    return _ScopeDraft(
-      role: scope.role.isEmpty ? 'OPERATIVO' : scope.role.toUpperCase(),
-      projectId: (scope.projectId ?? '').toUpperCase(),
-    );
-  }
-
   _UserScope toScope() {
     final normalizedProject = projectId.trim().toUpperCase();
     return _UserScope(
@@ -569,11 +562,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       curve: Curves.easeOutCubic,
                       width: resolvedSelectedUser == null ? 0 : 390,
                       decoration: BoxDecoration(
-                        color: SaoColors.surface,
+                        color: SaoColors.surfaceFor(context),
                         borderRadius: BorderRadius.circular(14),
                         border: resolvedSelectedUser == null
                             ? null
-                            : Border.all(color: SaoColors.gray200),
+                            : Border.all(color: SaoColors.borderFor(context)),
                         boxShadow: resolvedSelectedUser == null
                             ? null
                             : [
@@ -593,10 +586,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                                   padding:
                                       const EdgeInsets.fromLTRB(18, 14, 14, 14),
                                   decoration: BoxDecoration(
-                                    color: SaoColors.gray50,
+                                    color: SaoColors.surfaceMutedFor(context),
                                     border: Border(
                                         bottom: BorderSide(
-                                            color: SaoColors.gray200)),
+                                            color: SaoColors.borderFor(context))),
                                   ),
                                   child: Row(
                                     mainAxisAlignment:
@@ -651,9 +644,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: SaoColors.gray200),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Wrap(
         spacing: 20,
@@ -782,12 +775,13 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     required int filteredUsers,
     required List<String> availableProjects,
   }) {
+    final mutedTextColor = SaoColors.textMutedFor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: SaoColors.surfaceFor(context),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: SaoColors.gray200),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Row(children: [
         Column(
@@ -800,8 +794,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             const SizedBox(height: 2),
             Text(
               '$filteredUsers de $totalUsers usuarios',
-              style: const TextStyle(
-                color: SaoColors.gray600,
+              style: TextStyle(
+                color: mutedTextColor,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -811,9 +805,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           decoration: BoxDecoration(
-            color: SaoColors.gray50,
+            color: SaoColors.surfaceMutedFor(context),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: SaoColors.gray200),
+            border: Border.all(color: SaoColors.borderFor(context)),
           ),
           child: Row(
             children: [
@@ -833,14 +827,14 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             onPressed: _clearSearch,
                           ),
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: SaoColors.surfaceFor(context),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: SaoColors.gray200),
+                      borderSide: BorderSide(color: SaoColors.borderFor(context)),
                     ),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: SaoColors.gray200),
+                      borderSide: BorderSide(color: SaoColors.borderFor(context)),
                     ),
                     isDense: true,
                     contentPadding: const EdgeInsets.symmetric(vertical: 10),
@@ -1673,17 +1667,6 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     return parts.join(' · ');
   }
 
-  Future<void> _scrollToDetailSection(GlobalKey key) async {
-    final targetContext = key.currentContext;
-    if (targetContext == null) return;
-    await Scrollable.ensureVisible(
-      targetContext,
-      duration: const Duration(milliseconds: 260),
-      curve: Curves.easeOutCubic,
-      alignment: 0.12,
-    );
-  }
-
   void _showActivityQuickDetail(
     BuildContext context,
     _UserActivityItem item, {
@@ -1897,9 +1880,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: SaoColors.gray100,
+                              color: SaoColors.surfaceRaisedFor(context),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: SaoColors.gray300),
+                              border: Border.all(
+                                color: SaoColors.borderFor(context),
+                              ),
                             ),
                             child: Text(
                               permission,
@@ -1950,7 +1935,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-            color: SaoColors.gray50,
+            color: SaoColors.surfaceMutedFor(context),
             child: Row(
               children: [
                 CircleAvatar(
@@ -1972,10 +1957,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     children: [
                       Text(
                         user.fullName,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w700,
-                          color: SaoColors.gray900,
+                          color: SaoColors.textFor(context),
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -1983,9 +1968,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       const SizedBox(height: 2),
                       Text(
                         user.email,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12,
-                          color: SaoColors.gray600,
+                          color: SaoColors.textMutedFor(context),
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -2003,9 +1988,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
             decoration: BoxDecoration(
-              color: SaoColors.gray50,
+              color: SaoColors.surfaceMutedFor(context),
               border: Border(
-                bottom: BorderSide(color: SaoColors.gray200),
+                bottom: BorderSide(color: SaoColors.borderFor(context)),
               ),
             ),
             child: Row(
@@ -2022,7 +2007,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(width: 1, height: 24, color: SaoColors.gray300),
+                Container(
+                  width: 1,
+                  height: 24,
+                  color: SaoColors.borderFor(context),
+                ),
                 const SizedBox(width: 8),
                 _ActionIconBtn(
                   icon: Icons.security_rounded,
@@ -2036,7 +2025,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Container(width: 1, height: 24, color: SaoColors.gray300),
+                Container(
+                  width: 1,
+                  height: 24,
+                  color: SaoColors.borderFor(context),
+                ),
                 const SizedBox(width: 8),
                 _ActionIconBtn(
                   icon: user.isActive
@@ -2048,7 +2041,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                   onPressed: () => _toggleStatus(context, user),
                 ),
                 const Spacer(),
-                Container(width: 1, height: 24, color: SaoColors.gray300),
+                Container(width: 1, height: 24, color: SaoColors.borderFor(context)),
                 const SizedBox(width: 8),
                 _ActionIconBtn(
                   icon: Icons.delete_rounded,
@@ -2079,9 +2072,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: SaoColors.surface,
+                    color: SaoColors.surfaceFor(context),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: SaoColors.gray200),
+                    border: Border.all(color: SaoColors.borderFor(context)),
                   ),
                   child: Column(
                     children: [
@@ -2116,11 +2109,11 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                                         padding: const EdgeInsets.symmetric(
                                             horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
-                                          color: SaoColors.gray100,
+                                          color: SaoColors.surfaceRaisedFor(context),
                                           borderRadius:
                                               BorderRadius.circular(999),
                                           border: Border.all(
-                                              color: SaoColors.gray300),
+                                            color: SaoColors.borderFor(context)),
                                         ),
                                         child: Text(
                                           p,
@@ -2183,9 +2176,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 7, vertical: 3),
                               decoration: BoxDecoration(
-                                color: SaoColors.gray100,
+                                color: SaoColors.surfaceRaisedFor(context),
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: SaoColors.gray300),
+                                border: Border.all(color: SaoColors.borderFor(context)),
                               ),
                               child: Text(
                                 s.projectId == null
@@ -2226,8 +2219,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             summary == null || summary.recentItems.isEmpty
                                 ? null
                                 : summary.recentItems.first.createdAt;
-                        if (lastActivity == null)
+                          if (lastActivity == null) {
                           return const SizedBox.shrink();
+                          }
                         return Text(
                           'Última: ${DateFormat('dd/MM HH:mm').format(lastActivity)}',
                           style: const TextStyle(
@@ -2260,9 +2254,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       ),
                       onPressed: () async {
+                          final pageContext = context;
                         final summary = await _loadUserActivitySummary(user);
-                        if (!context.mounted) return;
-                        _showUserActivitiesDialog(context, user, summary);
+                          if (!pageContext.mounted) return;
+                          _showUserActivitiesDialog(pageContext, user, summary);
                       },
                       icon: const Icon(Icons.open_in_new_rounded, size: 14),
                       label: const Text(
@@ -2315,9 +2310,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 6),
                           decoration: BoxDecoration(
-                            color: SaoColors.gray100,
+                            color: SaoColors.surfaceRaisedFor(context),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: SaoColors.gray200),
+                            border: Border.all(color: SaoColors.borderFor(context)),
                           ),
                           child: Row(
                             children: [
@@ -2386,13 +2381,13 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             padding: const EdgeInsets.symmetric(
                                 vertical: 18, horizontal: 12),
                             decoration: BoxDecoration(
-                              color: SaoColors.gray50,
+                              color: SaoColors.surfaceMutedFor(context),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: SaoColors.gray200),
+                              border: Border.all(color: SaoColors.borderFor(context)),
                             ),
                             child: Column(
                               children: [
-                                Icon(
+                                  const Icon(
                                   Icons.find_in_page_outlined,
                                   size: 26,
                                   color: SaoColors.gray400,
@@ -2698,6 +2693,10 @@ class _ActionIconBtn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fg = color ?? SaoColors.gray700;
+    final baseColor = SaoColors.surfaceFor(context);
+    final borderColor = emphasized
+        ? fg.withValues(alpha: 0.45)
+        : SaoColors.borderFor(context);
     return Tooltip(
       message: label,
       child: InkWell(
@@ -2706,12 +2705,9 @@ class _ActionIconBtn extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
-            color: emphasized ? fg.withValues(alpha: 0.14) : SaoColors.surface,
+            color: emphasized ? fg.withValues(alpha: 0.14) : baseColor,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(
-              color:
-                  emphasized ? fg.withValues(alpha: 0.45) : SaoColors.gray300,
-            ),
+            border: Border.all(color: borderColor),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -2762,99 +2758,6 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class _StatPill extends StatelessWidget {
-  final String label;
-  final String value;
-  final Color color;
-  final VoidCallback? onTap;
-
-  const _StatPill({
-    required this.label,
-    required this.value,
-    required this.color,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.09),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 1),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 10,
-                color: color.withValues(alpha: 0.8),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _CountBadge extends StatelessWidget {
-  final String label;
-  final int count;
-  final Color color;
-
-  const _CountBadge(
-      {required this.label, required this.count, required this.color});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(5),
-      ),
-      child: RichText(
-        text: TextSpan(
-          children: [
-            TextSpan(
-              text: '$count ',
-              style: TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
-            ),
-            TextSpan(
-              text: label,
-              style: TextStyle(
-                fontSize: 11,
-                color: color.withValues(alpha: 0.75),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 class _ActivityFilterDropdown extends StatelessWidget {
   final String label;
   final String value;
@@ -2875,22 +2778,25 @@ class _ActivityFilterDropdown extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: SaoColors.surface,
+          color: SaoColors.surfaceFor(context),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: SaoColors.gray300),
+          border: Border.all(color: SaoColors.borderFor(context)),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             isExpanded: true,
             value: value,
             icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
-            style: const TextStyle(fontSize: 12, color: SaoColors.gray800),
+            style: TextStyle(
+              fontSize: 12,
+              color: SaoColors.textFor(context),
+            ),
             onChanged: onChanged,
             items: items
                 .map(
                   (item) => DropdownMenuItem<String>(
                     value: item.$1,
-                    child: Text('${label}: ${item.$2}'),
+                      child: Text('$label: ${item.$2}'),
                   ),
                 )
                 .toList(),
@@ -3056,9 +2962,9 @@ class _UsersTable extends StatelessWidget {
 
         return Container(
           decoration: BoxDecoration(
-            color: SaoColors.surface,
+            color: SaoColors.surfaceFor(context),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: SaoColors.gray200),
+            border: Border.all(color: SaoColors.borderFor(context)),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.04),
@@ -3080,7 +2986,7 @@ class _UsersTable extends StatelessWidget {
                   dataRowMaxHeight: 62,
                   headingRowHeight: 50,
                   headingRowColor:
-                      WidgetStateProperty.all(const Color(0xFFF8FAFC)),
+                      WidgetStateProperty.all(SaoColors.surfaceMutedFor(context)),
                   columns: [
                     _sortableColumn('Nombre', 'nombre', width: nameWidth),
                     _sortableColumn('Correo', 'correo', width: emailWidth),
@@ -3103,6 +3009,7 @@ class _UsersTable extends StatelessWidget {
                   ],
                   rows: users
                       .map((u) => _buildRow(
+                        context,
                             u,
                             nameWidth: nameWidth,
                             emailWidth: emailWidth,
@@ -3146,6 +3053,7 @@ class _UsersTable extends StatelessWidget {
   }
 
   DataRow _buildRow(
+    BuildContext context,
     _AdminUser u, {
     required double nameWidth,
     required double emailWidth,
@@ -3161,10 +3069,10 @@ class _UsersTable extends StatelessWidget {
     return DataRow(
       color: WidgetStateProperty.resolveWith<Color?>((states) {
         if (isSelected) {
-          return const Color(0xFFEFF6FF);
+          return SaoColors.primary.withValues(alpha: 0.14);
         }
         if (states.contains(WidgetState.hovered)) {
-          return const Color(0xFFF8FAFC);
+          return SaoColors.surfaceMutedFor(context);
         }
         return null;
       }),
@@ -3333,9 +3241,9 @@ class _UsersTable extends StatelessWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.delete_rounded,
+                                const Icon(Icons.delete_rounded,
                                   size: 16, color: SaoColors.error),
-                              SizedBox(width: 8),
+                                const SizedBox(width: 8),
                               Text(
                                 u.isActive ? 'Desactivar' : 'Eliminar',
                                 style: const TextStyle(color: SaoColors.error),
@@ -3886,8 +3794,9 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                                           )
                                         : null,
                                     filled: _isEdit,
-                                    fillColor:
-                                        _isEdit ? SaoColors.gray100 : null,
+                                    fillColor: _isEdit
+                                        ? SaoColors.surfaceRaisedFor(context)
+                                        : null,
                                   ),
                                   keyboardType: TextInputType.emailAddress,
                                   autovalidateMode:
@@ -4013,9 +3922,11 @@ class _UserFormDialogState extends State<_UserFormDialog> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: SaoColors.gray100,
+                        color: SaoColors.surfaceMutedFor(context),
                         borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: SaoColors.gray300),
+                        border: Border.all(
+                          color: SaoColors.borderFor(context),
+                        ),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4158,9 +4069,9 @@ class _UserFormDialogState extends State<_UserFormDialog> {
         child: Container(
           padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: SaoColors.surface,
+            color: SaoColors.surfaceFor(context),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: SaoColors.border),
+            border: Border.all(color: SaoColors.borderFor(context)),
           ),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.center,
@@ -4368,15 +4279,15 @@ class _UserPermissionsDialogState extends State<_UserPermissionsDialog> {
       }),
       backgroundColor: WidgetStateProperty.resolveWith<Color>((states) {
         if (states.contains(WidgetState.disabled)) {
-          return SaoColors.gray100;
+          return SaoColors.surfaceRaisedFor(context);
         }
-        return SaoColors.surface;
+        return SaoColors.surfaceFor(context);
       }),
       side: WidgetStateProperty.resolveWith<BorderSide>((states) {
         if (states.contains(WidgetState.disabled)) {
-          return const BorderSide(color: SaoColors.gray300);
+          return BorderSide(color: SaoColors.borderFor(context));
         }
-        return const BorderSide(color: SaoColors.gray400);
+        return BorderSide(color: SaoColors.borderFor(context));
       }),
     );
   }
@@ -4870,18 +4781,18 @@ class _FilterDropdown extends StatelessWidget {
         decoration: InputDecoration(
           labelText: label,
           filled: true,
-          fillColor: Colors.white,
+          fillColor: SaoColors.surfaceFor(context),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: SaoColors.gray200),
+            borderSide: BorderSide(color: SaoColors.borderFor(context)),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: SaoColors.gray200),
+            borderSide: BorderSide(color: SaoColors.borderFor(context)),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-            borderSide: BorderSide(color: SaoColors.gray400),
+              borderSide: const BorderSide(color: SaoColors.gray400),
           ),
           isDense: true,
           contentPadding:
@@ -4919,11 +4830,11 @@ class _RoleBadge extends StatelessWidget {
   }
 
   static Color _backgroundFor(String role) => switch (role.toUpperCase()) {
-        'ADMIN' => const Color(0xFFEEF2FF),
-        'SUPERVISOR' => const Color(0xFFDBEAFE),
-        'COORD' => const Color(0xFFF1F5F9),
-        'OPERATIVO' => const Color(0xFFCCFBF1),
-        'LECTOR' => const Color(0xFFF1F5F9),
+      'ADMIN' => const Color(0xFF7C3AED).withValues(alpha: 0.18),
+      'SUPERVISOR' => const Color(0xFF2563EB).withValues(alpha: 0.18),
+      'COORD' => const Color(0xFF64748B).withValues(alpha: 0.18),
+      'OPERATIVO' => const Color(0xFF0F766E).withValues(alpha: 0.18),
+      'LECTOR' => const Color(0xFF475569).withValues(alpha: 0.18),
         _ => SaoColors.gray500.withValues(alpha: 0.16),
       };
 
@@ -4957,12 +4868,19 @@ class _StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = isActive ? const Color(0xFF16A34A) : SaoColors.gray500;
-    final bg = isActive ? const Color(0xFFDCFCE7) : const Color(0xFFF1F5F9);
+    final bg = isActive
+        ? const Color(0xFF16A34A).withValues(alpha: 0.18)
+        : SaoColors.surfaceRaisedFor(context);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isActive
+              ? color.withValues(alpha: 0.28)
+              : SaoColors.borderFor(context),
+        ),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

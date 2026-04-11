@@ -1057,8 +1057,6 @@ class CatalogRepository {
         .map((entry) => entry.topicId)
         .toSet();
 
-    final mode =
-        _lastBundle?.effective.rules.topicPolicy.modeFor(normalized) ?? 'any';
     final suggested = [
       for (final id in suggestedIds)
         if (mapById[id] != null) mapById[id]!

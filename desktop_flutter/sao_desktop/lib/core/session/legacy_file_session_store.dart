@@ -18,7 +18,7 @@ class LegacyFileSessionStore {
       : _filePathOverride = filePathOverride;
 
   Future<File> _file() async {
-    if (_filePathOverride != null) return File(_filePathOverride!);
+    if (_filePathOverride != null) return File(_filePathOverride);
     final dir = await getApplicationDocumentsDirectory();
     return File('${dir.path}/sao_session.json');
   }

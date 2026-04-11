@@ -163,9 +163,15 @@ class AdminDashboardPage extends ConsumerWidget {
                         style: TextStyle(color: Colors.grey),
                       ),
                     )
-                  : Card(
+                  : Container(
+                      decoration: BoxDecoration(
+                        color: AppColors.surfaceFor(context),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: AppColors.borderFor(context)),
+                      ),
                       child: SingleChildScrollView(
                         child: DataTable(
+                          headingRowColor: WidgetStatePropertyAll(AppColors.surfaceMutedFor(context)),
                           columnSpacing: 20,
                           columns: const [
                             DataColumn(label: Text('Fecha')),
@@ -242,7 +248,12 @@ class _KpiCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Card(
+      child: Container(
+        decoration: BoxDecoration(
+          color: AppColors.surfaceFor(context),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.borderFor(context)),
+        ),
         child: Padding(
           padding: const EdgeInsets.all(20),
           child: Row(
@@ -278,8 +289,10 @@ class _KpiCard extends StatelessWidget {
                     ),
                     Text(
                       sub,
-                      style:
-                          const TextStyle(fontSize: 11, color: Colors.grey),
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: AppColors.textMutedFor(context),
+                      ),
                     ),
                   ],
                 ),

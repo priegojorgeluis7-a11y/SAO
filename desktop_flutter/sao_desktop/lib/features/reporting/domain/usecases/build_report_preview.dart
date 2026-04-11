@@ -1,6 +1,6 @@
 import 'package:pdf/widgets.dart' as pw;
-import '../domain/entities/report_context.dart';
-import './pdf_builder/report_builder.dart';
+import '../entities/report_context.dart';
+import '../../pdf_builder/report_builder.dart';
 
 /// Caso de uso: Construir vista previa del reporte
 class BuildReportPreview {

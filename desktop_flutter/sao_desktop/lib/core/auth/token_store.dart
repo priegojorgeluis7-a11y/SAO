@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../session/legacy_file_session_store.dart';
+import '../session/plain_file_session_store.dart';
 import '../session/secure_session_store.dart';
 import '../session/session_store.dart';
 
@@ -35,6 +36,7 @@ class TokenStore {
   // Production store — OS credential vault (DPAPI on Windows).
   // Replaced during tests via setFileResolverForTest.
   static DesktopSessionStore _store = SecureSessionStore();
+  static const DesktopSessionStore _fallbackStore = PlainFileSessionStore();
 
   static String _current = '';
   static String _refresh = '';
@@ -65,6 +67,18 @@ class TokenStore {
     return now >= (expiresAt - 60);
   }
 
+  static bool get _canFallbackToFileStore => _store is! _FileSessionStore;
+
+  static Future<T> _withStoreFallback<T>(Future<T> Function() action) async {
+    try {
+      return await action();
+    } catch (_) {
+      if (!_canFallbackToFileStore) rethrow;
+      _store = _fallbackStore;
+      return action();
+    }
+  }
+
   /// Persists tokens in the OS vault and updates the in-memory cache.
   static Future<void> save(
     String token, {
@@ -82,11 +96,13 @@ class TokenStore {
     } else {
       _accessExpiresAtEpoch = null;
     }
-    await _store.write(SessionData(
-      accessToken: _current,
-      refreshToken: _refresh,
-      accessExpiresAtEpoch: _accessExpiresAtEpoch,
-    ));
+    await _withStoreFallback(() {
+      return _store.write(SessionData(
+        accessToken: _current,
+        refreshToken: _refresh,
+        accessExpiresAtEpoch: _accessExpiresAtEpoch,
+      ));
+    });
   }
 
   /// Loads the persisted access token into the in-memory cache.
@@ -99,7 +115,7 @@ class TokenStore {
   /// Loads the full session from persistent storage into the in-memory cache.
   static Future<TokenSessionData> loadSession() async {
     try {
-      final data = await _store.read();
+      final data = await _withStoreFallback(() => _store.read());
       if (data != null) {
         _current = data.accessToken;
         _refresh = data.refreshToken;
@@ -122,7 +138,14 @@ class TokenStore {
     _current = '';
     _refresh = '';
     _accessExpiresAtEpoch = null;
-    await _store.clear();
+    try {
+      await _store.clear();
+    } catch (_) {
+      if (_canFallbackToFileStore) {
+        _store = _fallbackStore;
+      }
+    }
+    await _fallbackStore.clear();
     // Belt-and-suspenders: remove legacy file if it somehow still exists.
     await const LegacyFileSessionStore().deleteIfExists();
   }

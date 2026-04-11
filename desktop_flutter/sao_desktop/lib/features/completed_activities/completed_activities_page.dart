@@ -94,7 +94,7 @@ class _CompletedActivitiesPageState
     });
 
     return Scaffold(
-      backgroundColor: SaoColors.gray50,
+      backgroundColor: SaoColors.scaffoldBackgroundFor(context),
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -169,13 +169,20 @@ class _CompletedActivitiesPageState
               error: (e, _) => _ErrorState(message: e.toString()),
               data: (items) => items.isEmpty
                   ? const _EmptyState()
-                  : _SplitView(
-                      items:              items,
-                      selectedActivityId: _selectedActivityId,
-                      onSelectActivity:   (id) =>
-                          setState(() => _selectedActivityId = id),
-                      onCloseDetail: () =>
-                          setState(() => _selectedActivityId = null),
+                  : Column(
+                      children: [
+                        _RecordsSummary(items: items),
+                        Expanded(
+                          child: _SplitView(
+                            items: items,
+                            selectedActivityId: _selectedActivityId,
+                            onSelectActivity: (id) =>
+                                setState(() => _selectedActivityId = id),
+                            onCloseDetail: () =>
+                                setState(() => _selectedActivityId = null),
+                          ),
+                        ),
+                      ],
                     ),
             ),
           ),
@@ -203,13 +210,13 @@ class _PageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.white,
+      color: SaoColors.surfaceFor(context),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       child: Row(
         children: [
-          Icon(Icons.task_alt_rounded, color: SaoColors.success, size: 20),
+          const Icon(Icons.folder_copy_rounded, color: SaoColors.actionPrimary, size: 20),
           const SizedBox(width: 10),
-          Text('Actividades Completadas',
+          Text('Expediente digital',
               style: SaoTypography.pageTitle.copyWith(fontSize: 17)),
           const SizedBox(width: 8),
           if (total != null)
@@ -230,7 +237,7 @@ class _PageHeader extends StatelessWidget {
                 style: SaoTypography.caption
                     .copyWith(color: SaoColors.actionPrimary, fontSize: 12)),
           const SizedBox(width: 16),
-          Text('Solo actividades APROBADAS',
+          Text('Proyectos, frentes, estados y documentos aprobados',
               style: SaoTypography.caption
                   .copyWith(color: SaoColors.gray400, fontSize: 11)),
           const SizedBox(width: 12),
@@ -240,6 +247,133 @@ class _PageHeader extends StatelessWidget {
             onPressed: onRefresh,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RecordsSummary extends StatelessWidget {
+  final List<CompletedActivity> items;
+
+  const _RecordsSummary({required this.items});
+
+  @override
+  Widget build(BuildContext context) {
+    final uniqueProjects = items
+        .map((item) => item.projectId.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .length;
+    final uniqueFronts = items
+        .map((item) => item.front.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .length;
+    final uniqueStates = items
+        .map((item) => item.estado.trim())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .length;
+    final generatedDocs = items.where((item) => item.hasReport).length;
+    final totalEvidence = items.fold<int>(
+      0,
+      (sum, item) => sum + item.evidenceCount,
+    );
+
+    return Container(
+      width: double.infinity,
+      color: SaoColors.surfaceMutedFor(context),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 10),
+      child: Wrap(
+        spacing: 12,
+        runSpacing: 12,
+        children: [
+          _SummaryCard(
+            label: 'Proyectos',
+            value: '$uniqueProjects',
+            icon: Icons.domain_rounded,
+          ),
+          _SummaryCard(
+            label: 'Frentes',
+            value: '$uniqueFronts',
+            icon: Icons.alt_route_rounded,
+          ),
+          _SummaryCard(
+            label: 'Estados',
+            value: '$uniqueStates',
+            icon: Icons.map_outlined,
+          ),
+          _SummaryCard(
+            label: 'Documentos generados',
+            value: '$generatedDocs',
+            icon: Icons.description_outlined,
+          ),
+          _SummaryCard(
+            label: 'Evidencias',
+            value: '$totalEvidence',
+            icon: Icons.photo_library_outlined,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const _SummaryCard({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 180,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: SaoColors.actionPrimary.withValues(alpha: 0.10),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, color: SaoColors.actionPrimary, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: SaoTypography.metricValue.copyWith(
+                    color: SaoColors.actionPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.textMutedFor(context),
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -276,17 +410,17 @@ class _FilterBar extends ConsumerWidget {
 
   static InputDecoration _deco(String label) => InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(fontSize: 12, color: SaoColors.gray400),
+        labelStyle: const TextStyle(fontSize: 12, color: SaoColors.gray400),
         isDense: true,
         contentPadding:
             const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide(color: SaoColors.gray200),
+          borderSide: const BorderSide(color: SaoColors.gray200),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(6),
-          borderSide: BorderSide(color: SaoColors.gray200),
+          borderSide: const BorderSide(color: SaoColors.gray200),
         ),
       );
 
@@ -307,7 +441,7 @@ class _FilterBar extends ConsumerWidget {
     final usuario   = ref.watch(completedUsuarioFilterProvider);
 
     return Container(
-      color: Colors.white,
+      color: SaoColors.surfaceFor(context),
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -321,7 +455,7 @@ class _FilterBar extends ConsumerWidget {
           SizedBox(
             width: 160,
             child: DropdownButtonFormField<String>(
-              value: selectedProject.isEmpty ? null : selectedProject,
+              initialValue: selectedProject.isEmpty ? null : selectedProject,
               decoration: _deco('Proyecto'),
               isExpanded: true,
               items: [
@@ -427,11 +561,11 @@ class _FilterBar extends ConsumerWidget {
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       visualDensity: VisualDensity.compact,
                       labelStyle: SaoTypography.caption.copyWith(
-                        color: SaoColors.gray700,
+                        color: SaoColors.textFor(context),
                         fontSize: 11,
                       ),
-                      backgroundColor: SaoColors.gray100,
-                      side: BorderSide(color: SaoColors.gray200),
+                      backgroundColor: SaoColors.surfaceRaisedFor(context),
+                      side: BorderSide(color: SaoColors.borderFor(context)),
                     ),
                   )
                   .toList(growable: false),
@@ -482,11 +616,11 @@ class _OptionDropdown extends StatelessWidget {
     return SizedBox(
       width: width,
       child: DropdownButtonFormField<String>(
-        value: safeValue,
+          initialValue: safeValue,
         isExpanded: true,
         decoration: InputDecoration(
           labelText: loading ? '$label…' : label,
-          labelStyle: TextStyle(fontSize: 12, color: SaoColors.gray400),
+            labelStyle: const TextStyle(fontSize: 12, color: SaoColors.gray400),
           isDense: true,
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -497,11 +631,11 @@ class _OptionDropdown extends StatelessWidget {
               const BoxConstraints(minWidth: 28, minHeight: 0),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: SaoColors.gray200),
+              borderSide: const BorderSide(color: SaoColors.gray200),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(6),
-            borderSide: BorderSide(color: SaoColors.gray200),
+              borderSide: const BorderSide(color: SaoColors.gray200),
           ),
           suffixIcon: loading
               ? const SizedBox(
@@ -594,12 +728,18 @@ class _SplitView extends StatelessWidget {
     required this.onCloseDetail,
   });
 
+  static const _treeWidth = 320.0;
   static const _panelWidth = 440.0;
 
   @override
   Widget build(BuildContext context) {
     return Row(
       children: [
+        const SizedBox(
+          width: _treeWidth,
+          child: _HierarchyPanel(),
+        ),
+        const VerticalDivider(width: 1, thickness: 1),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -632,172 +772,141 @@ class _SplitView extends StatelessWidget {
   }
 }
 
-class _TopSummaryStrip extends StatelessWidget {
-  final List<CompletedActivity> items;
-  const _TopSummaryStrip({required this.items});
+class _HierarchyPanel extends ConsumerWidget {
+  const _HierarchyPanel();
 
   @override
-  Widget build(BuildContext context) {
-    final approved = items.where((i) => i.reviewDecision == 'APPROVE').length;
-    final approvedException =
-        items.where((i) => i.reviewDecision == 'APPROVE_EXCEPTION').length;
-    final rejected = items
-        .where((i) => i.reviewDecision.toUpperCase().contains('REJECT'))
-        .length;
-    final withEvidence = items.where((i) => i.evidenceCount > 0).length;
-    final withReport = items.where((i) => i.hasReport).length;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final itemsAsync = ref.watch(completedActivitiesProvider);
+    final selectedProject = ref.watch(completedProjectFilterProvider);
+    final selectedFront = ref.watch(completedFrenteFilterProvider);
+    final selectedState = ref.watch(completedEstadoFilterProvider);
 
     return Container(
-      margin: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: SaoColors.gray200),
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 56,
-            height: 56,
-            child: _MiniPieChart(
-              approved: approved,
-              approvedException: approvedException,
-              rejected: rejected,
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: [
-                _SummaryChip(
-                  color: SaoColors.success,
-                  label: 'Aprobadas',
-                  count: approved,
-                ),
-                _SummaryChip(
-                  color: const Color(0xFFD97706),
-                  label: 'Con observaciones',
-                  count: approvedException,
-                ),
-                _SummaryChip(
-                  color: SaoColors.error,
-                  label: 'Rechazadas',
-                  count: rejected,
-                ),
-                _SummaryChip(
-                  color: SaoColors.actionPrimary,
-                  label: 'Total',
-                  count: items.length,
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 12),
-          SizedBox(
-            width: 280,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _CoverageBar(
-                  label: 'Con evidencias',
-                  value: '$withEvidence/${items.length}',
-                  ratio: items.isEmpty ? 0 : withEvidence / items.length,
-                  color: SaoColors.actionPrimary,
-                ),
-                const SizedBox(height: 6),
-                _CoverageBar(
-                  label: 'Con reporte',
-                  value: '$withReport/${items.length}',
-                  ratio: items.isEmpty ? 0 : withReport / items.length,
-                  color: const Color(0xFF7C3AED),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SummaryChip extends StatelessWidget {
-  final Color color;
-  final String label;
-  final int count;
-
-  const _SummaryChip({
-    required this.color,
-    required this.label,
-    required this.count,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        '$label: $count',
-        style: SaoTypography.caption.copyWith(
-          color: color,
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
-    );
-  }
-}
-
-class _MiniPieChart extends StatelessWidget {
-  final int approved;
-  final int approvedException;
-  final int rejected;
-
-  const _MiniPieChart({
-    required this.approved,
-    required this.approvedException,
-    required this.rejected,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final total = approved + approvedException + rejected;
-    if (total == 0) {
-      return Container(
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          border: Border.all(color: SaoColors.gray200),
-        ),
-        child: Center(
+      color: SaoColors.surfaceFor(context),
+      child: itemsAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, _) => Padding(
+          padding: const EdgeInsets.all(16),
           child: Text(
-            '0',
-            style: SaoTypography.caption.copyWith(color: SaoColors.gray400),
+            'No se pudo construir el árbol del expediente: $error',
+            style: SaoTypography.caption,
           ),
         ),
-      );
-    }
-
-    return CustomPaint(
-      painter: _PiePainter(
-        slices: [
-          (approved / total, SaoColors.success),
-          (approvedException / total, const Color(0xFFD97706)),
-          (rejected / total, SaoColors.error),
-        ],
+        data: (items) {
+          final tree = _buildHierarchy(items);
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Carpetas SAO', style: SaoTypography.sectionTitle),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Proyecto > Frente > Estado. Selecciona un nivel para filtrar el expediente.',
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.textMutedFor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _FilterPill(
+                      label: selectedProject.isEmpty ? 'Proyecto: todos' : 'Proyecto: $selectedProject',
+                      isActive: selectedProject.isNotEmpty,
+                      onTap: () {
+                        ref.read(completedProjectFilterProvider.notifier).state = '';
+                        ref.read(completedFrenteFilterProvider.notifier).state = '';
+                        ref.read(completedEstadoFilterProvider.notifier).state = '';
+                      },
+                    ),
+                    _FilterPill(
+                      label: selectedFront.isEmpty ? 'Frente: todos' : 'Frente: $selectedFront',
+                      isActive: selectedFront.isNotEmpty,
+                      onTap: () {
+                        ref.read(completedFrenteFilterProvider.notifier).state = '';
+                      },
+                    ),
+                    _FilterPill(
+                      label: selectedState.isEmpty ? 'Estado: todos' : 'Estado: $selectedState',
+                      isActive: selectedState.isNotEmpty,
+                      onTap: () {
+                        ref.read(completedEstadoFilterProvider.notifier).state = '';
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: tree.isEmpty
+                    ? const Center(child: Text('Sin expedientes disponibles'))
+                    : ListView(
+                        padding: const EdgeInsets.fromLTRB(10, 0, 10, 16),
+                        children: tree
+                            .map(
+                              (project) => _ProjectNodeTile(
+                                node: project,
+                                selectedProject: selectedProject,
+                                selectedFront: selectedFront,
+                                selectedState: selectedState,
+                              ),
+                            )
+                            .toList(growable: false),
+                      ),
+              ),
+            ],
+          );
+        },
       ),
-      child: Center(
-        child: Container(
-          width: 24,
-          height: 24,
-          decoration: const BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white,
+    );
+  }
+}
+
+class _FilterPill extends StatelessWidget {
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _FilterPill({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isActive
+              ? SaoColors.actionPrimary.withValues(alpha: 0.10)
+              : SaoColors.surfaceMutedFor(context),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: isActive
+                ? SaoColors.actionPrimary.withValues(alpha: 0.25)
+                : SaoColors.borderFor(context),
+          ),
+        ),
+        child: Text(
+          label,
+          style: SaoTypography.caption.copyWith(
+            color: isActive
+                ? SaoColors.actionPrimary
+                : SaoColors.textMutedFor(context),
           ),
         ),
       ),
@@ -805,39 +914,292 @@ class _MiniPieChart extends StatelessWidget {
   }
 }
 
-class _PiePainter extends CustomPainter {
-  final List<(double, Color)> slices;
-  const _PiePainter({required this.slices});
+class _ProjectNodeTile extends ConsumerWidget {
+  final _ProjectHierarchyNode node;
+  final String selectedProject;
+  final String selectedFront;
+  final String selectedState;
+
+  const _ProjectNodeTile({
+    required this.node,
+    required this.selectedProject,
+    required this.selectedFront,
+    required this.selectedState,
+  });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final center = size.center(Offset.zero);
-    final radius = size.shortestSide / 2;
-    final stroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 10
-      ..strokeCap = StrokeCap.butt;
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isSelected = selectedProject == node.projectId;
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 8),
+      color: isSelected
+          ? SaoColors.actionPrimary.withValues(alpha: 0.06)
+          : SaoColors.surfaceFor(context),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(
+          color: isSelected
+              ? SaoColors.actionPrimary.withValues(alpha: 0.2)
+              : SaoColors.borderFor(context),
+        ),
+      ),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        leading: const Icon(Icons.domain_rounded, size: 18),
+        title: Text(node.projectId, style: SaoTypography.bodyTextBold),
+        subtitle: Text(
+          '${node.activityCount} expedientes · ${node.documentCount} documentos',
+          style: SaoTypography.caption,
+        ),
+        trailing: TextButton(
+          onPressed: () {
+            ref.read(completedProjectFilterProvider.notifier).state = node.projectId;
+            ref.read(completedFrenteFilterProvider.notifier).state = '';
+            ref.read(completedEstadoFilterProvider.notifier).state = '';
+          },
+          child: const Text('Ver'),
+        ),
+        children: node.fronts
+            .map(
+              (front) => _FrontNodeTile(
+                projectId: node.projectId,
+                node: front,
+                selectedProject: selectedProject,
+                selectedFront: selectedFront,
+                selectedState: selectedState,
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+  }
+}
 
-    double start = -1.57079632679;
-    for (final (portion, color) in slices) {
-      if (portion <= 0) continue;
-      stroke.color = color;
-      final sweep = 6.28318530718 * portion;
-      canvas.drawArc(
-        Rect.fromCircle(center: center, radius: radius - 5),
-        start,
-        sweep,
-        false,
-        stroke,
-      );
-      start += sweep;
+class _FrontNodeTile extends ConsumerWidget {
+  final String projectId;
+  final _FrontHierarchyNode node;
+  final String selectedProject;
+  final String selectedFront;
+  final String selectedState;
+
+  const _FrontNodeTile({
+    required this.projectId,
+    required this.node,
+    required this.selectedProject,
+    required this.selectedFront,
+    required this.selectedState,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isSelected = selectedProject == projectId && selectedFront == node.frontName;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
+        childrenPadding: const EdgeInsets.only(left: 12, right: 12, bottom: 8),
+        leading: const Icon(Icons.folder_open_rounded, size: 16),
+        title: Text(node.frontName, style: SaoTypography.bodyText),
+        subtitle: Text(
+          '${node.activityCount} expedientes · ${node.documentCount} documentos',
+          style: SaoTypography.caption,
+        ),
+        trailing: TextButton(
+          onPressed: () {
+            ref.read(completedProjectFilterProvider.notifier).state = projectId;
+            ref.read(completedFrenteFilterProvider.notifier).state = node.frontName;
+            ref.read(completedEstadoFilterProvider.notifier).state = '';
+          },
+          child: Text(isSelected ? 'Activo' : 'Filtrar'),
+        ),
+        children: node.states
+            .map(
+              (state) => _StateNodeTile(
+                projectId: projectId,
+                frontName: node.frontName,
+                node: state,
+                selectedProject: selectedProject,
+                selectedFront: selectedFront,
+                selectedState: selectedState,
+              ),
+            )
+            .toList(growable: false),
+      ),
+    );
+  }
+}
+
+class _StateNodeTile extends ConsumerWidget {
+  final String projectId;
+  final String frontName;
+  final _StateHierarchyNode node;
+  final String selectedProject;
+  final String selectedFront;
+  final String selectedState;
+
+  const _StateNodeTile({
+    required this.projectId,
+    required this.frontName,
+    required this.node,
+    required this.selectedProject,
+    required this.selectedFront,
+    required this.selectedState,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isSelected =
+        selectedProject == projectId && selectedFront == frontName && selectedState == node.stateName;
+    return InkWell(
+      onTap: () {
+        ref.read(completedProjectFilterProvider.notifier).state = projectId;
+        ref.read(completedFrenteFilterProvider.notifier).state = frontName;
+        ref.read(completedEstadoFilterProvider.notifier).state = node.stateName;
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? SaoColors.actionPrimary.withValues(alpha: 0.08)
+              : SaoColors.surfaceMutedFor(context),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+            color: isSelected
+                ? SaoColors.actionPrimary.withValues(alpha: 0.18)
+                : SaoColors.borderFor(context),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.map_rounded, size: 14, color: SaoColors.gray500),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(node.stateName, style: SaoTypography.bodyTextSmall),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${node.activityCount} expedientes · ${node.documentCount} documentos · ${node.evidenceCount} evidencias',
+                    style: SaoTypography.caption,
+                  ),
+                ],
+              ),
+            ),
+            if (isSelected)
+              const Icon(Icons.check_circle_rounded, size: 16, color: SaoColors.actionPrimary),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+List<_ProjectHierarchyNode> _buildHierarchy(List<CompletedActivity> items) {
+  final projects = <String, Map<String, List<CompletedActivity>>>{};
+  for (final item in items) {
+    final projectId = item.projectId.trim().isEmpty ? 'SIN_PROYECTO' : item.projectId.trim();
+    final frontName = item.front.trim().isEmpty ? 'Sin frente' : item.front.trim();
+    final stateName = item.estado.trim().isEmpty ? 'Sin estado' : item.estado.trim();
+    final fronts = projects.putIfAbsent(projectId, () => <String, List<CompletedActivity>>{});
+    final frontKey = '$frontName::$stateName';
+    fronts.putIfAbsent(frontKey, () => <CompletedActivity>[]).add(item);
+  }
+
+  final result = <_ProjectHierarchyNode>[];
+  final sortedProjects = projects.keys.toList()..sort();
+  for (final projectId in sortedProjects) {
+    final groupedFronts = <String, List<CompletedActivity>>{};
+    final groupedStates = <String, Map<String, List<CompletedActivity>>>{};
+    for (final entry in projects[projectId]!.entries) {
+      final parts = entry.key.split('::');
+      final frontName = parts.first;
+      final stateName = parts.length > 1 ? parts[1] : 'Sin estado';
+      groupedFronts.putIfAbsent(frontName, () => <CompletedActivity>[]).addAll(entry.value);
+      final states = groupedStates.putIfAbsent(frontName, () => <String, List<CompletedActivity>>{});
+      states.putIfAbsent(stateName, () => <CompletedActivity>[]).addAll(entry.value);
     }
+
+    final fronts = groupedFronts.entries.map((frontEntry) {
+      final stateMap = groupedStates[frontEntry.key] ?? const <String, List<CompletedActivity>>{};
+      final states = stateMap.entries.map((stateEntry) {
+        final stateItems = stateEntry.value;
+        return _StateHierarchyNode(
+          stateName: stateEntry.key,
+          activityCount: stateItems.length,
+          documentCount: stateItems.where((item) => item.hasReport).length,
+          evidenceCount: stateItems.fold<int>(0, (sum, item) => sum + item.evidenceCount),
+        );
+      }).toList()
+        ..sort((a, b) => a.stateName.compareTo(b.stateName));
+
+      return _FrontHierarchyNode(
+        frontName: frontEntry.key,
+        activityCount: frontEntry.value.length,
+        documentCount: frontEntry.value.where((item) => item.hasReport).length,
+        states: states,
+      );
+    }).toList()
+      ..sort((a, b) => a.frontName.compareTo(b.frontName));
+
+    final projectItems = groupedFronts.values.expand((items) => items).toList(growable: false);
+    result.add(
+      _ProjectHierarchyNode(
+        projectId: projectId,
+        activityCount: projectItems.length,
+        documentCount: projectItems.where((item) => item.hasReport).length,
+        fronts: fronts,
+      ),
+    );
   }
 
-  @override
-  bool shouldRepaint(covariant _PiePainter oldDelegate) {
-    return oldDelegate.slices != slices;
-  }
+  return result;
+}
+
+class _ProjectHierarchyNode {
+  final String projectId;
+  final int activityCount;
+  final int documentCount;
+  final List<_FrontHierarchyNode> fronts;
+
+  const _ProjectHierarchyNode({
+    required this.projectId,
+    required this.activityCount,
+    required this.documentCount,
+    required this.fronts,
+  });
+}
+
+class _FrontHierarchyNode {
+  final String frontName;
+  final int activityCount;
+  final int documentCount;
+  final List<_StateHierarchyNode> states;
+
+  const _FrontHierarchyNode({
+    required this.frontName,
+    required this.activityCount,
+    required this.documentCount,
+    required this.states,
+  });
+}
+
+class _StateHierarchyNode {
+  final String stateName;
+  final int activityCount;
+  final int documentCount;
+  final int evidenceCount;
+
+  const _StateHierarchyNode({
+    required this.stateName,
+    required this.activityCount,
+    required this.documentCount,
+    required this.evidenceCount,
+  });
 }
 
 class _TableSkeletonState extends StatelessWidget {
@@ -854,66 +1216,12 @@ class _TableSkeletonState extends StatelessWidget {
             height: 36,
             margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
-              color: SaoColors.gray100,
+              color: SaoColors.surfaceRaisedFor(context),
               borderRadius: BorderRadius.circular(6),
             ),
           ),
         ),
       ),
-    );
-  }
-}
-
-class _CoverageBar extends StatelessWidget {
-  final String label;
-  final String value;
-  final double ratio;
-  final Color color;
-
-  const _CoverageBar({
-    required this.label,
-    required this.value,
-    required this.ratio,
-    required this.color,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                label,
-                style: SaoTypography.caption.copyWith(
-                  fontSize: 11,
-                  color: SaoColors.gray600,
-                ),
-              ),
-            ),
-            Text(
-              value,
-              style: SaoTypography.caption.copyWith(
-                fontSize: 11,
-                color: SaoColors.gray700,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(999),
-          child: LinearProgressIndicator(
-            value: ratio.clamp(0, 1),
-            minHeight: 7,
-            backgroundColor: color.withValues(alpha: 0.12),
-            valueColor: AlwaysStoppedAnimation<Color>(color),
-          ),
-        ),
-      ],
     );
   }
 }
@@ -1057,7 +1365,7 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
                           dataRowMaxHeight: 50,
                           headingRowColor:
                               WidgetStateProperty.all(SaoColors.gray100),
-                          border: TableBorder(
+                          border: const TableBorder(
                             horizontalInside:
                                 BorderSide(color: SaoColors.gray200, width: 0.5),
                           ),
@@ -1128,7 +1436,7 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
       'Evidencias': DataCell(Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.photo_library_outlined,
+            const Icon(Icons.photo_library_outlined,
               size: 13, color: SaoColors.gray400),
           const SizedBox(width: 3),
           Text('${a.evidenceCount}',
@@ -1194,9 +1502,9 @@ class _DetailPanel extends ConsumerWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: SaoColors.surfaceFor(context),
         border:
-            Border(left: BorderSide(color: SaoColors.gray200, width: 1)),
+            Border(left: BorderSide(color: SaoColors.borderFor(context), width: 1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1223,16 +1531,16 @@ class _PanelHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: SaoColors.gray50,
+      color: SaoColors.surfaceMutedFor(context),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
-          Icon(Icons.manage_search_rounded,
+            const Icon(Icons.manage_search_rounded,
               size: 16, color: SaoColors.actionPrimary),
           const SizedBox(width: 8),
           Text('Trazabilidad completa',
               style: SaoTypography.bodyTextBold
-                  .copyWith(fontSize: 13, color: SaoColors.gray700)),
+                  .copyWith(fontSize: 13, color: SaoColors.textFor(context))),
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 16),
@@ -1258,7 +1566,7 @@ class _PanelError extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline_rounded, size: 40, color: SaoColors.error),
+            const Icon(Icons.error_outline_rounded, size: 40, color: SaoColors.error),
           const SizedBox(height: 10),
           Text('Error al cargar detalle',
               style: SaoTypography.sectionTitle
@@ -1355,28 +1663,28 @@ class _PanelContent extends StatelessWidget {
         const Divider(height: 1),
         const SizedBox(height: 12),
 
-        _SectionTitle(icon: Icons.info_outline_rounded, label: 'Datos generales'),
+          const _SectionTitle(icon: Icons.info_outline_rounded, label: 'Datos generales'),
         const SizedBox(height: 8),
         if (generalRows.isNotEmpty) ...[
-          _SubsectionLabel(label: 'General'),
+            const _SubsectionLabel(label: 'General'),
           const SizedBox(height: 6),
           _InfoGrid(rows: generalRows),
         ],
         if (locationRows.isNotEmpty) ...[
           const SizedBox(height: 10),
-          _SubsectionLabel(label: 'Ubicación'),
+            const _SubsectionLabel(label: 'Ubicación'),
           const SizedBox(height: 6),
           _InfoGrid(rows: locationRows),
         ],
         if (actorsRows.isNotEmpty) ...[
           const SizedBox(height: 10),
-          _SubsectionLabel(label: 'Responsables'),
+            const _SubsectionLabel(label: 'Responsables'),
           const SizedBox(height: 6),
           _InfoGrid(rows: actorsRows),
         ],
         if (timingRows.isNotEmpty) ...[
           const SizedBox(height: 10),
-          _SubsectionLabel(label: 'Tiempos'),
+            const _SubsectionLabel(label: 'Tiempos'),
           const SizedBox(height: 6),
           _InfoGrid(rows: timingRows),
         ],
@@ -1385,16 +1693,16 @@ class _PanelContent extends StatelessWidget {
           const SizedBox(height: 12),
           const Divider(height: 1),
           const SizedBox(height: 10),
-          _SectionTitle(
+          const _SectionTitle(
               icon: Icons.comment_outlined, label: 'Notas de revisión'),
           const SizedBox(height: 6),
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: SaoColors.gray50,
+              color: SaoColors.surfaceMutedFor(context),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: SaoColors.gray200),
+              border: Border.all(color: SaoColors.borderFor(context)),
             ),
             child: Text(detail.reviewNotes,
                 style: SaoTypography.bodyText.copyWith(fontSize: 12)),
@@ -1424,7 +1732,7 @@ class _PanelContent extends StatelessWidget {
           const SizedBox(height: 12),
           const Divider(height: 1),
           const SizedBox(height: 10),
-          _SectionTitle(
+          const _SectionTitle(
               icon: Icons.list_alt_rounded, label: 'Campos registrados'),
           const SizedBox(height: 6),
           _DataFieldsTable(fields: detail.dataFields),
@@ -1614,7 +1922,7 @@ class _PanelQuickActions extends StatelessWidget {
     await pdfDir.create(recursive: true);
 
     final snapshot = _buildActivitySnapshot();
-    final encoder = const JsonEncoder.withIndent('  ');
+    const encoder = JsonEncoder.withIndent('  ');
     await File(p.join(dataDir.path, 'actividad_detalle.json'))
         .writeAsString(encoder.convert(snapshot), flush: true);
 
@@ -1683,7 +1991,7 @@ class _PanelQuickActions extends StatelessWidget {
               style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
             ),
             pw.SizedBox(height: 6),
-            pw.Table.fromTextArray(
+              pw.TableHelper.fromTextArray(
               headers: const ['Campo', 'Valor'],
               data: dataRows,
               headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
@@ -1772,6 +2080,15 @@ class _PanelQuickActions extends StatelessWidget {
     }
 
     throw Exception('No se pudo descargar ${targetFile.path}: $lastError');
+  }
+
+  Future<void> _openDirectory(String path) async {
+    final command = switch (Platform.operatingSystem) {
+      'macos' => 'open',
+      'linux' => 'xdg-open',
+      _ => 'explorer.exe',
+    };
+    await Process.run(command, [path]);
   }
 
   Future<void> _downloadEvidences(BuildContext context) async {
@@ -1865,7 +2182,7 @@ class _PanelQuickActions extends StatelessWidget {
             action: SnackBarAction(
               label: 'Abrir carpeta',
               onPressed: () {
-                Process.run('explorer.exe', [activityDir.path]);
+                _openDirectory(activityDir.path);
               },
             ),
           ),
@@ -1963,14 +2280,19 @@ class _TimelinePlaceholder extends StatelessWidget {
                       width: 12,
                       height: 12,
                       decoration: BoxDecoration(
-                        color: done ? color.withValues(alpha: 0.15) : Colors.white,
+                        color: done
+                            ? color.withValues(alpha: 0.15)
+                            : SaoColors.surfaceFor(context),
                         shape: BoxShape.circle,
                         border: Border.all(color: color, width: 1.5),
                       ),
                     ),
                     if (!isLast)
                       Expanded(
-                        child: Container(width: 1.5, color: SaoColors.gray200),
+                        child: Container(
+                          width: 1.5,
+                          color: SaoColors.borderFor(context),
+                        ),
                       ),
                   ],
                 ),
@@ -1982,7 +2304,9 @@ class _TimelinePlaceholder extends StatelessWidget {
                   label,
                   style: SaoTypography.bodyText.copyWith(
                     fontSize: 12,
-                    color: done ? SaoColors.gray700 : SaoColors.gray400,
+                    color: done
+                        ? SaoColors.textFor(context)
+                        : SaoColors.textMutedFor(context),
                   ),
                 ),
               ),
@@ -2008,7 +2332,7 @@ class _DetailSkeleton extends StatelessWidget {
             height: index == 0 ? 44 : 30,
             margin: const EdgeInsets.only(bottom: 8),
             decoration: BoxDecoration(
-              color: SaoColors.gray100,
+              color: SaoColors.surfaceRaisedFor(context),
               borderRadius: BorderRadius.circular(6),
             ),
           ),
@@ -2067,16 +2391,16 @@ class _InfoCell extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: SaoColors.gray50,
+        color: SaoColors.surfaceMutedFor(context),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: SaoColors.gray200),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(label,
               style: SaoTypography.caption
-                  .copyWith(color: SaoColors.gray400, fontSize: 10)),
+                  .copyWith(color: SaoColors.textMutedFor(context), fontSize: 10)),
           const SizedBox(height: 2),
           Text(
             value.isNotEmpty ? value : '—',
@@ -2099,11 +2423,11 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 14, color: SaoColors.gray500),
+        Icon(icon, size: 14, color: SaoColors.textMutedFor(context)),
         const SizedBox(width: 6),
         Text(label,
             style: SaoTypography.bodyTextBold
-                .copyWith(fontSize: 12, color: SaoColors.gray600)),
+                .copyWith(fontSize: 12, color: SaoColors.textMutedFor(context))),
       ],
     );
   }
@@ -2122,9 +2446,9 @@ class _EvidenceRow extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: SaoColors.gray50,
+        color: SaoColors.surfaceMutedFor(context),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: SaoColors.gray200),
+        border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Row(
         children: [
@@ -2149,7 +2473,7 @@ class _EvidenceRow extends StatelessWidget {
                 Text(
                   '${ev.uploaderName.isNotEmpty ? ev.uploaderName : "—"}  ·  ${fmtDate(ev.uploadedAt)}',
                   style: SaoTypography.caption
-                      .copyWith(color: SaoColors.gray400, fontSize: 10),
+                      .copyWith(color: SaoColors.textMutedFor(context), fontSize: 10),
                 ),
               ],
             ),
@@ -2173,9 +2497,9 @@ class _DataFieldsTable extends StatelessWidget {
           padding:
               const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: SaoColors.gray50,
+            color: SaoColors.surfaceMutedFor(context),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: SaoColors.gray200),
+            border: Border.all(color: SaoColors.borderFor(context)),
           ),
           child: Row(
             children: [
@@ -2183,7 +2507,7 @@ class _DataFieldsTable extends StatelessWidget {
                 width: 120,
                 child: Text(e.key,
                     style: SaoTypography.caption
-                        .copyWith(color: SaoColors.gray500, fontSize: 11),
+                        .copyWith(color: SaoColors.textMutedFor(context), fontSize: 11),
                     overflow: TextOverflow.ellipsis),
               ),
               const SizedBox(width: 8),
@@ -2319,9 +2643,9 @@ class _AuditTimeline extends StatelessWidget {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: SaoColors.gray50,
+                            color: SaoColors.surfaceMutedFor(context),
                             borderRadius: BorderRadius.circular(4),
-                            border: Border.all(color: SaoColors.gray200),
+                            border: Border.all(color: SaoColors.borderFor(context)),
                           ),
                           child: Text(e.notes,
                               style: SaoTypography.caption
@@ -2475,7 +2799,7 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.check_circle_outline_rounded,
+            const Icon(Icons.check_circle_outline_rounded,
               size: 56, color: SaoColors.gray200),
           const SizedBox(height: 16),
           Text('Sin actividades completadas',
@@ -2502,7 +2826,7 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline_rounded, size: 48, color: SaoColors.error),
+            const Icon(Icons.error_outline_rounded, size: 48, color: SaoColors.error),
           const SizedBox(height: 12),
           Text('Error al cargar actividades',
               style: SaoTypography.sectionTitle

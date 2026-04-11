@@ -3,7 +3,6 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../theme/sao_colors.dart';
 import '../theme/sao_spacing.dart';
@@ -55,7 +54,6 @@ class SaoEvidenceViewer extends StatefulWidget {
 
 class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
   double _scale = 1.0;
-  int _rotationDegrees = 0; // 0, 90, 180, 270
   Offset _offset = Offset.zero;
   bool _lensEnabled = false;
   bool _isHovering = false;
@@ -78,20 +76,6 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
       if (_scale == _minScale) {
         _offset = Offset.zero;
       }
-    });
-  }
-
-  void _handleRotate() {
-    setState(() {
-      _rotationDegrees = (_rotationDegrees + 90) % 360;
-    });
-  }
-
-  void _resetView() {
-    setState(() {
-      _scale = 1.0;
-      _rotationDegrees = 0;
-      _offset = Offset.zero;
     });
   }
 
@@ -123,16 +107,16 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
       color: SaoColors.gray100,
       child: Center(
         child: SingleChildScrollView(
-          padding: EdgeInsets.all(SaoSpacing.md),
+          padding: const EdgeInsets.all(SaoSpacing.md),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
+              const Icon(
                 Icons.broken_image_rounded,
                 size: 64,
                 color: SaoColors.gray500,
               ),
-              SizedBox(height: SaoSpacing.md),
+              const SizedBox(height: SaoSpacing.md),
               Text(
                 'No se pudo cargar la evidencia',
                 style: SaoTypography.bodyText.copyWith(
@@ -140,11 +124,11 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                 ),
                 textAlign: TextAlign.center,
               ),
-              SizedBox(height: SaoSpacing.sm),
+              const SizedBox(height: SaoSpacing.sm),
               TextButton.icon(
-                onPressed: () => setState(() {}),
-                icon: Icon(Icons.refresh_rounded),
-                label: Text('Reintentar'),
+                onPressed: _retryLoad,
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Reintentar'),
               ),
             ],
           ),
@@ -221,19 +205,19 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
       children: [
         // Header con controles
         Container(
-          padding: EdgeInsets.all(SaoSpacing.md),
+          padding: const EdgeInsets.all(SaoSpacing.md),
           decoration: BoxDecoration(
-            color: SaoColors.surface,
-            border: Border(bottom: BorderSide(color: SaoColors.border)),
+            color: SaoColors.surfaceFor(context),
+            border: Border(bottom: BorderSide(color: SaoColors.borderFor(context))),
           ),
           child: Row(
             children: [
-              Icon(
+              const Icon(
                 Icons.photo_library_rounded,
                 size: 20,
                 color: SaoColors.primary,
               ),
-              SizedBox(width: SaoSpacing.sm),
+              const SizedBox(width: SaoSpacing.sm),
               Text(
                 widget.currentIndex != null && widget.totalCount != null
                     ? 'Evidencia ${widget.currentIndex! + 1} de ${widget.totalCount}'
@@ -254,7 +238,7 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
               // Controles de navegación
               if (widget.onPrevious != null)
                 IconButton(
-                  icon: Icon(Icons.chevron_left_rounded),
+                  icon: const Icon(Icons.chevron_left_rounded),
                   onPressed: widget.currentIndex != null && widget.currentIndex! > 0
                       ? widget.onPrevious
                       : null,
@@ -262,7 +246,7 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                 ),
               if (widget.onNext != null)
                 IconButton(
-                  icon: Icon(Icons.chevron_right_rounded),
+                  icon: const Icon(Icons.chevron_right_rounded),
                   onPressed: widget.currentIndex != null &&
                           widget.totalCount != null &&
                           widget.currentIndex! < widget.totalCount! - 1
@@ -278,8 +262,8 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
         Expanded(
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final lensSize = 140.0;
-              final lensZoom = 2.2;
+              const lensSize = 140.0;
+              const lensZoom = 2.2;
                 final maxX = math.max(0.0, constraints.maxWidth - lensSize);
                 final maxY = math.max(0.0, constraints.maxHeight - lensSize);
                 final safeX = (_lensPosition.dx - lensSize / 2)
@@ -307,16 +291,13 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                         onPanUpdate: _handlePanUpdate,
                         child: ClipRect(
                           child: Container(
-                          color: SaoColors.gray100,
+                          color: SaoColors.surfaceRaisedFor(context),
                           child: Center(
                             child: Transform.translate(
                               offset: _offset,
-                              child: Transform.rotate(
-                                angle: _rotationDegrees * 3.14159 / 180,
-                                child: Transform.scale(
-                                  scale: _scale,
-                                  child: _buildImageContent(fit: BoxFit.contain),
-                                ),
+                              child: Transform.scale(
+                                scale: _scale,
+                                child: _buildImageContent(fit: BoxFit.contain),
                               ),
                             ),
                           ),
@@ -358,9 +339,9 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                     bottom: 16,
                     left: 16,
                     child: Container(
-                      padding: EdgeInsets.all(SaoSpacing.sm),
+                      padding: const EdgeInsets.all(SaoSpacing.sm),
                       decoration: BoxDecoration(
-                        color: SaoColors.gray900.withOpacity(0.7),
+                        color: SaoColors.gray900.withValues(alpha: 0.7),
                         borderRadius: BorderRadius.circular(SaoRadii.sm),
                       ),
                       child: Column(
@@ -395,13 +376,13 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
 
         // Footer: compacto sin altura fija
         Container(
-          padding: EdgeInsets.symmetric(
+          padding: const EdgeInsets.symmetric(
             horizontal: SaoSpacing.md,
             vertical: SaoSpacing.xs,
           ),
           decoration: BoxDecoration(
-            color: SaoColors.surface,
-            border: Border(top: BorderSide(color: SaoColors.border)),
+            color: SaoColors.surfaceFor(context),
+            border: Border(top: BorderSide(color: SaoColors.borderFor(context))),
           ),
           child: Row(
             children: [
@@ -413,38 +394,12 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              SizedBox(width: SaoSpacing.sm),
-              Icon(Icons.info_outline, size: 12, color: SaoColors.gray500),
+              const SizedBox(width: SaoSpacing.sm),
+              const Icon(Icons.info_outline, size: 12),
             ],
           ),
         ),
       ],
-    );
-  }
-}
-
-/// Botón de herramienta flotante
-class _ToolbarButton extends StatelessWidget {
-  const _ToolbarButton({
-    required this.icon,
-    required this.tooltip,
-    this.onPressed,
-  });
-
-  final IconData icon;
-  final String tooltip;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Tooltip(
-      message: tooltip,
-      child: IconButton(
-        icon: Icon(icon, size: 20),
-        color: Colors.white,
-        onPressed: onPressed,
-        disabledColor: Colors.white.withOpacity(0.3),
-      ),
     );
   }
 }

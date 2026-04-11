@@ -1,6 +1,7 @@
 // lib/data/services/assignment_sync_service.dart
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/di/service_locator.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/logger.dart';
 import '../local/app_db.dart';
@@ -38,16 +39,16 @@ class AssignmentSyncService {
 
 // Riverpod provider for AssignmentSyncService
 final assignmentSyncServiceProvider = Provider((ref) {
-  final db = ref.watch(appDbProvider);
-  final apiClient = ref.watch(apiClientProvider);
+  final db = getIt<AppDb>();
+  final apiClient = getIt<ApiClient>();
   final repository = AssignmentsSyncRepository(db: db, apiClient: apiClient);
   return AssignmentSyncService(repository);
 });
 
 // DAO provider
 final assignmentsSyncRepositoryProvider = Provider((ref) {
-  final db = ref.watch(appDbProvider);
-  final apiClient = ref.watch(apiClientProvider);
+  final db = getIt<AppDb>();
+  final apiClient = getIt<ApiClient>();
   return AssignmentsSyncRepository(db: db, apiClient: apiClient);
 });
 

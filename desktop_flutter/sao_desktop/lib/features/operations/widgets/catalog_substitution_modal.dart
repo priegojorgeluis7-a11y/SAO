@@ -71,8 +71,8 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
           children: [
             // Header
             Container(
-              padding: EdgeInsets.all(SaoSpacing.lg),
-              decoration: BoxDecoration(
+              padding: const EdgeInsets.all(SaoSpacing.lg),
+              decoration: const BoxDecoration(
                 border: Border(bottom: BorderSide(color: SaoColors.border)),
               ),
               child: Column(
@@ -80,9 +80,9 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                 children: [
                   Row(
                     children: [
-                      Icon(Icons.swap_horiz_rounded, color: SaoColors.primary),
-                      SizedBox(width: SaoSpacing.sm),
-                      Expanded(
+                      const Icon(Icons.swap_horiz_rounded, color: SaoColors.primary),
+                      const SizedBox(width: SaoSpacing.sm),
+                      const Expanded(
                         child: Text(
                           'Sustituir por Catálogo',
                           style: SaoTypography.sectionTitle,
@@ -90,11 +90,11 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                       ),
                       IconButton(
                         onPressed: () => Navigator.pop(context),
-                        icon: Icon(Icons.close_rounded),
+                        icon: const Icon(Icons.close_rounded),
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.md),
+                  const SizedBox(height: SaoSpacing.md),
                   Text(
                     'Campo: ${widget.fieldName}',
                     style: SaoTypography.caption.copyWith(
@@ -102,9 +102,9 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                       color: SaoColors.gray600,
                     ),
                   ),
-                  SizedBox(height: SaoSpacing.sm),
+                  const SizedBox(height: SaoSpacing.sm),
                   Container(
-                    padding: EdgeInsets.all(SaoSpacing.sm),
+                    padding: const EdgeInsets.all(SaoSpacing.sm),
                     decoration: BoxDecoration(
                       color: SaoColors.gray50,
                       border: Border.all(color: SaoColors.border),
@@ -124,20 +124,20 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
 
             // Busqueda
             Container(
-              padding: EdgeInsets.all(SaoSpacing.md),
-              decoration: BoxDecoration(
+              padding: const EdgeInsets.all(SaoSpacing.md),
+              decoration: const BoxDecoration(
                 border: Border(bottom: BorderSide(color: SaoColors.border)),
               ),
               child: TextField(
                 controller: _searchController,
                 decoration: InputDecoration(
                   hintText: 'Buscar por nombre, código o categoría...',
-                  prefixIcon: Icon(Icons.search_rounded),
+                  prefixIcon: const Icon(Icons.search_rounded),
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(SaoRadii.md),
-                    borderSide: BorderSide(color: SaoColors.border),
+                    borderSide: const BorderSide(color: SaoColors.border),
                   ),
-                  contentPadding: EdgeInsets.symmetric(
+                  contentPadding: const EdgeInsets.symmetric(
                     horizontal: SaoSpacing.md,
                     vertical: SaoSpacing.sm,
                   ),
@@ -148,30 +148,38 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
 
             // Lista de catálogo
             Expanded(
-              child: _filteredItems.isEmpty
-                  ? Center(
-                      child: Text(
-                        'Sin coincidencias',
-                        style: SaoTypography.bodyText
-                            .copyWith(color: SaoColors.gray500),
-                      ),
-                    )
-                  : ListView.builder(
-                      padding: EdgeInsets.all(SaoSpacing.md),
-                      itemCount: _filteredItems.length,
-                      itemBuilder: (context, index) {
-                        final item = _filteredItems[index];
-                        final isSelected = _selectedValue == item.name;
+              child: RadioGroup<String>(
+                groupValue: _selectedValue,
+                onChanged: (value) {
+                  if (value != null) {
+                    setState(() => _selectedValue = value);
+                  }
+                },
+                child: _filteredItems.isEmpty
+                    ? Center(
+                        child: Text(
+                          'Sin coincidencias',
+                          style: SaoTypography.bodyText
+                              .copyWith(color: SaoColors.gray500),
+                        ),
+                      )
+                    : ListView.builder(
+                        padding: const EdgeInsets.all(SaoSpacing.md),
+                        itemCount: _filteredItems.length,
+                        itemBuilder: (context, index) {
+                          final item = _filteredItems[index];
+                          final isSelected = _selectedValue == item.name;
 
-                        return _buildCatalogItemTile(item, isSelected);
-                      },
-                    ),
+                          return _buildCatalogItemTile(item, isSelected);
+                        },
+                      ),
+              ),
             ),
 
             // Footer con acciones
             Container(
-              padding: EdgeInsets.all(SaoSpacing.lg),
-              decoration: BoxDecoration(
+              padding: const EdgeInsets.all(SaoSpacing.lg),
+              decoration: const BoxDecoration(
                 border: Border(top: BorderSide(color: SaoColors.border)),
               ),
               child: Row(
@@ -179,9 +187,9 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: Text('Cancelar'),
+                    child: const Text('Cancelar'),
                   ),
-                  SizedBox(width: SaoSpacing.md),
+                  const SizedBox(width: SaoSpacing.md),
                   ElevatedButton.icon(
                     onPressed: _selectedValue.isEmpty
                         ? null
@@ -189,8 +197,10 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                             widget.onSubstitute(_selectedValue);
                             Navigator.pop(context);
                           },
-                    icon: Icon(Icons.check_rounded),
-                    label: Text('Elegir: "${_selectedValue.length > 30 ? _selectedValue.substring(0, 30) + "..." : _selectedValue}"'),
+                    icon: const Icon(Icons.check_rounded),
+                    label: Text(
+                      'Elegir: "${_selectedValue.length > 30 ? '${_selectedValue.substring(0, 30)}...' : _selectedValue}"',
+                    ),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: SaoColors.primary,
                       foregroundColor: SaoColors.onPrimary,
@@ -207,7 +217,7 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
 
   Widget _buildCatalogItemTile(CatalogItem item, bool isSelected) {
     return Container(
-      margin: EdgeInsets.only(bottom: SaoSpacing.md),
+      margin: const EdgeInsets.only(bottom: SaoSpacing.md),
       decoration: BoxDecoration(
         border: Border.all(
           color: isSelected ? SaoColors.primary : SaoColors.border,
@@ -215,14 +225,14 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
         ),
         borderRadius: BorderRadius.circular(SaoRadii.md),
         color: isSelected
-            ? SaoColors.primary.withOpacity(0.05)
+            ? SaoColors.primary.withValues(alpha: 0.05)
             : SaoColors.surface,
       ),
       child: InkWell(
         onTap: () => setState(() => _selectedValue = item.name),
         borderRadius: BorderRadius.circular(SaoRadii.md),
         child: Padding(
-          padding: EdgeInsets.all(SaoSpacing.md),
+          padding: const EdgeInsets.all(SaoSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -244,12 +254,12 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                             ),
                             if (item.isRecommended)
                               Container(
-                                padding: EdgeInsets.symmetric(
+                                padding: const EdgeInsets.symmetric(
                                   horizontal: SaoSpacing.sm,
                                   vertical: 2,
                                 ),
                                 decoration: BoxDecoration(
-                                  color: SaoColors.success.withOpacity(0.1),
+                                  color: SaoColors.success.withValues(alpha: 0.1),
                                   borderRadius:
                                       BorderRadius.circular(SaoRadii.sm),
                                   border: Border.all(
@@ -266,7 +276,7 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                               ),
                           ],
                         ),
-                        SizedBox(height: SaoSpacing.xs),
+                        const SizedBox(height: SaoSpacing.xs),
                         Row(
                           children: [
                             Text(
@@ -275,14 +285,14 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                                 color: SaoColors.gray600,
                               ),
                             ),
-                            SizedBox(width: SaoSpacing.md),
+                            const SizedBox(width: SaoSpacing.md),
                             Container(
-                              padding: EdgeInsets.symmetric(
-                                horizontal: SaoSpacing.sm,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: SaoColors.info.withOpacity(0.1),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: SaoSpacing.sm,
+                                  vertical: 2,
+                                ),
+                                decoration: BoxDecoration(
+                                color: SaoColors.info.withValues(alpha: 0.1),
                                 borderRadius:
                                     BorderRadius.circular(SaoRadii.sm),
                               ),
@@ -298,20 +308,14 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                       ],
                     ),
                   ),
-                  SizedBox(width: SaoSpacing.md),
-                  Radio(
+                  const SizedBox(width: SaoSpacing.md),
+                  Radio<String>(
                     value: item.name,
-                    groupValue: _selectedValue,
                     activeColor: SaoColors.primary,
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _selectedValue = value);
-                      }
-                    },
                   ),
                 ],
               ),
-              SizedBox(height: SaoSpacing.sm),
+              const SizedBox(height: SaoSpacing.sm),
               Text(
                 item.description,
                 style: SaoTypography.bodyText.copyWith(
@@ -321,12 +325,12 @@ class _CatalogSubstitutionModalState extends State<CatalogSubstitutionModal> {
                 overflow: TextOverflow.ellipsis,
               ),
               if (item.standards.isNotEmpty) ...[
-                SizedBox(height: SaoSpacing.sm),
+                const SizedBox(height: SaoSpacing.sm),
                 Wrap(
                   spacing: SaoSpacing.xs,
                   children: item.standards
                       .map((std) => Container(
-                            padding: EdgeInsets.symmetric(
+                            padding: const EdgeInsets.symmetric(
                               horizontal: SaoSpacing.xs,
                               vertical: 2,
                             ),

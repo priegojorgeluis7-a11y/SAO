@@ -59,7 +59,7 @@ class SaoInput extends StatelessWidget {
           borderSide: const BorderSide(color: SaoColors.primary, width: 2),
         ),
         filled: true,
-        fillColor: SaoColors.surface,
+        fillColor: SaoColors.surfaceFor(context),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: SaoSpacing.lg,
           vertical: SaoSpacing.md,

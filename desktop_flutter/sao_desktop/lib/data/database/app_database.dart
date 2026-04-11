@@ -34,8 +34,19 @@ class AppDatabase extends _$AppDatabase {
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
+          await _seedInitialData();
         },
       );
+
+  Future<void> ensureBootstrapData() async {
+    final existingProject = await select(projects).getSingleOrNull();
+    if (existingProject != null) {
+      return;
+    }
+    await transaction(() async {
+      await _seedInitialData();
+    });
+  }
 
   Future<void> _seedInitialData() async {
     // Users

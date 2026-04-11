@@ -98,10 +98,6 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
     }
 
     filtered = filtered.where((activity) {
-      final status = _deriveStatus(activity);
-      final hasCatalogChange = activity.flags.catalogChanged;
-      final hasChecklistIncomplete = activity.flags.checklistIncomplete;
-
       switch (widget.queueTab) {
         case 'ALL':
           return true;
@@ -194,12 +190,15 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
   @override
   Widget build(BuildContext context) {
     final hasBulkMode = widget.bulkSelectedIds.isNotEmpty;
+    final surfaceColor = SaoColors.surfaceFor(context);
+    final borderColor = SaoColors.borderFor(context);
+    final textColor = SaoColors.textFor(context);
 
     return Container(
       decoration: BoxDecoration(
-        color: SaoColors.surface,
+        color: surfaceColor,
         borderRadius: BorderRadius.circular(SaoRadii.lg),
-        border: Border.all(color: SaoColors.border),
+        border: Border.all(color: borderColor),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -210,12 +209,14 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
                 SaoSpacing.lg, SaoSpacing.md, SaoSpacing.sm, SaoSpacing.sm),
             child: Row(
               children: [
-                const Icon(Icons.pending_actions_rounded,
-                    size: 18, color: SaoColors.primary),
+                Icon(Icons.pending_actions_rounded,
+                    size: 18, color: textColor),
                 const SizedBox(width: SaoSpacing.sm),
-                const Expanded(
+                Expanded(
                   child: Text('Cola de Revisión',
-                      style: SaoTypography.sectionTitle),
+                      style: SaoTypography.sectionTitle.copyWith(
+                        color: textColor,
+                      )),
                 ),
                 // Bulk action buttons
                 if (hasBulkMode) ...[
@@ -353,6 +354,7 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
 
   Widget _buildEmptyState() {
     final hasSearch = widget.searchQuery?.isNotEmpty == true;
+    final mutedTextColor = SaoColors.textMutedFor(context);
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(SaoSpacing.xl),
@@ -362,12 +364,12 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
             Icon(
               hasSearch ? Icons.search_off_rounded : Icons.inbox_rounded,
               size: 40,
-              color: SaoColors.gray300,
+              color: mutedTextColor,
             ),
             const SizedBox(height: SaoSpacing.md),
             Text(
               hasSearch ? 'Sin resultados' : 'Sin actividades pendientes',
-              style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
+              style: SaoTypography.bodyText.copyWith(color: mutedTextColor),
               textAlign: TextAlign.center,
             ),
           ],
@@ -392,10 +394,13 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
               const Icon(Icons.error_outline_rounded,
                   size: 36, color: SaoColors.error),
               const SizedBox(height: SaoSpacing.sm),
-              Text(error,
-                  style:
-                      SaoTypography.caption.copyWith(color: SaoColors.gray600),
-                  textAlign: TextAlign.center),
+              Text(
+                error,
+                style: SaoTypography.caption.copyWith(
+                  color: SaoColors.textMutedFor(context),
+                ),
+                textAlign: TextAlign.center,
+              ),
             ],
           ),
         ),
@@ -486,7 +491,7 @@ class _FrontSection extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(
                 horizontal: SaoSpacing.md, vertical: SaoSpacing.xs),
-            color: SaoColors.gray50,
+            color: SaoColors.surfaceMutedFor(context),
             child: Row(
               children: [
                 Icon(
@@ -494,7 +499,7 @@ class _FrontSection extends StatelessWidget {
                       ? Icons.chevron_right_rounded
                       : Icons.expand_more_rounded,
                   size: 16,
-                  color: SaoColors.gray500,
+                  color: SaoColors.textMutedFor(context),
                 ),
                 const SizedBox(width: SaoSpacing.xs),
                 Expanded(
@@ -502,7 +507,7 @@ class _FrontSection extends StatelessWidget {
                     frontName,
                     style: SaoTypography.caption.copyWith(
                       fontWeight: FontWeight.w700,
-                      color: SaoColors.gray700,
+                      color: SaoColors.textFor(context),
                       letterSpacing: 0.4,
                     ),
                   ),
@@ -524,13 +529,13 @@ class _FrontSection extends StatelessWidget {
                   padding: const EdgeInsets.symmetric(
                       horizontal: SaoSpacing.xs, vertical: 2),
                   decoration: BoxDecoration(
-                    color: SaoColors.gray200,
+                    color: SaoColors.surfaceRaisedFor(context),
                     borderRadius: BorderRadius.circular(SaoRadii.full),
                   ),
                   child: Text(
                     '${activities.length}',
                     style: SaoTypography.caption.copyWith(
-                      color: SaoColors.gray600,
+                      color: SaoColors.textMutedFor(context),
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -634,10 +639,13 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
           duration: const Duration(milliseconds: 120),
           decoration: BoxDecoration(
             color: widget.isSelected
-                ? SaoColors.primary.withValues(alpha: 0.05)
+                ? Theme.of(context)
+                    .colorScheme
+                    .primary
+                    .withValues(alpha: 0.10)
                 : _hovered
-                    ? SaoColors.gray50
-                    : SaoColors.surface,
+                    ? SaoColors.surfaceMutedFor(context)
+                    : SaoColors.surfaceFor(context),
             border: Border(
               left: BorderSide(
                 color: widget.isSelected ? riskColor : Colors.transparent,
@@ -720,8 +728,8 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                                   ? FontWeight.w700
                                   : FontWeight.w500,
                               color: widget.isSelected
-                                  ? SaoColors.primary
-                                  : SaoColors.gray800,
+                                  ? Theme.of(context).colorScheme.primary
+                                  : SaoColors.textFor(context),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -734,7 +742,7 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                           decoration: BoxDecoration(
                             color: hasConflict
                                 ? SaoColors.warning.withValues(alpha: 0.12)
-                                : SaoColors.gray100,
+                                : SaoColors.surfaceRaisedFor(context),
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
@@ -742,7 +750,7 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                             style: SaoTypography.monoSmall.copyWith(
                               color: hasConflict
                                   ? SaoColors.warning
-                                  : SaoColors.gray600,
+                                  : SaoColors.textMutedFor(context),
                             ),
                           ),
                         ),
@@ -752,7 +760,7 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                     Text(
                       '${widget.actorName} · ${widget.relativeTime}',
                       style: SaoTypography.caption
-                          .copyWith(color: SaoColors.gray400),
+                          .copyWith(color: SaoColors.textMutedFor(context)),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ],
@@ -762,8 +770,8 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
               // ── Selected chevron ──────────────────────────────
               const SizedBox(width: SaoSpacing.xxs),
               if (widget.isSelected)
-                const Icon(Icons.chevron_right_rounded,
-                    size: 14, color: SaoColors.primary)
+                Icon(Icons.chevron_right_rounded,
+                    size: 14, color: Theme.of(context).colorScheme.primary)
               else
                 const SizedBox(width: 14),
             ],
@@ -793,6 +801,7 @@ class _TabPill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = Theme.of(context).colorScheme.primary;
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
@@ -800,10 +809,10 @@ class _TabPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: SaoSpacing.sm, vertical: SaoSpacing.xxs),
         decoration: BoxDecoration(
-          color: selected ? SaoColors.primary : SaoColors.gray100,
+          color: selected ? accent : SaoColors.surfaceRaisedFor(context),
           borderRadius: BorderRadius.circular(SaoRadii.full),
           border: Border.all(
-            color: selected ? SaoColors.primary : SaoColors.border,
+            color: selected ? accent : SaoColors.borderFor(context),
           ),
         ),
         child: Row(
@@ -812,7 +821,9 @@ class _TabPill extends StatelessWidget {
             Text(
               label,
               style: SaoTypography.caption.copyWith(
-                color: selected ? Colors.white : SaoColors.gray600,
+                color: selected
+                    ? Theme.of(context).colorScheme.onPrimary
+                    : SaoColors.textMutedFor(context),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -822,14 +833,19 @@ class _TabPill extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                 decoration: BoxDecoration(
                   color: selected
-                      ? Colors.white.withValues(alpha: 0.25)
-                      : SaoColors.gray300,
+                      ? Theme.of(context)
+                          .colorScheme
+                          .onPrimary
+                          .withValues(alpha: 0.22)
+                      : SaoColors.borderFor(context),
                   borderRadius: BorderRadius.circular(SaoRadii.full),
                 ),
                 child: Text(
                   '$count',
                   style: SaoTypography.caption.copyWith(
-                    color: selected ? Colors.white : SaoColors.gray700,
+                    color: selected
+                        ? Theme.of(context).colorScheme.onPrimary
+                        : SaoColors.textFor(context),
                     fontSize: 10,
                     fontWeight: FontWeight.w700,
                   ),

@@ -82,7 +82,6 @@ class SaoFormat {
   // ============================================================
   
   static final NumberFormat _numberFormat = NumberFormat('#,##0', 'es');
-  static final NumberFormat _decimalFormat = NumberFormat('#,##0.00', 'es');
   static final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'es_MX',
     symbol: '\$',

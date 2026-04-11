@@ -165,6 +165,7 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
   const client = BackendApiClient();
   final user = ref.watch(currentAppUserProvider);
   final activeProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
+  final availableProjects = await ref.watch(availableProjectsProvider.future);
   final range = ref.watch(selectedDashboardRangeProvider);
 
   final now = DateTime.now();
@@ -189,12 +190,22 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
       client,
       '/api/v1/reports/activities${_reportsQuery(projectId: activeProjectId, from: currentStart, to: now)}',
     );
+    final activitiesDecoded = await _loadActivitiesDataset(
+      client,
+      activeProjectId: activeProjectId,
+      availableProjects: availableProjects,
+    );
 
     final counters = decoded['kpis'] as Map<String, dynamic>? ?? decoded;
+    final backlogByState = _asStringIntMap(counters['backlog_by_state']);
     final queueItemsRaw = queueDecoded?['items'] as List<dynamic>? ?? const [];
     final reportCurrentItems = (reportsCurrent?['items'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList(growable: false);
+    final activityItems = (activitiesDecoded?['items'] as List<dynamic>? ?? const [])
+      .whereType<Map<String, dynamic>>()
+      .toList(growable: false);
+    final visualItems = reportCurrentItems.isNotEmpty ? reportCurrentItems : activityItems;
     final trendRows = (dailyTrendDecoded?['trend'] as List<dynamic>? ?? const [])
       .whereType<Map<String, dynamic>>()
       .toList(growable: false);
@@ -202,13 +213,25 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
     final trendPrevious = trendRows.length > 1 ? trendRows[1] : const <String, dynamic>{};
 
     final pendingCount =
-      (counters['review_queue_count'] as num?)?.toInt() ?? (counters['pending_review'] as num?)?.toInt() ?? 0;
+      (counters['review_queue_count'] as num?)?.toInt() ??
+      (counters['pending_review'] as num?)?.toInt() ??
+      backlogByState['REVISION_PENDIENTE'] ??
+      0;
     final approvedCount =
-      (counters['completed_today'] as num?)?.toInt() ?? (counters['approved'] as num?)?.toInt() ?? 0;
+      (counters['completed'] as num?)?.toInt() ??
+      (counters['completed_today'] as num?)?.toInt() ??
+      (counters['approved'] as num?)?.toInt() ??
+      backlogByState['COMPLETADA'] ??
+      0;
     final rejectedCount =
-      (counters['overdue_review_count'] as num?)?.toInt() ?? (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ?? 0;
+      (counters['overdue_review_count'] as num?)?.toInt() ??
+      (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ??
+      0;
     final needsFixCount =
-      (counters['pending_today'] as num?)?.toInt() ?? (counters['in_progress'] as num?)?.toInt() ?? 0;
+      (counters['in_progress'] as num?)?.toInt() ??
+      (counters['pending_today'] as num?)?.toInt() ??
+      backlogByState['EN_CURSO'] ??
+      0;
 
     final projectId = (decoded['project_id'] ?? 'N/A').toString();
 
@@ -216,12 +239,12 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
         .whereType<Map<String, dynamic>>()
         .map<ValidationQueueItem>(_mapQueueItem)
         .toList(growable: false);
-    final geoPoints = _buildGeoPoints(reportCurrentItems);
+    final geoPoints = _buildGeoPoints(visualItems);
 
     final topErrors = _buildTopErrors(queueItemsRaw);
     final locationCounts = _buildLocationCounts(geoPoints).take(8).toList(growable: false);
     final riskCounts = _buildRiskCounts(geoPoints);
-    final frontProgress = _buildFrontProgress(reportCurrentItems);
+    final frontProgress = _buildFrontProgress(visualItems);
 
     final approvedTrend = DashboardTrend(
       current: _trendInt(trendCurrent, 'completed', approvedCount),
@@ -240,7 +263,7 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
       previous: _trendInt(trendPrevious, 'overdue_review_count', 0),
     );
 
-    final avgValidationHours = _computeAvgValidationHours(reportCurrentItems, now);
+    final avgValidationHours = _computeAvgValidationHours(visualItems, now);
 
     return DashboardData(
       pendingCount: pendingCount,
@@ -283,6 +306,51 @@ Future<Map<String, dynamic>?> _tryGetJsonMap(
   }
 }
 
+Future<Map<String, dynamic>?> _loadActivitiesDataset(
+  BackendApiClient client, {
+  required String activeProjectId,
+  required List<String> availableProjects,
+}) async {
+  if (activeProjectId.isNotEmpty) {
+    return _tryGetJsonMap(client, '/api/v1/activities${_activitiesQuery(projectId: activeProjectId)}');
+  }
+
+  final normalizedProjects = availableProjects
+      .map((projectId) => projectId.trim().toUpperCase())
+      .where((projectId) => projectId.isNotEmpty)
+      .toSet()
+      .toList(growable: false);
+  if (normalizedProjects.isEmpty) {
+    return _tryGetJsonMap(client, '/api/v1/activities${_activitiesQuery(projectId: activeProjectId)}');
+  }
+
+  final mergedItems = <Map<String, dynamic>>[];
+  final seenIds = <String>{};
+
+  for (final projectId in normalizedProjects) {
+    final decoded = await _tryGetJsonMap(
+      client,
+      '/api/v1/activities${_activitiesQuery(projectId: projectId)}',
+    );
+    final items = decoded?['items'];
+    if (items is! List) {
+      continue;
+    }
+    for (final raw in items) {
+      if (raw is! Map<String, dynamic>) {
+        continue;
+      }
+      final id = (raw['id'] ?? '').toString().trim();
+      if (id.isNotEmpty && !seenIds.add(id)) {
+        continue;
+      }
+      mergedItems.add(raw);
+    }
+  }
+
+  return {'items': mergedItems};
+}
+
 DashboardData _empty(dynamic user, DashboardRange range) => DashboardData(
       pendingCount: 0,
       approvedCount: 0,
@@ -317,11 +385,42 @@ String _reportsQuery({
   return '?${params.entries.map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}').join('&')}';
 }
 
+String _activitiesQuery({
+  required String projectId,
+}) {
+  final params = <String, String>{
+    if (projectId.isNotEmpty) 'project_id': projectId,
+    'page_size': '100',
+  };
+  return '?${params.entries.map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}').join('&')}';
+}
+
 int _trendInt(Map<String, dynamic> row, String key, int fallback) {
   final value = row[key];
   if (value is num) return value.toInt();
   if (value is String) return int.tryParse(value) ?? fallback;
   return fallback;
+}
+
+Map<String, int> _asStringIntMap(dynamic raw) {
+  if (raw is! Map) return const {};
+  final out = <String, int>{};
+  for (final entry in raw.entries) {
+    final key = entry.key.toString().trim().toUpperCase();
+    final value = entry.value;
+    if (key.isEmpty) continue;
+    if (value is num) {
+      out[key] = value.toInt();
+      continue;
+    }
+    if (value is String) {
+      final parsed = int.tryParse(value);
+      if (parsed != null) {
+        out[key] = parsed;
+      }
+    }
+  }
+  return out;
 }
 
 DateTime _rangeStart(DateTime now, DashboardRange range) {
@@ -406,10 +505,16 @@ List<DashboardGeoPoint> _buildGeoPoints(List<Map<String, dynamic>> reportItems) 
       'medio' => 'medio',
       _ => 'bajo',
     };
-    final municipality = (item['municipality'] ?? item['municipio'] ?? '').toString().trim();
-    final state = (item['state'] ?? item['estado'] ?? '').toString().trim();
-    final front = (item['front'] ?? item['front_name'] ?? '').toString().trim();
-    final title = (item['title'] ?? item['activity_type'] ?? 'Actividad').toString().trim();
+    final municipality = _resolveLocationField(item, ['municipality', 'municipio'], 'municipio');
+    final state = _resolveLocationField(item, ['state', 'estado'], 'estado');
+    final front = _resolveLocationField(item, ['front', 'front_name'], 'front_name');
+    final title = (
+      item['title'] ??
+      item['activity_type'] ??
+      item['activity_type_code'] ??
+      _nested(item, ['wizard_payload', 'activity', 'name']) ??
+      'Actividad'
+    ).toString().trim();
 
     result.add(
       DashboardGeoPoint(
@@ -423,7 +528,7 @@ List<DashboardGeoPoint> _buildGeoPoints(List<Map<String, dynamic>> reportItems) 
         state: state,
         label: title.isEmpty ? 'Actividad' : title,
         assignedToUserId: (item['assigned_to_user_id'])?.toString(),
-        assignedName: (item['assigned_name'])?.toString(),
+        assignedName: (item['assigned_name'] ?? item['assigned_to_user_name'])?.toString(),
         lat: lat,
         lon: lon,
       ),
@@ -468,9 +573,8 @@ List<FrontProgressItem> _buildFrontProgress(List<Map<String, dynamic>> reportIte
   final executedByFront = <String, int>{};
 
   for (final item in reportItems) {
-    final front = (item['front'] ?? '').toString().trim().isEmpty
-        ? 'Sin frente'
-        : (item['front'] ?? '').toString().trim();
+    final resolvedFront = _resolveLocationField(item, ['front', 'front_name'], 'front_name');
+    final front = resolvedFront.isEmpty ? 'Sin frente' : resolvedFront;
     plannedByFront[front] = (plannedByFront[front] ?? 0) + 1;
     if ((item['status'] ?? '').toString().toUpperCase() == 'COMPLETADA') {
       executedByFront[front] = (executedByFront[front] ?? 0) + 1;
@@ -501,4 +605,45 @@ double _computeAvgValidationHours(List<Map<String, dynamic>> reportItems, DateTi
   if (durations.isEmpty) return 0;
   final totalMinutes = durations.fold<int>(0, (sum, current) => sum + current.inMinutes);
   return totalMinutes / durations.length / 60;
+}
+
+dynamic _nested(Map<String, dynamic> item, List<String> path) {
+  dynamic current = item;
+  for (final key in path) {
+    if (current is! Map) return null;
+    current = current[key];
+  }
+  return current;
+}
+
+String _extractTaggedValue(String text, String field) {
+  final normalized = text.trim();
+  if (normalized.isEmpty) return '';
+  final patterns = [
+    RegExp('$field\\s*[:=]\\s*([^|;,]+)', caseSensitive: false),
+  ];
+  for (final pattern in patterns) {
+    final match = pattern.firstMatch(normalized);
+    if (match != null) {
+      return (match.group(1) ?? '').trim();
+    }
+  }
+  return '';
+}
+
+String _resolveLocationField(
+  Map<String, dynamic> item,
+  List<String> directKeys,
+  String wizardKey,
+) {
+  for (final key in directKeys) {
+    final value = (item[key] ?? '').toString().trim();
+    if (value.isNotEmpty) return value;
+  }
+  final fromWizard = (_nested(item, ['wizard_payload', 'location', wizardKey]) ?? '').toString().trim();
+  if (fromWizard.isNotEmpty) return fromWizard;
+  final description = (item['description'] ?? '').toString();
+  final fromDescription = _extractTaggedValue(description, directKeys.last);
+  if (fromDescription.isNotEmpty) return fromDescription;
+  return '';
 }

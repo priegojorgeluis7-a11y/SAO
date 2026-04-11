@@ -80,7 +80,7 @@ class SaoField extends StatelessWidget {
       autofocus: autofocus,
       style: TextStyle(
         fontSize: 14,
-        color: enabled ? SaoColors.gray900 : SaoColors.gray500,
+        color: enabled ? SaoColors.textFor(context) : SaoColors.textMutedFor(context),
       ),
       decoration: InputDecoration(
         labelText: label,
@@ -108,10 +108,10 @@ class SaoField extends StatelessWidget {
         ),
         disabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(SaoRadii.md),
-          borderSide: BorderSide(color: SaoColors.gray300),
+          borderSide: const BorderSide(color: SaoColors.gray300),
         ),
         filled: true,
-        fillColor: _getFillColor(),
+        fillColor: _getFillColor(context),
         contentPadding: EdgeInsets.symmetric(
           horizontal: SaoSpacing.lg,
           vertical: isDense ? SaoSpacing.sm : SaoSpacing.md,
@@ -121,10 +121,10 @@ class SaoField extends StatelessWidget {
     );
   }
 
-  Color _getFillColor() {
-    if (!enabled) return SaoColors.gray100;
-    if (isEdited) return SaoColors.warning.withOpacity(0.08);
-    return SaoColors.surface;
+  Color _getFillColor(BuildContext context) {
+    if (!enabled) return SaoColors.surfaceRaisedFor(context);
+    if (isEdited) return SaoColors.warning.withValues(alpha: 0.08);
+    return SaoColors.surfaceFor(context);
   }
 
   Widget? _buildEditedIndicator() {
@@ -137,7 +137,7 @@ class SaoField extends StatelessWidget {
           'Editado',
           style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
         ),
-        backgroundColor: SaoColors.warning.withOpacity(0.2),
+        backgroundColor: SaoColors.warning.withValues(alpha: 0.2),
         labelPadding: const EdgeInsets.symmetric(horizontal: 4),
         visualDensity: VisualDensity.compact,
       ),
@@ -194,7 +194,7 @@ class SaoSearchField extends StatelessWidget {
           borderSide: const BorderSide(color: SaoColors.actionPrimary, width: 2),
         ),
         filled: true,
-        fillColor: SaoColors.surface,
+        fillColor: SaoColors.surfaceFor(context),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: SaoSpacing.lg,
           vertical: SaoSpacing.sm,

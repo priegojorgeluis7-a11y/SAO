@@ -1,7 +1,6 @@
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
-import '../../domain/entities/report_context.dart';
 import 'report_section.dart';
 
 /// Sección 2: Datos Generales (tabla técnica)
@@ -58,16 +57,16 @@ class GeneralDataSection extends ReportSection {
     final rows = <pw.TableRow>[
       // Header row
       pw.TableRow(
-        decoration: pw.BoxDecoration(
+        decoration: const pw.BoxDecoration(
           color: mainColor,
         ),
         children: [
           pw.Padding(
-            padding: pw.EdgeInsets.all(6),
+            padding: const pw.EdgeInsets.all(6),
             child: pw.Text('Campo', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
           ),
           pw.Padding(
-            padding: pw.EdgeInsets.all(6),
+            padding: const pw.EdgeInsets.all(6),
             child: pw.Text('Valor', style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
           ),
         ],
@@ -80,12 +79,12 @@ class GeneralDataSection extends ReportSection {
         pw.TableRow(
           children: [
             pw.Padding(
-              padding: pw.EdgeInsets.all(6),
-              child: pw.Text(row[0] ?? '', style: const pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
+              padding: const pw.EdgeInsets.all(6),
+                child: pw.Text(row[0], style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold)),
             ),
             pw.Padding(
-              padding: pw.EdgeInsets.all(6),
-              child: pw.Text(row[1] ?? '', style: const pw.TextStyle(fontSize: 8)),
+              padding: const pw.EdgeInsets.all(6),
+              child: pw.Text(row[1], style: const pw.TextStyle(fontSize: 8)),
             ),
           ],
         ),
@@ -94,7 +93,7 @@ class GeneralDataSection extends ReportSection {
 
     widgets.add(
       pw.Table(
-        border: pw.TableBorder(
+        border: const pw.TableBorder(
           horizontalInside: pw.BorderSide(color: borderColor, width: 0.5),
           top: pw.BorderSide(color: borderColor, width: 0.5),
           bottom: pw.BorderSide(color: borderColor, width: 0.5),

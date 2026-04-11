@@ -76,7 +76,7 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
       children: [
         // Label
         Padding(
-          padding: EdgeInsets.only(bottom: SaoSpacing.xs),
+          padding: const EdgeInsets.only(bottom: SaoSpacing.xs),
           child: Text(
             widget.label,
             style: SaoTypography.caption.copyWith(
@@ -93,12 +93,12 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
           onExit: (_) => setState(() => _isHovering = false),
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
-            padding: EdgeInsets.all(SaoSpacing.md),
+            padding: const EdgeInsets.all(SaoSpacing.md),
             decoration: BoxDecoration(
               color: _isEditing
                   ? SaoColors.surface
                   : _hasChanges
-                      ? SaoColors.info.withOpacity(0.05)
+                      ? SaoColors.info.withValues(alpha: 0.05)
                       : SaoColors.gray50,
               border: Border.all(
                 color: _isEditing
@@ -120,12 +120,12 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                   // Valor original (catálogo)
                   Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.inventory_2_outlined,
                         size: 14,
                         color: SaoColors.gray500,
                       ),
-                      SizedBox(width: SaoSpacing.xs),
+                      const SizedBox(width: SaoSpacing.xs),
                       Text(
                         'Catálogo: ',
                         style: SaoTypography.caption.copyWith(
@@ -147,17 +147,17 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.xs),
+                  const SizedBox(height: SaoSpacing.xs),
                   
                   // Valor nuevo (campo)
                   Row(
                     children: [
-                      Icon(
+                      const Icon(
                         Icons.edit_note_rounded,
                         size: 14,
                         color: SaoColors.info,
                       ),
-                      SizedBox(width: SaoSpacing.xs),
+                      const SizedBox(width: SaoSpacing.xs),
                       Text(
                         'Campo: ',
                         style: SaoTypography.caption.copyWith(
@@ -180,7 +180,7 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                       ),
                     ],
                   ),
-                  SizedBox(height: SaoSpacing.sm),
+                  const SizedBox(height: SaoSpacing.sm),
                   
                   // Botones de acción
                   Row(
@@ -189,16 +189,16 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: widget.onAcceptChange,
-                          icon: Icon(Icons.check_rounded, size: 14),
-                          label: Text('Aceptar cambio'),
+                          icon: const Icon(Icons.check_rounded, size: 14),
+                          label: const Text('Aceptar cambio'),
                         ),
                       ),
-                      SizedBox(width: SaoSpacing.sm),
+                      const SizedBox(width: SaoSpacing.sm),
                       Expanded(
                         child: OutlinedButton.icon(
                           onPressed: widget.onRevertChange,
-                          icon: Icon(Icons.restore_rounded, size: 14),
-                          label: Text('Restaurar original'),
+                          icon: const Icon(Icons.restore_rounded, size: 14),
+                          label: const Text('Restaurar original'),
                         ),
                       ),
                     ],
@@ -226,7 +226,7 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                           onSubmitted: (_) => _saveEdit(),
                         ),
                       ),
-                      SizedBox(width: SaoSpacing.sm),
+                      const SizedBox(width: SaoSpacing.sm),
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -236,7 +236,7 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                             onPressed: _saveEdit,
                             tooltip: 'Guardar (Enter)',
                           ),
-                          SizedBox(width: 4),
+                          const SizedBox(width: 4),
                           _IconButtonSmall(
                             icon: Icons.close_rounded,
                             color: SaoColors.gray600,
@@ -263,9 +263,9 @@ class _ActivityDiffFieldState extends State<ActivityDiffField> {
                           !widget.readOnly &&
                           widget.onEdit != null)
                         IconButton(
-                          icon: Icon(Icons.edit_rounded, size: 16),
+                          icon: const Icon(Icons.edit_rounded, size: 16),
                           color: SaoColors.primary,
-                          padding: EdgeInsets.all(4),
+                          padding: const EdgeInsets.all(4),
                           constraints: const BoxConstraints(),
                           onPressed: _startEditing,
                           tooltip: 'Editar valor',
