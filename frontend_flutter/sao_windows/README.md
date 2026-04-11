@@ -1,17 +1,36 @@
-# sao_windows
+# SAO Mobile
 
-A new Flutter project.
+Cliente Flutter movil de SAO.
 
-## Getting Started
+## Comandos base
 
-This project is a starting point for a Flutter application.
+- `flutter pub get`
+- `flutter analyze`
+- `flutter test`
+- `dart run build_runner build --delete-conflicting-outputs`
 
-A few resources to get you started if this is your first Flutter project:
+## iOS
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+El proyecto incluye target nativo para iPhone/iPad en `ios/`.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Prerequisitos para compilar en macOS:
+
+- Xcode con el runtime de iOS y/o iOS Simulator instalado desde `Xcode > Settings > Components`
+- CocoaPods disponible
+- Cuenta/equipo de signing configurado en Xcode para pruebas en dispositivo fisico
+
+Build de simulador:
+
+- `flutter build ios --simulator --no-codesign`
+- Si el workspace vive dentro de `Documents` y Xcode falla por metadatos Finder/codesign, usa `tools/diagnostics/scripts/build_mobile_ios_simulator_clean.sh`
+
+Build para dispositivo fisico sin firmar:
+
+- `flutter build ios --release --no-codesign`
+
+Notas:
+
+- El bundle id iOS del proyecto es `com.tmq.sao`.
+- Para push notifications en iPhone sigue siendo necesario configurar certificados o key de APNs en Apple Developer/Firebase fuera del repositorio.
+- Si Xcode reporta que no encuentra destino para simulator, normalmente falta instalar el runtime de iOS correspondiente.
+- El Podfile iOS usa `use_modular_headers!` para que Firebase y `sqlite3_flutter_libs` resuelvan modulos Swift sin `use_frameworks!`.

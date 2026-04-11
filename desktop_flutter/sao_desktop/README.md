@@ -89,6 +89,16 @@ dart run build_runner build --delete-conflicting-outputs
 flutter run -d windows
 ```
 
+#### 4. Build limpio en macOS fuera de Documents/iCloud
+
+Si macOS falla por codesign o metadatos Finder dentro de `Documents`, usa:
+
+```bash
+tools/diagnostics/scripts/build_desktop_macos_clean.sh
+```
+
+El script compila en `/tmp`, evita `macos/Pods` y `macos/Flutter/ephemeral`, y copia el `.app` final de regreso a `build/macos/Build/Products/Release/`.
+
 **Nota sobre el icono**: Si muestra error sobre `app_icon.ico`, puedes:
 - Crear un archivo vacío: `New-Item -Path "windows\runner\resources\app_icon.ico" -ItemType File`
 - O usar un icono real de 256x256px en formato .ico

@@ -13,6 +13,7 @@ Thumbs.db
 **/.pytest_cache/
 **/.mypy_cache/
 .venv/
+.venv*/
 venv/
 
 # Flutter / Dart
@@ -20,6 +21,15 @@ venv/
 **/.flutter-plugins
 **/.flutter-plugins-dependencies
 **/.packages
+**/ios/Flutter/.last_build_id
+**/ios/Flutter/Generated.xcconfig
+**/ios/Flutter/flutter_export_environment.sh
+**/ios/Flutter/Flutter.podspec
+**/ios/Flutter/Generated *.xcconfig
+**/ios/Flutter/flutter_export_environment *.sh
+**/ios/Flutter/Flutter *.podspec
+**/ios/Podfile *.lock
+**/macos/Podfile *.lock
 **/build/
 **/coverage/
 
