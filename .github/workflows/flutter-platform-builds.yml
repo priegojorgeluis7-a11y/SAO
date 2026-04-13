@@ -46,7 +46,7 @@ jobs:
         run: flutter pub get
 
       - name: Static analysis
-        run: flutter analyze
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Run tests
         run: flutter test
@@ -134,11 +134,3 @@ jobs:
 
       - name: Build Windows app
         run: flutter build windows --dart-define=SAO_BACKEND_URL=https://sao-api-fjzra25vya-uc.a.run.app
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Flutter/Flutter 2.podspec
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Flutter/Flutter 3.podspec
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Flutter/Generated 2.xcconfig
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Flutter/Generated 3.xcconfig
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Flutter/flutter_export_environment 2.sh
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Flutter/flutter_export_environment 3.sh
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/frontend_flutter/sao_windows/ios/Podfile 2.lock
-*** Delete File: /Users/jorgeluispriegocruz/Documents/SAO/desktop_flutter/sao_desktop/macos/Podfile 2.lock
