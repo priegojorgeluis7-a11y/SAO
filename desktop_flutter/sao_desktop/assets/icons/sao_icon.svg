@@ -1,0 +1,114 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+<!-- SAO Desktop App Icon v2 — Identidad: navy/teal, amber ring, checklist + campo -->
+  <defs>
+
+    <!-- Background: deep navy → rich teal -->
+    <linearGradient id="bgGrad" x1="0" y1="0" x2="1024" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#091C2E"/>
+      <stop offset="50%"  stop-color="#0C3D58"/>
+      <stop offset="100%" stop-color="#0C5F6A"/>
+    </linearGradient>
+
+    <!-- Soft center glow -->
+    <radialGradient id="ambientGlow" cx="512" cy="490" r="390" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#1C7090" stop-opacity="0.40"/>
+      <stop offset="100%" stop-color="#091C2E" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Amber/gold ring gradient -->
+    <linearGradient id="ringGrad" x1="206" y1="186" x2="818" y2="798" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#FFC938"/>
+      <stop offset="55%"  stop-color="#F4A020"/>
+      <stop offset="100%" stop-color="#E07412"/>
+    </linearGradient>
+
+    <!-- White document card -->
+    <linearGradient id="docGrad" x1="372" y1="308" x2="644" y2="646" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#E6EFF8"/>
+    </linearGradient>
+
+    <!-- Teal location badge -->
+    <linearGradient id="tealGrad" x1="276" y1="622" x2="378" y2="756" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#2ED4AE"/>
+      <stop offset="100%" stop-color="#14A48E"/>
+    </linearGradient>
+
+    <!-- Document drop shadow -->
+    <filter id="docShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="14" stdDeviation="22" flood-color="#000000" flood-opacity="0.26"/>
+    </filter>
+
+    <!-- Badge drop shadow -->
+    <filter id="badgeShadow" x="-40%" y="-40%" width="180%" height="180%">
+      <feDropShadow dx="0" dy="10" stdDeviation="16" flood-color="#000000" flood-opacity="0.35"/>
+    </filter>
+
+    <!-- Ring ambient glow (applied to blurred circle) -->
+    <filter id="ringGlowFilter">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+
+    <!-- Subtle dot grid texture -->
+    <pattern id="dotGrid" x="0" y="0" width="40" height="40" patternUnits="userSpaceOnUse">
+      <circle cx="20" cy="20" r="1.5" fill="#FFFFFF" fill-opacity="0.055"/>
+    </pattern>
+
+    <!-- Clip to rounded rect shape -->
+    <clipPath id="bgClip">
+      <rect width="1024" height="1024" rx="224"/>
+    </clipPath>
+
+  </defs>
+
+  <!-- ── 1. Background ─────────────────────────────────────────────── -->
+  <rect width="1024" height="1024" rx="224" fill="url(#bgGrad)"/>
+  <rect width="1024" height="1024" fill="url(#dotGrid)" clip-path="url(#bgClip)"/>
+  <rect width="1024" height="1024" rx="224" fill="url(#ambientGlow)"/>
+
+  <!-- ── 2. Dark disk behind ring ──────────────────────────────────── -->
+  <circle cx="512" cy="492" r="354" fill="#0A2F45" opacity="0.72"/>
+
+  <!-- ── 3. Ring glow (blurred halo) ──────────────────────────────── -->
+  <circle cx="512" cy="492" r="306" fill="none"
+          stroke="#F4A020" stroke-width="96" opacity="0.14"
+          filter="url(#ringGlowFilter)"/>
+
+  <!-- ── 4. Main amber ring ────────────────────────────────────────── -->
+  <circle cx="512" cy="492" r="306" fill="none"
+          stroke="url(#ringGrad)" stroke-width="48"/>
+
+  <!-- Thin inner highlight on ring -->
+  <circle cx="512" cy="492" r="306" fill="none"
+          stroke="#FFE899" stroke-width="7" opacity="0.40"/>
+
+  <!-- ── 5. Document card ──────────────────────────────────────────── -->
+  <rect x="372" y="308" width="272" height="338" rx="36"
+        fill="url(#docGrad)" filter="url(#docShadow)"/>
+
+  <!-- macOS-style header dots -->
+  <circle cx="408" cy="342" r="8" fill="#8BAFC6" opacity="0.65"/>
+  <circle cx="436" cy="342" r="8" fill="#8BAFC6" opacity="0.65"/>
+  <circle cx="464" cy="342" r="8" fill="#8BAFC6" opacity="0.65"/>
+
+  <!-- Header separator -->
+  <line x1="392" y1="362" x2="624" y2="362" stroke="#BED0DF" stroke-width="1.5"/>
+
+  <!-- Row 1: aprobada — check verde + barra -->
+  <polyline points="398,430 414,449 443,419" fill="none"
+            stroke="#1BAD78" stroke-width="17"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="460" y="425" width="158" height="14" rx="7" fill="#BDD0E0"/>
+
+  <!-- Row 2: aprobada — check verde + barra más corta -->
+  <polyline points="398,494 414,513 443,483" fill="none"
+            stroke="#1BAD78" stroke-width="17"
+            stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="460" y="490" width="132" height="14" rx="7" fill="#BDD0E0"/>
+
+  <!-- Row 3: pendiente — círculo amber + barra -->
+  <circle cx="420" cy="566" r="13" fill="none" stroke="#E8A820" stroke-width="9"/>
+  <rect x="460" y="559" width="100" height="14" rx="7" fill="#BDD0E0"/>
+
+
+</svg>
