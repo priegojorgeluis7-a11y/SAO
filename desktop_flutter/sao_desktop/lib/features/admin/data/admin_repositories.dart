@@ -197,7 +197,7 @@ class AdminProject {
         frontLocationScopeRaw is List ? frontLocationScopeRaw : const [];
     final statesList = statesRaw is List ? statesRaw : const [];
 
-    int _toInt(dynamic value) {
+    int toIntValue(dynamic value) {
       if (value is int) return value;
       if (value is num) return value.toInt();
       return int.tryParse('$value') ?? 0;
@@ -209,16 +209,16 @@ class AdminProject {
       status: (json['status'] ?? json['estado'] ?? 'active').toString(),
       startDate: (json['start_date'] ?? json['startDate'] ?? '').toString(),
       endDate: (json['end_date'] ?? json['endDate'])?.toString(),
-      frontsCount: _toInt(
+      frontsCount: toIntValue(
       json['fronts_count'] ?? json['frontsCount'] ?? json['frentes_count'],
       ),
-      municipalitiesCount: _toInt(
+      municipalitiesCount: toIntValue(
       json['municipalities_count'] ??
         json['municipalitiesCount'] ??
         json['municipios_count'],
       ),
       statesCount:
-        _toInt(json['states_count'] ?? json['statesCount'] ?? json['estados_count']),
+        toIntValue(json['states_count'] ?? json['statesCount'] ?? json['estados_count']),
         fronts: frontsList
           .map((item) =>
               AdminProjectFront.fromJson(item as Map<String, dynamic>))
@@ -351,7 +351,9 @@ class AdminUserItem {
 class AuditItem {
   final String id;
   final String createdAt;
+  final String? actorName;
   final String? actorEmail;
+  final String? actorRole;
   final String action;
   final String entity;
   final String entityId;
@@ -359,17 +361,56 @@ class AuditItem {
   const AuditItem({
     required this.id,
     required this.createdAt,
+    required this.actorName,
     required this.actorEmail,
+    required this.actorRole,
     required this.action,
     required this.entity,
     required this.entityId,
   });
 
+  String get actorDisplay {
+    String? normalizeRole(String? rawRole) {
+      final normalized = (rawRole ?? '').trim().toUpperCase();
+      if (normalized.isEmpty) return null;
+      if (normalized.contains('ADMIN')) return 'ADMIN';
+      if (normalized.contains('COORD')) return 'COORDINADOR';
+      if (normalized.contains('SUPERVISOR')) return 'SUPERVISOR';
+      if (normalized.contains('LECTOR') || normalized.contains('VIEW')) return 'LECTOR';
+      if (normalized.contains('OPERAT') || normalized.contains('OPERAR') || normalized.contains('TECN') || normalized.contains('ING') || normalized.contains('TOP')) {
+        return 'OPERATIVO';
+      }
+      return normalized;
+    }
+
+    final name = actorName?.trim();
+    final role = normalizeRole(actorRole?.trim());
+    final email = actorEmail?.trim();
+
+    final header = [
+      if (name != null && name.isNotEmpty) name,
+      if (role != null && role.isNotEmpty) role,
+    ].join(' • ');
+
+    if (header.isNotEmpty && email != null && email.isNotEmpty) {
+      return '$header\n$email';
+    }
+    if (header.isNotEmpty) {
+      return header;
+    }
+    if (email != null && email.isNotEmpty) {
+      return email;
+    }
+    return '-';
+  }
+
   factory AuditItem.fromJson(Map<String, dynamic> json) {
     return AuditItem(
       id: json['id'].toString(),
       createdAt: json['created_at'] as String,
+      actorName: json['actor_name'] as String?,
       actorEmail: json['actor_email'] as String?,
+      actorRole: json['actor_role'] as String?,
       action: json['action'] as String,
       entity: json['entity'] as String,
       entityId: json['entity_id'] as String,
@@ -649,6 +690,89 @@ class UsersRepository {
   }
 }
 
+// ─── Invitation model + repository ────────────────────────────────────────────
+
+class AdminInvitation {
+  final String inviteId;
+  final String role;
+  final String createdBy;
+  final String? targetEmail;
+  final DateTime expiresAt;
+  final bool used;
+  final String? usedBy;
+  final DateTime? usedAt;
+  final DateTime createdAt;
+
+  const AdminInvitation({
+    required this.inviteId,
+    required this.role,
+    required this.createdBy,
+    required this.targetEmail,
+    required this.expiresAt,
+    required this.used,
+    required this.usedBy,
+    required this.usedAt,
+    required this.createdAt,
+  });
+
+  factory AdminInvitation.fromJson(Map<String, dynamic> json) {
+    DateTime parseDate(dynamic v) {
+      if (v == null) return DateTime.now();
+      if (v is DateTime) return v;
+      return DateTime.tryParse(v.toString()) ?? DateTime.now();
+    }
+
+    return AdminInvitation(
+      inviteId: json['invite_id']?.toString() ?? '',
+      role: json['role']?.toString() ?? '',
+      createdBy: json['created_by']?.toString() ?? '',
+      targetEmail: json['target_email']?.toString(),
+      expiresAt: parseDate(json['expires_at']),
+      used: json['used'] as bool? ?? false,
+      usedBy: json['used_by']?.toString(),
+      usedAt: json['used_at'] != null ? parseDate(json['used_at']) : null,
+      createdAt: parseDate(json['created_at']),
+    );
+  }
+
+  bool get isExpired => DateTime.now().isAfter(expiresAt);
+}
+
+class InvitationsRepository {
+  final AdminApiTransport transport;
+
+  InvitationsRepository(this.transport);
+
+  Future<List<AdminInvitation>> list(String token) async {
+    final response =
+        await transport.get('/api/v1/invitations', token: token) as List<dynamic>;
+    return response
+        .map((e) => AdminInvitation.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<AdminInvitation> create(
+    String token, {
+    required String role,
+    String? targetEmail,
+    int expireDays = 7,
+  }) async {
+    final body = <String, dynamic>{
+      'role': role,
+      'expire_days': expireDays,
+    };
+    if (targetEmail != null && targetEmail.trim().isNotEmpty) {
+      body['target_email'] = targetEmail.trim();
+    }
+    final response = await transport.post(
+      '/api/v1/invitations',
+      token: token,
+      body: body,
+    );
+    return AdminInvitation.fromJson(response as Map<String, dynamic>);
+  }
+}
+
 class AuditRepository {
   final AdminApiTransport transport;
 
@@ -707,7 +831,7 @@ class AdminAssignmentItem {
   });
 
   factory AdminAssignmentItem.fromJson(Map<String, dynamic> json) {
-    DateTime _parse(String? raw) =>
+    DateTime parseDate(String? raw) =>
         DateTime.tryParse(raw ?? '')?.toLocal() ?? DateTime.now();
     return AdminAssignmentItem(
       id: (json['id'] ?? '').toString(),
@@ -716,8 +840,8 @@ class AdminAssignmentItem {
       title: (json['title'] ?? '').toString(),
       status: (json['status'] ?? '').toString(),
       frente: json['frente']?.toString(),
-      startAt: _parse(json['start_at']?.toString()),
-      endAt: _parse(json['end_at']?.toString()),
+      startAt: parseDate(json['start_at']?.toString()),
+      endAt: parseDate(json['end_at']?.toString()),
     );
   }
 }

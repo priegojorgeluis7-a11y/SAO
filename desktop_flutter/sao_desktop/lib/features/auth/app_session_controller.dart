@@ -421,6 +421,11 @@ class AppSessionController extends StateNotifier<AppSessionState> {
     }
   }
 
+  /// Surfaces a login error in the UI without going through a network call.
+  void setLoginError(String message) {
+    state = state.copyWith(loading: false, error: message);
+  }
+
   Future<void> login(String email, String password) async {
     state = state.copyWith(loading: true, clearError: true);
     try {
@@ -447,6 +452,137 @@ class AppSessionController extends StateNotifier<AppSessionState> {
         accessToken: token,
         user: AppUser.fromJson(me, accessToken: token),
       );
+    } catch (e) {
+      state = state.copyWith(
+        loading: false,
+        error: _humanizeAuthError(e),
+      );
+    }
+  }
+
+  /// Returns true if invite code is required (user doesn't exist yet).
+  Future<bool> loginWithGoogle(String idToken, [String? inviteCode]) async {
+    final trimmedIdToken = idToken.trim();
+    if (trimmedIdToken.isEmpty) {
+      state = state.copyWith(
+        loading: false,
+        error: 'No se pudo obtener token de Google (idToken).',
+      );
+      return false;
+    }
+
+    state = state.copyWith(loading: true, clearError: true);
+    try {
+      final body = await _http.post('/api/v1/auth/google', {
+        'id_token': trimmedIdToken,
+        'invite_code': inviteCode?.trim() ?? '',
+      });
+
+      final token = body['access_token'] as String;
+      final refreshToken = body['refresh_token'] as String? ?? '';
+      final expiresInRaw = body['expires_in'];
+      final expiresInSeconds = switch (expiresInRaw) {
+        int value => value,
+        String value => int.tryParse(value),
+        _ => null,
+      };
+
+      await TokenStore.save(
+        token,
+        refreshToken: refreshToken,
+        expiresInSeconds: expiresInSeconds,
+      );
+
+      final me = await _resolveMePayload(token);
+      state = AppSessionState(
+        initializing: false,
+        loading: false,
+        error: null,
+        accessToken: token,
+        user: AppUser.fromJson(me, accessToken: token),
+      );
+      return false;
+    } catch (e) {
+      // Surface specific signal: backend says user needs invite code
+      if (e is AuthApiException && e.statusCode == 403) {
+        String detail = '';
+        try {
+          final decoded = jsonDecode(e.message);
+          if (decoded is Map<String, dynamic>) {
+            detail = (decoded['detail'] ?? '').toString().toLowerCase();
+          }
+        } catch (_) {}
+        if (detail.contains('invite code')) {
+          state = state.copyWith(loading: false, clearError: true);
+          return true; // Signal: needs invite code
+        }
+      }
+      state = state.copyWith(
+        loading: false,
+        error: _humanizeAuthError(e),
+      );
+      return false;
+    }
+  }
+
+  Future<void> signup({
+    required String email,
+    required String password,
+    required String displayName,
+    required String inviteCode,
+    required String role,
+    String? firstName,
+    String? lastName,
+    String? secondLastName,
+    String? birthDate,
+  }) async {
+    state = state.copyWith(loading: true, clearError: true);
+    try {
+      final body = await _http.post('/api/v1/auth/signup', {
+        'email': email,
+        'password': password,
+        'display_name': displayName,
+        if (firstName != null && firstName.trim().isNotEmpty)
+          'first_name': firstName.trim(),
+        if (lastName != null && lastName.trim().isNotEmpty)
+          'last_name': lastName.trim(),
+        if (secondLastName != null && secondLastName.trim().isNotEmpty)
+          'second_last_name': secondLastName.trim(),
+        if (birthDate != null && birthDate.trim().isNotEmpty)
+          'birth_date': birthDate.trim(),
+        'role': role,
+        'invite_code': inviteCode,
+      });
+
+      final token = body['access_token'] as String?;
+      if (token != null && token.isNotEmpty) {
+        final refreshToken = body['refresh_token'] as String? ?? '';
+        final expiresInRaw = body['expires_in'];
+        final expiresInSeconds = switch (expiresInRaw) {
+          int value => value,
+          String value => int.tryParse(value),
+          _ => null,
+        };
+
+        await TokenStore.save(
+          token,
+          refreshToken: refreshToken,
+          expiresInSeconds: expiresInSeconds,
+        );
+
+        final me = await _resolveMePayload(token);
+        state = AppSessionState(
+          initializing: false,
+          loading: false,
+          error: null,
+          accessToken: token,
+          user: AppUser.fromJson(me, accessToken: token),
+        );
+      } else {
+        // Backend may return signup-only payload without tokens. Attempt login
+        // to keep a consistent UX after successful signup.
+        await login(email, password);
+      }
     } catch (e) {
       state = state.copyWith(
         loading: false,
@@ -490,6 +626,7 @@ class AppSessionController extends StateNotifier<AppSessionState> {
 
   Future<void> logout() async {
     final token = state.accessToken;
+    final refreshToken = TokenStore.currentRefreshToken;
     await TokenStore.clear();
     state = const AppSessionState(
       initializing: false,
@@ -500,7 +637,8 @@ class AppSessionController extends StateNotifier<AppSessionState> {
     );
     if (token == null) return;
     try {
-      await _http.post('/api/v1/auth/logout', {}, token: token);
+      final body = refreshToken.isNotEmpty ? {'refresh_token': refreshToken} : <String, dynamic>{};
+      await _http.post('/api/v1/auth/logout', body, token: token);
     } catch (_) {
       // local-first logout — ignore server errors
     }

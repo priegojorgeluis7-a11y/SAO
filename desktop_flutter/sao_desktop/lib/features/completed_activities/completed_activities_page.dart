@@ -11,6 +11,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/evidence_repository.dart';
 import '../../ui/sao_ui.dart';
+import '../digital_records/digital_records_colors.dart';
+import '../reports/reports_provider.dart' as reports;
 import 'completed_activities_provider.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -50,6 +52,7 @@ class _CompletedActivitiesPageState
 
   void _clearAll() {
     _searchCtrl.clear();
+    ref.read(completedProjectFilterProvider.notifier).state = '';
     ref.read(completedSearchQueryProvider.notifier).state    = '';
     ref.read(completedFrenteFilterProvider.notifier).state   = '';
     ref.read(completedTemaFilterProvider.notifier).state     = '';
@@ -66,27 +69,32 @@ class _CompletedActivitiesPageState
     ref.read(completedUsuarioFilterProvider.notifier).state  = '';
   }
 
+  void _ensureSelection(List<CompletedActivity> items) {
+    if (items.isEmpty) {
+      if (_selectedActivityId != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          setState(() => _selectedActivityId = null);
+        });
+      }
+      return;
+    }
+
+    final alreadySelected =
+        _selectedActivityId != null && items.any((item) => item.id == _selectedActivityId);
+    if (alreadySelected) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() => _selectedActivityId = items.first.id);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final projectsAsync   = ref.watch(availableProjectsProvider);
     final selectedProject = ref.watch(completedProjectFilterProvider);
     final activitiesAsync = ref.watch(completedActivitiesProvider);
-    final frente = ref.watch(completedFrenteFilterProvider);
-    final tema = ref.watch(completedTemaFilterProvider);
-    final estado = ref.watch(completedEstadoFilterProvider);
-    final municipio = ref.watch(completedMunicipioFilterProvider);
-    final usuario = ref.watch(completedUsuarioFilterProvider);
-    final query = ref.watch(completedSearchQueryProvider);
-
-    final activeFilters = <String, String>{
-      if (selectedProject.isNotEmpty) 'Proyecto': selectedProject,
-      if (frente.isNotEmpty) 'Frente': frente,
-      if (tema.isNotEmpty) 'Tema/Tipo': tema,
-      if (estado.isNotEmpty) 'Estado': estado,
-      if (municipio.isNotEmpty) 'Municipio': municipio,
-      if (usuario.isNotEmpty) 'Responsable': usuario,
-      if (query.isNotEmpty) 'B\u00fasqueda': query,
-    };
 
     // Reset dependent filters when project changes
     ref.listen(completedProjectFilterProvider, (_, __) {
@@ -120,7 +128,6 @@ class _CompletedActivitiesPageState
                   .toList(growable: false),
               orElse: () => const <String>[],
             ),
-            activeFilters: activeFilters,
             onProjectChanged: (v) {
               ref.read(completedProjectFilterProvider.notifier).state = v ?? '';
             },
@@ -133,32 +140,6 @@ class _CompletedActivitiesPageState
               }
             },
             onClearAll: _clearAll,
-            onRemoveFilter: (key) {
-              switch (key) {
-                case 'Proyecto':
-                  ref.read(completedProjectFilterProvider.notifier).state = '';
-                  break;
-                case 'Frente':
-                  ref.read(completedFrenteFilterProvider.notifier).state = '';
-                  break;
-                case 'Tema/Tipo':
-                  ref.read(completedTemaFilterProvider.notifier).state = '';
-                  break;
-                case 'Estado':
-                  ref.read(completedEstadoFilterProvider.notifier).state = '';
-                  break;
-                case 'Municipio':
-                  ref.read(completedMunicipioFilterProvider.notifier).state = '';
-                  break;
-                case 'Responsable':
-                  ref.read(completedUsuarioFilterProvider.notifier).state = '';
-                  break;
-                case 'B\u00fasqueda':
-                  _searchCtrl.clear();
-                  ref.read(completedSearchQueryProvider.notifier).state = '';
-                  break;
-              }
-            },
           ),
 
           const Divider(height: 1),
@@ -167,23 +148,27 @@ class _CompletedActivitiesPageState
             child: activitiesAsync.when(
               loading: () => const _TableSkeletonState(),
               error: (e, _) => _ErrorState(message: e.toString()),
-              data: (items) => items.isEmpty
-                  ? const _EmptyState()
-                  : Column(
-                      children: [
-                        _RecordsSummary(items: items),
-                        Expanded(
-                          child: _SplitView(
-                            items: items,
-                            selectedActivityId: _selectedActivityId,
-                            onSelectActivity: (id) =>
-                                setState(() => _selectedActivityId = id),
-                            onCloseDetail: () =>
-                                setState(() => _selectedActivityId = null),
-                          ),
-                        ),
-                      ],
+              data: (items) {
+                _ensureSelection(items);
+                if (items.isEmpty) {
+                  return const _EmptyState();
+                }
+                return Column(
+                  children: [
+                    _RecordsSummary(items: items),
+                    Expanded(
+                      child: _SplitView(
+                        items: items,
+                        selectedActivityId: _selectedActivityId,
+                        onSelectActivity: (id) =>
+                            setState(() => _selectedActivityId = id),
+                        onCloseDetail: () =>
+                            setState(() => _selectedActivityId = null),
+                      ),
                     ),
+                  ],
+                );
+              },
             ),
           ),
         ],
@@ -210,11 +195,11 @@ class _PageHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: SaoColors.surfaceFor(context),
+      color: DigitalRecordColors.headerSurfaceFor(context),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       child: Row(
         children: [
-          const Icon(Icons.folder_copy_rounded, color: SaoColors.actionPrimary, size: 20),
+          const Icon(Icons.folder_copy_rounded, color: DigitalRecordColors.accent, size: 20),
           const SizedBox(width: 10),
           Text('Expediente digital',
               style: SaoTypography.pageTitle.copyWith(fontSize: 17)),
@@ -235,11 +220,11 @@ class _PageHeader extends StatelessWidget {
           if (hasSelection)
             Text('Trazabilidad completa →',
                 style: SaoTypography.caption
-                    .copyWith(color: SaoColors.actionPrimary, fontSize: 12)),
+                    .copyWith(color: DigitalRecordColors.accent, fontSize: 12)),
           const SizedBox(width: 16),
           Text('Proyectos, frentes, estados y documentos aprobados',
               style: SaoTypography.caption
-                  .copyWith(color: SaoColors.gray400, fontSize: 11)),
+                .copyWith(color: SaoColors.gray600, fontSize: 11)),
           const SizedBox(width: 12),
           IconButton(
             icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -285,32 +270,32 @@ class _RecordsSummary extends StatelessWidget {
     return Container(
       width: double.infinity,
       color: SaoColors.surfaceMutedFor(context),
-      padding: const EdgeInsets.fromLTRB(24, 14, 24, 10),
+      padding: const EdgeInsets.fromLTRB(24, 8, 24, 6),
       child: Wrap(
-        spacing: 12,
-        runSpacing: 12,
+        spacing: 8,
+        runSpacing: 8,
         children: [
-          _SummaryCard(
+          _SummaryChip(
             label: 'Proyectos',
             value: '$uniqueProjects',
             icon: Icons.domain_rounded,
           ),
-          _SummaryCard(
+          _SummaryChip(
             label: 'Frentes',
             value: '$uniqueFronts',
             icon: Icons.alt_route_rounded,
           ),
-          _SummaryCard(
+          _SummaryChip(
             label: 'Estados',
             value: '$uniqueStates',
             icon: Icons.map_outlined,
           ),
-          _SummaryCard(
+          _SummaryChip(
             label: 'Documentos generados',
             value: '$generatedDocs',
             icon: Icons.description_outlined,
           ),
-          _SummaryCard(
+          _SummaryChip(
             label: 'Evidencias',
             value: '$totalEvidence',
             icon: Icons.photo_library_outlined,
@@ -321,12 +306,12 @@ class _RecordsSummary extends StatelessWidget {
   }
 }
 
-class _SummaryCard extends StatelessWidget {
+class _SummaryChip extends StatelessWidget {
   final String label;
   final String value;
   final IconData icon;
 
-  const _SummaryCard({
+  const _SummaryChip({
     required this.label,
     required this.value,
     required this.icon,
@@ -335,44 +320,37 @@ class _SummaryCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 180,
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
         color: SaoColors.surfaceFor(context),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(999),
         border: Border.all(color: SaoColors.borderFor(context)),
       ),
       child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(5),
             decoration: BoxDecoration(
-              color: SaoColors.actionPrimary.withValues(alpha: 0.10),
-              borderRadius: BorderRadius.circular(10),
+              color: DigitalRecordColors.accentSurfaceFor(context),
+              borderRadius: BorderRadius.circular(999),
             ),
-            child: Icon(icon, color: SaoColors.actionPrimary, size: 16),
+            child: Icon(icon, color: DigitalRecordColors.accent, size: 12),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: SaoTypography.metricValue.copyWith(
-                    color: SaoColors.actionPrimary,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: SaoTypography.caption.copyWith(
-                    color: SaoColors.textMutedFor(context),
-                  ),
-                ),
-              ],
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: SaoTypography.bodyTextBold.copyWith(
+              color: DigitalRecordColors.accent,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: SaoTypography.caption.copyWith(
+              color: SaoColors.textMutedFor(context),
+              fontSize: 11,
             ),
           ),
         ],
@@ -390,22 +368,18 @@ class _FilterBar extends ConsumerWidget {
   final String selectedProject;
   final TextEditingController searchCtrl;
   final List<String> searchSuggestions;
-  final Map<String, String> activeFilters;
   final ValueChanged<String?> onProjectChanged;
   final ValueChanged<String> onSearchChanged;
   final VoidCallback onClearAll;
-  final ValueChanged<String> onRemoveFilter;
 
   const _FilterBar({
     required this.projectsAsync,
     required this.selectedProject,
     required this.searchCtrl,
     required this.searchSuggestions,
-    required this.activeFilters,
     required this.onProjectChanged,
     required this.onSearchChanged,
     required this.onClearAll,
-    required this.onRemoveFilter,
   });
 
   static InputDecoration _deco(String label) => InputDecoration(
@@ -426,17 +400,12 @@ class _FilterBar extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final projects = projectsAsync.maybeWhen(
-        data: (d) => d, orElse: () => <String>[]);
-
     final optAsync = ref.watch(completedFilterOptionsProvider);
     final opts = optAsync.maybeWhen(
         data: (o) => o, orElse: () => const FilterOptions.empty());
     final isLoading = optAsync.isLoading;
 
-    final frente    = ref.watch(completedFrenteFilterProvider);
     final tema      = ref.watch(completedTemaFilterProvider);
-    final estado    = ref.watch(completedEstadoFilterProvider);
     final municipio = ref.watch(completedMunicipioFilterProvider);
     final usuario   = ref.watch(completedUsuarioFilterProvider);
 
@@ -451,42 +420,15 @@ class _FilterBar extends ConsumerWidget {
             runSpacing: 8,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
-          // ── Proyecto ────────────────────────────────────────────────────────
-          SizedBox(
-            width: 160,
-            child: DropdownButtonFormField<String>(
-              initialValue: selectedProject.isEmpty ? null : selectedProject,
-              decoration: _deco('Proyecto'),
-              isExpanded: true,
-              items: [
-                const DropdownMenuItem(value: '', child: Text('Todos')),
-                ...projects.map((p) =>
-                    DropdownMenuItem(value: p, child: Text(p))),
-              ],
-              onChanged: onProjectChanged,
-            ),
-          ),
-
           // ── Búsqueda libre ──────────────────────────────────────────────────
               SizedBox(
-                width: 260,
+                width: 280,
                 child: _SearchAutocompleteField(
                   controller: searchCtrl,
                   suggestions: searchSuggestions,
                   onChanged: onSearchChanged,
                 ),
               ),
-
-          // ── Frente ──────────────────────────────────────────────────────────
-          _OptionDropdown(
-            label: 'Frente',
-            width: 150,
-            value: frente.isEmpty ? null : frente,
-            options: opts.frentes,
-            loading: isLoading,
-            onChanged: (v) =>
-                ref.read(completedFrenteFilterProvider.notifier).state = v ?? '',
-          ),
 
           // ── Tema / Tipo ─────────────────────────────────────────────────────
           _OptionDropdown(
@@ -497,17 +439,6 @@ class _FilterBar extends ConsumerWidget {
             loading: isLoading,
             onChanged: (v) =>
                 ref.read(completedTemaFilterProvider.notifier).state = v ?? '',
-          ),
-
-          // ── Estado ──────────────────────────────────────────────────────────
-          _OptionDropdown(
-            label: 'Estado',
-            width: 140,
-            value: estado.isEmpty ? null : estado,
-            options: opts.estados,
-            loading: isLoading,
-            onChanged: (v) =>
-                ref.read(completedEstadoFilterProvider.notifier).state = v ?? '',
           ),
 
           // ── Municipio ───────────────────────────────────────────────────────
@@ -536,41 +467,19 @@ class _FilterBar extends ConsumerWidget {
           ),
 
           // ── Limpiar ─────────────────────────────────────────────────────────
-              TextButton.icon(
+              OutlinedButton.icon(
                 onPressed: onClearAll,
                 icon: const Icon(Icons.filter_alt_off_rounded, size: 15),
                 label: const Text('Limpiar'),
-                style: TextButton.styleFrom(
-                  foregroundColor: SaoColors.gray500,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: SaoColors.gray700,
+                  side: BorderSide(color: SaoColors.borderFor(context)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  textStyle: const TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
             ],
           ),
-          if (activeFilters.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 6,
-              children: activeFilters.entries
-                  .map(
-                    (e) => InputChip(
-                      label: Text('${e.key}: ${e.value}'),
-                      onDeleted: () => onRemoveFilter(e.key),
-                      deleteIcon: const Icon(Icons.close_rounded, size: 14),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                      labelStyle: SaoTypography.caption.copyWith(
-                        color: SaoColors.textFor(context),
-                        fontSize: 11,
-                      ),
-                      backgroundColor: SaoColors.surfaceRaisedFor(context),
-                      side: BorderSide(color: SaoColors.borderFor(context)),
-                    ),
-                  )
-                  .toList(growable: false),
-            ),
-          ],
         ],
       ),
     );
@@ -715,7 +624,7 @@ class _SearchAutocompleteField extends StatelessWidget {
 // Split view: table ← → detail panel
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SplitView extends StatelessWidget {
+class _SplitView extends StatefulWidget {
   final List<CompletedActivity> items;
   final String? selectedActivityId;
   final ValueChanged<String> onSelectActivity;
@@ -728,27 +637,60 @@ class _SplitView extends StatelessWidget {
     required this.onCloseDetail,
   });
 
-  static const _treeWidth = 320.0;
+  static const _treeWidth = 272.0;
   static const _panelWidth = 440.0;
 
   @override
+  State<_SplitView> createState() => _SplitViewState();
+}
+
+class _SplitViewState extends State<_SplitView> {
+  bool _isHierarchyCollapsed = false;
+
+  @override
   Widget build(BuildContext context) {
+    final selectedItem = widget.selectedActivityId == null
+        ? null
+        : widget.items.cast<CompletedActivity?>().firstWhere(
+              (item) => item?.id == widget.selectedActivityId,
+              orElse: () => null,
+            );
+
     return Row(
       children: [
-        const SizedBox(
-          width: _treeWidth,
-          child: _HierarchyPanel(),
+        AnimatedContainer(
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          width: _isHierarchyCollapsed ? 44 : _SplitView._treeWidth,
+          child: _isHierarchyCollapsed
+              ? Center(
+                  child: IconButton(
+                    tooltip: 'Mostrar carpetas SAO',
+                    onPressed: () => setState(() => _isHierarchyCollapsed = false),
+                    icon: const Icon(Icons.chevron_right_rounded),
+                  ),
+                )
+              : _HierarchyPanel(
+                  onCollapse: () => setState(() => _isHierarchyCollapsed = true),
+                ),
         ),
         const VerticalDivider(width: 1, thickness: 1),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              _MasterPaneHeader(
+                total: widget.items.length,
+                selectedItem: selectedItem,
+                onClearSelection: widget.selectedActivityId == null
+                    ? null
+                    : () => widget.onCloseDetail(),
+              ),
               Expanded(
                 child: _ActivitiesTable(
-                  items: items,
-                  selectedActivityId: selectedActivityId,
-                  onTap: onSelectActivity,
+                  items: widget.items,
+                  selectedActivityId: widget.selectedActivityId,
+                  onTap: widget.onSelectActivity,
                 ),
               ),
             ],
@@ -757,23 +699,103 @@ class _SplitView extends StatelessWidget {
         AnimatedContainer(
           duration: const Duration(milliseconds: 220),
           curve: Curves.easeOut,
-          width: selectedActivityId != null ? _panelWidth : 0,
+          width: _SplitView._panelWidth,
           clipBehavior: Clip.hardEdge,
           decoration: const BoxDecoration(),
-          child: selectedActivityId != null
+          child: widget.selectedActivityId != null
               ? _DetailPanel(
-                  activityId: selectedActivityId!,
-                  onClose: onCloseDetail,
+                  activityId: widget.selectedActivityId!,
+                  onClose: widget.onCloseDetail,
                 )
-              : const SizedBox.shrink(),
+              : const _DetailPlaceholder(),
         ),
       ],
     );
   }
 }
 
+class _MasterPaneHeader extends StatelessWidget {
+  const _MasterPaneHeader({
+    required this.total,
+    required this.selectedItem,
+    required this.onClearSelection,
+  });
+
+  final int total;
+  final CompletedActivity? selectedItem;
+  final VoidCallback? onClearSelection;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = selectedItem == null
+        ? 'Selecciona un expediente para ver su trazabilidad'
+        : (selectedItem!.title.isNotEmpty ? selectedItem!.title : selectedItem!.activityType);
+    final subtitle = selectedItem == null
+        ? '$total expedientes en resultado'
+        : '${selectedItem!.pk.isEmpty ? selectedItem!.id : selectedItem!.pk} · ${selectedItem!.projectId} · ${selectedItem!.front}';
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        border: Border(
+          bottom: BorderSide(color: SaoColors.borderFor(context)),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: DigitalRecordColors.accentSurfaceFor(context),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.table_rows_rounded,
+              size: 14,
+              color: DigitalRecordColors.accent,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SaoTypography.bodyTextBold.copyWith(fontSize: 13),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.textMutedFor(context),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (onClearSelection != null)
+            TextButton.icon(
+              onPressed: onClearSelection,
+              icon: const Icon(Icons.deselect_rounded, size: 14),
+              label: const Text('Limpiar selección'),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _HierarchyPanel extends ConsumerWidget {
-  const _HierarchyPanel();
+  final VoidCallback onCollapse;
+
+  const _HierarchyPanel({required this.onCollapse});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -800,45 +822,76 @@ class _HierarchyPanel extends ConsumerWidget {
             children: [
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 10),
-                child: Column(
+                child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Carpetas SAO', style: SaoTypography.sectionTitle),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Proyecto > Frente > Estado. Selecciona un nivel para filtrar el expediente.',
-                      style: SaoTypography.caption.copyWith(
-                        color: SaoColors.textMutedFor(context),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Carpetas SAO', style: SaoTypography.sectionTitle),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Proyecto > Frente > Estado. Abre una carpeta para navegar el expediente.',
+                            style: SaoTypography.caption.copyWith(
+                              color: SaoColors.textMutedFor(context),
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
+                    IconButton(
+                      tooltip: 'Colapsar carpetas',
+                      onPressed: onCollapse,
+                      icon: const Icon(Icons.chevron_left_rounded, size: 18),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                     ),
                   ],
                 ),
               ),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _FilterPill(
-                      label: selectedProject.isEmpty ? 'Proyecto: todos' : 'Proyecto: $selectedProject',
-                      isActive: selectedProject.isNotEmpty,
+                    _FolderBreadcrumbBar(
+                      project: selectedProject,
+                      front: selectedFront,
+                      state: selectedState,
+                    ),
+                    const SizedBox(height: 10),
+                    _FolderPathTile(
+                      level: 0,
+                      title: 'Proyecto',
+                      value: selectedProject.isEmpty ? 'Raiz de proyectos' : selectedProject,
+                      isOpen: selectedProject.isNotEmpty,
+                      icon: Icons.folder_copy_outlined,
                       onTap: () {
                         ref.read(completedProjectFilterProvider.notifier).state = '';
                         ref.read(completedFrenteFilterProvider.notifier).state = '';
                         ref.read(completedEstadoFilterProvider.notifier).state = '';
                       },
                     ),
-                    _FilterPill(
-                      label: selectedFront.isEmpty ? 'Frente: todos' : 'Frente: $selectedFront',
-                      isActive: selectedFront.isNotEmpty,
+                    const SizedBox(height: 8),
+                    _FolderPathTile(
+                      level: 1,
+                      title: 'Frente',
+                      value: selectedFront.isEmpty ? 'Todos los frentes' : selectedFront,
+                      isOpen: selectedFront.isNotEmpty,
+                      icon: Icons.folder_open_rounded,
                       onTap: () {
                         ref.read(completedFrenteFilterProvider.notifier).state = '';
+                        ref.read(completedEstadoFilterProvider.notifier).state = '';
                       },
                     ),
-                    _FilterPill(
-                      label: selectedState.isEmpty ? 'Estado: todos' : 'Estado: $selectedState',
-                      isActive: selectedState.isNotEmpty,
+                    const SizedBox(height: 8),
+                    _FolderPathTile(
+                      level: 2,
+                      title: 'Estado',
+                      value: selectedState.isEmpty ? 'Todos los estados' : selectedState,
+                      isOpen: selectedState.isNotEmpty,
+                      icon: Icons.inventory_2_outlined,
                       onTap: () {
                         ref.read(completedEstadoFilterProvider.notifier).state = '';
                       },
@@ -872,42 +925,174 @@ class _HierarchyPanel extends ConsumerWidget {
   }
 }
 
-class _FilterPill extends StatelessWidget {
-  final String label;
-  final bool isActive;
+class _FolderBreadcrumbBar extends StatelessWidget {
+  final String project;
+  final String front;
+  final String state;
+
+  const _FolderBreadcrumbBar({
+    required this.project,
+    required this.front,
+    required this.state,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final segments = <String>[
+      project.isEmpty ? 'Proyectos' : project,
+      front.isEmpty ? 'Frentes' : front,
+      state.isEmpty ? 'Estados' : state,
+    ];
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: DigitalRecordColors.panelSurfaceFor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: DigitalRecordColors.borderFor(context)),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.folder_zip_rounded,
+            size: 15,
+            color: DigitalRecordColors.accent,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                for (var index = 0; index < segments.length; index++) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: index == segments.length - 1
+                          ? DigitalRecordColors.accentSurfaceFor(context)
+                          : SaoColors.surfaceMutedFor(context),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      segments[index],
+                      style: SaoTypography.caption.copyWith(
+                        color: index == segments.length - 1
+                            ? DigitalRecordColors.accent
+                            : SaoColors.textFor(context),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                  if (index < segments.length - 1)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 1),
+                      child: Icon(
+                        Icons.chevron_right_rounded,
+                        size: 14,
+                        color: SaoColors.textMutedFor(context),
+                      ),
+                    ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FolderPathTile extends StatelessWidget {
+  final int level;
+  final String title;
+  final String value;
+  final bool isOpen;
+  final IconData icon;
   final VoidCallback onTap;
 
-  const _FilterPill({
-    required this.label,
-    required this.isActive,
+  const _FolderPathTile({
+    required this.level,
+    required this.title,
+    required this.value,
+    required this.isOpen,
+    required this.icon,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final leftInset = level * 16.0;
     return InkWell(
       onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
+      borderRadius: BorderRadius.circular(12),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        width: double.infinity,
+        margin: EdgeInsets.only(left: leftInset),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: isActive
-              ? SaoColors.actionPrimary.withValues(alpha: 0.10)
+          color: isOpen
+              ? DigitalRecordColors.accentSurfaceFor(context)
               : SaoColors.surfaceMutedFor(context),
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isActive
-                ? SaoColors.actionPrimary.withValues(alpha: 0.25)
+            color: isOpen
+                ? DigitalRecordColors.selectedBorderFor(context)
                 : SaoColors.borderFor(context),
           ),
         ),
-        child: Text(
-          label,
-          style: SaoTypography.caption.copyWith(
-            color: isActive
-                ? SaoColors.actionPrimary
-                : SaoColors.textMutedFor(context),
-          ),
+        child: Row(
+          children: [
+            if (level > 0) ...[
+              Container(
+                width: 10,
+                height: 1,
+                margin: const EdgeInsets.only(right: 8),
+                color: SaoColors.borderFor(context),
+              ),
+            ],
+            Icon(
+              isOpen ? Icons.folder_open_rounded : icon,
+              size: 16,
+              color: isOpen
+                  ? DigitalRecordColors.accent
+                  : SaoColors.textMutedFor(context),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: SaoTypography.caption.copyWith(
+                      color: SaoColors.textMutedFor(context),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    value,
+                    style: SaoTypography.bodyTextSmall.copyWith(
+                      color: isOpen
+                          ? DigitalRecordColors.accent
+                          : SaoColors.textFor(context),
+                      fontWeight: isOpen ? FontWeight.w700 : FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              isOpen ? 'Abierta' : 'Abrir',
+              style: SaoTypography.caption.copyWith(
+                color: isOpen
+                    ? DigitalRecordColors.accent
+                    : SaoColors.textMutedFor(context),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -934,13 +1119,13 @@ class _ProjectNodeTile extends ConsumerWidget {
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 8),
       color: isSelected
-          ? SaoColors.actionPrimary.withValues(alpha: 0.06)
+          ? DigitalRecordColors.selectedSurfaceFor(context)
           : SaoColors.surfaceFor(context),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(12),
         side: BorderSide(
           color: isSelected
-              ? SaoColors.actionPrimary.withValues(alpha: 0.2)
+              ? DigitalRecordColors.selectedBorderFor(context)
               : SaoColors.borderFor(context),
         ),
       ),
@@ -959,7 +1144,7 @@ class _ProjectNodeTile extends ConsumerWidget {
             ref.read(completedFrenteFilterProvider.notifier).state = '';
             ref.read(completedEstadoFilterProvider.notifier).state = '';
           },
-          child: const Text('Ver'),
+          child: Text(isSelected ? 'Abierta' : 'Abrir'),
         ),
         children: node.fronts
             .map(
@@ -1012,7 +1197,7 @@ class _FrontNodeTile extends ConsumerWidget {
             ref.read(completedFrenteFilterProvider.notifier).state = node.frontName;
             ref.read(completedEstadoFilterProvider.notifier).state = '';
           },
-          child: Text(isSelected ? 'Activo' : 'Filtrar'),
+          child: Text(isSelected ? 'Abierta' : 'Abrir'),
         ),
         children: node.states
             .map(
@@ -1064,12 +1249,12 @@ class _StateNodeTile extends ConsumerWidget {
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         decoration: BoxDecoration(
           color: isSelected
-              ? SaoColors.actionPrimary.withValues(alpha: 0.08)
+              ? DigitalRecordColors.selectedSurfaceFor(context)
               : SaoColors.surfaceMutedFor(context),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
             color: isSelected
-                ? SaoColors.actionPrimary.withValues(alpha: 0.18)
+                ? DigitalRecordColors.selectedBorderFor(context)
                 : SaoColors.borderFor(context),
           ),
         ),
@@ -1091,7 +1276,7 @@ class _StateNodeTile extends ConsumerWidget {
               ),
             ),
             if (isSelected)
-              const Icon(Icons.check_circle_rounded, size: 16, color: SaoColors.actionPrimary),
+              const Icon(Icons.check_circle_rounded, size: 16, color: DigitalRecordColors.accent),
           ],
         ),
       ),
@@ -1296,6 +1481,20 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
     return t.toLowerCase().startsWith('sin ');
   }
 
+  String _titleCase(String text) {
+    final normalized = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.isEmpty) return '';
+    return normalized
+        .split(' ')
+        .map((word) {
+          final lower = word.toLowerCase();
+          return lower.isEmpty
+              ? lower
+              : '${lower[0].toUpperCase()}${lower.substring(1)}';
+        })
+        .join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _columnVisible.entries
@@ -1419,40 +1618,62 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
       'Frente': DataCell(_txt(a.front, w: 110)),
       'Estado': DataCell(_txt(a.estado, w: 100)),
       'Municipio': DataCell(_txt(a.municipio, w: 110)),
-      'Responsable': DataCell(_txt(a.assignedName, w: 120)),
-      'Revisó': DataCell(_txt(a.reviewedByName, w: 120)),
+      'Responsable': DataCell(_txt(_titleCase(a.assignedName), w: 140)),
+      'Revisó': DataCell(_txt(_titleCase(a.reviewedByName), w: 140)),
       'Duración': DataCell(Text(
         _durationBetween(a.createdAt, a.reviewedAt),
         style: SaoTypography.caption.copyWith(fontSize: 11, color: SaoColors.gray600),
       )),
       'Decisión': DataCell(_DecisionBadge(decision: a.reviewDecision)),
       'Reporte': DataCell(
-        Icon(
-          a.hasReport ? Icons.description_outlined : Icons.remove_circle_outline_rounded,
-          size: 14,
-          color: a.hasReport ? SaoColors.actionPrimary : SaoColors.gray300,
+        SizedBox(
+          width: 96,
+          child: Align(
+            alignment: Alignment.center,
+            child: Text(
+              a.hasReport ? 'Generado' : 'Sin reporte',
+              style: SaoTypography.caption.copyWith(
+                fontSize: 11,
+                color: a.hasReport ? DigitalRecordColors.accent : SaoColors.gray500,
+                fontWeight: a.hasReport ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ),
         ),
       ),
-      'Evidencias': DataCell(Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-            const Icon(Icons.photo_library_outlined,
-              size: 13, color: SaoColors.gray400),
-          const SizedBox(width: 3),
-          Text('${a.evidenceCount}',
-              style: SaoTypography.caption.copyWith(fontSize: 12)),
-        ],
-      )),
-      'Fecha revisión': DataCell(Text(_fmtDate(a.reviewedAt),
-          style: SaoTypography.caption
-              .copyWith(fontSize: 11, color: SaoColors.gray500))),
+      'Evidencias': DataCell(
+        SizedBox(
+          width: 72,
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.photo_library_outlined, size: 13, color: SaoColors.gray500),
+              const SizedBox(width: 4),
+              Text(
+                '${a.evidenceCount}',
+                style: SaoTypography.caption.copyWith(fontSize: 12, fontWeight: FontWeight.w600),
+              ),
+            ],
+          ),
+        ),
+      ),
+      'Fecha revisión': DataCell(
+        SizedBox(
+          width: 96,
+          child: Text(
+            _fmtDate(a.reviewedAt),
+            style: SaoTypography.caption.copyWith(fontSize: 11, color: SaoColors.gray500),
+          ),
+        ),
+      ),
     };
 
     return DataRow(
       selected: isSelected,
       color: WidgetStateProperty.resolveWith((states) {
         if (states.contains(WidgetState.selected)) {
-          return SaoColors.actionPrimary.withValues(alpha: 0.08);
+          return DigitalRecordColors.selectedSurfaceFor(context);
         }
         return null;
       }),
@@ -1480,7 +1701,7 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
             style: SaoTypography.bodyText.copyWith(fontSize: 12))
         : Text('—',
             style: SaoTypography.caption
-                .copyWith(color: SaoColors.gray200));
+            .copyWith(color: SaoColors.gray500, fontWeight: FontWeight.w600));
     return w != null ? SizedBox(width: w, child: content) : content;
   }
 }
@@ -1505,6 +1726,13 @@ class _DetailPanel extends ConsumerWidget {
         color: SaoColors.surfaceFor(context),
         border:
             Border(left: BorderSide(color: SaoColors.borderFor(context), width: 1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 16,
+            offset: const Offset(-4, 0),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1524,6 +1752,66 @@ class _DetailPanel extends ConsumerWidget {
   }
 }
 
+class _DetailPlaceholder extends StatelessWidget {
+  const _DetailPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        border: Border(
+          left: BorderSide(color: SaoColors.borderFor(context), width: 1),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _PanelHeader(onClose: () {}),
+          const Divider(height: 1),
+          Expanded(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: DigitalRecordColors.accentSurfaceFor(context),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Icon(
+                        Icons.fact_check_outlined,
+                        size: 24,
+                        color: DigitalRecordColors.accent,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Sin expediente seleccionado',
+                      style: SaoTypography.sectionTitle.copyWith(fontSize: 15),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Selecciona una fila de la tabla para ver trazabilidad, evidencias, notas y acciones del expediente.',
+                      textAlign: TextAlign.center,
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.textMutedFor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _PanelHeader extends StatelessWidget {
   final VoidCallback onClose;
   const _PanelHeader({required this.onClose});
@@ -1531,17 +1819,40 @@ class _PanelHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: SaoColors.surfaceMutedFor(context),
+      color: DigitalRecordColors.mutedSurfaceFor(context),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       child: Row(
         children: [
-            const Icon(Icons.manage_search_rounded,
-              size: 16, color: SaoColors.actionPrimary),
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: DigitalRecordColors.accentSurfaceFor(context),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: const Icon(
+              Icons.manage_search_rounded,
+              size: 14,
+              color: DigitalRecordColors.accent,
+            ),
+          ),
           const SizedBox(width: 8),
-          Text('Trazabilidad completa',
-              style: SaoTypography.bodyTextBold
-                  .copyWith(fontSize: 13, color: SaoColors.textFor(context))),
-          const Spacer(),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Expediente seleccionado',
+                    style: SaoTypography.caption.copyWith(
+                      color: SaoColors.textMutedFor(context),
+                      fontSize: 11,
+                    )),
+                Text('Trazabilidad completa',
+                    style: SaoTypography.bodyTextBold.copyWith(
+                      fontSize: 13,
+                      color: SaoColors.textFor(context),
+                    )),
+              ],
+            ),
+          ),
           IconButton(
             icon: const Icon(Icons.close_rounded, size: 16),
             tooltip: 'Cerrar panel',
@@ -1599,6 +1910,20 @@ class _PanelContent extends StatelessWidget {
     return !v.toLowerCase().startsWith('sin ');
   }
 
+  String _titleCase(String text) {
+    final normalized = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.isEmpty) return '';
+    return normalized
+        .split(' ')
+        .map((word) {
+          final lower = word.toLowerCase();
+          return lower.isEmpty
+              ? lower
+              : '${lower[0].toUpperCase()}${lower.substring(1)}';
+        })
+        .join(' ');
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = detail.summary;
@@ -1617,8 +1942,8 @@ class _PanelContent extends StatelessWidget {
     ].where((r) => _hasValue(r.value)).toList(growable: false);
 
     final actorsRows = <_InfoRow>[
-      _InfoRow('Responsable', s.assignedName),
-      _InfoRow('Revisó', s.reviewedByName),
+      _InfoRow('Responsable', _titleCase(s.assignedName)),
+      _InfoRow('Revisó', _titleCase(s.reviewedByName)),
     ].where((r) => _hasValue(r.value)).toList(growable: false);
 
     final timingRows = <_InfoRow>[
@@ -1915,6 +2240,146 @@ class _PanelQuickActions extends StatelessWidget {
     };
   }
 
+  String? _pickDetailField(List<String> keys) {
+    final normalizedKeys = keys
+        .map((key) => key.trim().toLowerCase().replaceAll(' ', '_'))
+        .toSet();
+
+    for (final entry in detail.dataFields.entries) {
+      final normalizedEntryKey = entry.key
+          .trim()
+          .toLowerCase()
+          .replaceAll(' ', '_');
+      if (!normalizedKeys.contains(normalizedEntryKey)) {
+        continue;
+      }
+      final value = entry.value?.toString().trim();
+      if (value != null && value.isNotEmpty) {
+        return value;
+      }
+    }
+    return null;
+  }
+
+  reports.ReportActivityItem _buildReportActivityItem() {
+    final s = detail.summary;
+    return reports.ReportActivityItem(
+      id: s.id,
+      projectId: s.projectId,
+      title: s.title,
+      activityType: s.activityType,
+      pk: s.pk,
+      frontName: s.front.isEmpty ? 'Sin frente' : s.front,
+      status: s.reviewDecision.isEmpty ? 'COMPLETADA' : s.reviewDecision,
+      reviewDecision: s.reviewDecision,
+      reviewStatus: s.reviewDecision,
+      createdAt: s.reviewedAt.isNotEmpty ? s.reviewedAt : s.createdAt,
+      assignedName: s.assignedName,
+      purpose: _pickDetailField(const ['purpose', 'proposito', 'objetivo']),
+      detail: _pickDetailField(
+        const ['detail', 'description', 'descripcion', 'minuta', 'comments'],
+      ),
+      agreements: _pickDetailField(
+        const ['agreements', 'acuerdos', 'commitments', 'compromisos'],
+      ),
+      municipality: s.municipio,
+      state: s.estado,
+      colony: detail.colonia,
+      riskLevel: _pickDetailField(const ['risk_level', 'risk', 'riesgo']),
+      locationType: _pickDetailField(
+        const ['location_type', 'ubicacion_tipo'],
+      ),
+      pkStart: _pickDetailField(const ['pk_start', 'pk_inicio']) ?? s.pk,
+      pkEnd: _pickDetailField(const ['pk_end', 'pk_fin']),
+      startTime: _pickDetailField(
+        const ['start_time', 'hora_inicio', 'horario_inicio'],
+      ),
+      endTime: _pickDetailField(
+        const ['end_time', 'hora_fin', 'horario_fin'],
+      ),
+      subcategory: _pickDetailField(
+        const ['subcategory', 'subcategoria'],
+      ),
+      result: _pickDetailField(const ['result', 'resultado']),
+      notes: detail.reviewNotes,
+      pendingEvidence: detail.evidences.isEmpty,
+      hasReport: s.hasReport,
+      evidences: detail.evidences
+          .map(
+            (evidence) => reports.ReportEvidenceItem(
+              id: evidence.id,
+              filePath: evidence.gcsPath,
+              fileType: evidence.type,
+              caption: evidence.description,
+              capturedAt: evidence.uploadedAt,
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Future<File> _buildDetailedPdf(Directory pdfDir) async {
+    final s = detail.summary;
+    final createdAt = DateTime.tryParse(s.createdAt) ?? DateTime.now();
+    final reviewedAt = DateTime.tryParse(s.reviewedAt) ?? createdAt;
+    final start = createdAt.isBefore(reviewedAt) ? createdAt : reviewedAt;
+    final end = reviewedAt.isAfter(start)
+        ? reviewedAt
+        : start.add(const Duration(minutes: 1));
+
+    return reports.generateActivitiesPdf(
+      [_buildReportActivityItem()],
+      reports.ReportFilters(
+        projectId: s.projectId,
+        frontName: s.front.isEmpty ? 'Todos' : s.front,
+        dateRange: reports.ReportDateRange(start: start, end: end),
+        includeAlreadyReported: true,
+      ),
+      executiveSummary: detail.reviewNotes.trim(),
+      includeAudit: true,
+      includeNotes: true,
+      includeAttachments: true,
+      saveFilePath: p.join(pdfDir.path, 'reporte_con_evidencias.pdf'),
+    );
+  }
+
+  Future<void> _exportPdf(BuildContext context) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final activityDir = _buildActivityDirectory(detail.summary);
+    final pdfDir = Directory(p.join(activityDir.path, 'pdfs'));
+
+    try {
+      await _writeActivityFiles(activityDir);
+      final file = await _buildDetailedPdf(pdfDir);
+
+      if (!context.mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('PDF exportado en ${file.path}'),
+            duration: const Duration(seconds: 10),
+            action: SnackBarAction(
+              label: 'Abrir carpeta',
+              onPressed: () {
+                _openDirectory(pdfDir.path);
+              },
+            ),
+          ),
+        );
+    } catch (e) {
+      if (!context.mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('No se pudo exportar el PDF: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+    }
+  }
+
   Future<void> _writeActivityFiles(Directory activityDir) async {
     final dataDir = Directory(p.join(activityDir.path, 'datos'));
     final pdfDir = Directory(p.join(activityDir.path, 'pdfs'));
@@ -2111,6 +2576,7 @@ class _PanelQuickActions extends StatelessWidget {
       }
 
       await _writeActivityFiles(activityDir);
+      await _buildDetailedPdf(pdfDir);
 
       messenger
         ..hideCurrentSnackBar()
@@ -2217,13 +2683,7 @@ class _PanelQuickActions extends StatelessWidget {
           label: const Text('Editar'),
         ),
         OutlinedButton.icon(
-          onPressed: s.hasReport
-              ? () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Exportación PDF en integración.')),
-                  );
-                }
-              : null,
+          onPressed: () => _exportPdf(context),
           icon: const Icon(Icons.picture_as_pdf_outlined, size: 15),
           label: const Text('Exportar PDF'),
         ),
@@ -2386,8 +2846,34 @@ class _InfoCell extends StatelessWidget {
   final String value;
   const _InfoCell({required this.label, required this.value});
 
+  static const Set<String> _nameLikeLabels = {
+    'Responsable',
+    'Revisó',
+    'Supervisor',
+    'Capturó',
+    'Actualizó',
+  };
+
+  String _displayValue() {
+    final trimmed = value.trim();
+    if (trimmed.isEmpty) {
+      return '—';
+    }
+    if (_nameLikeLabels.contains(label)) {
+      return trimmed
+          .split(RegExp(r'\s+'))
+          .where((part) => part.isNotEmpty)
+          .map(
+            (part) => '${part[0].toUpperCase()}${part.substring(1).toLowerCase()}',
+          )
+          .join(' ');
+    }
+    return trimmed;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final displayValue = _displayValue();
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
@@ -2403,7 +2889,7 @@ class _InfoCell extends StatelessWidget {
                   .copyWith(color: SaoColors.textMutedFor(context), fontSize: 10)),
           const SizedBox(height: 2),
           Text(
-            value.isNotEmpty ? value : '—',
+            displayValue,
             style: SaoTypography.bodyText.copyWith(fontSize: 12),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,

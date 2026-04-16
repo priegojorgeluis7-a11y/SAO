@@ -357,11 +357,6 @@ class ActivityRepository {
     DateTime fallback, {
     Map<String, dynamic>? wizardPayload,
   }) {
-    double? asDouble(dynamic value) {
-      if (value is num) return value.toDouble();
-      return double.tryParse((value ?? '').toString().trim());
-    }
-
     String? firstNonEmptyText(Iterable<Object?> values) {
       for (final value in values) {
         final text = (value ?? '').toString().trim();
@@ -438,8 +433,8 @@ class ActivityRepository {
                     wizardCaptionFor(evidenceId, index),
                   ]),
                   capturedAt: takenAt,
-                  latitude: asDouble(raw['lat']),
-                  longitude: asDouble(raw['lng']),
+                  latitude: null,
+                  longitude: null,
                 );
               })
               .whereType<Evidence>()
@@ -497,8 +492,8 @@ class ActivityRepository {
                 payload['notes'])
             ?.toString(),
         capturedAt: takenAt,
-        latitude: asDouble(payload['lat'] ?? payload['latitude']),
-        longitude: asDouble(payload['lng'] ?? payload['longitude']),
+        latitude: null,
+        longitude: null,
       );
     }).whereType<Evidence>().toList(growable: false);
   }
@@ -519,6 +514,98 @@ class ActivityRepository {
       'field_resolutions': <Map<String, dynamic>>[],
       'apply_to_similar': false,
     });
+  }
+
+  Future<ActivityReadinessResult> getActivityReadiness(String activityId) async {
+    _requireBackend();
+    final decoded = await _apiClient.getJson('/api/v1/activities/$activityId/readiness');
+    if (decoded is! Map<String, dynamic>) {
+      throw StateError('Respuesta inválida para readiness de actividad');
+    }
+
+    final checksRaw = decoded['checks'];
+    final checks = checksRaw is Map<String, dynamic>
+        ? checksRaw
+        : checksRaw is Map
+            ? checksRaw.cast<String, dynamic>()
+            : const <String, dynamic>{};
+    final hasRequiredFields = (checks['has_required_fields'] as bool?) ?? false;
+    final hasEvidence = (checks['has_evidence'] as bool?) ?? false;
+
+    final checklistRaw = decoded['checklist_summary'];
+    final checklist = checklistRaw is Map<String, dynamic>
+        ? checklistRaw
+        : checklistRaw is Map
+            ? checklistRaw.cast<String, dynamic>()
+            : <String, dynamic>{
+                'total': checks.isEmpty ? 0 : 2,
+                'completed': (hasRequiredFields ? 1 : 0) + (hasEvidence ? 1 : 0),
+              };
+
+    final missingRaw = decoded['missing'];
+    final missingItems = (missingRaw is List)
+        ? missingRaw
+            .whereType<Map>()
+            .map((raw) {
+              final item = raw.cast<String, dynamic>();
+              final detailRaw = item['detail'];
+              final detail = detailRaw is Map<String, dynamic>
+                  ? detailRaw
+                  : detailRaw is Map
+                      ? detailRaw.cast<String, dynamic>()
+                      : null;
+              final field = (item['field'] ?? '').toString();
+              final reason = (item['reason'] ?? '').toString();
+              final message = (item['message'] ?? '').toString().trim();
+              return ActivityReadinessMissingItem(
+                category: (item['category'] ?? field).toString(),
+                code: (item['code'] ?? reason).toString(),
+                message: message.isNotEmpty
+                    ? message
+                    : _fallbackReadinessMessage(field, reason),
+                step: item['step']?.toString() ?? (field.isEmpty ? null : field),
+                detail: detail ??
+                    ((field.isNotEmpty || reason.isNotEmpty)
+                        ? <String, dynamic>{'field': field, 'reason': reason}
+                        : null),
+              );
+            })
+            .where((item) => item.code.isNotEmpty || item.message.isNotEmpty)
+            .toList(growable: false)
+        : const <ActivityReadinessMissingItem>[];
+
+    final evidenceCount = _toInt(decoded['evidence_count']);
+
+    return ActivityReadinessResult(
+      ready: (decoded['ready'] as bool?) ?? (decoded['is_ready'] as bool?) ?? false,
+      evidenceCount: evidenceCount > 0 ? evidenceCount : (hasEvidence ? 1 : 0),
+      hasGps: (decoded['has_gps'] as bool?) ?? (checks['has_gps'] as bool?) ?? false,
+      wizardFilled: (decoded['wizard_filled'] as bool?) ?? hasRequiredFields,
+      missing: missingItems,
+      checklistSummary: ActivityReadinessChecklistSummary(
+        total: _toInt(checklist['total']),
+        completed: _toInt(checklist['completed']),
+      ),
+    );
+  }
+
+  String _fallbackReadinessMessage(String field, String reason) {
+    if (field.contains('evidencias') || reason == 'at_least_1') {
+      return 'Se requiere al menos una evidencia antes de validar y enviar.';
+    }
+    if (reason == 'required') {
+      return 'Falta completar la información obligatoria antes de enviar.';
+    }
+    return 'Hay requisitos pendientes antes de enviar.';
+  }
+
+  int _toInt(dynamic value) {
+    return switch (value) {
+      int v => v,
+      double v => v.toInt(),
+      String v => int.tryParse(v) ?? 0,
+      _ => 0,
+    };
   }
 
   Future<void> rejectActivity(
@@ -605,5 +692,49 @@ class RejectionPlaybookItem {
     required this.label,
     required this.severity,
     required this.requiresComment,
+  });
+}
+
+class ActivityReadinessResult {
+  final bool ready;
+  final int evidenceCount;
+  final bool hasGps;
+  final bool wizardFilled;
+  final List<ActivityReadinessMissingItem> missing;
+  final ActivityReadinessChecklistSummary checklistSummary;
+
+  const ActivityReadinessResult({
+    required this.ready,
+    required this.evidenceCount,
+    required this.hasGps,
+    required this.wizardFilled,
+    required this.missing,
+    required this.checklistSummary,
+  });
+}
+
+class ActivityReadinessMissingItem {
+  final String category;
+  final String code;
+  final String message;
+  final String? step;
+  final Map<String, dynamic>? detail;
+
+  const ActivityReadinessMissingItem({
+    required this.category,
+    required this.code,
+    required this.message,
+    this.step,
+    this.detail,
+  });
+}
+
+class ActivityReadinessChecklistSummary {
+  final int total;
+  final int completed;
+
+  const ActivityReadinessChecklistSummary({
+    required this.total,
+    required this.completed,
   });
 }

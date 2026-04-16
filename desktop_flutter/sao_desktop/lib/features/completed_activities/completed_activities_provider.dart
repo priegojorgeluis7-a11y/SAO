@@ -25,6 +25,7 @@ class CompletedActivity {
   final String estado;
   final String municipio;
   final bool hasReport;
+  final int documentCount;
   final String reviewedAt;
   final String createdAt;
   final int evidenceCount;
@@ -42,6 +43,7 @@ class CompletedActivity {
     required this.estado,
     required this.municipio,
     required this.hasReport,
+    required this.documentCount,
     required this.reviewedAt,
     required this.createdAt,
     required this.evidenceCount,
@@ -61,6 +63,7 @@ class CompletedActivity {
       estado:         (json['estado'] ?? '').toString(),
       municipio:      (json['municipio'] ?? '').toString(),
       hasReport:      (json['has_report'] as bool?) ?? false,
+      documentCount:  (json['document_count'] as num?)?.toInt() ?? (((json['has_report'] as bool?) ?? false) ? 1 : 0),
       reviewedAt:     (json['reviewed_at'] ?? '').toString(),
       createdAt:      (json['created_at'] ?? '').toString(),
       evidenceCount:  (json['evidence_count'] as num?)?.toInt() ?? 0,
@@ -139,6 +142,7 @@ class CompletedActivityDetail {
   final Map<String, dynamic> dataFields;
   final List<AuditEntry> auditTrail;
   final List<EvidenceItem> evidences;
+  final List<EvidenceItem> documents;
   final int syncVersion;
 
   const CompletedActivityDetail({
@@ -148,6 +152,7 @@ class CompletedActivityDetail {
     required this.dataFields,
     required this.auditTrail,
     required this.evidences,
+    this.documents = const [],
     required this.syncVersion,
   });
 
@@ -163,6 +168,11 @@ class CompletedActivityDetail {
               .toList(growable: false) ??
           const [],
       evidences: (json['evidences'] as List?)
+              ?.whereType<Map<String, dynamic>>()
+              .map(EvidenceItem.fromJson)
+              .toList(growable: false) ??
+          const [],
+      documents: (json['documents'] as List?)
               ?.whereType<Map<String, dynamic>>()
               .map(EvidenceItem.fromJson)
               .toList(growable: false) ??
@@ -197,14 +207,14 @@ class FilterOptions {
         usuarios   = const [];
 
   factory FilterOptions.fromJson(Map<String, dynamic> json) {
-    List<String> _list(String key) =>
+    List<String> parseList(String key) =>
         (json[key] as List?)?.map((e) => e.toString()).toList() ?? [];
     return FilterOptions(
-      frentes:    _list('frentes'),
-      temas:      _list('temas'),
-      estados:    _list('estados'),
-      municipios: _list('municipios'),
-      usuarios:   _list('usuarios'),
+      frentes:    parseList('frentes'),
+      temas:      parseList('temas'),
+      estados:    parseList('estados'),
+      municipios: parseList('municipios'),
+      usuarios:   parseList('usuarios'),
     );
   }
 }

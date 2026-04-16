@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
@@ -10,6 +12,8 @@ import '../../ui/theme/sao_colors.dart';
 import '../../ui/theme/sao_spacing.dart';
 import '../../ui/theme/sao_typography.dart';
 import '../../ui/theme/sao_radii.dart';
+import '../auth/app_session_controller.dart';
+import '../completed_activities/completed_activities_provider.dart';
 import 'reports_provider.dart';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -39,6 +43,11 @@ String _previewLocation(ReportActivityItem item) {
 }
 
 bool _isApproved(ReportActivityItem item) => item.isApprovedForReport;
+
+enum _ReportSaveMode {
+  defaultPath,
+  chooseFolder,
+}
 
 String _normalizeReportProject(String value) => value.trim().toUpperCase();
 
@@ -345,41 +354,270 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
     );
   }
 
+  Future<void> _showPdfStatusDialog() async {
+    if (!mounted) return;
+    final entries = await loadAllPdfStatusEntries();
+    if (!mounted) return;
+
+    if (entries.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay PDFs generados en este equipo aún.')),
+      );
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('PDFs generados'),
+        contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+        content: SizedBox(
+          width: 560,
+          child: ListView.separated(
+            shrinkWrap: true,
+            itemCount: entries.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (_, i) {
+              final e = entries[i];
+              final icon = switch (e.status) {
+                PdfStatusKind.cloud =>
+                  const Icon(Icons.cloud_done_rounded, color: Colors.green, size: 18),
+                PdfStatusKind.localOnly =>
+                  const Icon(Icons.computer_rounded, color: Colors.orange, size: 18),
+                PdfStatusKind.missingFile =>
+                  const Icon(Icons.broken_image_rounded, color: Colors.red, size: 18),
+              };
+              final statusLabel = switch (e.status) {
+                PdfStatusKind.cloud => 'En nube',
+                PdfStatusKind.localOnly => 'Solo local',
+                PdfStatusKind.missingFile => 'Archivo perdido',
+              };
+              final dateLabel = e.generatedAt.isNotEmpty
+                  ? _fmtDate(DateTime.tryParse(e.generatedAt) ?? DateTime.now())
+                  : '—';
+              return ListTile(
+                dense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 2),
+                leading: icon,
+                title: Text(
+                  e.fileName,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  '$statusLabel · $dateLabel'
+                  '${e.generatedByEmail != null ? ' · ${e.generatedByEmail}' : ''}',
+                  style: const TextStyle(fontSize: 11),
+                ),
+                trailing: e.status == PdfStatusKind.missingFile
+                    ? Tooltip(
+                        message: 'Limpiar registro (el archivo ya no existe)',
+                        child: IconButton(
+                          icon: const Icon(Icons.delete_outline, size: 16),
+                          onPressed: () async {
+                            await clearPdfRegistryEntry(e.activityId);
+                            if (ctx.mounted) Navigator.of(ctx).pop();
+                          },
+                        ),
+                      )
+                    : null,
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _generatePdf(
       List<ReportActivityItem> items, ReportFilters filters) async {
     _flushEditor();
+
+    // Confirmation dialog
+    final activityLabel = items.length == 1
+        ? '"${items.first.title?.trim().isNotEmpty == true ? items.first.title! : items.first.activityType}"'
+        : '${items.length} actividades';
+    final saveMode = await showDialog<_ReportSaveMode>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('¿Generar PDF?'),
+        content: Text(
+          'Se generará un PDF para $activityLabel.\n'
+          '${items.length > 1 ? 'Se generará un archivo por actividad seleccionada.\n' : ''}'
+          'Puedes guardarlo en la ruta predeterminada (Documentos/SAO_Expedientes) '
+          'o elegir otra carpeta. El PDF también se subirá automáticamente a la nube.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          OutlinedButton(
+            onPressed: () => Navigator.of(ctx).pop(_ReportSaveMode.defaultPath),
+            child: const Text('Ruta predeterminada'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(_ReportSaveMode.chooseFolder),
+            child: const Text('Elegir carpeta'),
+          ),
+        ],
+      ),
+    );
+    if (saveMode == null || !mounted) return;
+
+    String? saveRootPath;
+    String? saveFilePath;
+    bool keepExpedienteStructure = true;
+    if (saveMode == _ReportSaveMode.chooseFolder) {
+      if (items.length == 1) {
+        final item = items.first;
+        final rawName = (item.title?.trim().isNotEmpty == true
+                ? item.title!
+                : item.activityType)
+            .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+            .replaceAll(RegExp(r'\s+'), '_')
+            .trim();
+        final suggestedName = rawName.isEmpty ? 'reporte.pdf' : '$rawName.pdf';
+        final selectedFile = await FilePicker.platform.saveFile(
+          dialogTitle: 'Guardar reporte PDF',
+          fileName: suggestedName,
+          type: FileType.custom,
+          allowedExtensions: const ['pdf'],
+        );
+        if (!mounted) return;
+        if (selectedFile == null || selectedFile.trim().isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se seleccionó ubicación. Se canceló la generación.'),
+              backgroundColor: SaoColors.warning,
+            ),
+          );
+          return;
+        }
+        saveFilePath = selectedFile.toLowerCase().endsWith('.pdf')
+            ? selectedFile.trim()
+            : '${selectedFile.trim()}.pdf';
+      } else {
+        final selectedFolder = await FilePicker.platform.getDirectoryPath(
+          dialogTitle: 'Selecciona la carpeta donde guardar los PDFs',
+        );
+        if (!mounted) return;
+        if (selectedFolder == null || selectedFolder.trim().isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('No se seleccionó carpeta. Se canceló la generación.'),
+              backgroundColor: SaoColors.warning,
+            ),
+          );
+          return;
+        }
+        saveRootPath = selectedFolder.trim();
+        keepExpedienteStructure = false;
+      }
+    }
+
     setState(() {
       _isGenerating = true;
       _lastSavedPath = null;
     });
     try {
       final patched = items.map(_withDraft).toList();
-      final file = await generateActivitiesPdf(
-        patched,
-        filters,
-        executiveSummary: _summaryCtrl.text.trim(),
-        includeAudit: _includeAudit,
-        includeNotes: _includeNotes,
-        includeAttachments: _includeAttachments,
-      );
-      setState(() => _lastSavedPath = file.path);
+      final generatedFiles = <File>[];
+      final uploadErrorsByActivityId = <String, String>{};
+
+      for (final item in patched) {
+        final file = await generateActivitiesPdf(
+          [item],
+          filters,
+          executiveSummary: _summaryCtrl.text.trim(),
+          includeAudit: _includeAudit,
+          includeNotes: _includeNotes,
+          includeAttachments: _includeAttachments,
+          saveRootPath: saveRootPath,
+          saveFilePath: patched.length == 1 ? saveFilePath : null,
+          keepExpedienteStructure: keepExpedienteStructure,
+        );
+        generatedFiles.add(file);
+
+        final itemUploadResult =
+            await uploadGeneratedReportPdfToCloud([item], file);
+        uploadErrorsByActivityId.addAll(itemUploadResult.errorsByActivityId);
+
+        await registerGeneratedReportReferences(
+          [item],
+          file,
+          generatedByUserId: ref.read(currentAppUserProvider)?.id,
+          generatedByEmail: ref.read(currentAppUserProvider)?.email,
+          sourceEvidenceIdsByActivityId: itemUploadResult.evidenceByActivityId,
+        );
+      }
+
+      final uploadErrors = <String>[];
+      for (final item in patched) {
+        final activityId = item.id.trim();
+        final error = uploadErrorsByActivityId[activityId];
+        if (error == null) continue;
+        uploadErrors.add('${item.pk.isEmpty ? activityId : item.pk}: $error');
+      }
+
+      final syncedActivityIds = <String>[];
+      final syncErrors = <String>[];
+      for (final item in patched) {
+        try {
+          await markReportGenerated(item.id);
+          syncedActivityIds.add(item.id);
+        } catch (error) {
+          syncErrors.add('${item.pk.isEmpty ? item.id : item.pk}: $error');
+        }
+      }
+
+      final firstFile = generatedFiles.isEmpty ? null : generatedFiles.first;
+      ref.invalidate(reportActivitiesProvider);
+      ref.invalidate(completedActivitiesProvider);
+      for (final activityId in syncedActivityIds) {
+        ref.invalidate(completedActivityDetailProvider(activityId));
+      }
+
+      setState(() => _lastSavedPath = firstFile?.path);
       if (mounted) {
+        final hasAnyWarning = syncErrors.isNotEmpty || uploadErrors.isNotEmpty;
+        final generatedCount = generatedFiles.length;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: SaoColors.success,
-            duration: const Duration(seconds: 6),
+            backgroundColor:
+                hasAnyWarning ? SaoColors.warning : SaoColors.success,
+            duration: const Duration(seconds: 8),
             content: Row(
               children: [
-                const Icon(Icons.check_circle_rounded,
-                    color: Colors.white, size: 18),
+                Icon(
+                  hasAnyWarning
+                      ? Icons.warning_amber_rounded
+                      : Icons.check_circle_rounded,
+                  color: Colors.white,
+                  size: 18,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text('PDF guardado: ${file.path}',
-                      style: const TextStyle(color: Colors.white)),
+                  child: Text(
+                    !hasAnyWarning
+                        ? (generatedCount <= 1
+                            ? 'PDF guardado, subido a la nube y expediente actualizado: ${firstFile?.path ?? ''}'
+                            : '$generatedCount PDFs guardados por separado, subidos a la nube y expediente actualizado.')
+                        : (generatedCount <= 1
+                            ? 'PDF guardado con advertencias (${uploadErrors.length} carga(s), ${syncErrors.length} sincronización): ${firstFile?.path ?? ''}'
+                            : '$generatedCount PDFs guardados por separado con advertencias (${uploadErrors.length} carga(s), ${syncErrors.length} sincronización).'),
+                    style: const TextStyle(color: Colors.white),
+                  ),
                 ),
                 TextButton(
                   onPressed: () async {
-                    final uri = Uri.file(file.parent.path);
+                    final uri = Uri.file((firstFile ?? generatedFiles.last).parent.path);
                     if (await canLaunchUrl(uri)) launchUrl(uri);
                   },
                   child: const Text('Abrir carpeta',
@@ -390,6 +628,30 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
             ),
           ),
         );
+
+        if (uploadErrors.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'No se pudo subir a la nube algunos reportes: ${uploadErrors.join(' | ')}',
+              ),
+              backgroundColor: SaoColors.warning,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+        }
+
+        if (syncErrors.isNotEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'No se pudieron sincronizar algunos expedientes: ${syncErrors.join(' | ')}',
+              ),
+              backgroundColor: SaoColors.warning,
+              duration: const Duration(seconds: 8),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -447,6 +709,9 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
 
     final focusedApproved =
       focusedItem != null && _isApproved(focusedItem) ? focusedItem : null;
+    final generationItems = selectedItems.isNotEmpty
+        ? selectedItems
+        : (focusedApproved != null ? [focusedApproved] : <ReportActivityItem>[]);
 
     final frontsSorted = reportableItems.map((a) => a.frontName).toSet().toList()
       ..sort();
@@ -463,12 +728,16 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
         _TopBar(
           filters: filters,
           fronts: fronts,
-          selectedCount: focusedApproved == null ? 0 : 1,
+          selectedCount: generationItems.length,
           isGenerating: _isGenerating,
-          canGenerate: focusedApproved != null && !_isGenerating,
+          canGenerate: generationItems.isNotEmpty && !_isGenerating,
           onRefresh: refresh,
           onProjectChanged: (projectId) => _syncToProject(projectId, updateGlobal: true),
-          onGenerate: () => _generatePdf([focusedApproved!], filters),
+          onGenerate: () => _generatePdf(generationItems, filters),
+          onIncludeAlreadyReportedChanged: (value) {
+            ref.read(reportFiltersProvider.notifier).state =
+                filters.copyWith(includeAlreadyReported: value);
+          },
         ),
         const Divider(height: 1),
 
@@ -525,6 +794,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
                           setState(() => _includeAttachments = v),
                       onCollapse: () =>
                           setState(() => _sidebarCollapsed = true),
+                      onViewPdfStatus: _showPdfStatusDialog,
                     ),
                   ),
                 ),
@@ -640,6 +910,7 @@ class _TopBar extends ConsumerWidget {
   final VoidCallback onRefresh;
   final ValueChanged<String> onProjectChanged;
   final VoidCallback onGenerate;
+  final ValueChanged<bool> onIncludeAlreadyReportedChanged;
 
   const _TopBar({
     required this.filters,
@@ -650,6 +921,7 @@ class _TopBar extends ConsumerWidget {
     required this.onRefresh,
     required this.onProjectChanged,
     required this.onGenerate,
+    required this.onIncludeAlreadyReportedChanged,
   });
 
   void _updateFilters(WidgetRef ref, ReportFilters updated) =>
@@ -713,6 +985,27 @@ class _TopBar extends ConsumerWidget {
                 dateRange: ReportDateRange(
                     start: picked.start, end: picked.end),
               ),
+            ),
+          ),
+          const SizedBox(width: SaoSpacing.md),
+
+          // Include already reported checkbox
+          Tooltip(
+            message: 'Mostrar actividades que ya tienen reporte generado',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Checkbox(
+                  value: filters.includeAlreadyReported,
+                  onChanged: (value) =>
+                      onIncludeAlreadyReportedChanged(value ?? false),
+                ),
+                const SizedBox(width: 4),
+                const Text(
+                  'Ver reportes anteriores',
+                  style: SaoTypography.bodyTextSmall,
+                ),
+              ],
             ),
           ),
 
@@ -862,6 +1155,7 @@ class _ActivityTray extends StatelessWidget {
   final ValueChanged<bool> onIncludeNotes;
   final ValueChanged<bool> onIncludeAttachments;
   final VoidCallback onCollapse;
+  final VoidCallback onViewPdfStatus;
 
   const _ActivityTray({
     required this.activitiesAsync,
@@ -881,6 +1175,7 @@ class _ActivityTray extends StatelessWidget {
     required this.onIncludeNotes,
     required this.onIncludeAttachments,
     required this.onCollapse,
+    required this.onViewPdfStatus,
   });
 
   @override
@@ -960,6 +1255,23 @@ class _ActivityTray extends StatelessWidget {
                     ),
                   ),
                 const SizedBox(width: 4),
+                // PDFs status button
+                Tooltip(
+                  message: 'Ver estado de PDFs generados',
+                  child: InkWell(
+                    onTap: onViewPdfStatus,
+                    borderRadius: BorderRadius.circular(SaoRadii.sm),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.picture_as_pdf_rounded,
+                        size: 16,
+                        color: mutedTextColor,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 2),
                 // Collapse button
                 Tooltip(
                   message: 'Ocultar panel',
@@ -1076,45 +1388,6 @@ class _ActivityTray extends StatelessWidget {
                   value: includeAttachments,
                   onChanged: onIncludeAttachments,
                 ),
-                const SizedBox(height: SaoSpacing.xs),
-                Text(
-                  'Resumen ejecutivo',
-                  style: SaoTypography.caption.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: SaoColors.gray600,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                TextField(
-                  controller: summaryCtrl,
-                  maxLines: 3,
-                  style: SaoTypography.caption.copyWith(fontSize: 12),
-                  decoration: InputDecoration(
-                    hintText: 'Texto para la portada del PDF…',
-                    hintStyle: SaoTypography.caption
-                        .copyWith(color: SaoColors.gray400),
-                    isDense: true,
-                    contentPadding: const EdgeInsets.all(8),
-                    border: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(SaoRadii.sm),
-                      borderSide:
-                          const BorderSide(color: SaoColors.border),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(SaoRadii.sm),
-                      borderSide:
-                          const BorderSide(color: SaoColors.border),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(SaoRadii.sm),
-                      borderSide: const BorderSide(
-                          color: SaoColors.primary, width: 1.5),
-                    ),
-                  ),
-                ),
 
                 // Last saved
                 if (lastSavedPath != null) ...[
@@ -1199,7 +1472,8 @@ class _TrayItemState extends State<_TrayItem> {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = SaoColors.getStatusColor(widget.item.status);
+    final effectiveStatus = widget.isApproved ? 'APROBADO' : widget.item.status;
+    final statusColor = SaoColors.getStatusColor(effectiveStatus);
     final dimmed = !widget.isApproved;
     final isDark = SaoColors.isDarkMode(context);
     final accent = Theme.of(context).colorScheme.primary;
@@ -1285,7 +1559,7 @@ class _TrayItemState extends State<_TrayItem> {
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            _StatusPill(status: widget.item.status),
+                            _StatusPill(status: effectiveStatus),
                             const SizedBox(width: 5),
                             if (widget.item.evidences.isNotEmpty)
                               _EvidenceBadge(count: widget.item.evidences.length),
@@ -1747,8 +2021,9 @@ class _EditorTab extends StatelessWidget {
       return const _EmptyEditor();
     }
 
-    final statusColor = SaoColors.getStatusColor(item!.status);
-    final statusBg = SaoColors.getStatusBackground(item!.status);
+    final effectiveStatus = item!.isApprovedForReport ? 'APROBADO' : item!.status;
+    final statusColor = SaoColors.getStatusColor(effectiveStatus);
+    final statusBg = SaoColors.getStatusBackground(effectiveStatus);
 
     return Container(
       color: SaoColors.surfaceMutedFor(context),
@@ -1814,7 +2089,7 @@ class _EditorTab extends StatelessWidget {
                                 SaoRadii.full),
                           ),
                           child: Text(
-                            SaoColors.getStatusLabel(item!.status),
+                            SaoColors.getStatusLabel(effectiveStatus),
                             style: SaoTypography.caption.copyWith(
                               color: statusColor,
                               fontWeight: FontWeight.w700,
@@ -2074,8 +2349,14 @@ class _ToggleChip extends StatelessWidget {
 }
 
 // ── Mini doc preview (editor right panel) ─────────────────────────────────────
+//
+// Stateful with 600 ms debounce: the PDF is only re-rendered after the user
+// stops typing or switching activities, preventing expensive rebuilds on every
+// keystroke.  Photos (evidences) are intentionally skipped in this panel for
+// speed — they are still included in the generated PDF and in the full
+// "Vista previa" tab.
 
-class _MiniDocPreview extends StatelessWidget {
+class _MiniDocPreview extends StatefulWidget {
   final ReportFilters filters;
   final ReportActivityItem item;
   final TextEditingController summaryCtrl;
@@ -2114,52 +2395,145 @@ class _MiniDocPreview extends StatelessWidget {
     required this.onFocusNext,
   });
 
+  @override
+  State<_MiniDocPreview> createState() => _MiniDocPreviewState();
+}
+
+class _MiniDocPreviewState extends State<_MiniDocPreview> {
+  static const _kDebounce = Duration(milliseconds: 600);
   static const double _previewPageWidth = 760;
+
+  Timer? _debounce;
+  late ReportActivityItem _committed;
+  late String _committedSummary;
+
+  @override
+  void initState() {
+    super.initState();
+    _committed = _snapshot();
+    _committedSummary = widget.summaryCtrl.text;
+    for (final c in _ctrls) {
+      c.addListener(_onChange);
+    }
+  }
+
+  List<TextEditingController> get _ctrls => [
+        widget.summaryCtrl,
+        widget.titleCtrl,
+        widget.purposeCtrl,
+        widget.detailCtrl,
+        widget.agreementsCtrl,
+      ];
+
+  @override
+  void didUpdateWidget(_MiniDocPreview old) {
+    super.didUpdateWidget(old);
+    // Re-register listeners if controller objects changed (shouldn't normally)
+    final oldCtrls = [
+      old.summaryCtrl,
+      old.titleCtrl,
+      old.purposeCtrl,
+      old.detailCtrl,
+      old.agreementsCtrl
+    ];
+    if (oldCtrls.any((c) => !_ctrls.contains(c))) {
+      for (final c in oldCtrls) {
+        c.removeListener(_onChange);
+      }
+      for (final c in _ctrls) {
+        c.addListener(_onChange);
+      }
+    }
+    // When the focused activity switches, commit immediately (no debounce)
+    if (old.item.id != widget.item.id) {
+      _debounce?.cancel();
+      setState(() {
+        _committed = _snapshot();
+        _committedSummary = widget.summaryCtrl.text;
+      });
+    } else if (old.includeAudit != widget.includeAudit ||
+        old.includeNotes != widget.includeNotes ||
+        old.includeAttachments != widget.includeAttachments) {
+      _onChange();
+    }
+  }
+
+  void _onChange() {
+    _debounce?.cancel();
+    _debounce = Timer(_kDebounce, _commit);
+  }
+
+  void _commit() {
+    if (!mounted) return;
+    setState(() {
+      _committed = _snapshot();
+      _committedSummary = widget.summaryCtrl.text;
+    });
+  }
+
+  /// Builds a snapshot of the current activity with editor text applied.
+  ReportActivityItem _snapshot() {
+    final it = widget.item;
+    return ReportActivityItem(
+      id: it.id,
+      activityType: it.activityType,
+      pk: it.pk,
+      frontName: it.frontName,
+      status: it.status,
+      reviewDecision: it.reviewDecision,
+      reviewStatus: it.reviewStatus,
+      createdAt: it.createdAt,
+      assignedName: it.assignedName,
+      projectId: it.projectId,
+      title: widget.titleCtrl.text.trim().isNotEmpty
+          ? widget.titleCtrl.text
+          : it.title,
+      purpose: widget.purposeCtrl.text.trim().isNotEmpty
+          ? widget.purposeCtrl.text
+          : it.purpose,
+      detail: widget.detailCtrl.text.trim().isNotEmpty
+          ? widget.detailCtrl.text
+          : it.detail,
+      agreements: widget.agreementsCtrl.text.trim().isNotEmpty
+          ? widget.agreementsCtrl.text
+          : it.agreements,
+      municipality: it.municipality,
+      state: it.state,
+      colony: it.colony,
+      riskLevel: it.riskLevel,
+      locationType: it.locationType,
+      pkStart: it.pkStart,
+      pkEnd: it.pkEnd,
+      startTime: it.startTime,
+      endTime: it.endTime,
+      technicalLatitude: it.technicalLatitude,
+      technicalLongitude: it.technicalLongitude,
+      gpsPrecision: it.gpsPrecision,
+      isUnplanned: it.isUnplanned,
+      unplannedReason: it.unplannedReason,
+      referenceFolio: it.referenceFolio,
+      subcategory: it.subcategory,
+      topics: it.topics,
+      attendees: it.attendees,
+      result: it.result,
+      notes: it.notes,
+      pendingEvidence: it.pendingEvidence,
+      evidenceDueAt: it.evidenceDueAt,
+      evidences: it.evidences,
+    );
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    for (final c in _ctrls) {
+      c.removeListener(_onChange);
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final previewItem = ReportActivityItem(
-      id: item.id,
-      activityType: item.activityType,
-      pk: item.pk,
-      frontName: item.frontName,
-      status: item.status,
-      reviewDecision: item.reviewDecision,
-      reviewStatus: item.reviewStatus,
-      createdAt: item.createdAt,
-      assignedName: item.assignedName,
-      projectId: item.projectId,
-      title: titleCtrl.text.trim().isNotEmpty ? titleCtrl.text : item.title,
-      purpose: purposeCtrl.text.trim().isNotEmpty ? purposeCtrl.text : item.purpose,
-      detail: detailCtrl.text.trim().isNotEmpty ? detailCtrl.text : item.detail,
-      agreements: agreementsCtrl.text.trim().isNotEmpty
-          ? agreementsCtrl.text
-          : item.agreements,
-      municipality: item.municipality,
-      state: item.state,
-      colony: item.colony,
-      riskLevel: item.riskLevel,
-      locationType: item.locationType,
-      pkStart: item.pkStart,
-      pkEnd: item.pkEnd,
-      startTime: item.startTime,
-      endTime: item.endTime,
-      technicalLatitude: item.technicalLatitude,
-      technicalLongitude: item.technicalLongitude,
-      gpsPrecision: item.gpsPrecision,
-      isUnplanned: item.isUnplanned,
-      unplannedReason: item.unplannedReason,
-      referenceFolio: item.referenceFolio,
-      subcategory: item.subcategory,
-      topics: item.topics,
-      attendees: item.attendees,
-      result: item.result,
-      notes: item.notes,
-      pendingEvidence: item.pendingEvidence,
-      evidenceDueAt: item.evidenceDueAt,
-      evidences: item.evidences,
-    );
-
     return Container(
       color: SaoColors.surfaceMutedFor(context),
       child: Column(
@@ -2181,24 +2555,25 @@ class _MiniDocPreview extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                if (totalItems > 1) ...[
+                if (widget.totalItems > 1) ...[
                   IconButton(
                     icon: const Icon(Icons.chevron_left_rounded, size: 18),
-                    onPressed: focusedIdx > 0 ? onFocusPrev : null,
+                    onPressed:
+                        widget.focusedIdx > 0 ? widget.onFocusPrev : null,
                     tooltip: 'Actividad anterior',
                     padding: EdgeInsets.zero,
                     constraints:
                         const BoxConstraints(minWidth: 28, minHeight: 28),
                   ),
                   Text(
-                    '${focusedIdx + 1} / $totalItems',
+                    '${widget.focusedIdx + 1} / ${widget.totalItems}',
                     style: SaoTypography.caption
                         .copyWith(color: SaoColors.gray500),
                   ),
                   IconButton(
                     icon: const Icon(Icons.chevron_right_rounded, size: 18),
-                    onPressed: focusedIdx < totalItems - 1
-                        ? onFocusNext
+                    onPressed: widget.focusedIdx < widget.totalItems - 1
+                        ? widget.onFocusNext
                         : null,
                     tooltip: 'Actividad siguiente',
                     padding: EdgeInsets.zero,
@@ -2214,12 +2589,12 @@ class _MiniDocPreview extends StatelessWidget {
             child: Padding(
               padding: const EdgeInsets.all(SaoSpacing.md),
               child: _ActualPdfPreview(
-                items: [previewItem],
-                filters: filters,
-                executiveSummary: summaryCtrl.text.trim(),
-                includeAudit: includeAudit,
-                includeNotes: includeNotes,
-                includeAttachments: includeAttachments,
+                items: [_committed],
+                filters: widget.filters,
+                executiveSummary: _committedSummary,
+                includeAudit: widget.includeAudit,
+                includeNotes: widget.includeNotes,
+                includeAttachments: widget.includeAttachments,
                 maxPageWidth: _previewPageWidth,
               ),
             ),

@@ -25,14 +25,25 @@ class ProfilePage extends ConsumerWidget {
 
   (String label, Color color) _roleInfo(String role, ColorScheme cs) {
     final n = role.toLowerCase().trim();
-    if (n.contains('admin')) return ('Admin', cs.primary);
-    if (n.contains('supervisor')) return ('Supervisor', Colors.orange);
-    if (n.contains('tecnico') || n.contains('técnico')) return ('Técnico', Colors.teal);
-    if (n.contains('operador')) return ('Operador', Colors.indigo);
-    if (n.contains('viewer') || n.contains('lectura')) return ('Solo lectura', Colors.grey);
     if (n.isEmpty) return ('Sin rol', cs.outline);
-    // Return text-cased version of whatever role the backend sends
-    return (role[0].toUpperCase() + role.substring(1).toLowerCase(), cs.secondary);
+    if (n.contains('admin')) return ('Administrador', cs.primary);
+    if (n.contains('coord')) return ('Coordinador', Colors.indigo);
+    if (n.contains('supervisor')) return ('Supervisor', Colors.orange);
+    if (n.contains('lector') || n.contains('view') || n.contains('lectura')) {
+      return ('Lector', Colors.grey);
+    }
+    if (
+      n.contains('operat') ||
+      n.contains('operador') ||
+      n.contains('tecnico') ||
+      n.contains('técnico') ||
+      n.contains('ingeniero') ||
+      n.contains('topografo') ||
+      n.contains('topógrafo')
+    ) {
+      return ('Operativo', Colors.teal);
+    }
+    return ('Operativo', cs.secondary);
   }
 
   void _confirmLogout(BuildContext context, WidgetRef ref) {

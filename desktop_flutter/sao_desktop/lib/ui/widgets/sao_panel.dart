@@ -45,31 +45,34 @@ class SaoPanel extends StatelessWidget {
       );
     }
 
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (title != null || trailing != null)
+          _PanelHeader(
+            title: title,
+            subtitle: subtitle,
+            trailing: trailing,
+            padding: headerPadding,
+          ),
+        if ((title != null || trailing != null) && showDivider)
+          Divider(height: 1, color: SaoColors.borderFor(context)),
+        Padding(
+          padding: padding ??
+              const EdgeInsets.all(SaoSpacing.lg),
+          child: child,
+        ),
+      ],
+    );
+
     return Container(
       decoration: BoxDecoration(
         color: SaoColors.surfaceFor(context),
         border: Border.all(color: SaoColors.borderFor(context)),
         borderRadius: BorderRadius.circular(SaoRadii.lg),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (title != null || trailing != null)
-            _PanelHeader(
-              title: title,
-              subtitle: subtitle,
-              trailing: trailing,
-              padding: headerPadding,
-            ),
-          if ((title != null || trailing != null) && showDivider)
-            Divider(height: 1, color: SaoColors.borderFor(context)),
-          Padding(
-            padding: padding ??
-                const EdgeInsets.all(SaoSpacing.lg),
-            child: child,
-          ),
-        ],
-      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(child: body),
     );
   }
 }

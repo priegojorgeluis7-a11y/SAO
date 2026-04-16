@@ -391,7 +391,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   Timer? _searchDebounce;
   final Set<String> _processingStatusIds = <String>{};
 
-  static const _roles = [
+  static const _filterRoles = [
     'Todos',
     'ADMIN',
     'SUPERVISOR',
@@ -400,6 +400,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     'LECTOR'
   ];
   static const _statusOptions = ['Todos', 'Activos', 'Inactivos'];
+  static const _inviteRoles = ['ADMIN', 'COORD', 'SUPERVISOR', 'OPERATIVO', 'LECTOR'];
+  static const _inviteExpiryDays = [1, 3, 7, 14, 30];
 
   @override
   void initState() {
@@ -845,7 +847,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
               _FilterDropdown(
                 label: 'Rol',
                 value: _roleFilter,
-                items: _roles,
+                items: _filterRoles,
                 onChanged: (v) => setState(() => _roleFilter = v),
               ),
               const SizedBox(width: 8),
@@ -880,6 +882,12 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           onPressed: () => ref.invalidate(_adminUsersProvider),
         ),
         const SizedBox(width: 4),
+        FilledButton.tonalIcon(
+          icon: const Icon(Icons.key_rounded, size: 18),
+          label: const Text('Generar clave'),
+          onPressed: () => _openInviteCodeDialog(context),
+        ),
+        const SizedBox(width: 8),
         FilledButton.icon(
           icon: const Icon(Icons.person_add_rounded, size: 18),
           label: const Text('Nuevo usuario'),
@@ -985,6 +993,19 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           const SnackBar(content: Text('Usuario creado')),
         );
       }
+    }
+  }
+
+  Future<void> _openInviteCodeDialog(BuildContext context) async {
+    final result = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _UserInviteDialog(),
+    );
+    if (result == true && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Clave de invitación generada y copiada')),
+      );
     }
   }
 
@@ -4079,16 +4100,21 @@ class _UserFormDialogState extends State<_UserFormDialog> {
               Expanded(
                 flex: 2,
                 child: DropdownButtonFormField<String>(
-                  initialValue:
-                      _roles.contains(scope.role) ? scope.role : 'OPERATIVO',
+                  isExpanded: true,
+                  initialValue: _roles.contains(scope.role.trim().toUpperCase())
+                      ? scope.role.trim().toUpperCase()
+                      : 'OPERATIVO',
                   decoration: const InputDecoration(
                     labelText: 'Rol',
                     border: OutlineInputBorder(),
                     isDense: true,
+                    contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                   ),
                   items: _roles
-                      .map((role) =>
-                          DropdownMenuItem(value: role, child: Text(role)))
+                      .map((role) => DropdownMenuItem(
+                            value: role,
+                            child: Text(role, overflow: TextOverflow.ellipsis),
+                          ))
                       .toList(),
                   onChanged: _submitting
                       ? null
@@ -4219,6 +4245,11 @@ class _UserFormDialogState extends State<_UserFormDialog> {
           {
             'email': normalizedEmail,
             'full_name': fullName,
+            'first_name': _normalizePersonName(_firstNameCtrl.text),
+            'last_name': _normalizePersonName(_lastNameCtrl.text),
+            'second_last_name': _normalizePersonName(
+              _secondLastNameCtrl.text,
+            ),
             'password': _passwordCtrl.text,
             if (birthDateIso != null) 'birth_date': birthDateIso,
             ...payload,
@@ -4774,12 +4805,22 @@ class _FilterDropdown extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final fieldWidth = switch (label) {
+      'Proyecto' => 146.0,
+      'Estado' => 132.0,
+      _ => 122.0,
+    };
+
     return SizedBox(
-      width: 134,
+      width: fieldWidth,
       child: DropdownButtonFormField<String>(
-        initialValue: value,
+        isExpanded: true,
+        initialValue: value.trim(),
+        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 18),
         decoration: InputDecoration(
           labelText: label,
+          labelStyle: const TextStyle(fontSize: 12),
+          floatingLabelStyle: const TextStyle(fontSize: 12),
           filled: true,
           fillColor: SaoColors.surfaceFor(context),
           border: OutlineInputBorder(
@@ -4792,14 +4833,16 @@ class _FilterDropdown extends StatelessWidget {
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(10),
-              borderSide: const BorderSide(color: SaoColors.gray400),
+            borderSide: const BorderSide(color: SaoColors.gray400),
           ),
           isDense: true,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
         ),
         items: items
-            .map((i) => DropdownMenuItem(value: i, child: Text(i)))
+            .map((i) => DropdownMenuItem(
+                  value: i.trim(),
+                  child: Text(i.trim(), overflow: TextOverflow.ellipsis),
+                ))
             .toList(),
         onChanged: (v) {
           if (v != null) onChanged(v);
@@ -4823,12 +4866,6 @@ class _RoleBadge extends StatelessWidget {
         _ => SaoColors.gray500,
       };
 
-  static Color _foregroundFor(String role) {
-    // Utilizar la función de contraste automático basada en el fondo
-    final bgColor = _backgroundFor(role);
-    return SaoContrast.getContrastColor(bgColor);
-  }
-
   static Color _backgroundFor(String role) => switch (role.toUpperCase()) {
       'ADMIN' => const Color(0xFF7C3AED).withValues(alpha: 0.18),
       'SUPERVISOR' => const Color(0xFF2563EB).withValues(alpha: 0.18),
@@ -4841,7 +4878,10 @@ class _RoleBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final backgroundColor = _backgroundFor(role);
-    final foreground = _foregroundFor(role);
+    final foreground = SaoContrast.getContrastColor(
+      backgroundColor,
+      againstColor: SaoColors.surfaceFor(context),
+    );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
@@ -4897,6 +4937,341 @@ class _StatusBadge extends StatelessWidget {
               fontSize: 12,
               color: color,
               fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreatedInvitation {
+  final String inviteId;
+  final String role;
+  final String? targetEmail;
+  final DateTime expiresAt;
+
+  const _CreatedInvitation({
+    required this.inviteId,
+    required this.role,
+    required this.targetEmail,
+    required this.expiresAt,
+  });
+
+  factory _CreatedInvitation.fromJson(Map<String, dynamic> json) {
+    final rawTargetEmail = (json['target_email'] ?? '').toString().trim();
+    return _CreatedInvitation(
+      inviteId: (json['invite_id'] ?? '').toString(),
+      role: (json['role'] ?? '').toString(),
+      targetEmail: rawTargetEmail.isEmpty ? null : rawTargetEmail,
+      expiresAt: DateTime.tryParse((json['expires_at'] ?? '').toString()) ??
+          DateTime.now(),
+    );
+  }
+}
+
+class _UserInviteDialog extends StatefulWidget {
+  const _UserInviteDialog();
+
+  @override
+  State<_UserInviteDialog> createState() => _UserInviteDialogState();
+}
+
+class _UserInviteDialogState extends State<_UserInviteDialog> {
+  final _emailCtrl = TextEditingController();
+  String _role = _UsersPageState._inviteRoles.first;
+  int _expireDays = 7;
+  bool _loading = false;
+  String? _error;
+  _CreatedInvitation? _created;
+
+  @override
+  void dispose() {
+    _emailCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final payload = <String, dynamic>{
+        'role': _role,
+        'expire_days': _expireDays,
+      };
+      final email = _emailCtrl.text.trim();
+      if (email.isNotEmpty) {
+        payload['target_email'] = email;
+      }
+
+      final response = await const BackendApiClient().postJson(
+        '/api/v1/invitations',
+        payload,
+      );
+      if (response is! Map<String, dynamic>) {
+        throw const HttpException('Respuesta inválida del servidor');
+      }
+
+      final created = _CreatedInvitation.fromJson(response);
+      await Clipboard.setData(ClipboardData(text: created.inviteId));
+
+      if (!mounted) return;
+      setState(() {
+        _created = created;
+        _loading = false;
+      });
+    } on HttpException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.message;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _error = e.toString();
+      });
+    }
+  }
+
+  Future<void> _copyCode() async {
+    final inviteId = _created?.inviteId.trim() ?? '';
+    if (inviteId.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: inviteId));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Clave copiada')),
+    );
+  }
+
+  String _formatExpiry(DateTime value) {
+    return DateFormat('dd/MM/yyyy HH:mm').format(value.toLocal());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.key_rounded, size: 20),
+          SizedBox(width: 8),
+          Text('Generar clave de invitación'),
+        ],
+      ),
+      content: SizedBox(
+        width: 460,
+        child: _created != null ? _buildSuccess(context) : _buildForm(context),
+      ),
+      actions: _created != null
+          ? [
+              TextButton(
+                onPressed: _copyCode,
+                child: const Text('Copiar de nuevo'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: const Text('Listo'),
+              ),
+            ]
+          : [
+              TextButton(
+                onPressed:
+                    _loading ? null : () => Navigator.of(context).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: _loading ? null : _submit,
+                child: _loading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Generar'),
+              ),
+            ],
+    );
+  }
+
+  Widget _buildForm(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Selecciona el rol para la invitación.',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _UsersPageState._inviteRoles.map((role) {
+            final selected = _role == role;
+            return ChoiceChip(
+              label: Text(role),
+              selected: selected,
+              onSelected: (_) => setState(() => _role = role),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 18),
+        TextField(
+          controller: _emailCtrl,
+          keyboardType: TextInputType.emailAddress,
+          decoration: InputDecoration(
+            labelText: 'Email destino (opcional)',
+            hintText: 'usuario@ejemplo.com',
+            prefixIcon: const Icon(Icons.alternate_email_rounded, size: 18),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Si capturas un correo, solo ese usuario podrá usar la clave.',
+          style: TextStyle(
+            fontSize: 12,
+            color: SaoColors.textMutedFor(context),
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Text(
+          'Vigencia',
+          style: TextStyle(fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 10),
+        SegmentedButton<int>(
+          segments: _UsersPageState._inviteExpiryDays
+              .map(
+                (day) => ButtonSegment<int>(
+                  value: day,
+                  label: Text('${day}d'),
+                ),
+              )
+              .toList(),
+          selected: {_expireDays},
+          onSelectionChanged: (selection) {
+            setState(() => _expireDays = selection.first);
+          },
+        ),
+        if (_error != null) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: SaoColors.error.withValues(alpha: 0.25),
+              ),
+            ),
+            child: Text(
+              _error!,
+              style: const TextStyle(
+                color: SaoColors.error,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildSuccess(BuildContext context) {
+    final invite = _created!;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.check_circle_rounded,
+                color: Color(0xFF16A34A), size: 24),
+            SizedBox(width: 8),
+            Text(
+              'Clave lista',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Comparte esta clave con la persona invitada.',
+          style: TextStyle(color: SaoColors.textMutedFor(context)),
+        ),
+        const SizedBox(height: 12),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: SaoColors.surfaceMutedFor(context),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: SaoColors.borderFor(context)),
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: SelectableText(
+                  invite.inviteId,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Copiar',
+                onPressed: _copyCode,
+                icon: const Icon(Icons.copy_rounded, size: 18),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _inviteMetaChip(Icons.badge_rounded, invite.role),
+            _inviteMetaChip(
+              Icons.schedule_rounded,
+              'Vence ${_formatExpiry(invite.expiresAt)}',
+            ),
+            if (invite.targetEmail != null)
+              _inviteMetaChip(Icons.mail_outline_rounded, invite.targetEmail!),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _inviteMetaChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: SaoColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: SaoColors.primary.withValues(alpha: 0.18)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: SaoColors.primary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: SaoColors.primary,
             ),
           ),
         ],

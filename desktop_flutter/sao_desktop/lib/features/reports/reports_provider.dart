@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -10,6 +11,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import '../../core/providers/project_providers.dart';
+import '../../core/settings/report_export_settings.dart';
 import '../../data/catalog/activity_status.dart';
 import '../../data/database/app_database.dart';
 import '../../data/repositories/backend_api_client.dart';
@@ -34,22 +36,26 @@ class ReportFilters {
   final String projectId;
   final String frontName;
   final ReportDateRange dateRange;
+  final bool includeAlreadyReported;
 
   const ReportFilters({
     required this.projectId,
     required this.frontName,
     required this.dateRange,
+    this.includeAlreadyReported = false,
   });
 
   ReportFilters copyWith({
     String? projectId,
     String? frontName,
     ReportDateRange? dateRange,
+    bool? includeAlreadyReported,
   }) {
     return ReportFilters(
       projectId: projectId ?? this.projectId,
       frontName: frontName ?? this.frontName,
       dateRange: dateRange ?? this.dateRange,
+      includeAlreadyReported: includeAlreadyReported ?? this.includeAlreadyReported,
     );
   }
 }
@@ -113,6 +119,7 @@ class ReportActivityItem {
   final String? notes;
   final bool pendingEvidence;
   final String? evidenceDueAt;
+  final bool hasReport;
   final List<ReportEvidenceItem> evidences;
 
   const ReportActivityItem({
@@ -152,6 +159,7 @@ class ReportActivityItem {
     this.notes,
     this.pendingEvidence = false,
     this.evidenceDueAt,
+    this.hasReport = false,
     this.evidences = const [],
   });
 
@@ -249,6 +257,12 @@ class ReportActivityItem {
           json,
           const ['evidence_due_at', 'fecha_limite_evidencia'],
         ),
+        hasReport: _parseBool(
+          _extractNestedValue(
+            json,
+            const ['has_report', 'report_generated', 'is_report_generated'],
+          ),
+        ),
       evidences: (evidencesRaw ?? const [])
           .whereType<Map<String, dynamic>>()
           .map(ReportEvidenceItem.fromJson)
@@ -300,6 +314,446 @@ class ReportActivityItem {
       _ => status,
     };
   }
+}
+
+class GeneratedReportReference {
+  final String activityId;
+  final String filePath;
+  final String generatedAt;
+  final String? generatedByUserId;
+  final String? generatedByEmail;
+  final String? sourceEvidenceId;
+  final String source;
+
+  const GeneratedReportReference({
+    required this.activityId,
+    required this.filePath,
+    required this.generatedAt,
+    this.generatedByUserId,
+    this.generatedByEmail,
+    this.sourceEvidenceId,
+    this.source = 'local_generation',
+  });
+
+  String get fileName {
+    final normalized = filePath.replaceAll('\\', '/');
+    final segments = normalized.split('/');
+    return segments.isEmpty ? filePath : segments.last;
+  }
+}
+
+enum PdfStatusKind {
+  cloud,       // uploaded to cloud (has sourceEvidenceId)
+  localOnly,   // generated locally, not in cloud
+  missingFile, // registered but file no longer on disk
+}
+
+class PdfStatusEntry {
+  final String activityId;
+  final String filePath;
+  final String generatedAt;
+  final String? generatedByEmail;
+  final String? sourceEvidenceId;
+  final PdfStatusKind status;
+
+  const PdfStatusEntry({
+    required this.activityId,
+    required this.filePath,
+    required this.generatedAt,
+    this.generatedByEmail,
+    this.sourceEvidenceId,
+    required this.status,
+  });
+
+  String get fileName {
+    final normalized = filePath.replaceAll('\\', '/');
+    final segments = normalized.split('/');
+    return segments.isEmpty ? filePath : segments.last;
+  }
+}
+
+Future<List<PdfStatusEntry>> loadAllPdfStatusEntries() async {
+  final registry = await _readReportRegistry();
+  final activitiesRaw =
+      (registry['activities'] as Map<String, dynamic>?) ?? const {};
+  final results = <PdfStatusEntry>[];
+
+  for (final entry in activitiesRaw.values) {
+    if (entry is! Map<String, dynamic>) continue;
+    final activityId = (entry['activity_id'] ?? '').toString().trim();
+    final filePath = (entry['file_path'] ?? '').toString().trim();
+    final generatedAt = (entry['generated_at'] ?? '').toString().trim();
+    final generatedByEmail =
+        (entry['generated_by_email'] ?? '').toString().trim();
+    final sourceEvidenceId =
+        (entry['source_evidence_id'] ?? '').toString().trim();
+
+    if (activityId.isEmpty || filePath.isEmpty) continue;
+
+    final fileExists = await File(filePath).exists();
+    final PdfStatusKind kind;
+    if (!fileExists) {
+      kind = PdfStatusKind.missingFile;
+    } else if (sourceEvidenceId.isNotEmpty) {
+      kind = PdfStatusKind.cloud;
+    } else {
+      kind = PdfStatusKind.localOnly;
+    }
+
+    results.add(PdfStatusEntry(
+      activityId: activityId,
+      filePath: filePath,
+      generatedAt: generatedAt,
+      generatedByEmail: generatedByEmail.isEmpty ? null : generatedByEmail,
+      sourceEvidenceId: sourceEvidenceId.isEmpty ? null : sourceEvidenceId,
+      status: kind,
+    ));
+  }
+
+  // Most recent first
+  results.sort((a, b) => b.generatedAt.compareTo(a.generatedAt));
+  return results;
+}
+
+/// Removes the registry entry for [activityId] so the PDF can be regenerated
+/// and re-uploaded as a fresh evidence. Does not delete the file from disk.
+Future<void> clearPdfRegistryEntry(String activityId) async {
+  final trimmedId = activityId.trim();
+  if (trimmedId.isEmpty) return;
+  final registry = await _readReportRegistry();
+  final activities = Map<String, dynamic>.from(
+    (registry['activities'] as Map<String, dynamic>?) ?? const {},
+  );
+  activities.remove(trimmedId);
+  final registryFile = await _reportRegistryFile();
+  await registryFile.writeAsString(
+    const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+      'activities': activities,
+    }),
+    flush: true,
+  );
+}
+
+class ReportPdfCloudUploadResult {
+  final Map<String, String> evidenceByActivityId;
+  final Map<String, String> errorsByActivityId;
+
+  const ReportPdfCloudUploadResult({
+    required this.evidenceByActivityId,
+    required this.errorsByActivityId,
+  });
+}
+
+Future<File> _reportRegistryFile() async {
+  final docsDir = await getApplicationDocumentsDirectory();
+  final reportsRoot = Directory('${docsDir.path}/SAO_Reportes');
+  if (!await reportsRoot.exists()) {
+    await reportsRoot.create(recursive: true);
+  }
+  return File('${reportsRoot.path}/report_registry.json');
+}
+
+Future<Map<String, dynamic>> _readReportRegistry() async {
+  final file = await _reportRegistryFile();
+  if (!await file.exists()) {
+    return <String, dynamic>{'activities': <String, dynamic>{}};
+  }
+
+  try {
+    final raw = await file.readAsString();
+    if (raw.trim().isEmpty) {
+      return <String, dynamic>{'activities': <String, dynamic>{}};
+    }
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) {
+      final activities = decoded['activities'];
+      if (activities is Map<String, dynamic>) {
+        return decoded;
+      }
+    }
+  } catch (_) {
+    // Ignore corrupt registry and rebuild it on next write.
+  }
+
+  return <String, dynamic>{'activities': <String, dynamic>{}};
+}
+
+Future<void> registerGeneratedReportReferences(
+  List<ReportActivityItem> items,
+  File file,
+  {
+    String? generatedByUserId,
+    String? generatedByEmail,
+    Map<String, String>? sourceEvidenceIdsByActivityId,
+  }
+) async {
+  final registry = await _readReportRegistry();
+  final activities = Map<String, dynamic>.from(
+    (registry['activities'] as Map<String, dynamic>?) ?? const <String, dynamic>{},
+  );
+  final now = DateTime.now().toIso8601String();
+
+  for (final item in items) {
+    final activityId = item.id.trim();
+    if (activityId.isEmpty) continue;
+    final sourceEvidenceId =
+        (sourceEvidenceIdsByActivityId?[activityId] ?? '').trim();
+    activities[activityId] = <String, dynamic>{
+      'activity_id': activityId,
+      'file_path': file.path,
+      'generated_at': now,
+      'generated_by_user_id': generatedByUserId,
+      'generated_by_email': generatedByEmail,
+      'source': sourceEvidenceId.isEmpty ? 'local_generation' : 'cloud_upload',
+      if (sourceEvidenceId.isNotEmpty) 'source_evidence_id': sourceEvidenceId,
+    };
+  }
+
+  final registryFile = await _reportRegistryFile();
+  await registryFile.writeAsString(
+    const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+      'activities': activities,
+    }),
+    flush: true,
+  );
+}
+
+Future<ReportPdfCloudUploadResult> uploadGeneratedReportPdfToCloud(
+  List<ReportActivityItem> items,
+  File file,
+) async {
+  final bytes = await file.readAsBytes();
+  if (bytes.isEmpty) {
+    throw const FileSystemException('El PDF generado está vacío');
+  }
+
+  final fileName = file.uri.pathSegments.isEmpty
+      ? 'reporte.pdf'
+      : file.uri.pathSegments.last;
+  final repository = EvidenceRepository();
+  final evidenceByActivityId = <String, String>{};
+  final errorsByActivityId = <String, String>{};
+
+  for (final item in items) {
+    final activityId = item.id.trim();
+    if (activityId.isEmpty) {
+      continue;
+    }
+
+    // If a report already exists for this activity and a PDF evidence is present,
+    // reuse that evidence id to prevent creating duplicated report evidences.
+    final existingReportEvidenceId = _pickExistingReportPdfEvidenceId(item);
+    if (existingReportEvidenceId != null) {
+      evidenceByActivityId[activityId] = existingReportEvidenceId;
+      continue;
+    }
+
+    try {
+      final init = await repository.uploadInit(
+        activityId: activityId,
+        fileName: fileName,
+        sizeBytes: bytes.length,
+      );
+      await repository.uploadToSignedUrl(
+        signedUrl: init.signedUrl,
+        bytes: bytes,
+      );
+      await repository.uploadComplete(init.evidenceId);
+      evidenceByActivityId[activityId] = init.evidenceId;
+    } catch (error) {
+      errorsByActivityId[activityId] = error.toString();
+    }
+  }
+
+  return ReportPdfCloudUploadResult(
+    evidenceByActivityId: evidenceByActivityId,
+    errorsByActivityId: errorsByActivityId,
+  );
+}
+
+String? _pickExistingReportPdfEvidenceId(ReportActivityItem item) {
+  if (!item.hasReport || item.evidences.isEmpty) return null;
+
+  final candidates = item.evidences
+      .where((e) => e.id.trim().isNotEmpty)
+      .where((e) {
+        final typeToken = e.fileType.trim().toUpperCase();
+        final pathToken = e.filePath.trim().toLowerCase();
+        return typeToken.contains('PDF') ||
+            typeToken.contains('DOCUMENT') ||
+            pathToken.endsWith('.pdf');
+      })
+      .toList(growable: false);
+
+  if (candidates.isEmpty) return null;
+
+  final sorted = [...candidates]
+    ..sort((a, b) {
+      final ad = _tryParseDate(a.capturedAt ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final bd = _tryParseDate(b.capturedAt ?? '') ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      return bd.compareTo(ad);
+    });
+
+  return sorted.first.id.trim();
+}
+
+Future<void> registerDownloadedReportReference({
+  required String activityId,
+  required File file,
+  required String sourceEvidenceId,
+  String? generatedAt,
+}) async {
+  final trimmedActivityId = activityId.trim();
+  if (trimmedActivityId.isEmpty) return;
+
+  final trimmedEvidenceId = sourceEvidenceId.trim();
+  final now = DateTime.now().toIso8601String();
+  final trimmedGeneratedAt = (generatedAt ?? '').trim();
+  final registry = await _readReportRegistry();
+  final activities = Map<String, dynamic>.from(
+    (registry['activities'] as Map<String, dynamic>?) ?? const <String, dynamic>{},
+  );
+
+  activities[trimmedActivityId] = <String, dynamic>{
+    'activity_id': trimmedActivityId,
+    'file_path': file.path,
+    'generated_at': trimmedGeneratedAt.isEmpty ? now : trimmedGeneratedAt,
+    'source': 'evidence_download',
+    'source_evidence_id': trimmedEvidenceId,
+  };
+
+  final registryFile = await _reportRegistryFile();
+  await registryFile.writeAsString(
+    const JsonEncoder.withIndent('  ').convert(<String, dynamic>{
+      'activities': activities,
+    }),
+    flush: true,
+  );
+}
+
+Future<GeneratedReportReference?> findGeneratedReportReference(
+  String activityId,
+) async {
+  final trimmedId = activityId.trim();
+  if (trimmedId.isEmpty) return null;
+
+  final registry = await _readReportRegistry();
+  final activities =
+      (registry['activities'] as Map<String, dynamic>?) ?? const <String, dynamic>{};
+  final entry = activities[trimmedId];
+  if (entry is! Map<String, dynamic>) return null;
+
+  final filePath = (entry['file_path'] ?? '').toString().trim();
+  final generatedAt = (entry['generated_at'] ?? '').toString().trim();
+  final generatedByUserId =
+      (entry['generated_by_user_id'] ?? '').toString().trim();
+  final generatedByEmail =
+      (entry['generated_by_email'] ?? '').toString().trim();
+  final sourceEvidenceId =
+      (entry['source_evidence_id'] ?? '').toString().trim();
+  final source = (entry['source'] ?? 'local_generation').toString().trim();
+  if (filePath.isEmpty) return null;
+
+  final file = File(filePath);
+  if (!await file.exists()) {
+    return null;
+  }
+
+  return GeneratedReportReference(
+    activityId: trimmedId,
+    filePath: filePath,
+    generatedAt: generatedAt,
+    generatedByUserId: generatedByUserId.isEmpty ? null : generatedByUserId,
+    generatedByEmail: generatedByEmail.isEmpty ? null : generatedByEmail,
+    sourceEvidenceId: sourceEvidenceId.isEmpty ? null : sourceEvidenceId,
+    source: source.isEmpty ? 'local_generation' : source,
+  );
+}
+
+Future<String?> findExistingLocalReportPath({
+  required String activityId,
+  required String projectId,
+  required String front,
+  required String state,
+  required String municipality,
+  required String activityType,
+}) async {
+  final reference = await findGeneratedReportReference(activityId);
+  if (reference != null) {
+    return reference.filePath;
+  }
+
+  final roots = <String>{};
+  final appDocs = await getApplicationDocumentsDirectory();
+  roots.add(appDocs.path);
+
+  final home = Platform.isWindows
+      ? Platform.environment['USERPROFILE']
+      : Platform.environment['HOME'];
+  if (home != null && home.trim().isNotEmpty) {
+    roots.add('$home/Documents');
+  }
+
+  final projectFolder = _normalizeFolderSegment(projectId, fallback: 'GENERAL');
+  final frontFolder = _normalizeFolderSegment(front, fallback: 'SIN_FRENTE');
+  final stateFolder = _normalizeFolderSegment(state, fallback: 'SIN_ESTADO');
+  final municipalityFolder = _normalizeFolderSegment(municipality, fallback: 'SIN_MUNICIPIO');
+  final activityFolder = _normalizeFolderSegment(activityType, fallback: 'ACTIVIDAD');
+  final expedienteFolder = _normalizeFolderSegment(activityId, fallback: 'SIN_ID');
+
+  Future<String?> newestPdfIn(Directory dir) async {
+    if (!await dir.exists()) return null;
+    final pdfs = await dir
+        .list()
+        .where((entity) => entity is File && entity.path.toLowerCase().endsWith('.pdf'))
+        .cast<File>()
+        .toList();
+    if (pdfs.isEmpty) return null;
+    pdfs.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+    return pdfs.first.path;
+  }
+
+  for (final root in roots) {
+    final candidateDirs = <Directory>[
+      Directory(
+        '$root/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
+      ),
+      Directory(
+        '$root/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$activityFolder/$expedienteFolder/Reportes',
+      ),
+      Directory(
+        '$root/SAO_Expedientes/$projectFolder/$frontFolder/$activityFolder/$expedienteFolder/Reportes',
+      ),
+      Directory(
+        '$root/SAO_Expedientes/$projectFolder/$frontFolder/$expedienteFolder/Reportes',
+      ),
+    ];
+
+    for (final dir in candidateDirs) {
+      final localPath = await newestPdfIn(dir);
+      if (localPath != null) return localPath;
+    }
+
+    final baseDir = Directory('$root/SAO_Expedientes');
+    if (!await baseDir.exists()) continue;
+
+    final matches = <File>[];
+    await for (final entity in baseDir.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final lowerPath = entity.path.toLowerCase();
+      if (!lowerPath.endsWith('.pdf')) continue;
+      if (!entity.path.contains(expedienteFolder)) continue;
+      matches.add(entity);
+    }
+    if (matches.isNotEmpty) {
+      matches.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
+      return matches.first.path;
+    }
+  }
+
+  return null;
 }
 
 class ReportEvidenceItem {
@@ -397,6 +851,7 @@ Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
       'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
       'date_from=${Uri.encodeQueryComponent(filters.dateRange.start.toUtc().toIso8601String())}',
       'date_to=${Uri.encodeQueryComponent(filters.dateRange.end.toUtc().toIso8601String())}',
+      'include_already_reported=${filters.includeAlreadyReported ? "true" : "false"}',
     ];
     if (!_isAllFrontsFilter(filters.frontName)) {
       queryParams.add('front=${Uri.encodeQueryComponent(filters.frontName)}');
@@ -467,6 +922,7 @@ Future<List<ReportActivityItem>> _loadFromCompletedActivities(
               normalized['reviewed_at'] ?? normalized['created_at'] ?? '';
           return ReportActivityItem.fromJson(normalized);
         })
+        .where((item) => !item.hasReport)
         .where((item) => _matchesSelectedProject(item, filters.projectId))
         .where((item) => item.isApprovedForReport)
         .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
@@ -775,7 +1231,7 @@ Future<Uint8List> buildActivitiesPdfBytes(
           : _buildNaturalDevelopmentNarrative(item);
         final agreements = item.agreements?.trim() ?? '';
       final shouldUseTwoPages =
-          allSummary.length + agreements.length > 860 || item.evidences.length >= 4;
+          allSummary.length + agreements.length > 1200 && item.evidences.length >= 5;
 
       final firstPageMargin = _buildAdaptiveMargin(
         hasTemplate: hasTemplate,
@@ -792,7 +1248,9 @@ Future<Uint8List> buildActivitiesPdfBytes(
 
       final resolvedEvidences = <_ResolvedEvidence>[];
       if (includeAttachments && item.evidences.isNotEmpty) {
-        final sortedEvidences = [...item.evidences]
+        final sortedEvidences = item.evidences
+            .where((e) => e.filePath.trim().isNotEmpty)
+            .toList()
           ..sort((a, b) {
             final ad = _tryParseDate(a.capturedAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
             final bd = _tryParseDate(b.capturedAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -801,10 +1259,18 @@ Future<Uint8List> buildActivitiesPdfBytes(
         final evidenceLimit = shouldUseTwoPages ? 5 : 2;
         for (final evidence in sortedEvidences.take(evidenceLimit)) {
           final bytes = await _loadEvidenceBytes(evidence);
+          if (bytes == null || !_isSupportedImageFormat(bytes)) continue;
+          pw.MemoryImage? image;
+          try {
+            image = pw.MemoryImage(bytes);
+          } catch (_) {
+            image = null;
+          }
+          if (image == null) continue;
           resolvedEvidences.add(
             _ResolvedEvidence(
               evidence: evidence,
-              image: bytes == null ? null : pw.MemoryImage(bytes),
+              image: image,
             ),
           );
         }
@@ -816,8 +1282,6 @@ Future<Uint8List> buildActivitiesPdfBytes(
           footer: (_) => pw.SizedBox(),
           build: (_) => [
             _buildTitleRow(item, activityDate),
-            pw.SizedBox(height: 8),
-            _buildExecutiveHeader(item, activityDate),
             pw.SizedBox(height: 8),
             _buildGeneralData(item),
             pw.SizedBox(height: 8),
@@ -897,6 +1361,9 @@ Future<File> generateActivitiesPdf(
   bool includeAudit = true,
   bool includeNotes = false,
   bool includeAttachments = true,
+  String? saveRootPath,
+  String? saveFilePath,
+  bool keepExpedienteStructure = true,
 }) async {
   final now = DateTime.now();
   final pdfBytes = await buildActivitiesPdfBytes(
@@ -908,21 +1375,195 @@ Future<File> generateActivitiesPdf(
     includeAttachments: includeAttachments,
   );
 
-  // Save to documents
-  final docsDir = await getApplicationDocumentsDirectory();
-  final normalizedProject = filters.projectId.trim().isEmpty
-      ? 'GENERAL'
-      : filters.projectId.trim().toUpperCase();
-  final reportsDir = Directory('${docsDir.path}/SAO_Reportes/$normalizedProject');
+  final normalizedProject = _normalizeFolderSegment(
+    filters.projectId.trim().isEmpty ? 'GENERAL' : filters.projectId.trim(),
+  );
+  final fileName = _buildGeneratedReportFileName(
+    projectId: normalizedProject,
+    items: items,
+    generatedAt: now,
+  );
+
+  final explicitFilePath = (saveFilePath ?? '').trim();
+  if (explicitFilePath.isNotEmpty) {
+    final file = File(explicitFilePath);
+    if (!await file.parent.exists()) {
+      await file.parent.create(recursive: true);
+    }
+    await file.writeAsBytes(pdfBytes, flush: true);
+    return file;
+  }
+
+  if (!keepExpedienteStructure && (saveRootPath ?? '').trim().isNotEmpty) {
+    final customDir = Directory(saveRootPath!.trim());
+    if (!await customDir.exists()) {
+      await customDir.create(recursive: true);
+    }
+    final file = File('${customDir.path}/$fileName');
+    await file.writeAsBytes(pdfBytes, flush: true);
+    return file;
+  }
+
+  // Save to documents / configured root using expediente structure.
+  final docsRootPath = await _resolveUserDocumentsRootPath(
+    customRootPath: saveRootPath,
+  );
+  final reportsDir = await _resolveExpedienteReportsDir(
+    docsRootPath: docsRootPath,
+    projectFolder: normalizedProject,
+    items: items,
+    generatedAt: now,
+  );
   if (!await reportsDir.exists()) {
     await reportsDir.create(recursive: true);
   }
 
-  final fileName =
-      'SAO_${normalizedProject}_${DateFormat('yyyyMMdd_HHmm').format(now)}.pdf';
   final file = File('${reportsDir.path}/$fileName');
-  await file.writeAsBytes(pdfBytes);
+  await file.writeAsBytes(pdfBytes, flush: true);
   return file;
+}
+
+Future<String> _resolveUserDocumentsRootPath({String? customRootPath}) async {
+  final custom = (customRootPath ?? '').trim();
+  if (custom.isNotEmpty) {
+    final customDir = Directory(custom);
+    if (!await customDir.exists()) {
+      await customDir.create(recursive: true);
+    }
+    return customDir.path;
+  }
+
+  final configuredRootPath = await ReportExportSettings.readDefaultRootPath();
+  final configured = (configuredRootPath ?? '').trim();
+  if (configured.isNotEmpty) {
+    final configuredDir = Directory(configured);
+    if (!await configuredDir.exists()) {
+      await configuredDir.create(recursive: true);
+    }
+    return configuredDir.path;
+  }
+
+  String? home;
+  if (Platform.isWindows) {
+    home = Platform.environment['USERPROFILE'];
+  } else {
+    home = Platform.environment['HOME'];
+  }
+
+  if (home != null && home.trim().isNotEmpty) {
+    final docsDir = Directory('$home/Documents');
+    if (!await docsDir.exists()) {
+      await docsDir.create(recursive: true);
+    }
+    return docsDir.path;
+  }
+
+  final appDocs = await getApplicationDocumentsDirectory();
+  return appDocs.path;
+}
+
+String _buildGeneratedReportFileName({
+  required String projectId,
+  required List<ReportActivityItem> items,
+  required DateTime generatedAt,
+}) {
+  final frontToken = _groupFolderSegment(
+    items.map((item) => item.frontName),
+    singleFallback: 'SIN_FRENTE',
+    multiLabel: 'MULTI_FRENTE',
+  );
+  final stateToken = _groupFolderSegment(
+    items.map((item) => item.state ?? ''),
+    singleFallback: 'SIN_ESTADO',
+    multiLabel: 'MULTI_ESTADO',
+  );
+  final activityToken = _groupFolderSegment(
+    items.map((item) => item.activityType),
+    singleFallback: 'ACTIVIDAD',
+    multiLabel: 'MULTI_ACTIVIDAD',
+  );
+  final activityDateToken = _activityDateToken(items, generatedAt);
+  return '${projectId}_${frontToken}_${stateToken}_${activityToken}_$activityDateToken.pdf';
+}
+
+String _activityDateToken(List<ReportActivityItem> items, DateTime generatedAt) {
+  if (items.isEmpty) {
+    return DateFormat('yyyyMMdd').format(generatedAt);
+  }
+  final dates = items
+      .map((item) => _tryParseDate(item.createdAt))
+      .whereType<DateTime>()
+      .toList(growable: false)
+    ..sort();
+  if (dates.isEmpty) {
+    return DateFormat('yyyyMMdd').format(generatedAt);
+  }
+  final first = DateFormat('yyyyMMdd').format(dates.first);
+  final last = DateFormat('yyyyMMdd').format(dates.last);
+  return first == last ? first : '${first}_A_$last';
+}
+
+Future<Directory> _resolveExpedienteReportsDir({
+  required String docsRootPath,
+  required String projectFolder,
+  required List<ReportActivityItem> items,
+  required DateTime generatedAt,
+}) async {
+  if (items.length == 1) {
+    final item = items.first;
+    final frontFolder = _normalizeFolderSegment(item.frontName, fallback: 'SIN_FRENTE');
+    final stateFolder = _normalizeFolderSegment(item.state ?? '', fallback: 'SIN_ESTADO');
+    final municipalityFolder = _normalizeFolderSegment(item.municipality ?? '', fallback: 'SIN_MUNICIPIO');
+    final activityFolder = _normalizeFolderSegment(item.activityType, fallback: 'ACTIVIDAD');
+    final expedienteFolder = _normalizeFolderSegment(item.id, fallback: 'SIN_ID');
+    return Directory(
+      '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
+    );
+  }
+
+  final frontFolder = _groupFolderSegment(
+    items.map((item) => item.frontName),
+    singleFallback: 'SIN_FRENTE',
+    multiLabel: 'MULTI_FRENTE',
+  );
+  final stateFolder = _groupFolderSegment(
+    items.map((item) => item.state ?? ''),
+    singleFallback: 'SIN_ESTADO',
+    multiLabel: 'MULTI_ESTADO',
+  );
+  final lotFolder = 'LOTE_${DateFormat('yyyyMMdd_HHmm').format(generatedAt)}';
+  return Directory(
+    '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/Lotes/$lotFolder/Reportes',
+  );
+}
+
+String _groupFolderSegment(
+  Iterable<String> rawValues, {
+  required String singleFallback,
+  required String multiLabel,
+}) {
+  final normalized = rawValues
+      .map((value) => value.trim())
+      .where((value) => value.isNotEmpty)
+      .toSet();
+  if (normalized.isEmpty) return singleFallback;
+  if (normalized.length == 1) {
+    return _normalizeFolderSegment(normalized.first, fallback: singleFallback);
+  }
+  return multiLabel;
+}
+
+String _normalizeFolderSegment(String raw, {String fallback = 'SIN_DATO'}) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return fallback;
+
+  final sanitized = trimmed
+      .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  if (sanitized.isEmpty) return fallback;
+  return sanitized.length <= 80 ? sanitized : sanitized.substring(0, 80).trim();
 }
 
 DateTime? _tryParseDate(String raw) {
@@ -931,6 +1572,31 @@ DateTime? _tryParseDate(String raw) {
   } catch (_) {
     return null;
   }
+}
+
+/// Returns true only if [bytes] starts with magic bytes that the `pdf` package
+/// recognises (JPEG, PNG, GIF, WebP, BMP, TIFF). Anything else (e.g. HEIC)
+/// would throw "Unable to guess the image type" inside pw.MemoryImage.
+bool _isSupportedImageFormat(Uint8List bytes) {
+  if (bytes.length < 4) return false;
+  // JPEG: FF D8 FF
+  if (bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF) return true;
+  // PNG: 89 50 4E 47
+  if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47) return true;
+  // GIF87a / GIF89a: 47 49 46 38
+  if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x38) return true;
+  // BMP: 42 4D
+  if (bytes[0] == 0x42 && bytes[1] == 0x4D) return true;
+  // TIFF little-endian: 49 49 2A 00  big-endian: 4D 4D 00 2A
+  if (bytes[0] == 0x49 && bytes[1] == 0x49 && bytes[2] == 0x2A && bytes[3] == 0x00) return true;
+  if (bytes[0] == 0x4D && bytes[1] == 0x4D && bytes[2] == 0x00 && bytes[3] == 0x2A) return true;
+  // WebP: RIFF????WEBP
+  if (bytes.length >= 12 &&
+      bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+      bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50) {
+    return true;
+  }
+  return false;
 }
 
 pw.EdgeInsets _buildAdaptiveMargin({
@@ -990,77 +1656,6 @@ pw.Widget _buildTitleRow(ReportActivityItem item, DateTime activityDate) {
           ),
         ),
         pw.Text(dateFmt.format(activityDate), style: const pw.TextStyle(fontSize: 9, color: _textDark)),
-      ],
-    ),
-  );
-}
-
-pw.Widget _buildExecutiveHeader(
-  ReportActivityItem item,
-  DateTime activityDate,
-) {
-  final dateFmt = DateFormat('dd/MM/yyyy HH:mm', 'es_MX');
-  final executiveSummary = _buildExecutiveSummary(item);
-
-  return pw.Container(
-    padding: const pw.EdgeInsets.all(8),
-    decoration: pw.BoxDecoration(
-      border: pw.Border.all(color: _borderGray),
-      color: const PdfColor.fromInt(0xFFF8FAFC),
-    ),
-    child: pw.Column(
-      children: [
-        pw.Row(
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Expanded(
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text(
-                    'Resumen Ejecutivo',
-                    style: pw.TextStyle(
-                      fontSize: 10,
-                      color: _guinda,
-                      fontWeight: pw.FontWeight.bold,
-                    ),
-                  ),
-                  pw.SizedBox(height: 3),
-                  pw.Text(
-                    '${item.activityType} · ${item.subcategory ?? 'Sin subcategoría'}',
-                    style: const pw.TextStyle(fontSize: 8.5, color: _textDark),
-                  ),
-                  pw.Text(
-                    '${item.projectId ?? '-'} / ${item.frontName} · ${item.municipality ?? '-'}, ${item.state ?? '-'}',
-                    style: const pw.TextStyle(fontSize: 8.5, color: _textGray),
-                  ),
-                  pw.Text(
-                    'Ventana: ${_formatTimeRange(item.startTime, item.endTime)} · Registro: ${dateFmt.format(activityDate)}',
-                    style: const pw.TextStyle(fontSize: 8, color: _textGray),
-                  ),
-                  if (executiveSummary.isNotEmpty) ...[
-                    pw.SizedBox(height: 5),
-                    pw.Text(
-                      executiveSummary,
-                      style: const pw.TextStyle(fontSize: 8.3, color: _textDark, lineSpacing: 2),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-        if (item.isUnplanned)
-          pw.Padding(
-            padding: const pw.EdgeInsets.only(top: 5),
-            child: pw.Align(
-              alignment: pw.Alignment.centerLeft,
-              child: pw.Text(
-                'No planeada: ${item.unplannedReason?.trim().isNotEmpty == true ? item.unplannedReason : 'Sin motivo capturado'}',
-                style: const pw.TextStyle(fontSize: 8, color: _textDark),
-              ),
-            ),
-          ),
       ],
     ),
   );
@@ -1282,7 +1877,7 @@ pw.Widget _buildEvidenceCard(
         pw.Text(
           evidence.evidence.caption?.trim().isNotEmpty == true
               ? evidence.evidence.caption!
-              : 'Evidencia ${evidence.evidence.id}',
+              : 'Sin pie de foto',
           style: pw.TextStyle(fontSize: compact ? 7.5 : 8.5, color: _textDark),
         ),
         pw.SizedBox(height: 2),
@@ -1437,30 +2032,6 @@ String buildReportNaturalNarrative(ReportActivityItem item, {String? fallbackTex
   return _buildNaturalDevelopmentNarrative(item, fallbackText: fallbackText);
 }
 
-String _buildExecutiveSummary(ReportActivityItem item) {
-  final purpose = item.purpose?.trim();
-  final result = item.result?.trim();
-  final location = _joinNonEmpty([
-    item.municipality?.trim(),
-    item.state?.trim(),
-  ]);
-
-  final parts = <String>[];
-  if (purpose != null && purpose.isNotEmpty) {
-    parts.add('Actividad orientada a ${_lowercaseFirst(purpose)}');
-  }
-  if (location.isNotEmpty) {
-    parts.add('desarrollada en $location');
-  }
-  if (result != null && result.isNotEmpty) {
-    parts.add('con resultado ${_lowercaseFirst(result)}');
-  }
-  if (parts.isEmpty) {
-    return '';
-  }
-  return '${parts.join(', ')}.';
-}
-
 bool _looksSystemGeneratedNarrative(String value) {
   final normalized = value.trim().toLowerCase();
   return normalized.startsWith('actividad:') ||
@@ -1606,8 +2177,12 @@ Future<pw.MemoryImage?> _loadMembreteImage({
   if (cleanPath.isNotEmpty) {
     final file = File(cleanPath);
     if (await file.exists()) {
-      final bytes = await file.readAsBytes();
-      return pw.MemoryImage(bytes);
+      try {
+        final bytes = await file.readAsBytes();
+        if (_isSupportedImageFormat(bytes)) return pw.MemoryImage(bytes);
+      } catch (_) {
+        // Archivo de membrete inválido — usar recurso predeterminado.
+      }
     }
   }
 

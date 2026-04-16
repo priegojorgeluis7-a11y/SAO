@@ -83,7 +83,6 @@ class RolesCatalog {
     permissions: [
       permCreateActivity,
       permEditActivity,
-      permDeleteActivity,
       permApproveActivity,
       permRejectActivity,
       permViewReports,

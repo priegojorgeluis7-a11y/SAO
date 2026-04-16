@@ -55,6 +55,22 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
     }
   }
 
+  Future<void> _selectAndHydrateActivity(ActivityWithDetails summary) async {
+    setState(() {
+      _selectedActivity = summary;
+      _selectedEvidenceIndex = 0;
+    });
+
+    final repo = ref.read(activityRepositoryProvider);
+    final hydrated = await repo.hydrateReviewActivity(summary);
+    if (!mounted || hydrated == null) return;
+    if (_selectedActivity?.activity.id != summary.activity.id) return;
+
+    setState(() {
+      _selectedActivity = hydrated;
+    });
+  }
+
   Future<void> _approveAndNext() async {
     if (_selectedActivity == null) return;
 
@@ -247,21 +263,12 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
           (a) => a.activity.id == _selectedActivity!.activity.id,
         );
         if (currentIndex >= 0 && currentIndex < activities.length - 1) {
-          setState(() {
-            _selectedActivity = activities[currentIndex + 1];
-            _selectedEvidenceIndex = 0;
-          });
+          _selectAndHydrateActivity(activities[currentIndex + 1]);
         } else if (activities.isNotEmpty) {
-          setState(() {
-            _selectedActivity = activities.first;
-            _selectedEvidenceIndex = 0;
-          });
+          _selectAndHydrateActivity(activities.first);
         }
       } else {
-        setState(() {
-          _selectedActivity = activities.first;
-          _selectedEvidenceIndex = 0;
-        });
+        _selectAndHydrateActivity(activities.first);
       }
     });
   }
@@ -292,14 +299,14 @@ class _ValidationPageState extends ConsumerState<ValidationPage> {
                         searchQuery: _searchQuery,
                         bulkSelectedIds: _bulkSelectedIds,
                         onSelectActivity: (activity) {
-                          setState(() {
-                            _selectedActivity = activity;
-                            _selectedEvidenceIndex = 0;
-                          });
+                          _selectAndHydrateActivity(activity);
                         },
                         onVisibleActivitiesChanged: (activities) {
                           if (!mounted) return;
                           setState(() => _visibleActivities = activities);
+                          if (_selectedActivity == null && activities.isNotEmpty) {
+                            _selectAndHydrateActivity(activities.first);
+                          }
                         },
                         onBulkToggle: (activityId) {
                           setState(() {

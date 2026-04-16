@@ -4,6 +4,7 @@ import 'backend_api_client.dart';
 
 class AssignmentItem {
   final String id;
+  final String projectId;
   final String title;
   final String activityTypeName;
   final String pk;
@@ -25,6 +26,7 @@ class AssignmentItem {
 
   const AssignmentItem({
     required this.id,
+    required this.projectId,
     required this.title,
     required this.activityTypeName,
     required this.pk,
@@ -63,8 +65,9 @@ class AssignmentItem {
 
     return AssignmentItem(
       id: (json['id'] ?? '').toString(),
+      projectId: (json['project_id'] ?? json['projectId'] ?? '').toString().trim().toUpperCase(),
       title: titleRaw,
-        activityTypeName: activityTypeRaw.isNotEmpty ? activityTypeRaw : titleRaw,
+      activityTypeName: activityTypeRaw.isNotEmpty ? activityTypeRaw : titleRaw,
       pk: (json['pk'] ?? '—').toString(),
       frontId: (json['front_id'] ??
               json['frontId'] ??
@@ -113,11 +116,15 @@ class AssignmentAssigneeOption {
   });
 
   factory AssignmentAssigneeOption.fromJson(Map<String, dynamic> json) {
+    final roleRaw = json['role'];
+    final nestedRoleName = roleRaw is Map<String, dynamic>
+        ? (roleRaw['name'] ?? '').toString()
+        : '';
     return AssignmentAssigneeOption(
-      userId: (json['user_id'] ?? '').toString(),
-      fullName: (json['full_name'] ?? '').toString(),
+      userId: (json['user_id'] ?? json['id'] ?? '').toString(),
+      fullName: (json['full_name'] ?? json['name'] ?? '').toString(),
       email: (json['email'] ?? '').toString(),
-      roleName: (json['role_name'] ?? '').toString(),
+      roleName: (json['role_name'] ?? json['roleName'] ?? nestedRoleName).toString(),
     );
   }
 }
@@ -139,10 +146,35 @@ class AssignmentFrontOption {
 
   static int? _parsePkValue(dynamic value) {
     if (value == null) return null;
-    if (value is int) return value;
-    final text = value.toString().trim();
-    if (text.isEmpty) return null;
-    return int.tryParse(text);
+
+    if (value is int) {
+      if (value > 0 && value < 1000) return value * 1000;
+      return value;
+    }
+
+    final text = value.toString().trim().replaceAll(' ', '');
+    if (text.isEmpty || text == '—') return null;
+
+    final chainage = RegExp(r'^(\d+)\+(\d{1,3})$').firstMatch(text);
+    if (chainage != null) {
+      final km = int.tryParse(chainage.group(1)!);
+      final meters = int.tryParse(chainage.group(2)!.padRight(3, '0'));
+      if (km == null || meters == null || meters > 999) return null;
+      return (km * 1000) + meters;
+    }
+
+    final chainageNoMeters = RegExp(r'^(\d+)\+$').firstMatch(text);
+    if (chainageNoMeters != null) {
+      final km = int.tryParse(chainageNoMeters.group(1)!);
+      if (km == null) return null;
+      return km * 1000;
+    }
+
+    final parsed = int.tryParse(text);
+    if (parsed == null) return null;
+    if (text.length <= 3) return parsed * 1000;
+    if (parsed > 0 && parsed < 1000) return parsed * 1000;
+    return parsed;
   }
 
   factory AssignmentFrontOption.fromJson(Map<String, dynamic> json) {
@@ -477,11 +509,38 @@ class AssignmentsRepository {
     final decoded = await _client.getJson(
       '/api/v1/assignments/assignees?project_id=${Uri.encodeQueryComponent(projectId)}',
     );
-    if (decoded is! List) return const [];
-    return decoded
-        .whereType<Map<String, dynamic>>()
-        .map(AssignmentAssigneeOption.fromJson)
-        .toList();
+    return _parseAssigneeOptions(decoded);
+  }
+
+  Future<List<AssignmentAssigneeOption>> getTransferCandidates(String projectId) async {
+    try {
+      final decoded = await _client.getJson(
+        '/api/v1/users?project_id=${Uri.encodeQueryComponent(projectId)}',
+      );
+      final members = _parseAssigneeOptions(decoded)
+          .where((item) => item.userId.trim().isNotEmpty)
+          .toList();
+      if (members.isNotEmpty) {
+        return members;
+      }
+    } catch (_) {
+      // Fallback to assignee endpoint when general users listing is unavailable.
+    }
+    return getAssignees(projectId);
+  }
+
+  List<AssignmentAssigneeOption> _parseAssigneeOptions(dynamic decoded) {
+    final list = decoded is List
+        ? decoded
+        : (decoded is Map<String, dynamic> && decoded['items'] is List)
+            ? decoded['items'] as List
+            : const [];
+
+    return list
+        .whereType<Map>()
+        .map((item) => AssignmentAssigneeOption.fromJson(item.cast<String, dynamic>()))
+        .where((item) => item.userId.trim().isNotEmpty)
+        .toList(growable: false);
   }
 
   Future<List<AssignmentFrontOption>> getFronts(String projectId) async {
@@ -689,6 +748,21 @@ class AssignmentsRepository {
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
     });
+    return AssignmentItem.fromJson((decoded as Map).cast<String, dynamic>());
+  }
+
+  Future<AssignmentItem> transferAssignment({
+    required String assignmentId,
+    required String assigneeUserId,
+    String? reason,
+  }) async {
+    final decoded = await _client.postJson(
+      '/api/v1/assignments/$assignmentId/transfer',
+      {
+        'assignee_user_id': assigneeUserId,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      },
+    );
     return AssignmentItem.fromJson((decoded as Map).cast<String, dynamic>());
   }
 

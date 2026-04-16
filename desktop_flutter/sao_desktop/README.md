@@ -1,71 +1,51 @@
-# SAO Desktop - Sistema de Administración y Control
+# SAO Desktop - sistema de administración y control
 
-## Consola Central para Gestión de SAO Mobile
+## Consola central para la gestión operativa
 
-SAO Desktop es la "fuente de verdad" que administra y controla las actividades capturadas por SAO Mobile.
+SAO Desktop funciona como consola de validación, control y seguimiento para las actividades capturadas desde la app móvil.
 
-### Características
+### Funcionalidad actual
 
 #### ✅ Implementado
 
-**1. Dashboard**
-- KPIs principales: Pendientes, Aprobadas, Rechazadas, Total
+**1. Tablero**
+- KPIs principales: pendientes, aprobadas, rechazadas y total.
 
-**2. Operaciones > Validación** (Pantalla principal funcional)
-- **3 paneles**: Cola / Formulario / Evidencias
-- **Atajos de teclado**:
-  - `Enter` → Aprobar y pasar a siguiente
-  - `R` → Rechazar (abre diálogo)
-  - `Esc` → Saltar actividad
-- Navegación fluida entre actividades
-- Visualización de evidencias con metadata GPS/timestamp
-- Sistema de comentarios para rechazo
+**2. Operaciones > Validación**
+- Vista principal con 3 paneles: cola, formulario y evidencias.
+- Atajos de teclado:
+  - `Enter` para aprobar y avanzar.
+  - `R` para rechazar.
+  - `Esc` para saltar actividad.
+- Navegación fluida entre registros.
+- Evidencias con metadatos de GPS y tiempo.
+- Comentarios estructurados para rechazo.
 
-**3. Base de datos SQLite (Drift)**
-- 10 tablas: Users, Projects, ActivityTypes, Activities, Evidences, Assignments, Fronts, Municipalities, RejectionReasons, SyncQueue
-- Seed data automático con 10 actividades de prueba
-- Offline-first: funciona sin internet
+**3. Base local con Drift**
+- Persistencia SQLite para operación local.
+- Datos semilla para pruebas y navegación inicial.
+- Soporte de trabajo sin conexión en flujos acotados.
 
 **4. Arquitectura**
-- Data/Domain/Presentation layers
-- Riverpod para state management
-- Repositorios con Streams reactivos
+- Separación por capas de datos, dominio y presentación.
+- Riverpod para manejo de estado.
+- Repositorios reactivos y desacoplados.
 
-**5. Módulos placeholder**
-- Planeación (asignación de actividades)
-- Catálogos (tipos, frentes, municipios)
-- Usuarios (gestión de permisos)
-- Reportes (generación de informes)
+**5. Módulos complementarios**
+- Planeación.
+- Catálogos.
+- Usuarios.
+- Reportes.
 
 ### Estructura de carpetas
 
-```
+```text
 lib/
-├── main.dart                    # Entry point + DB init
+├── main.dart
 ├── app/
-│   └── shell.dart              # NavigationRail + TopBar
 ├── data/
-│   ├── database/
-│   │   ├── app_database.dart   # DB principal con seed
-│   │   └── tables.dart         # Schema de 10 tablas
-│   ├── models/
-│   │   └── activity_model.dart # ActivityWithDetails
-│   └── repositories/
-│       └── activity_repository.dart # CRUD + Streams
-└── features/
-    ├── dashboard/
-    │   └── dashboard_page.dart
-    ├── operations/
-    │   ├── validation_page.dart
-    │   └── widgets/
-    │       ├── activity_queue_panel.dart
-    │       ├── activity_form_panel.dart
-    │       ├── evidence_gallery_panel.dart
-    │       └── review_actions.dart
-    ├── planning/
-    ├── catalogs/
-    ├── users/
-    └── reports/
+├── features/
+└── ui/
 ```
 
 ### Instalación y ejecución
@@ -89,78 +69,54 @@ dart run build_runner build --delete-conflicting-outputs
 flutter run -d windows
 ```
 
-#### 4. Build limpio en macOS fuera de Documents/iCloud
+#### 4. Compilación limpia en macOS fuera de Documents o iCloud
 
-Si macOS falla por codesign o metadatos Finder dentro de `Documents`, usa:
+Si macOS falla por firma o metadatos Finder, usar el script de compilación limpia disponible en la carpeta de diagnóstico.
 
-```bash
-tools/diagnostics/scripts/build_desktop_macos_clean.sh
-```
+### Uso general
 
-El script compila en `/tmp`, evita `macos/Pods` y `macos/Flutter/ephemeral`, y copia el `.app` final de regreso a `build/macos/Build/Products/Release/`.
+1. La aplicación abre en la vista de validación.
+2. La cola lateral muestra actividades pendientes.
+3. El panel central presenta detalle del expediente.
+4. El panel derecho muestra la evidencia asociada.
+5. Las acciones pueden ejecutarse con botones o atajos.
 
-**Nota sobre el icono**: Si muestra error sobre `app_icon.ico`, puedes:
-- Crear un archivo vacío: `New-Item -Path "windows\runner\resources\app_icon.ico" -ItemType File`
-- O usar un icono real de 256x256px en formato .ico
+### Atajos de teclado
 
-### Uso
+- `Enter`: aprobar y avanzar.
+- `R`: abrir diálogo de rechazo.
+- `Esc`: saltar sin acción.
+- Flechas en galería: navegar entre evidencias.
 
-1. **Al iniciar**: La app abre automáticamente en **Operaciones > Validación**
-2. **Cola izquierda**: Muestra 10 actividades pendientes de revisión con seed data
-3. **Panel central**: Detalles completos de la actividad seleccionada
-4. **Panel derecho**: Galería de evidencias fotográficas
-5. **Acciones**:
-   - Click en cualquier actividad de la cola para seleccionarla
-   - Navegar entre evidencias con flechas
-   - Aprobar/Rechazar/Saltar con botones o atajos de teclado
+### Base de datos local
 
-### Keyboard Shortcuts
+**Ubicación**: carpeta Documents del usuario.
 
-- `Enter` - Aprobar actividad y pasar a siguiente
-- `R` - Abrir diálogo de rechazo
-- `Esc` - Saltar a siguiente actividad sin acción
-- Flechas en galería - Navegar entre evidencias
+Incluye datos de prueba para usuarios, proyectos, frentes, municipios, motivos de rechazo y actividades con evidencia.
 
-### Base de datos
+### Modo offline
 
-**Ubicación**: `%USERPROFILE%\Documents\sao_desktop.db`
-
-**Seed data automático**:
-- 3 usuarios (Admin, Coordinador, Ingeniero)
-- 1 proyecto (TMQ)
-- 5 tipos de actividad
-- 4 frentes
-- 4 municipios
-- 6 motivos de rechazo
-- **10 actividades con estado PENDING_REVIEW**
-- 2-4 evidencias por actividad (20+ evidencias totales)
-
-### Modo Offline
-
-- ✅ Toda la operación funciona sin internet
-- ✅ Cambios se guardan en `sync_queue` tabla
-- ⏳ Sincronización con backend (pendiente de implementar)
+- ✅ La consola puede seguir operando en tareas locales.
+- ✅ Los cambios se almacenan en cola local.
+- ⏳ La sincronización completa con backend debe seguir validándose por flujo.
 
 ### Próximos pasos
 
-1. **Sincronización real**: Conectar sync_queue con API REST
-2. **Planeación**: Calendario/Gantt para asignación de actividades
-3. **Catálogos**: CRUD completo para tipos, frentes, etc.
-4. **Usuarios**: Gestión de roles y permisos
-5. **Reportes**: Exportar a PDF/Word con plantillas
-6. **Evidencias reales**: Integrar visor de imágenes desde filesystem
-7. **Maps**: Integrar Google Maps/OpenStreetMap para GPS
+1. Terminar sincronización real con backend.
+2. Ampliar planeación con calendario o Gantt.
+3. Completar CRUD de catálogos y usuarios.
+4. Robustecer reportes y exportaciones.
+5. Mejorar visor de evidencias y mapas.
 
-### Stack técnico
+### Pila técnica
 
-- Flutter 3.x Desktop (Windows)
-- Drift 2.31.0 (SQLite ORM)
-- Riverpod 2.6.1 (State management)
-- Material Design 3
-- Architecture: Clean Architecture (Data/Domain/Presentation)
+- Flutter Desktop.
+- Drift para persistencia local.
+- Riverpod para estado.
+- Material Design 3.
+- Arquitectura limpia por capas.
 
 ---
 
-**Estado**: ✅ Compilando y funcional
-**Fecha**: Feb 2026
-**Autor**: GitHub Copilot
+**Estado**: compilando y funcional  
+**Fecha**: febrero de 2026

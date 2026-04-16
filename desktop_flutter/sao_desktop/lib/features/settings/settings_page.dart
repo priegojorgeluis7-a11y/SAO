@@ -1,21 +1,212 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/config/data_mode.dart';
 import '../../core/providers/app_refresh_provider.dart';
-import '../../core/theme/theme_provider.dart';
+import '../../core/settings/report_export_settings.dart';
 import '../../features/auth/app_session_controller.dart';
 
-class SettingsPage extends ConsumerWidget {
+enum _ConnectionProbeStatus {
+  idle,
+  checking,
+  online,
+  error,
+}
+
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final themeMode = ref.watch(themeModeProvider);
-    final isDark    = themeMode == ThemeMode.dark;
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends ConsumerState<SettingsPage> {
+  String? _defaultReportsRootPath;
+  _ConnectionProbeStatus _connectionStatus = _ConnectionProbeStatus.idle;
+  String _connectionMessage = 'Sin verificacion reciente';
+  int? _connectionLatencyMs;
+  DateTime? _lastConnectionCheck;
+  String _appVersion = '1.0.0';
+  String _appBuildNumber = '1';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadInitialState();
+  }
+
+  Future<void> _loadInitialState() async {
+    await Future.wait([
+      _loadReportSettings(),
+      _loadAppInfo(),
+    ]);
+  }
+
+  Future<void> _loadReportSettings() async {
+    try {
+      final path = await ReportExportSettings.readDefaultRootPath();
+      if (!mounted) return;
+      setState(() => _defaultReportsRootPath = path);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo leer carpeta de reportes: $error')),
+      );
+    }
+  }
+
+  Future<void> _loadAppInfo() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
+      setState(() {
+        _appVersion = info.version;
+        _appBuildNumber = info.buildNumber;
+      });
+    } catch (_) {
+      // Keep safe fallback values if package metadata is unavailable.
+    }
+  }
+
+  Future<void> _pickDefaultReportsFolder() async {
+    try {
+      final path = await FilePicker.platform.getDirectoryPath(
+        dialogTitle: 'Selecciona carpeta raiz para reportes',
+      );
+      if (!mounted) return;
+      if (path == null || path.trim().isEmpty) return;
+
+      await ReportExportSettings.writeDefaultRootPath(path.trim());
+      if (!mounted) return;
+      setState(() => _defaultReportsRootPath = path.trim());
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Carpeta base guardada.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo guardar carpeta base: $error')),
+      );
+    }
+  }
+
+  Future<void> _resetDefaultReportsFolder() async {
+    try {
+      await ReportExportSettings.writeDefaultRootPath(null);
+      if (!mounted) return;
+      setState(() => _defaultReportsRootPath = null);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ruta predeterminada restablecida.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo restablecer ruta: $error')),
+      );
+    }
+  }
+
+  Future<void> _probeConnection() async {
+    setState(() {
+      _connectionStatus = _ConnectionProbeStatus.checking;
+      _connectionMessage = 'Verificando conexion...';
+      _connectionLatencyMs = null;
+    });
+
+    final stopwatch = Stopwatch()..start();
+    try {
+      final baseUrl = AppDataMode.backendBaseUrl.trim();
+      if (baseUrl.isEmpty) {
+        throw StateError('SAO_BACKEND_URL no esta configurado');
+      }
+
+      final uri = Uri.parse('$baseUrl/health');
+      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+      try {
+        final request = await client.getUrl(uri);
+        final response = await request.close().timeout(const Duration(seconds: 12));
+        final body = await response.transform(const Utf8Decoder()).join();
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          throw HttpException('HTTP ${response.statusCode}: $body', uri: uri);
+        }
+      } finally {
+        client.close(force: true);
+      }
+      stopwatch.stop();
+      if (!mounted) return;
+      setState(() {
+        _connectionStatus = _ConnectionProbeStatus.online;
+        _connectionMessage = 'Conexion correcta con backend';
+        _connectionLatencyMs = stopwatch.elapsedMilliseconds;
+        _lastConnectionCheck = DateTime.now();
+      });
+    } catch (error) {
+      stopwatch.stop();
+      if (!mounted) return;
+      setState(() {
+        _connectionStatus = _ConnectionProbeStatus.error;
+        _connectionMessage = 'Error de conexion: $error';
+        _connectionLatencyMs = stopwatch.elapsedMilliseconds;
+        _lastConnectionCheck = DateTime.now();
+      });
+    }
+  }
+
+  String _platformLabel() {
+    if (Platform.isMacOS) return 'macOS Desktop';
+    if (Platform.isWindows) return 'Windows Desktop';
+    if (Platform.isLinux) return 'Linux Desktop';
+    return '${Platform.operatingSystem} Desktop';
+  }
+
+  String _connectionStatusLabel() {
+    switch (_connectionStatus) {
+      case _ConnectionProbeStatus.idle:
+        return 'Sin verificar';
+      case _ConnectionProbeStatus.checking:
+        return 'Verificando';
+      case _ConnectionProbeStatus.online:
+        return 'Conectado';
+      case _ConnectionProbeStatus.error:
+        return 'Sin conexion';
+    }
+  }
+
+  Color _connectionStatusColor() {
+    switch (_connectionStatus) {
+      case _ConnectionProbeStatus.idle:
+        return Colors.grey;
+      case _ConnectionProbeStatus.checking:
+        return Colors.orange;
+      case _ConnectionProbeStatus.online:
+        return Colors.green;
+      case _ConnectionProbeStatus.error:
+        return Colors.red;
+    }
+  }
+
+  String _formatDateTime(DateTime? dt) {
+    if (dt == null) return 'Sin intentos';
+    final local = dt.toLocal();
+    final mm = local.month.toString().padLeft(2, '0');
+    final dd = local.day.toString().padLeft(2, '0');
+    final hh = local.hour.toString().padLeft(2, '0');
+    final min = local.minute.toString().padLeft(2, '0');
+    return '$dd/$mm/${local.year} $hh:$min';
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final cs        = Theme.of(context).colorScheme;
     const backendUrl = AppDataMode.backendBaseUrl;
+    final reportsRootLabel =
+      _defaultReportsRootPath ?? 'Documentos del usuario (predeterminado)';
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(32),
@@ -25,102 +216,60 @@ class SettingsPage extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // ── Apariencia ───────────────────────────────────────────────
+              // ── Reportes ────────────────────────────────────────────────
               const _SectionHeader(
-                  title: 'Apariencia', icon: Icons.palette_rounded),
+                title: 'Reportes',
+                icon: Icons.folder_rounded,
+              ),
               const SizedBox(height: 12),
               _SettingsCard(
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 140,
-                          child: Text(
-                            'Tema',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: cs.onSurface.withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ),
-                        Expanded(
-                          child: SegmentedButton<ThemeMode>(
-                            segments: const [
-                              ButtonSegment(
-                                value: ThemeMode.light,
-                                icon: Icon(Icons.light_mode_rounded, size: 16),
-                                label: Text('Claro'),
-                              ),
-                              ButtonSegment(
-                                value: ThemeMode.dark,
-                                icon: Icon(Icons.dark_mode_rounded, size: 16),
-                                label: Text('Oscuro'),
-                              ),
-                              ButtonSegment(
-                                value: ThemeMode.system,
-                                icon: Icon(Icons.contrast_rounded, size: 16),
-                                label: Text('Sistema'),
-                              ),
-                            ],
-                            selected: {themeMode},
-                            onSelectionChanged: (s) => ref
-                                .read(themeModeProvider.notifier)
-                                .setMode(s.first),
-                            style: ButtonStyle(
-                              textStyle:
-                                  WidgetStateProperty.all(const TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w500,
-                              )),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  _CopyRow(
+                    label: 'Carpeta base',
+                    value: reportsRootLabel,
                   ),
                   const _Divider(),
                   Padding(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 16, vertical: 14),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                     child: Row(
                       children: [
-                        SizedBox(
-                          width: 140,
-                          child: Text(
-                            'Acceso rápido',
-                            style: TextStyle(
-                              fontSize: 13,
-                              color: cs.onSurface.withValues(alpha: 0.55),
-                            ),
-                          ),
-                        ),
                         Expanded(
-                          child: Row(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              _ThemePreviewTile(
-                                label: 'Claro',
-                                selected: !isDark,
-                                bg: Colors.white,
-                                fg: const Color(0xFF111827),
-                                onTap: () => ref
-                                    .read(themeModeProvider.notifier)
-                                    .setMode(ThemeMode.light),
+                              Text(
+                                'Ruta predeterminada para PDF',
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: cs.onSurface,
+                                ),
                               ),
-                              const SizedBox(width: 10),
-                              _ThemePreviewTile(
-                                label: 'Oscuro',
-                                selected: isDark,
-                                bg: const Color(0xFF1E293B),
-                                fg: const Color(0xFFF1F5F9),
-                                onTap: () => ref
-                                    .read(themeModeProvider.notifier)
-                                    .setMode(ThemeMode.dark),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Se usa al guardar reportes cuando eliges ruta predeterminada.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: cs.onSurface.withValues(alpha: 0.5),
+                                ),
                               ),
                             ],
                           ),
+                        ),
+                        const SizedBox(width: 16),
+                        OutlinedButton.icon(
+                          onPressed: _pickDefaultReportsFolder,
+                          icon: const Icon(Icons.edit_location_alt_rounded, size: 16),
+                          label: const Text('Elegir'),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: _defaultReportsRootPath == null
+                              ? null
+                              : _resetDefaultReportsFolder,
+                          icon: const Icon(Icons.restore_rounded, size: 16),
+                          label: const Text('Restablecer'),
                         ),
                       ],
                     ),
@@ -136,6 +285,95 @@ class SettingsPage extends ConsumerWidget {
               _SettingsCard(
                 children: [
                   const _CopyRow(label: 'Backend URL', value: backendUrl),
+                  const _Divider(),
+                  Padding(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: 140,
+                          child: Text(
+                            'Estado',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: cs.onSurface.withValues(alpha: 0.5),
+                            ),
+                          ),
+                        ),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.circle,
+                                    size: 10,
+                                    color: _connectionStatusColor(),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    _connectionStatusLabel(),
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w600,
+                                      color: cs.onSurface,
+                                    ),
+                                  ),
+                                  if (_connectionLatencyMs != null) ...[
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      '$_connectionLatencyMs ms',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: cs.onSurface.withValues(alpha: 0.6),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                _connectionMessage,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: cs.onSurface.withValues(alpha: 0.6),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                'Ultima verificacion: ${_formatDateTime(_lastConnectionCheck)}',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: cs.onSurface.withValues(alpha: 0.45),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        OutlinedButton.icon(
+                          onPressed: _connectionStatus == _ConnectionProbeStatus.checking
+                              ? null
+                              : _probeConnection,
+                          icon: _connectionStatus == _ConnectionProbeStatus.checking
+                              ? const SizedBox(
+                                  width: 14,
+                                  height: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.network_check_rounded, size: 16),
+                          label: Text(
+                            _connectionStatus == _ConnectionProbeStatus.checking
+                                ? 'Verificando...'
+                                : 'Probar conexion',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                   const _Divider(),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -192,16 +430,22 @@ class SettingsPage extends ConsumerWidget {
               const _SectionHeader(
                   title: 'Acerca de', icon: Icons.info_outline_rounded),
               const SizedBox(height: 12),
-              const _SettingsCard(
+              _SettingsCard(
                 children: [
-                  _InfoRow(label: 'Sistema', value: 'SAO Desktop'),
-                  _Divider(),
-                  _InfoRow(label: 'Versión', value: '1.0.0'),
-                  _Divider(),
+                  const _InfoRow(label: 'Sistema', value: 'SAO Desktop'),
+                  const _Divider(),
                   _InfoRow(
-                      label: 'Organización', value: 'Tren Maya — TMQ / SAO'),
-                  _Divider(),
-                  _InfoRow(label: 'Plataforma', value: 'Windows Desktop'),
+                    label: 'Version',
+                    value: _appVersion,
+                    hint: 'Build $_appBuildNumber',
+                  ),
+                  const _Divider(),
+                  const _InfoRow(
+                    label: 'Organizacion',
+                    value: 'ATTRAPI',
+                  ),
+                  const _Divider(),
+                  _InfoRow(label: 'Plataforma', value: _platformLabel()),
                 ],
               ),
               const SizedBox(height: 28),
@@ -456,71 +700,6 @@ class _CopyRowState extends State<_CopyRow> {
   }
 }
 
-class _ThemePreviewTile extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final Color bg;
-  final Color fg;
-  final VoidCallback onTap;
-
-  const _ThemePreviewTile({
-    required this.label,
-    required this.selected,
-    required this.bg,
-    required this.fg,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        width: 80,
-        height: 52,
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? Theme.of(context).colorScheme.primary
-                : Theme.of(context).dividerColor,
-            width: selected ? 2 : 1,
-          ),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 32,
-              height: 8,
-              decoration: BoxDecoration(
-                color: fg.withValues(alpha: 0.25),
-                borderRadius: BorderRadius.circular(4),
-              ),
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: 48,
-              height: 6,
-              decoration: BoxDecoration(
-                color: fg.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(3),
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              label,
-              style: TextStyle(
-                  fontSize: 9, fontWeight: FontWeight.w600, color: fg),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _Divider extends StatelessWidget {
   const _Divider();

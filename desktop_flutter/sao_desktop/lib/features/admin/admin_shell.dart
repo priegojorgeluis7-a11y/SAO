@@ -11,6 +11,7 @@ import 'pages/dashboard_page.dart';
 import 'pages/projects_page.dart';
 import 'pages/settings_page.dart';
 import 'pages/users_page.dart';
+import 'pages/invitations_page.dart';
 
 class AdminShell extends ConsumerStatefulWidget {
   const AdminShell({super.key});
@@ -30,6 +31,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
         _NavItem(icon: Icons.people, label: 'Users', page: AdminUsersPage()),
         _NavItem(icon: Icons.fact_check, label: 'Audit', page: AdminAuditPage()),
         _NavItem(icon: Icons.settings, label: 'Settings', page: AdminSettingsPage()),
+        _NavItem(icon: Icons.mail_outline, label: 'Invitaciones', page: AdminInvitationsPage()),
       ];
 
   @override

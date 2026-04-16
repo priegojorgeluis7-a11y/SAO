@@ -355,26 +355,60 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
   Widget _buildEmptyState() {
     final hasSearch = widget.searchQuery?.isNotEmpty == true;
     final mutedTextColor = SaoColors.textMutedFor(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(SaoSpacing.xl),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              hasSearch ? Icons.search_off_rounded : Icons.inbox_rounded,
-              size: 40,
-              color: mutedTextColor,
-            ),
-            const SizedBox(height: SaoSpacing.md),
-            Text(
-              hasSearch ? 'Sin resultados' : 'Sin actividades pendientes',
-              style: SaoTypography.bodyText.copyWith(color: mutedTextColor),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxHeight < 140 || constraints.maxWidth < 130;
+        final ultraCompact = constraints.maxHeight < 96 || constraints.maxWidth < 96;
+        final iconSize = compact ? 24.0 : 40.0;
+        final content = ultraCompact
+            ? Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    hasSearch ? Icons.search_off_rounded : Icons.inbox_rounded,
+                    size: 18,
+                    color: mutedTextColor,
+                  ),
+                  const SizedBox(width: SaoSpacing.xs),
+                  Flexible(
+                    child: Text(
+                      hasSearch ? 'Sin resultados' : 'Sin pendientes',
+                      style: SaoTypography.caption.copyWith(color: mutedTextColor),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              )
+            : Column(
+                mainAxisSize: MainAxisSize.min,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    hasSearch ? Icons.search_off_rounded : Icons.inbox_rounded,
+                    size: iconSize,
+                    color: mutedTextColor,
+                  ),
+                  SizedBox(height: compact ? SaoSpacing.xs : SaoSpacing.md),
+                  Text(
+                    hasSearch ? 'Sin resultados' : 'Sin actividades pendientes',
+                    style: SaoTypography.bodyText.copyWith(color: mutedTextColor),
+                    textAlign: TextAlign.center,
+                    maxLines: compact ? 2 : 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              );
+
+        return Center(
+          child: Padding(
+            padding: EdgeInsets.all(compact ? SaoSpacing.sm : SaoSpacing.xl),
+            child: constraints.maxHeight.isFinite
+                ? SingleChildScrollView(child: content)
+                : content,
+          ),
+        );
+      },
     );
   }
 
@@ -385,25 +419,60 @@ class _ActivityQueuePanelState extends State<ActivityQueuePanel> {
         ),
       );
 
-  Widget _buildErrorState(String error) => Center(
-        child: Padding(
-          padding: const EdgeInsets.all(SaoSpacing.xl),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline_rounded,
-                  size: 36, color: SaoColors.error),
-              const SizedBox(height: SaoSpacing.sm),
-              Text(
-                error,
-                style: SaoTypography.caption.copyWith(
-                  color: SaoColors.textMutedFor(context),
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
+  Widget _buildErrorState(String error) => LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxHeight < 140 || constraints.maxWidth < 130;
+          final ultraCompact = constraints.maxHeight < 96 || constraints.maxWidth < 96;
+          final content = ultraCompact
+              ? Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.error_outline_rounded,
+                        size: 18, color: SaoColors.error),
+                    const SizedBox(width: SaoSpacing.xs),
+                    Flexible(
+                      child: Text(
+                        'Error de carga',
+                        style: SaoTypography.caption.copyWith(
+                          color: SaoColors.textMutedFor(context),
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                )
+              : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline_rounded,
+                      size: compact ? 24 : 36,
+                      color: SaoColors.error,
+                    ),
+                    SizedBox(height: compact ? SaoSpacing.xs : SaoSpacing.sm),
+                    Text(
+                      error,
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.textMutedFor(context),
+                      ),
+                      textAlign: TextAlign.center,
+                      maxLines: compact ? 3 : 5,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                );
+
+          return Center(
+            child: Padding(
+              padding: EdgeInsets.all(compact ? SaoSpacing.sm : SaoSpacing.xl),
+              child: constraints.maxHeight.isFinite
+                  ? SingleChildScrollView(child: content)
+                  : content,
+            ),
+          );
+        },
       );
 }
 

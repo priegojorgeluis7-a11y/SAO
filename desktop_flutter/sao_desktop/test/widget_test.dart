@@ -36,6 +36,27 @@ class _FakeAppSessionController extends StateNotifier<AppSessionState>
   Future<void> login(String email, String password) async {}
 
   @override
+  Future<bool> loginWithGoogle(String idToken, [String? inviteCode]) async {
+    return false;
+  }
+
+  @override
+  void setLoginError(String message) {}
+
+  @override
+  Future<void> signup({
+    required String email,
+    required String password,
+    required String displayName,
+    required String inviteCode,
+    required String role,
+    String? firstName,
+    String? lastName,
+    String? secondLastName,
+    String? birthDate,
+  }) async {}
+
+  @override
   Future<void> logout() async {}
 }
 

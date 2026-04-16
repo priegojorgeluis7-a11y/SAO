@@ -1,4 +1,3 @@
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,7 +8,6 @@ import '../features/operations/operations_hub_page.dart';
 import '../features/planning/planning_page.dart';
 import '../features/profile/profile_settings_page.dart';
 import '../features/structure/structure_page.dart';
-import '../features/ui_catalog/ui_catalog_page.dart';
 import '../core/providers/app_refresh_provider.dart';
 import '../core/theme/app_colors.dart';
 
@@ -21,7 +19,6 @@ class AppShell extends ConsumerStatefulWidget {
 }
 
 class _AppShellState extends ConsumerState<AppShell> {
-  int _selectedIndex = 2; // Start on Operations
   int _refreshToken = 0;
 
   List<_NavItem> get _navItems {
@@ -51,12 +48,6 @@ class _AppShellState extends ConsumerState<AppShell> {
         label: 'Expediente digital',
         page: const DigitalRecordsPage(),
       ),
-      if (kDebugMode)
-        _NavItem(
-          icon: Icons.palette_rounded,
-          label: 'UI Catalog',
-          page: const UiCatalogPage(),
-        ),
       _NavItem(
         icon: Icons.person_rounded,
         label: 'Configuración',
@@ -69,8 +60,9 @@ class _AppShellState extends ConsumerState<AppShell> {
   @override
   Widget build(BuildContext context) {
     final appRefreshToken = ref.watch(appRefreshTokenProvider);
+    final selectedIndex = ref.watch(appShellIndexProvider);
     final navItems = _navItems;
-    final safeIndex = _selectedIndex.clamp(0, navItems.length - 1);
+    final safeIndex = selectedIndex.clamp(0, navItems.length - 1);
 
     return CallbackShortcuts(
       bindings: {
@@ -88,7 +80,7 @@ class _AppShellState extends ConsumerState<AppShell> {
               _SideNav(
                 selectedIndex: safeIndex,
                 items: navItems,
-                onSelect: (i) => setState(() => _selectedIndex = i),
+                onSelect: (i) => ref.read(appShellIndexProvider.notifier).state = i,
               ),
 
               const VerticalDivider(thickness: 1, width: 1),
@@ -225,10 +217,13 @@ class _NavTileState extends State<_NavTile> {
       cursor: SystemMouseCursors.click,
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        // ── Row: barra izquierda (3px fija) + contenido con bg redondeado
-        child: Row(
+      child: Tooltip(
+        message: widget.label,
+        waitDuration: const Duration(milliseconds: 300),
+        child: GestureDetector(
+          onTap: widget.onTap,
+          // ── Row: barra izquierda (3px fija) + contenido con bg redondeado
+          child: Row(
           children: [
             // Barra indicadora — siempre 3px, solo colorea cuando activo
             AnimatedContainer(
@@ -285,6 +280,7 @@ class _NavTileState extends State<_NavTile> {
               ),
             ),
           ],
+          ),
         ),
       ),
     );

@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import '../../../data/models/activity_model.dart';
+import '../../../data/repositories/evidence_repository.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
@@ -9,7 +12,7 @@ import 'gps_validation_banner.dart';
 import 'caption_editor_widget.dart';
 
 /// Panel de galería de evidencias rediseñado con SaoEvidenceViewer
-class EvidenceGalleryPanel extends StatelessWidget {
+class EvidenceGalleryPanel extends StatefulWidget {
   final ActivityWithDetails? activity;
   final int selectedIndex;
   final Function(int) onSelectEvidence;
@@ -22,8 +25,26 @@ class EvidenceGalleryPanel extends StatelessWidget {
   });
 
   @override
+  State<EvidenceGalleryPanel> createState() => _EvidenceGalleryPanelState();
+}
+
+class _EvidenceGalleryPanelState extends State<EvidenceGalleryPanel> {
+  final EvidenceRepository _evidenceRepository = EvidenceRepository();
+  final Map<String, Future<String?>> _imageUrlFutureCache = {};
+
+  @override
+  void didUpdateWidget(covariant EvidenceGalleryPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldId = oldWidget.activity?.activity.id;
+    final newId = widget.activity?.activity.id;
+    if (oldId != newId) {
+      _imageUrlFutureCache.clear();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (activity == null || activity!.evidences.isEmpty) {
+    if (widget.activity == null || widget.activity!.evidences.isEmpty) {
       return Container(
         decoration: BoxDecoration(
           color: SaoColors.surface,
@@ -46,11 +67,15 @@ class EvidenceGalleryPanel extends StatelessWidget {
       );
     }
 
-    final evidence = activity!.evidences[selectedIndex];
+    final evidence = widget.activity!.evidences[widget.selectedIndex];
+    final imageUrlFuture = _imageUrlFutureCache.putIfAbsent(
+      evidence.id,
+      () => _resolveImageUrl(evidence),
+    );
     
     // Calculate GPS validation status
-    final gpsStatus = _calculateGpsStatus(activity!);
-    final distance = _calculateDistance(activity!, 150.0);
+    final gpsStatus = _calculateGpsStatus(widget.activity!);
+    final distance = _calculateDistance(widget.activity!, 150.0);
 
     return Container(
       decoration: BoxDecoration(
@@ -66,7 +91,7 @@ class EvidenceGalleryPanel extends StatelessWidget {
             child: GpsValidationBanner(
               status: gpsStatus,
               pkLabel: 'PK 142+000',
-              gpsCoordinates: '${activity!.activity.latitude?.toStringAsFixed(4) ?? '20.6295'}°N, ${activity!.activity.longitude?.toStringAsFixed(4) ?? '100.3161'}°W',
+              gpsCoordinates: '${widget.activity!.activity.latitude?.toStringAsFixed(4) ?? '20.6295'}°N, ${widget.activity!.activity.longitude?.toStringAsFixed(4) ?? '100.3161'}°W',
               distanceInMeters: distance,
               onViewMap: () {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -93,59 +118,50 @@ class EvidenceGalleryPanel extends StatelessWidget {
           Expanded(
             child: Container(
               color: SaoColors.gray900,
-              child: SaoEvidenceViewer(
-                imageUrl: 'https://via.placeholder.com/800x600/e5e7eb/6b7280?text=Evidencia+${selectedIndex + 1}', // TODO: evidence.fileUrl
-                caption: evidence.caption,
-                latitude: evidence.latitude,
-                longitude: evidence.longitude,
-                capturedAt: evidence.capturedAt,
-                currentIndex: selectedIndex,
-                totalCount: activity!.evidences.length,
-                onPrevious: selectedIndex > 0
-                    ? () => onSelectEvidence(selectedIndex - 1)
-                    : null,
-                onNext: selectedIndex < activity!.evidences.length - 1
-                    ? () => onSelectEvidence(selectedIndex + 1)
-                    : null,
-                onFullscreen: () {
-                  // Modo pantalla completa
-                  showDialog(
-                    context: context,
-                    builder: (context) => Dialog.fullscreen(
-                      child: SaoEvidenceViewer(
-                        imageUrl: 'https://via.placeholder.com/800x600/e5e7eb/6b7280?text=Evidencia+${selectedIndex + 1}',
-                        caption: evidence.caption,
-                        latitude: evidence.latitude,
-                        longitude: evidence.longitude,
-                        capturedAt: evidence.capturedAt,
-                        currentIndex: selectedIndex,
-                        totalCount: activity!.evidences.length,
-                        onPrevious: selectedIndex > 0
-                            ? () => onSelectEvidence(selectedIndex - 1)
-                            : null,
-                        onNext: selectedIndex < activity!.evidences.length - 1
-                            ? () => onSelectEvidence(selectedIndex + 1)
-                            : null,
-                        onMapView: () {
-                          Navigator.of(context).pop();
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Abriendo ubicación en mapa...'),
-                              backgroundColor: SaoColors.success,
+              child: FutureBuilder<String?>(
+                future: imageUrlFuture,
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  final imageUrl = snapshot.data?.trim();
+                  if (snapshot.hasError || imageUrl == null || imageUrl.isEmpty) {
+                    return Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(SaoSpacing.lg),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(
+                              Icons.broken_image_rounded,
+                              size: 48,
+                              color: SaoColors.gray400,
                             ),
-                          );
-                        },
+                            const SizedBox(height: SaoSpacing.sm),
+                            Text(
+                              'No se pudo cargar la foto de evidencia',
+                              textAlign: TextAlign.center,
+                              style: SaoTypography.caption.copyWith(
+                                color: SaoColors.gray500,
+                              ),
+                            ),
+                            const SizedBox(height: SaoSpacing.sm),
+                            TextButton.icon(
+                              onPressed: () {
+                                _imageUrlFutureCache.remove(evidence.id);
+                                setState(() {});
+                              },
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Reintentar'),
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
-                onMapView: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Abriendo ubicación GPS en mapa...'),
-                      backgroundColor: SaoColors.info,
-                    ),
-                  );
+                    );
+                  }
+
+                  return _buildEvidenceViewer(context, evidence, imageUrl);
                 },
               ),
             ),
@@ -173,6 +189,67 @@ class EvidenceGalleryPanel extends StatelessWidget {
     );
   }
 
+  Widget _buildEvidenceViewer(
+    BuildContext context,
+    Evidence evidence,
+    String imageUrl,
+  ) {
+    return SaoEvidenceViewer(
+      imageUrl: imageUrl,
+      caption: evidence.caption,
+      latitude: evidence.latitude,
+      longitude: evidence.longitude,
+      capturedAt: evidence.capturedAt,
+      currentIndex: widget.selectedIndex,
+      totalCount: widget.activity!.evidences.length,
+      onPrevious: widget.selectedIndex > 0
+          ? () => widget.onSelectEvidence(widget.selectedIndex - 1)
+          : null,
+      onNext: widget.selectedIndex < widget.activity!.evidences.length - 1
+          ? () => widget.onSelectEvidence(widget.selectedIndex + 1)
+          : null,
+      onFullscreen: () {
+        showDialog(
+          context: context,
+          builder: (context) => Dialog.fullscreen(
+            child: SaoEvidenceViewer(
+              imageUrl: imageUrl,
+              caption: evidence.caption,
+              latitude: evidence.latitude,
+              longitude: evidence.longitude,
+              capturedAt: evidence.capturedAt,
+              currentIndex: widget.selectedIndex,
+              totalCount: widget.activity!.evidences.length,
+              onPrevious: widget.selectedIndex > 0
+                  ? () => widget.onSelectEvidence(widget.selectedIndex - 1)
+                  : null,
+              onNext: widget.selectedIndex < widget.activity!.evidences.length - 1
+                  ? () => widget.onSelectEvidence(widget.selectedIndex + 1)
+                  : null,
+              onMapView: () {
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Abriendo ubicación en mapa...'),
+                    backgroundColor: SaoColors.success,
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      },
+      onMapView: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Abriendo ubicación GPS en mapa...'),
+            backgroundColor: SaoColors.info,
+          ),
+        );
+      },
+    );
+  }
+
   /// Calcula el estado de validación GPS vs PK
   GpsValidationStatus _calculateGpsStatus(ActivityWithDetails activity) {
     // Simular diferentes estados según la distancia
@@ -194,5 +271,36 @@ class EvidenceGalleryPanel extends StatelessWidget {
   double _calculateDistance(ActivityWithDetails activity, double fallbackDistance) {
     // TODO: Implementar cálculo real usando Haversine formula
     return fallbackDistance;
+  }
+
+  Future<String?> _resolveImageUrl(Evidence evidence) async {
+    final rawPath = evidence.filePath.trim();
+    if (rawPath.isEmpty) return null;
+
+    if (rawPath.startsWith('backend://')) {
+      try {
+        final signedUrl = await _evidenceRepository.getDownloadSignedUrl(evidence.id);
+        return signedUrl.trim().isEmpty ? null : signedUrl;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    if (rawPath.startsWith('pending://')) {
+      return null;
+    }
+
+    if (rawPath.startsWith('http://') ||
+        rawPath.startsWith('https://') ||
+        rawPath.startsWith('file://')) {
+      return rawPath;
+    }
+
+    final file = File(rawPath);
+    if (file.existsSync()) {
+      return file.path;
+    }
+
+    return rawPath;
   }
 }

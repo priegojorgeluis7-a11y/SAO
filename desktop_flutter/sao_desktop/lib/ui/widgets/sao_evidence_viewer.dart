@@ -14,8 +14,7 @@ import '../theme/sao_typography.dart';
 /// Características:
 /// - Zoom con rueda del mouse (1x - 5x)
 /// - Rotación de imagen (90° incrementos)
-/// - Mini-mapa con coordenadas GPS
-/// - Metadatos superpuestos (fecha/hora original)
+/// - Metadatos superpuestos mínimos
 /// - Navegación entre evidencias
 /// - Modo pantalla completa
 class SaoEvidenceViewer extends StatefulWidget {
@@ -93,13 +92,6 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
         _offset += details.delta;
       });
     }
-  }
-
-  String get _formattedCoordinates {
-    if (widget.latitude == null || widget.longitude == null) {
-      return 'Sin coordenadas';
-    }
-    return '${widget.latitude!.toStringAsFixed(5)}, ${widget.longitude!.toStringAsFixed(5)}';
   }
 
   Widget _buildErrorWidget() {
@@ -356,14 +348,7 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                                 fontSize: 10,
                               ),
                             ),
-                          if (widget.latitude != null && widget.longitude != null)
-                            Text(
-                              _formattedCoordinates,
-                              style: SaoTypography.caption.copyWith(
-                                color: Colors.white,
-                                fontSize: 10,
-                              ),
-                            ),
+
                         ],
                       ),
                     ),

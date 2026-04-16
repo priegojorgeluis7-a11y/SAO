@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/assignments_repository.dart';
+import '../../data/repositories/backend_api_client.dart';
 
 String _normalizedPlanningStatus(String status) {
   return status.trim().toLowerCase().replaceAll(' ', '_').replaceAll('-', '_');
@@ -55,4 +56,29 @@ final planningMonthlyAssignmentsProvider =
   final end = DateTime(date.year, date.month + 1, 0);
   final items = await repo.getForRange(projectId: projectId, from: start, to: end);
   return items.where(_isVisiblePlanningAssignment).toList(growable: false);
+});
+
+final planningReportActivityIdsProvider =
+    FutureProvider.autoDispose<Set<String>>((ref) async {
+  final projectId = ref.watch(activeProjectIdProvider).trim();
+  if (projectId.isEmpty) return <String>{};
+
+  try {
+    const client = BackendApiClient();
+    final decoded = await client.getJson(
+      '/api/v1/completed-activities?project_id=${Uri.encodeQueryComponent(projectId)}',
+    );
+    if (decoded is! Map<String, dynamic>) return <String>{};
+    final items = decoded['items'];
+    if (items is! List) return <String>{};
+
+    return items
+        .whereType<Map<String, dynamic>>()
+        .where((item) => (item['has_report'] as bool?) ?? false)
+        .map((item) => (item['id'] ?? '').toString().trim())
+        .where((id) => id.isNotEmpty)
+        .toSet();
+  } catch (_) {
+    return <String>{};
+  }
 });

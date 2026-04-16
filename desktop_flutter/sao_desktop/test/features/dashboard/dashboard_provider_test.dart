@@ -6,7 +6,7 @@ void main() {
   group('DashboardData - KPI Calculations', () {
     test('avancePct returns percentage of approved', () {
       // GIVEN
-      final dashData = DashboardData(
+      const dashData = DashboardData(
         pendingCount: 3,
         approvedCount: 7,
         rejectedCount: 0,
@@ -14,16 +14,16 @@ void main() {
         totalInQueue: 10,
         projectId: 'TMQ',
         range: DashboardRange.today,
-        approvedTrend: const DashboardTrend(current: 7, previous: 5),
-        rejectedTrend: const DashboardTrend(current: 0, previous: 0),
-        needsFixTrend: const DashboardTrend(current: 0, previous: 0),
-        pendingTrend: const DashboardTrend(current: 3, previous: 5),
-        queueItems: const [],
-        geoPoints: const [],
-        topErrors: const [],
-        locationCounts: const [],
-        riskCounts: const {},
-        frontProgress: const [],
+        approvedTrend: DashboardTrend(current: 7, previous: 5),
+        rejectedTrend: DashboardTrend(current: 0, previous: 0),
+        needsFixTrend: DashboardTrend(current: 0, previous: 0),
+        pendingTrend: DashboardTrend(current: 3, previous: 5),
+        queueItems: [],
+        geoPoints: [],
+        topErrors: [],
+        locationCounts: [],
+        riskCounts: {},
+        frontProgress: [],
         avgValidationHours: 2.5,
       );
 
@@ -38,7 +38,7 @@ void main() {
 
     test('avancePct returns 0 when totalInQueue is 0', () {
       // GIVEN
-      final dashData = DashboardData(
+      const dashData = DashboardData(
         pendingCount: 0,
         approvedCount: 0,
         rejectedCount: 0,
@@ -46,16 +46,16 @@ void main() {
         totalInQueue: 0,
         projectId: 'TMQ',
         range: DashboardRange.today,
-        approvedTrend: const DashboardTrend(current: 0, previous: 0),
-        rejectedTrend: const DashboardTrend(current: 0, previous: 0),
-        needsFixTrend: const DashboardTrend(current: 0, previous: 0),
-        pendingTrend: const DashboardTrend(current: 0, previous: 0),
-        queueItems: const [],
-        geoPoints: const [],
-        topErrors: const [],
-        locationCounts: const [],
-        riskCounts: const {},
-        frontProgress: const [],
+        approvedTrend: DashboardTrend(current: 0, previous: 0),
+        rejectedTrend: DashboardTrend(current: 0, previous: 0),
+        needsFixTrend: DashboardTrend(current: 0, previous: 0),
+        pendingTrend: DashboardTrend(current: 0, previous: 0),
+        queueItems: [],
+        geoPoints: [],
+        topErrors: [],
+        locationCounts: [],
+        riskCounts: {},
+        frontProgress: [],
         avgValidationHours: 0,
       );
 
@@ -141,6 +141,7 @@ void main() {
       // GIVEN
       const geoPoint = DashboardGeoPoint(
         id: 'geo-1',
+        projectId: 'TMQ',
         risk: 'critical',
         status: 'COMPLETADA',
         reviewStatus: 'approved',
@@ -153,20 +154,24 @@ void main() {
         assignedName: 'Juan García',
         lat: 19.2832,
         lon: -99.6554,
+        hasReport: true,
       );
 
       // WHEN / THEN
       expect(geoPoint.id, 'geo-1');
+      expect(geoPoint.projectId, 'TMQ');
       expect(geoPoint.risk, 'critical');
       expect(geoPoint.lat, lessThan(90));
       expect(geoPoint.lon, lessThan(180));
       expect(geoPoint.municipality, 'Toluca');
+      expect(geoPoint.hasReport, isTrue);
     });
 
     test('handles null optional fields', () {
       // GIVEN
       const geoPoint = DashboardGeoPoint(
         id: 'geo-2',
+        projectId: 'TMQ',
         risk: 'low',
         status: 'PENDIENTE',
         reviewStatus: 'pending',
@@ -176,12 +181,199 @@ void main() {
         label: 'Km 150',
         lat: 19.4326,
         lon: -99.1332,
+        hasReport: false,
       );
 
       // WHEN / THEN
       expect(geoPoint.reviewDecision, isNull);
       expect(geoPoint.assignedToUserId, isNull);
       expect(geoPoint.assignedName, isNull);
+      expect(geoPoint.hasReport, isFalse);
+    });
+
+    test('uses activity id fallback from backend payload', () {
+      final geoPoint = dashboardGeoPointFromJson(
+        {
+          'activity_id': 'activity-42',
+          'project_id': 'TMQ',
+          'risk_level': 'alto',
+          'status': 'COMPLETADA',
+          'review_status': 'APPROVED',
+          'front_name': 'Frente A',
+          'municipio': 'Doctor Mora',
+          'estado': 'Guanajuato',
+          'activity_type': 'Asamblea',
+          'document_url': 'https://example.com/report.pdf',
+        },
+        lat: 21.142,
+        lon: -100.312,
+      );
+
+      expect(geoPoint.id, 'activity-42');
+      expect(geoPoint.projectId, 'TMQ');
+      expect(geoPoint.hasReport, isTrue);
+      expect(geoPoint.label, 'Asamblea');
+    });
+  });
+
+  group('Dashboard map data hydration', () {
+    test('merges activities with reports so existing activities stay visible', () {
+      final merged = mergeDashboardMapSourceItems(
+        const [
+          {
+            'id': 'activity-1',
+            'project_id': 'TMQ',
+            'title': 'Inspección base',
+            'status': 'PENDIENTE',
+            'latitude': 20.1,
+            'longitude': -100.2,
+          },
+          {
+            'id': 'activity-2',
+            'project_id': 'TMQ',
+            'title': 'Asamblea sin reporte',
+            'status': 'EN_CURSO',
+            'latitude': 20.2,
+            'longitude': -100.3,
+          },
+        ],
+        const [
+          {
+            'activity_id': 'activity-1',
+            'report_url': 'https://example.com/report.pdf',
+            'review_status': 'APPROVED',
+          },
+        ],
+      );
+
+      expect(merged, hasLength(2));
+      expect(merged.where((item) => (item['id'] ?? item['activity_id']) == 'activity-2'), isNotEmpty);
+      expect((merged.firstWhere((item) => (item['id'] ?? item['activity_id']) == 'activity-1'))['report_url'], isNotEmpty);
+    });
+
+    test('extracts coordinates from wizard payload when top-level GPS is absent', () {
+      final geoPoint = dashboardGeoPointFromMapItem({
+        'id': 'activity-99',
+        'project_id': 'TMQ',
+        'status': 'PENDIENTE',
+        'wizard_payload': {
+          'location': {'latitude': 21.1234, 'longitude': -100.9876},
+          'activity': {'name': 'Recorrido'},
+        },
+      });
+
+      expect(geoPoint, isNotNull);
+      expect(geoPoint!.lat, closeTo(21.1234, 0.000001));
+      expect(geoPoint.lon, closeTo(-100.9876, 0.000001));
+      expect(geoPoint.label, 'Recorrido');
+    });
+
+    test('deduplicates one activity when activity api uses uuid and report api uses id', () {
+      final merged = mergeDashboardMapSourceItems(
+        const [
+          {
+            'uuid': 'uuid-123',
+            'project_id': 'TMQ',
+            'title': 'Actividad con reporte',
+            'execution_state': 'COMPLETADA',
+            'latitude': 20.55,
+            'longitude': -100.44,
+          },
+        ],
+        const [
+          {
+            'id': 'uuid-123',
+            'project_id': 'TMQ',
+            'title': 'Actividad con reporte',
+            'status': 'COMPLETADA',
+            'review_status': 'APPROVED',
+            'report_url': 'https://example.com/reporte.pdf',
+            'latitude': 20.55,
+            'longitude': -100.44,
+          },
+        ],
+      );
+
+      expect(merged, hasLength(1));
+      expect(merged.first['report_url'], isNotEmpty);
+    });
+  });
+
+  group('Dashboard metrics formulas', () {
+    test('counts project activities consistently with and without report', () {
+      final metrics = summarizeDashboardActivityMetrics([
+        {
+          'id': 'activity-1',
+          'project_id': 'TMQ',
+          'execution_state': 'COMPLETADA',
+          'review_status': 'APPROVED',
+        },
+        {
+          'id': 'activity-2',
+          'project_id': 'TMQ',
+          'execution_state': 'PENDIENTE',
+        },
+      ]);
+
+      expect(metrics.total, 2);
+      expect(metrics.approved, 1);
+      expect(metrics.pending, 1);
+      expect(metrics.needsFix, 0);
+      expect(metrics.rejected, 0);
+    });
+
+    test('caps progress at 100 percent when counts drift', () {
+      const dashData = DashboardData(
+        pendingCount: 0,
+        approvedCount: 3,
+        rejectedCount: 0,
+        needsFixCount: 0,
+        totalInQueue: 2,
+        projectId: 'TMQ',
+        range: DashboardRange.today,
+        approvedTrend: DashboardTrend(current: 3, previous: 2),
+        rejectedTrend: DashboardTrend(current: 0, previous: 0),
+        needsFixTrend: DashboardTrend(current: 0, previous: 0),
+        pendingTrend: DashboardTrend(current: 0, previous: 1),
+        queueItems: [],
+        geoPoints: [],
+        topErrors: [],
+        locationCounts: [],
+        riskCounts: {},
+        frontProgress: [],
+        avgValidationHours: 1.0,
+      );
+
+      expect(dashData.avancePct, 1.0);
+    });
+  });
+
+  group('Dashboard range filters', () {
+    test('filters activities for today week month and all correctly', () {
+      final now = DateTime.utc(2026, 4, 15, 12);
+      final items = [
+        {
+          'id': 'today-1',
+          'created_at': DateTime.utc(2026, 4, 15, 9).toIso8601String(),
+        },
+        {
+          'id': 'week-1',
+          'created_at': DateTime.utc(2026, 4, 14, 10).toIso8601String(),
+        },
+        {
+          'id': 'month-1',
+          'created_at': DateTime.utc(2026, 4, 2, 8).toIso8601String(),
+        },
+        {
+          'id': 'old-1',
+          'created_at': DateTime.utc(2026, 3, 20, 8).toIso8601String(),
+        },
+      ];
+
+      expect(filterDashboardItemsByRange(items, DashboardRange.today, now), hasLength(1));
+      expect(filterDashboardItemsByRange(items, DashboardRange.week, now), hasLength(2));
+      expect(filterDashboardItemsByRange(items, DashboardRange.month, now), hasLength(3));
+      expect(filterDashboardItemsByRange(items, DashboardRange.all, now), hasLength(4));
     });
   });
 
@@ -226,9 +418,10 @@ void main() {
   group('Dashboard Integration Tests', () {
     test('dashboard data comprehensively models review queue state', () {
       // GIVEN: Complex multi-front, multi-status scenario
-      final geoPoints = [
+      final List<DashboardGeoPoint> geoPoints = [
         const DashboardGeoPoint(
           id: 'g1',
+          projectId: 'TMQ',
           risk: 'critical',
           status: 'COMPLETADA',
           reviewStatus: 'approved',
@@ -238,9 +431,11 @@ void main() {
           label: 'Km 142',
           lat: 19.28,
           lon: -99.65,
+          hasReport: true,
         ),
         const DashboardGeoPoint(
           id: 'g2',
+          projectId: 'TMQ',
           risk: 'low',
           status: 'PENDIENTE',
           reviewStatus: 'pending',
@@ -250,6 +445,7 @@ void main() {
           label: 'Km 150',
           lat: 19.43,
           lon: -99.13,
+          hasReport: false,
         ),
       ];
 

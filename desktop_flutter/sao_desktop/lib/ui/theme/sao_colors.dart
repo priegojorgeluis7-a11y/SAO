@@ -50,10 +50,10 @@ class SaoColors {
   static const riskCritical = riskPriority;      // ⚠️ Alias para compatibilidad
 
   // Backgrounds de riesgo (con opacidad)
-  static final riskLowBg = riskLow.withOpacity(0.14);
-  static final riskMediumBg = riskMedium.withOpacity(0.14);
-  static final riskHighBg = riskHigh.withOpacity(0.14);
-  static final riskPriorityBg = riskPriority.withOpacity(0.14);  // 📱 Homologado
+  static final riskLowBg = riskLow.withValues(alpha: 0.14);
+  static final riskMediumBg = riskMedium.withValues(alpha: 0.14);
+  static final riskHighBg = riskHigh.withValues(alpha: 0.14);
+  static final riskPriorityBg = riskPriority.withValues(alpha: 0.14);  // 📱 Homologado
   static final riskCriticalBg = riskPriorityBg;               // ⚠️ Alias para compatibilidad
 
   // ============================================================
@@ -79,6 +79,14 @@ class SaoColors {
   static const border = gray200;
   static const borderStrong = gray300;
 
+  // ============================================================
+  // EXPEDIENTE DIGITAL
+  // ============================================================
+  static const digitalRecordAccent = Color(0xFF1A2B45);
+  static const digitalRecordAccentStrong = Color(0xFF2A3B55);
+  static const digitalRecordInfo = Color(0xFF3B82F6);
+  static const digitalRecordValidation = Color(0xFF8B5CF6);
+
     static bool isDarkMode(BuildContext context) =>
       Theme.of(context).brightness == Brightness.dark;
 
@@ -103,6 +111,104 @@ class SaoColors {
     static Color textMutedFor(BuildContext context) =>
       isDarkMode(context) ? _darkSubtext : gray500;
 
+    static Color digitalRecordScaffoldFor(BuildContext context) =>
+      isDarkMode(context) ? _darkBg : gray50;
+
+    static Color digitalRecordHeaderSurfaceFor(BuildContext context) =>
+      surfaceFor(context);
+
+    static Color digitalRecordPanelSurfaceFor(BuildContext context) =>
+      surfaceFor(context);
+
+    static Color digitalRecordMutedSurfaceFor(BuildContext context) =>
+      isDarkMode(context) ? _darkSurfaceMuted : gray100;
+
+    static Color digitalRecordBorderFor(BuildContext context) =>
+      borderFor(context);
+
+    static Color digitalRecordAccentSurfaceFor(BuildContext context) =>
+      digitalRecordAccent.withValues(alpha: isDarkMode(context) ? 0.18 : 0.10);
+
+    static Color digitalRecordSelectedSurfaceFor(BuildContext context) =>
+      digitalRecordAccent.withValues(alpha: isDarkMode(context) ? 0.16 : 0.08);
+
+    static Color digitalRecordSelectedBorderFor(BuildContext context) =>
+      digitalRecordAccent.withValues(alpha: isDarkMode(context) ? 0.34 : 0.24);
+
+    static Color digitalRecordProgressTrackFor(BuildContext context) =>
+      isDarkMode(context) ? _darkBorder : gray200;
+
+    static Color digitalRecordChipSurfaceFor(BuildContext context) =>
+      surfaceFor(context);
+
+    static Color digitalRecordChipBorderFor(BuildContext context) =>
+      borderFor(context);
+
+    static Color digitalRecordChecklistDoneBgFor(BuildContext context) =>
+      success.withValues(alpha: isDarkMode(context) ? 0.18 : 0.10);
+
+    static Color digitalRecordChecklistPendingBgFor(BuildContext context) =>
+      warning.withValues(alpha: isDarkMode(context) ? 0.18 : 0.10);
+
+    static Color digitalRecordEvidenceIconBgFor(BuildContext context) =>
+      digitalRecordAccent.withValues(alpha: isDarkMode(context) ? 0.18 : 0.08);
+
+    static Color digitalRecordStatusColor(String status) {
+      final normalized = status.trim().toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll(' ', '_');
+
+      switch (normalized) {
+        case 'aprobado':
+        case 'approved':
+          return success;
+        case 'rechazado':
+        case 'rejected':
+          return error;
+        case 'en_validacion':
+        case 'validacion':
+          return digitalRecordValidation;
+        case 'borrador':
+        case 'draft':
+          return statusBorrador;
+        case 'pendiente':
+        default:
+          return warning;
+      }
+    }
+
+    static Color digitalRecordStatusBg(String status) {
+      final normalized = status.trim().toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll(' ', '_');
+
+      switch (normalized) {
+        case 'aprobado':
+        case 'approved':
+          return success.withValues(alpha: 0.14);
+        case 'rechazado':
+        case 'rejected':
+          return error.withValues(alpha: 0.14);
+        case 'en_validacion':
+        case 'validacion':
+          return digitalRecordValidation.withValues(alpha: 0.14);
+        case 'borrador':
+        case 'draft':
+          return statusBorrador.withValues(alpha: 0.14);
+        case 'pendiente':
+        default:
+          return warning.withValues(alpha: 0.14);
+      }
+    }
+
   // ============================================================
   // ESTADOS OPERATIVOS (Workflow de SAO)
   // ⚠️ IMPORTANTE: Estados operativos ≠ Niveles de riesgo
@@ -115,12 +221,12 @@ class SaoColors {
   static const statusBorrador = Color(0xFF6B7280);       // ⚪ Gris - Borrador/sin enviar
 
   // Backgrounds de estados operativos (con opacidad)
-  static final statusPendienteBg = statusPendiente.withOpacity(0.14);
-  static final statusEnCampoBg = statusEnCampo.withOpacity(0.14);
-  static final statusEnValidacionBg = statusEnValidacion.withOpacity(0.14);
-  static final statusAprobadoBg = statusAprobado.withOpacity(0.14);
-  static final statusRechazadoBg = statusRechazado.withOpacity(0.14);
-  static final statusBorradorBg = statusBorrador.withOpacity(0.14);
+  static final statusPendienteBg = statusPendiente.withValues(alpha: 0.14);
+  static final statusEnCampoBg = statusEnCampo.withValues(alpha: 0.14);
+  static final statusEnValidacionBg = statusEnValidacion.withValues(alpha: 0.14);
+  static final statusAprobadoBg = statusAprobado.withValues(alpha: 0.14);
+  static final statusRechazadoBg = statusRechazado.withValues(alpha: 0.14);
+  static final statusBorradorBg = statusBorrador.withValues(alpha: 0.14);
 
   // ============================================================
   // HELPERS: Obtener color de riesgo

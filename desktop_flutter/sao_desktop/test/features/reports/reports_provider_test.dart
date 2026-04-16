@@ -116,7 +116,7 @@ void main() {
       }
     });
 
-    test('creates a PDF file under SAO_Reportes', () async {
+    test('creates a PDF file under the local expediente reports folder', () async {
       final items = [
         const ReportActivityItem(
           id: 'actividad-1',
@@ -155,7 +155,8 @@ void main() {
       );
 
       expect(await file.exists(), isTrue);
-      expect(file.path, contains('SAO_Reportes'));
+      expect(file.path, contains('Reportes'));
+      expect(file.path, contains('SAO_Expedientes'));
       expect(file.path.toLowerCase(), endsWith('.pdf'));
     });
   });

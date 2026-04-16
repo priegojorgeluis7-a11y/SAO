@@ -98,7 +98,7 @@ class _AdminAuditPageState extends ConsumerState<AdminAuditPage> {
                 width: 220,
                 child: TextField(
                   controller: _actorController,
-                  decoration: const InputDecoration(labelText: 'Actor email'),
+                  decoration: const InputDecoration(labelText: 'Actor'),
                 ),
               ),
               const SizedBox(width: 8),
@@ -140,7 +140,7 @@ class _AdminAuditPageState extends ConsumerState<AdminAuditPage> {
                         (row) => DataRow(
                           cells: [
                             DataCell(Text(row.createdAt)),
-                            DataCell(Text(row.actorEmail ?? '-')),
+                            DataCell(Text(row.actorDisplay)),
                             DataCell(Text(row.action)),
                             DataCell(Text(row.entity)),
                             DataCell(Text(row.entityId)),

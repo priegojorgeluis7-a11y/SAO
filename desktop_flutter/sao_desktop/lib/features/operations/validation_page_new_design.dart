@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/config/data_mode.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
+import '../auth/app_session_controller.dart';
 import '../../data/repositories/activity_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../ui/sao_ui.dart';
@@ -38,6 +39,7 @@ class _ValidationPageNewDesignState
   final bool _filterChanges = false;
   final bool _filterOnlyConflicts = false; // "Solo conflictos" quick-switch
   String? _selectedRejectReasonCode;
+  bool _approving = false;
   late TextEditingController _reviewCommentsController;
   List<ActivityTimelineEntry> _timelineEntries = const [];
   bool _timelineLoading = false;
@@ -67,6 +69,25 @@ class _ValidationPageNewDesignState
   Timer? _autoRefreshTimer;
   int _secondsUntilRefresh = _autoRefreshInterval.inSeconds;
   Timer? _countdownTimer;
+
+  bool _isAdminUser(AppUser? user) {
+    if (user == null) return false;
+    final normalizedRoles = <String>{
+      user.role.trim().toUpperCase(),
+      ...user.roles.map((role) => role.trim().toUpperCase()),
+    }..removeWhere((value) => value.isEmpty);
+    return normalizedRoles.any((role) => role == 'ADMIN' || role.contains('ADMIN'));
+  }
+
+  void _showDeleteNotAllowedMessage() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Solo administradores pueden eliminar actividades'),
+        backgroundColor: SaoColors.warning,
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -219,6 +240,9 @@ class _ValidationPageNewDesignState
       orElse: () => const <ActivityWithDetails>[],
     );
 
+    final currentUser = ref.watch(currentAppUserProvider);
+    final canDeleteActivities = _isAdminUser(currentUser);
+
     return BoardShortcuts(
       onApprove: () {
         if (_selectedActivity == null) return;
@@ -361,6 +385,7 @@ class _ValidationPageNewDesignState
                 bulkSelectedIds: _bulkSelectedIds,
                 onClear: () => setState(() => _bulkSelectedIds.clear()),
                 onApproveAll: _bulkApproveSelected,
+                canDeleteAll: canDeleteActivities,
                 onDeleteAll: _bulkDeleteSelected,
               ),
 
@@ -581,7 +606,9 @@ class _ValidationPageNewDesignState
                             const SizedBox(width: 6),
                             Flexible(
                               child: Text(
-                                'Atajos: Enter = Validar  ·  R = Rechazar  ·  Del = Eliminar  ·  Esc = Limpiar selección',
+                                canDeleteActivities
+                                    ? 'Atajos: Enter = Validar  ·  R = Rechazar  ·  Del = Eliminar  ·  Esc = Limpiar selección'
+                                    : 'Atajos: Enter = Validar  ·  R = Rechazar  ·  Esc = Limpiar selección',
                                 maxLines: compact ? 2 : 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: SaoTypography.caption
@@ -598,18 +625,19 @@ class _ValidationPageNewDesignState
                       runSpacing: 8,
                       alignment: WrapAlignment.end,
                       children: [
-                        ElevatedButton.icon(
-                          onPressed: _selectedActivity == null
-                              ? null
-                              : () => _deleteSelectedActivity(),
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          label: const Text('Eliminar'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: SaoColors.gray700,
-                            foregroundColor: SaoColors.onPrimary,
-                            disabledBackgroundColor: SaoColors.gray300,
+                        if (canDeleteActivities)
+                          ElevatedButton.icon(
+                            onPressed: _selectedActivity == null
+                                ? null
+                                : () => _deleteSelectedActivity(),
+                            icon: const Icon(Icons.delete_outline_rounded),
+                            label: const Text('Eliminar'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: SaoColors.gray700,
+                              foregroundColor: SaoColors.onPrimary,
+                              disabledBackgroundColor: SaoColors.gray300,
+                            ),
                           ),
-                        ),
                         ElevatedButton.icon(
                           onPressed: _selectedActivity == null
                               ? null
@@ -948,11 +976,20 @@ class _ValidationPageNewDesignState
 
   /// Aprueba la actividad seleccionada y carga la siguiente
   Future<void> _approveActivity() async {
-    if (_selectedActivity == null) return;
+    if (_selectedActivity == null || _approving) return;
     final previousActivityId = _selectedActivity!.activity.id;
 
     final repo = ref.read(activityRepositoryProvider);
     try {
+      setState(() => _approving = true);
+      final readiness = await repo.getActivityReadiness(previousActivityId);
+      if (!readiness.ready) {
+        if (mounted) {
+          await _showReadinessBlockedDialog(readiness);
+        }
+        return;
+      }
+
       await repo.approveActivity(previousActivityId, 'usr-admin-001');
 
       if (mounted) {
@@ -992,7 +1029,124 @@ class _ValidationPageNewDesignState
           ),
         );
       }
+    } finally {
+      if (mounted) {
+        setState(() => _approving = false);
+      }
     }
+  }
+
+  Future<void> _showReadinessBlockedDialog(
+    ActivityReadinessResult readiness,
+  ) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.rule_rounded, color: SaoColors.warning),
+              SizedBox(width: 8),
+              Expanded(child: Text('Faltan requisitos antes de enviar')),
+            ],
+          ),
+          content: SizedBox(
+            width: 560,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Checklist: ${readiness.checklistSummary.completed}/${readiness.checklistSummary.total} completado · Evidencias: ${readiness.evidenceCount}',
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.textMutedFor(ctx),
+                  ),
+                ),
+                const SizedBox(height: SaoSpacing.md),
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: readiness.missing
+                          .map(
+                            (item) => Container(
+                              margin: const EdgeInsets.only(bottom: SaoSpacing.sm),
+                              padding: const EdgeInsets.all(SaoSpacing.md),
+                              decoration: BoxDecoration(
+                                color: SaoColors.surfaceMutedFor(ctx),
+                                borderRadius: BorderRadius.circular(SaoRadii.md),
+                                border: Border.all(color: SaoColors.borderFor(ctx)),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(
+                                    Icons.warning_amber_rounded,
+                                    color: SaoColors.warning,
+                                    size: 20,
+                                  ),
+                                  const SizedBox(width: SaoSpacing.md),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item.message,
+                                          style: SaoTypography.bodyTextBold,
+                                        ),
+                                        const SizedBox(height: 2),
+                                        Text(
+                                          'Código: ${item.code}',
+                                          style: SaoTypography.caption.copyWith(
+                                            color: SaoColors.textMutedFor(ctx),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 6),
+                                        Text(
+                                          _readinessActionByCode(item.code),
+                                          style: SaoTypography.caption.copyWith(
+                                            color: SaoColors.primary,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                          .toList(growable: false),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Entendido'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  String _readinessActionByCode(String code) {
+    return switch (code.toUpperCase()) {
+      'MISSING_GPS_COORDINATES' =>
+        'Sugerencia: captura o corrige ubicación en el paso de ubicación.',
+      'GPS_MISMATCH_FLAG' =>
+        'Sugerencia: revisa PK/ubicación y vuelve a registrar GPS en sitio.',
+      'MIN_EVIDENCE_NOT_MET' =>
+        'Sugerencia: agrega las evidencias faltantes antes de enviar.',
+      'WIZARD_NOT_FILLED' =>
+        'Sugerencia: completa el formulario principal de la actividad.',
+      'CHECKLIST_INCOMPLETE' =>
+        'Sugerencia: completa los pendientes del checklist del wizard.',
+      _ => 'Sugerencia: revisa y completa el requisito marcado.',
+    };
   }
 
   /// Muestra diálogo para rechazar la actividad
@@ -1632,6 +1786,7 @@ class _ValidationPageNewDesignState
 
   /// Aprueba en lote todas las actividades seleccionadas sin conflictos
   Future<void> _bulkApproveSelected() async {
+    if (_approving) return;
     final repo = ref.read(activityRepositoryProvider);
     final toApprove = _visibleActivities
         .where((a) =>
@@ -1652,23 +1807,40 @@ class _ValidationPageNewDesignState
       return;
     }
 
+    setState(() => _approving = true);
     int approved = 0;
+    int blocked = 0;
     for (final activity in toApprove) {
       try {
+        final readiness = await repo.getActivityReadiness(activity.activity.id);
+        if (!readiness.ready) {
+          blocked++;
+          continue;
+        }
         await repo.approveActivity(activity.activity.id, 'usr-admin-001');
         approved++;
       } catch (_) {}
     }
 
     if (mounted) {
-      setState(() => _bulkSelectedIds.clear());
+      setState(() {
+        _bulkSelectedIds.clear();
+        _approving = false;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('$approved actividades validadas'),
-          backgroundColor: SaoColors.success,
+          content: Text(
+            blocked > 0
+                ? '$approved validadas · $blocked bloqueadas por requisitos de envío'
+                : '$approved actividades validadas',
+          ),
+          backgroundColor: blocked > 0 ? SaoColors.warning : SaoColors.success,
           behavior: SnackBarBehavior.floating,
         ),
       );
+      ref.invalidate(pendingActivitiesProvider);
+    } else {
+      _approving = false;
     }
   }
 
@@ -1699,6 +1871,10 @@ class _ValidationPageNewDesignState
   }
 
   Future<void> _deleteSelectedActivity() async {
+    if (!_isAdminUser(ref.read(currentAppUserProvider))) {
+      _showDeleteNotAllowedMessage();
+      return;
+    }
     if (_selectedActivity == null) return;
     final shouldDelete = await _confirmDeleteDialog(count: 1);
     if (!shouldDelete) return;
@@ -1733,45 +1909,48 @@ class _ValidationPageNewDesignState
   }
 
   Future<void> _bulkDeleteSelected() async {
+    if (!_isAdminUser(ref.read(currentAppUserProvider))) {
+      _showDeleteNotAllowedMessage();
+      return;
+    }
     if (_bulkSelectedIds.isEmpty) return;
     final ids = _bulkSelectedIds.toList(growable: false);
     final shouldDelete = await _confirmDeleteDialog(count: ids.length);
     if (!shouldDelete) return;
 
-    // UX first: remove immediately from current view even if backend retries are needed.
-    if (mounted) {
-      setState(() {
-        _dismissedActivityIds.addAll(ids);
-      });
-      unawaited(_persistDismissedActivityIds());
-    }
-
     var deleted = 0;
+    final deletedIds = <String>[];
     for (final id in ids) {
       try {
         await _removeActivityFromQueue(id);
         deleted++;
+        deletedIds.add(id);
       } catch (_) {}
     }
 
     if (!mounted) return;
     setState(() {
-      _bulkSelectedIds.clear();
+      _dismissedActivityIds.addAll(deletedIds);
+      _bulkSelectedIds.removeAll(deletedIds);
       if (_selectedActivity != null &&
-          ids.contains(_selectedActivity!.activity.id)) {
+          deletedIds.contains(_selectedActivity!.activity.id)) {
         _selectedActivity = null;
         _selectedEvidenceIndex = 0;
       }
     });
+    if (deletedIds.isNotEmpty) {
+      unawaited(_persistDismissedActivityIds());
+    }
     ref.invalidate(pendingActivitiesProvider);
+    final failed = ids.length - deleted;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(
           deleted == ids.length
               ? '$deleted actividades eliminadas'
               : deleted > 0
-                  ? '$deleted de ${ids.length} eliminadas. El resto se ocultó en esta vista.'
-                  : '${ids.length} actividades ocultadas en esta vista (sin confirmación de servidor).',
+                  ? '$deleted eliminadas · $failed sin autorización o sin confirmación del servidor'
+                  : 'No se pudo eliminar ninguna actividad',
         ),
         backgroundColor: deleted > 0 ? SaoColors.success : SaoColors.warning,
         behavior: SnackBarBehavior.floating,
@@ -1781,18 +1960,7 @@ class _ValidationPageNewDesignState
 
   Future<void> _removeActivityFromQueue(String activityId) async {
     final repo = ref.read(activityRepositoryProvider);
-    try {
-      await repo.deleteActivity(activityId);
-      return;
-    } catch (_) {
-      // Fallback operativo: rechazo para sacar de la cola cuando DELETE no aplica.
-      await repo.rejectActivity(
-        activityId,
-        'usr-admin-001',
-        'Eliminada desde validación',
-        'MISSING_INFO',
-      );
-    }
+    await repo.deleteActivity(activityId);
   }
 
   List<String> _buildProjectOptions(
@@ -2117,6 +2285,7 @@ class _BulkActionBar extends StatelessWidget {
   final int selectedCount;
   final List<ActivityWithDetails> visibleActivities;
   final Set<String> bulkSelectedIds;
+  final bool canDeleteAll;
   final VoidCallback onClear;
   final VoidCallback onApproveAll;
   final VoidCallback onDeleteAll;
@@ -2125,6 +2294,7 @@ class _BulkActionBar extends StatelessWidget {
     required this.selectedCount,
     required this.visibleActivities,
     required this.bulkSelectedIds,
+    required this.canDeleteAll,
     required this.onClear,
     required this.onApproveAll,
     required this.onDeleteAll,
@@ -2175,17 +2345,19 @@ class _BulkActionBar extends StatelessWidget {
             onPressed: onClear,
             child: const Text('Cancelar selección'),
           ),
-          const SizedBox(width: SaoSpacing.sm),
-          FilledButton.icon(
-            onPressed: onDeleteAll,
-            style: FilledButton.styleFrom(
-              backgroundColor: SaoColors.error,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: SaoSpacing.lg, vertical: SaoSpacing.sm),
+          if (canDeleteAll) ...[
+            const SizedBox(width: SaoSpacing.sm),
+            FilledButton.icon(
+              onPressed: onDeleteAll,
+              style: FilledButton.styleFrom(
+                backgroundColor: SaoColors.error,
+                padding: const EdgeInsets.symmetric(
+                    horizontal: SaoSpacing.lg, vertical: SaoSpacing.sm),
+              ),
+              icon: const Icon(Icons.delete_outline_rounded, size: 16),
+              label: const Text('Eliminar selección'),
             ),
-            icon: const Icon(Icons.delete_outline_rounded, size: 16),
-            label: const Text('Eliminar selección'),
-          ),
+          ],
           const SizedBox(width: SaoSpacing.sm),
           if (cleanCount > 0)
             FilledButton.icon(

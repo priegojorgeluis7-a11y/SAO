@@ -1,12 +1,113 @@
+import 'dart:io';
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart' hide Path;
+import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
+import '../../data/repositories/evidence_repository.dart';
 import '../../ui/theme/sao_colors.dart';
-import '../operations/validation_page_new_design.dart';
+import '../completed_activities/completed_activities_provider.dart';
+import '../reports/reports_provider.dart';
 import 'dashboard_provider.dart';
+
+String _sanitizePdfFolderSegment(String raw, {String fallback = 'SIN_DATO'}) {
+  final trimmed = raw.trim();
+  if (trimmed.isEmpty) return fallback;
+  final sanitized = trimmed
+      .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  if (sanitized.isEmpty) return fallback;
+  return sanitized.length <= 80 ? sanitized : sanitized.substring(0, 80).trim();
+}
+
+bool _isPdfEvidenceItem(EvidenceItem evidence) {
+  final typeToken = evidence.type.trim().toUpperCase();
+  final pathToken = evidence.gcsPath.trim().toLowerCase();
+  return typeToken.contains('PDF') ||
+      typeToken.contains('DOCUMENT') ||
+      pathToken.endsWith('.pdf');
+}
+
+EvidenceItem? _selectPdfEvidenceForDownload(CompletedActivityDetail detail) {
+  final candidates = <EvidenceItem>[
+    ...detail.documents,
+    ...detail.evidences.where(_isPdfEvidenceItem),
+  ];
+  if (candidates.isEmpty) return null;
+  candidates.sort((left, right) {
+    final leftDate = DateTime.tryParse(left.uploadedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final rightDate = DateTime.tryParse(right.uploadedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+    return rightDate.compareTo(leftDate);
+  });
+  return candidates.first;
+}
+
+String _inferPdfFileName(EvidenceItem evidence, String activityId) {
+  final normalized = evidence.gcsPath.trim().replaceAll('\\', '/');
+  if (normalized.isNotEmpty) {
+    final segments = normalized.split('/');
+    final candidate = segments.isEmpty ? '' : segments.last.trim();
+    if (candidate.isNotEmpty) return candidate;
+  }
+  return 'reporte_${activityId.trim()}.pdf';
+}
+
+Future<String> _resolveDashboardDocumentsRootPath() async {
+  String? home;
+  if (Platform.isWindows) {
+    home = Platform.environment['USERPROFILE'];
+  } else {
+    home = Platform.environment['HOME'];
+  }
+
+  if (home != null && home.trim().isNotEmpty) {
+    final docsDir = Directory('$home/Documents');
+    if (!await docsDir.exists()) {
+      await docsDir.create(recursive: true);
+    }
+    return docsDir.path;
+  }
+
+  final appDocs = await getApplicationDocumentsDirectory();
+  return appDocs.path;
+}
+
+Future<bool> _openDashboardLocalPath(String path) async {
+  final trimmedPath = path.trim();
+  if (trimmedPath.isEmpty) return false;
+
+  try {
+    final opened = await launchUrl(
+      Uri.file(trimmedPath),
+      mode: LaunchMode.externalApplication,
+    );
+    if (opened) return true;
+  } catch (_) {
+    // Fall back to native desktop commands below.
+  }
+
+  try {
+    late final ProcessResult result;
+    if (Platform.isMacOS) {
+      result = await Process.run('open', [trimmedPath]);
+    } else if (Platform.isWindows) {
+      result = await Process.run('cmd', ['/c', 'start', '', trimmedPath]);
+    } else {
+      result = await Process.run('xdg-open', [trimmedPath]);
+    }
+    return result.exitCode == 0;
+  } catch (_) {
+    return false;
+  }
+}
 
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
@@ -20,7 +121,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   String _planningStatusFilter = 'todos';
   String _planningRiskFilter = 'todos';
   String _planningReviewFilter = 'todos';
+  String _mapSearchQuery = '';
+  String? _selectedMapPointId;
   bool _mapFiltersExpanded = false;
+  final ScrollController _frontProgressScrollController = ScrollController();
+  final ScrollController _mapLocationsScrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _frontProgressScrollController.dispose();
+    _mapLocationsScrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -72,9 +184,9 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       if (isCompact) {
                         return Column(
                           children: [
-                            _buildProgressCard(data),
+                            _buildStatusOverviewCard(data),
                             const SizedBox(height: 16),
-                            _buildTopErrorsCard(data),
+                            _buildProgressCard(data),
                             const SizedBox(height: 16),
                             _buildMapsPanel(data),
                           ],
@@ -88,11 +200,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                               crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
                                 Expanded(
-                                  child: _buildProgressCard(data),
+                                  flex: 4,
+                                  child: _buildStatusOverviewCard(data),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(
-                                  child: _buildTopErrorsCard(data),
+                                  flex: 6,
+                                  child: _buildProgressCard(data),
                                 ),
                               ],
                             ),
@@ -123,38 +237,79 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     String selectedProjectId,
     List<String> projectOptions,
   ) {
+    final activeFronts = data.frontProgress
+        .where((item) => item.front.trim().isNotEmpty)
+        .length;
+    final progressPct = (data.avancePct * 100).round();
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
         gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
           colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.radar_rounded, color: Colors.white, size: 28),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Torre de Control | SAO Desktop',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.analytics_rounded, color: Colors.white, size: 24),
               ),
-            ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Dashboard de avance operativo',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Seguimiento de proyectos, frentes, revisión y focos operativos del periodo seleccionado.',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.82),
+                        fontSize: 13,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              _buildProjectSelector(selectedProjectId, projectOptions),
+              const SizedBox(width: 12),
+              _buildRangeSelector(range),
+              const SizedBox(width: 8),
+              IconButton(
+                onPressed: () => ref.invalidate(dashboardProvider),
+                icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                tooltip: 'Actualizar',
+              ),
+            ],
           ),
-          _buildProjectSelector(selectedProjectId, projectOptions),
-          const SizedBox(width: 12),
-          _chipStat('Cola total', '${data.totalInQueue} actos'),
-          const SizedBox(width: 12),
-          _buildRangeSelector(range),
-          const SizedBox(width: 8),
-          IconButton(
-            onPressed: () => ref.invalidate(dashboardProvider),
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-            tooltip: 'Actualizar',
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              _chipStat('Actividades', '${data.totalInQueue}'),
+              _chipStat('Frentes activos', '$activeFronts'),
+              _chipStat('Avance global', '$progressPct%'),
+              _chipStat('Pendientes', '${data.pendingCount}'),
+            ],
           ),
         ],
       ),
@@ -231,6 +386,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             DropdownMenuItem(value: DashboardRange.today, child: Text('Hoy')),
             DropdownMenuItem(value: DashboardRange.week, child: Text('Semana')),
             DropdownMenuItem(value: DashboardRange.month, child: Text('Mes')),
+            DropdownMenuItem(value: DashboardRange.all, child: Text('Todo')),
           ],
         ),
       ),
@@ -238,19 +394,36 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   Widget _buildKpis(BuildContext context, DashboardData data) {
+    final activeFronts = data.frontProgress.where((item) => item.front.trim().isNotEmpty).length;
+    final highRiskCount = (data.riskCounts['alto'] ?? 0) + (data.riskCounts['prioritario'] ?? 0);
+    final progressPct = (data.avancePct * 100).round();
+
     return LayoutBuilder(
       builder: (context, constraints) {
-        final count = constraints.maxWidth < 1200 ? 2 : 5;
+        final count = constraints.maxWidth < 900
+            ? 2
+            : constraints.maxWidth < 1400
+                ? 3
+                : 6;
         return GridView.count(
           crossAxisCount: count,
-          childAspectRatio: 2.1,
+          childAspectRatio: constraints.maxWidth < 1400 ? 2.35 : 2.0,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
           children: [
             _kpiCard(
-              title: data.range == DashboardRange.today ? 'Completadas hoy' : 'Completadas periodo',
+              title: 'Actividades del periodo',
+              value: data.totalInQueue,
+              subtitle: '$activeFronts frentes con actividad',
+              trend: data.pendingTrend,
+              color: SaoColors.primary,
+              icon: Icons.assignment_turned_in_rounded,
+              filter: DashboardKpiFilter.all,
+            ),
+            _kpiCard(
+              title: 'Aprobadas',
               value: data.approvedCount,
               subtitle: _trendSubtitle(data.approvedTrend),
               trend: data.approvedTrend,
@@ -259,25 +432,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               filter: DashboardKpiFilter.approved,
             ),
             _kpiCard(
-              title: 'Rechazados',
-              value: data.rejectedCount,
-              subtitle: _trendSubtitle(data.rejectedTrend),
-              trend: data.rejectedTrend,
-              color: SaoColors.error,
-              icon: Icons.cancel_rounded,
-              filter: DashboardKpiFilter.rejected,
-            ),
-            _kpiCard(
-              title: 'Necesitan correccion',
-              value: data.needsFixCount,
-              subtitle: _trendSubtitle(data.needsFixTrend),
-              trend: data.needsFixTrend,
-              color: SaoColors.warning,
-              icon: Icons.edit_note_rounded,
-              filter: DashboardKpiFilter.needsFix,
-            ),
-            _kpiCard(
-              title: 'Pendientes revision',
+              title: 'Pendientes de revisión',
               value: data.pendingCount,
               subtitle: _trendSubtitle(data.pendingTrend),
               trend: data.pendingTrend,
@@ -286,17 +441,108 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               filter: DashboardKpiFilter.pending,
             ),
             _kpiCard(
-              title: 'Tiempo promedio validacion',
-              value: data.avgValidationHours.round(),
-              subtitle: '${data.avgValidationHours.toStringAsFixed(1)} h',
+              title: 'Requieren corrección',
+              value: data.needsFixCount,
+              subtitle: _trendSubtitle(data.needsFixTrend),
+              trend: data.needsFixTrend,
+              color: SaoColors.warning,
+              icon: Icons.edit_note_rounded,
+              filter: DashboardKpiFilter.needsFix,
+            ),
+            _kpiCard(
+              title: 'Rechazadas',
+              value: data.rejectedCount,
+              subtitle: _trendSubtitle(data.rejectedTrend),
+              trend: data.rejectedTrend,
+              color: SaoColors.error,
+              icon: Icons.cancel_rounded,
+              filter: DashboardKpiFilter.rejected,
+            ),
+            _kpiCard(
+              title: 'Avance global',
+              value: progressPct,
+              subtitle: '${data.avgValidationHours.toStringAsFixed(1)} h promedio · $highRiskCount puntos de alto riesgo',
               trend: const DashboardTrend(current: 0, previous: 0),
               color: SaoColors.primaryLight,
-              icon: Icons.timer_outlined,
+              icon: Icons.insights_rounded,
               filter: DashboardKpiFilter.all,
             ),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildStatusOverviewCard(DashboardData data) {
+    final total = data.totalInQueue <= 0
+        ? (data.pendingCount + data.approvedCount + data.rejectedCount + data.needsFixCount)
+        : data.totalInQueue;
+    final rows = [
+      ('Aprobadas', data.approvedCount, SaoColors.success),
+      ('Pendientes', data.pendingCount, SaoColors.info),
+      ('Corrección', data.needsFixCount, SaoColors.warning),
+      ('Rechazadas', data.rejectedCount, SaoColors.error),
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Resumen ejecutivo',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Distribución del flujo actual para medir avance y rezago.',
+            style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context)),
+          ),
+          const SizedBox(height: 14),
+          ...rows.map((row) {
+            final label = row.$1;
+            final value = row.$2;
+            final color = row.$3;
+            final ratio = total == 0 ? 0.0 : (value / total).clamp(0, 1).toDouble();
+            final pct = (ratio * 100).round();
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          label,
+                          style: const TextStyle(fontWeight: FontWeight.w600, color: SaoColors.gray700),
+                        ),
+                      ),
+                      Text(
+                        '$value · $pct%',
+                        style: TextStyle(fontWeight: FontWeight.w700, color: color),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  LinearProgressIndicator(
+                    minHeight: 10,
+                    value: ratio,
+                    borderRadius: BorderRadius.circular(999),
+                    backgroundColor: SaoColors.gray200,
+                    color: color,
+                  ),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
     );
   }
 
@@ -316,7 +562,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       borderRadius: BorderRadius.circular(14),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
           color: SaoColors.surfaceFor(context),
           borderRadius: BorderRadius.circular(14),
@@ -337,11 +583,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           children: [
             Row(
               children: [
-                Icon(icon, color: color, size: 20),
+                Icon(icon, color: color, size: 18),
                 const Spacer(),
                 SizedBox(
-                  width: 72,
-                  height: 24,
+                  width: 56,
+                  height: 18,
                   child: CustomPaint(painter: _SparklinePainter(sparkline, color)),
                 ),
               ],
@@ -349,11 +595,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             const Spacer(),
             Text(
               '$value',
-              style: TextStyle(fontSize: 30, fontWeight: FontWeight.bold, color: color),
+              style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: color),
             ),
-            Text(title, style: const TextStyle(fontWeight: FontWeight.w700, color: SaoColors.gray800)),
-            const SizedBox(height: 2),
-            Text(subtitle, style: const TextStyle(color: SaoColors.gray500, fontSize: 12)),
+            Text(
+              title,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w700, color: SaoColors.gray800, fontSize: 12),
+            ),
+            const SizedBox(height: 1),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: SaoColors.gray500, fontSize: 11),
+            ),
           ],
         ),
       ),
@@ -374,8 +630,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Avance de Validacion: Planeado vs Ejecutado por Tramo/Frente',
+            'Avance por frente',
             style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Comparativo entre lo planeado y lo ejecutado para ubicar frentes con mejor o menor desempeño.',
+            style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context)),
           ),
           const SizedBox(height: 12),
           if (data.frontProgress.isEmpty)
@@ -388,63 +649,16 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             SizedBox(
               height: 240,
               child: Scrollbar(
+                controller: _frontProgressScrollController,
                 thumbVisibility: true,
                 child: ListView(
+                  controller: _frontProgressScrollController,
                   children: frontRows,
                 ),
               ),
             )
           else
             ...frontRows,
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTopErrorsCard(DashboardData data) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: SaoColors.surfaceFor(context),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: SaoColors.borderFor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.error_outline_rounded, size: 20, color: SaoColors.warning),
-              SizedBox(width: 8),
-              Text('Top 5 errores comunes', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (data.topErrors.isEmpty)
-            const _EmptyState(
-              icon: Icons.check_circle_outline_rounded,
-              iconColor: SaoColors.success,
-              message: 'Sin errores detectados en el periodo',
-            )
-          else
-            ...data.topErrors.take(5).map((item) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4),
-                child: Row(
-                  children: [
-                    Expanded(child: Text(item.label, style: const TextStyle(color: SaoColors.gray700))),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: SaoColors.surfaceRaisedFor(context),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text('${item.count}', style: const TextStyle(fontWeight: FontWeight.w700)),
-                    ),
-                  ],
-                ),
-              );
-            }),
         ],
       ),
     );
@@ -508,10 +722,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       children: [
         _buildMapCard(
           title: 'Mapa de Calor',
-          subtitle: 'Actividades registradas del periodo seleccionado',
+          subtitle: 'Actividades registradas del periodo, con y sin reporte',
           points: planningPoints,
           summary: 'Planeacion · ${planningPoints.length} puntos',
-          emptyMessage: 'Sin actividades registradas para esos filtros',
+          emptyMessage: 'Sin actividades visibles para esos filtros, incluso sin reporte',
           filtersSection: _buildCompactMapFilters(),
           mapHeight: mapHeight,
           minCardHeight: minCardHeight,
@@ -531,7 +745,127 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     required double minCardHeight,
   }) {
     final groupedPoints = _groupMapPoints(points);
+    final visibleMarkers = _expandMapMarkers(groupedPoints);
     final locationCounts = _locationCountsFor(points);
+    final selectedPoint = _resolveSelectedMapPoint(points);
+
+    Widget buildMapView() {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: SizedBox(
+          height: mapHeight,
+          child: points.isEmpty
+              ? Container(
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    color: SaoColors.surfaceMutedFor(context),
+                    border: Border.all(color: SaoColors.borderFor(context)),
+                  ),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.map_rounded, size: 42, color: SaoColors.textMutedFor(context)),
+                        const SizedBox(height: 8),
+                        Text(summary, style: TextStyle(fontWeight: FontWeight.w700, color: SaoColors.textFor(context))),
+                        const SizedBox(height: 4),
+                        Text(emptyMessage, style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context))),
+                      ],
+                    ),
+                  ),
+                )
+              : FlutterMap(
+                  options: MapOptions(
+                    initialCenter: _mapCenter(groupedPoints),
+                    initialZoom: groupedPoints.length == 1 ? 11.0 : 8.0,
+                    initialCameraFit: groupedPoints.length > 1
+                        ? CameraFit.bounds(
+                            bounds: _mapBounds(groupedPoints),
+                            padding: const EdgeInsets.all(40),
+                          )
+                        : null,
+                  ),
+                  children: [
+                    TileLayer(
+                      urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName: 'mx.sao.desktop',
+                    ),
+                    CircleLayer(
+                      circles: visibleMarkers.map((entry) {
+                        final color = SaoColors.getRiskColor(entry.item.risk);
+                        final isSelected = entry.item.id == _selectedMapPointId;
+                        return CircleMarker(
+                          point: entry.point,
+                          radius: isSelected ? 13 : 9,
+                          color: color.withValues(alpha: isSelected ? 0.82 : 0.58),
+                          borderColor: isSelected ? Colors.white : color,
+                          borderStrokeWidth: isSelected ? 2.0 : 1.2,
+                        );
+                      }).toList(),
+                    ),
+                    MarkerLayer(
+                      markers: visibleMarkers.map((entry) {
+                        final item = entry.item;
+                        final color = SaoColors.getRiskColor(item.risk);
+                        final isSelected = item.id == _selectedMapPointId;
+                        return Marker(
+                          point: entry.point,
+                          width: 42,
+                          height: 46,
+                          child: Tooltip(
+                            message: _expandedMarkerTooltip(entry),
+                            child: GestureDetector(
+                              onTap: () => setState(() => _selectedMapPointId = item.id),
+                              child: Stack(
+                                clipBehavior: Clip.none,
+                                alignment: Alignment.topCenter,
+                                children: [
+                                  Icon(
+                                    Icons.location_on_rounded,
+                                    size: isSelected ? 34 : 30,
+                                    color: isSelected ? SaoColors.info : color,
+                                    shadows: const [
+                                      Shadow(
+                                        blurRadius: 8,
+                                        color: Color(0x66000000),
+                                        offset: Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  if (entry.groupSize > 1 && entry.groupIndex == 0)
+                                    Positioned(
+                                      top: -2,
+                                      right: -2,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: SaoColors.gray900,
+                                          borderRadius: BorderRadius.circular(999),
+                                          border: Border.all(color: Colors.white, width: 1.5),
+                                        ),
+                                        child: Text(
+                                          '${entry.groupSize}',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+        ),
+      );
+    }
+
     return ConstrainedBox(
       constraints: BoxConstraints(minHeight: minCardHeight),
       child: Container(
@@ -544,120 +878,101 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
-            const SizedBox(height: 4),
-            Text(subtitle, style: const TextStyle(fontSize: 12, color: SaoColors.gray600)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 4),
+                      Text(subtitle, style: const TextStyle(fontSize: 12, color: SaoColors.gray600)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  alignment: WrapAlignment.end,
+                  children: [
+                    _mapMetricChip(
+                      Icons.assignment_rounded,
+                      '${points.length} actividades',
+                    ),
+                    _mapMetricChip(
+                      Icons.place_rounded,
+                      '${groupedPoints.length} ubicaciones',
+                    ),
+                  ],
+                ),
+              ],
+            ),
             const SizedBox(height: 12),
             filtersSection,
             const SizedBox(height: 12),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: SizedBox(
-                height: mapHeight,
-                child: points.isEmpty
-                    ? Container(
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(12),
-                          color: SaoColors.surfaceMutedFor(context),
-                          border: Border.all(color: SaoColors.borderFor(context)),
-                        ),
-                        child: Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(Icons.map_rounded, size: 42, color: SaoColors.textMutedFor(context)),
-                              const SizedBox(height: 8),
-                              Text(summary, style: TextStyle(fontWeight: FontWeight.w700, color: SaoColors.textFor(context))),
-                              const SizedBox(height: 4),
-                              Text(emptyMessage, style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context))),
-                            ],
-                          ),
-                        ),
-                      )
-                    : FlutterMap(
-                        options: MapOptions(
-                          initialCenter: _mapCenter(groupedPoints),
-                          initialZoom: groupedPoints.length == 1 ? 11.0 : 8.0,
-                          initialCameraFit: groupedPoints.length > 1
-                              ? CameraFit.bounds(
-                                  bounds: _mapBounds(groupedPoints),
-                                  padding: const EdgeInsets.all(40),
-                                )
-                              : null,
-                        ),
-                        children: [
-                          TileLayer(
-                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                            userAgentPackageName: 'mx.sao.desktop',
-                          ),
-                          CircleLayer(
-                            circles: groupedPoints.map((entry) {
-                              final color = SaoColors.getRiskColor(entry.items.first.risk);
-                              return CircleMarker(
-                                point: LatLng(entry.lat, entry.lon),
-                                radius: entry.items.length > 1 ? 12 : 9,
-                                color: color.withValues(alpha: 0.65),
-                                borderColor: color,
-                                borderStrokeWidth: 1.5,
-                              );
-                            }).toList(),
-                          ),
-                          MarkerLayer(
-                            markers: groupedPoints.map((entry) {
-                              final item = entry.items.first;
-                              final color = SaoColors.getRiskColor(item.risk);
-                              return Marker(
-                                point: LatLng(entry.lat, entry.lon),
-                                width: 38,
-                                height: 42,
-                                child: Tooltip(
-                                  message: _groupedTooltip(entry),
-                                  child: Stack(
-                                    clipBehavior: Clip.none,
-                                    alignment: Alignment.topCenter,
-                                    children: [
-                                      Icon(
-                                        Icons.location_on_rounded,
-                                        size: 30,
-                                        color: color,
-                                        shadows: const [
-                                          Shadow(
-                                            blurRadius: 8,
-                                            color: Color(0x66000000),
-                                            offset: Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      if (entry.items.length > 1)
-                                        Positioned(
-                                          top: -2,
-                                          right: -2,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                            decoration: BoxDecoration(
-                                              color: SaoColors.gray900,
-                                              borderRadius: BorderRadius.circular(999),
-                                              border: Border.all(color: Colors.white, width: 1.5),
-                                            ),
-                                            child: Text(
-                                              '${entry.items.length}',
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w700,
-                                              ),
-                                            ),
-                                          ),
-                                        ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ],
-                      ),
-              ),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _legendChip(
+                  'Todas',
+                  SaoColors.gray600,
+                  active: _planningStatusFilter == 'todos',
+                  onTap: () => setState(() => _planningStatusFilter = 'todos'),
+                ),
+                _legendChip(
+                  'Pendiente',
+                  SaoColors.info,
+                  active: _planningStatusFilter == 'PENDIENTE' || _planningStatusFilter == 'REVISION_PENDIENTE',
+                  onTap: () => setState(() => _planningStatusFilter = 'REVISION_PENDIENTE'),
+                ),
+                _legendChip(
+                  'En curso',
+                  SaoColors.warning,
+                  active: _planningStatusFilter == 'EN_CURSO',
+                  onTap: () => setState(() => _planningStatusFilter = 'EN_CURSO'),
+                ),
+                _legendChip(
+                  'Completada / validada',
+                  SaoColors.success,
+                  active: _planningStatusFilter == 'COMPLETADA',
+                  onTap: () => setState(() => _planningStatusFilter = 'COMPLETADA'),
+                ),
+                _legendChip(
+                  'Rechazada',
+                  SaoColors.error,
+                  active: _planningStatusFilter == 'RECHAZADO',
+                  onTap: () => setState(() => _planningStatusFilter = 'RECHAZADO'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final showSidePanel = constraints.maxWidth >= 1050;
+                if (!showSidePanel) {
+                  return Column(
+                    children: [
+                      buildMapView(),
+                      const SizedBox(height: 12),
+                      _buildMapSelectionPanel(selectedPoint),
+                    ],
+                  );
+                }
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(flex: 7, child: buildMapView()),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      flex: 4,
+                      child: _buildMapSelectionPanel(selectedPoint),
+                    ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -705,8 +1020,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               SizedBox(
                 height: (locationCounts.length * 28.0).clamp(40.0, 160.0),
                 child: Scrollbar(
+                  controller: _mapLocationsScrollController,
                   thumbVisibility: locationCounts.length > 5,
                   child: ListView.builder(
+                    controller: _mapLocationsScrollController,
                     itemCount: locationCounts.length,
                     itemBuilder: (context, index) {
                       final item = locationCounts[index];
@@ -729,6 +1046,32 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
+  Widget _mapMetricChip(IconData icon, String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceRaisedFor(context),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: SaoColors.info),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: SaoColors.gray700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCompactMapFilters() {
     final activeCount = [_planningStatusFilter, _planningRiskFilter, _planningReviewFilter]
         .where((value) => value != 'todos')
@@ -736,6 +1079,21 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        TextField(
+          onChanged: (value) => setState(() => _mapSearchQuery = value.trim().toLowerCase()),
+          decoration: InputDecoration(
+            hintText: 'Buscar por actividad, frente, municipio o estado',
+            prefixIcon: const Icon(Icons.search_rounded),
+            isDense: true,
+            filled: true,
+            fillColor: SaoColors.surfaceMutedFor(context),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: BorderSide(color: SaoColors.borderFor(context)),
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
         Row(
           children: [
             OutlinedButton.icon(
@@ -746,7 +1104,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               ),
               label: Text('Filtros del mapa ($activeCount activos)'),
             ),
-            if (activeCount > 0) ...[
+            if (activeCount > 0 || _mapSearchQuery.isNotEmpty) ...[
               const SizedBox(width: 8),
               TextButton(
                 onPressed: () {
@@ -754,6 +1112,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     _planningStatusFilter = 'todos';
                     _planningRiskFilter = 'todos';
                     _planningReviewFilter = 'todos';
+                    _mapSearchQuery = '';
                   });
                 },
                 child: const Text('Limpiar'),
@@ -871,24 +1230,53 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         .toList(growable: false);
   }
 
-  String _groupedTooltip(_GroupedGeoPoint entry) {
-    final lines = <String>[];
-    final first = entry.items.first;
-    final location = [
-      if (first.municipality.isNotEmpty || first.state.isNotEmpty)
-        '${first.municipality}${first.state.isNotEmpty ? ' / ${first.state}' : ''}',
-      if (first.front.isNotEmpty) 'Frente: ${first.front}',
+  String _expandedMarkerTooltip(_ExpandedGeoPoint entry) {
+    final lines = <String>[
+      entry.item.label,
+      if (entry.item.municipality.isNotEmpty || entry.item.state.isNotEmpty)
+        '${entry.item.municipality}${entry.item.state.isNotEmpty ? ' / ${entry.item.state}' : ''}',
+      if (entry.item.front.isNotEmpty) 'Frente: ${entry.item.front}',
+      if (entry.groupSize > 1) '${entry.groupIndex + 1} de ${entry.groupSize} actividades en la misma ubicación',
     ];
-    if (location.isNotEmpty) {
-      lines.addAll(location);
-    }
-    if (entry.items.length > 1) {
-      lines.add('${entry.items.length} actividades en esta ubicación:');
-    }
-    for (final item in entry.items) {
-      lines.add('• ${item.label} (${_normalizeExecutionStatus(item.status)})');
-    }
     return lines.join('\n');
+  }
+
+  List<_ExpandedGeoPoint> _expandMapMarkers(List<_GroupedGeoPoint> groups) {
+    final result = <_ExpandedGeoPoint>[];
+
+    for (final group in groups) {
+      if (group.items.length <= 1) {
+        result.add(
+          _ExpandedGeoPoint(
+            item: group.items.first,
+            point: LatLng(group.lat, group.lon),
+            groupIndex: 0,
+            groupSize: 1,
+          ),
+        );
+        continue;
+      }
+
+      final angleStep = (2 * math.pi) / group.items.length;
+      final baseRadius = group.items.length <= 3 ? 0.0035 : 0.0045;
+      final lonFactor = math.max(0.35, math.cos(group.lat * math.pi / 180).abs());
+
+      for (var i = 0; i < group.items.length; i++) {
+        final angle = (-math.pi / 2) + (angleStep * i);
+        final latOffset = math.sin(angle) * baseRadius;
+        final lonOffset = (math.cos(angle) * baseRadius) / lonFactor;
+        result.add(
+          _ExpandedGeoPoint(
+            item: group.items[i],
+            point: LatLng(group.lat + latOffset, group.lon + lonOffset),
+            groupIndex: i,
+            groupSize: group.items.length,
+          ),
+        );
+      }
+    }
+
+    return result;
   }
 
   Widget _mapFilterChip(String label, bool active, VoidCallback onTap, Color color) {
@@ -938,10 +1326,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text('Cola de Validacion Critica', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const Text('Pendientes críticos por revisar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           const Text(
-            'Pendientes de revision con prioridad alta y rezago >24h',
+            'Actividades con mayor rezago operativo o necesidad de atención inmediata.',
             style: TextStyle(color: SaoColors.gray600),
           ),
           const SizedBox(height: 12),
@@ -1028,10 +1416,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   List<DashboardGeoPoint> _filterPlanningMapPoints(List<DashboardGeoPoint> items) {
     return items.where((item) {
-      final byStatus = _planningStatusFilter == 'todos' || _normalizeExecutionStatus(item.status) == _planningStatusFilter;
+      final byStatus = _planningStatusFilter == 'todos' || _effectiveMapStatus(item) == _planningStatusFilter;
       final byRisk = _planningRiskFilter == 'todos' || item.risk == _planningRiskFilter;
       final byReview = _planningReviewFilter == 'todos' || _normalizeReviewStatus(item.reviewStatus) == _planningReviewFilter;
-      return byStatus && byRisk && byReview;
+      final searchable = [
+        item.label,
+        item.front,
+        item.municipality,
+        item.state,
+        item.assignedName ?? '',
+      ].join(' ').toLowerCase();
+      final bySearch = _mapSearchQuery.isEmpty || searchable.contains(_mapSearchQuery);
+      return byStatus && byRisk && byReview && bySearch;
     }).toList(growable: false);
   }
 
@@ -1055,14 +1451,33 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     if (normalized == 'PENDIENTE_REVISION') return 'REVISION_PENDIENTE';
     if (normalized == 'EN_REVISION') return 'REVISION_PENDIENTE';
     if (normalized == 'PROGRAMADA') return 'PENDIENTE';
+    if (normalized == 'APROBADA' || normalized == 'APROBADO' || normalized == 'APPROVED') return 'COMPLETADA';
     return normalized;
+  }
+
+  String _effectiveMapStatus(DashboardGeoPoint point) {
+    final reviewStatus = _normalizeReviewStatus(point.reviewStatus);
+    final reviewDecision = _normalizeReviewStatus(point.reviewDecision ?? '');
+    if (reviewStatus == 'APROBADO' || reviewDecision == 'APROBADO') {
+      return 'COMPLETADA';
+    }
+    if (reviewStatus == 'RECHAZADO' || reviewDecision == 'RECHAZADO') {
+      return 'RECHAZADO';
+    }
+    return _normalizeExecutionStatus(point.status);
   }
 
   String _normalizeReviewStatus(String raw) {
     final normalized = raw.trim().toUpperCase().replaceAll(' ', '_');
-    if (normalized == 'APROBADA') return 'APROBADO';
-    if (normalized == 'RECHAZADA') return 'RECHAZADO';
-    if (normalized == 'PENDIENTE' || normalized == 'EN_REVISION') return 'PENDIENTE_REVISION';
+    if (normalized == 'APROBADA' || normalized == 'APROBADO' || normalized == 'APPROVED' || normalized == 'APPROVE') {
+      return 'APROBADO';
+    }
+    if (normalized == 'RECHAZADA' || normalized == 'RECHAZADO' || normalized == 'REJECTED' || normalized == 'REJECT') {
+      return 'RECHAZADO';
+    }
+    if (normalized == 'PENDIENTE' || normalized == 'EN_REVISION' || normalized == 'PENDING') {
+      return 'PENDIENTE_REVISION';
+    }
     return normalized;
   }
 
@@ -1086,12 +1501,331 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return '${id.substring(0, 8)}...';
   }
 
-  void _openReviewPage(String activityId) {
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ValidationPageNewDesign(initialActivityId: activityId),
+  DashboardGeoPoint? _resolveSelectedMapPoint(List<DashboardGeoPoint> points) {
+    if (points.isEmpty) return null;
+    for (final point in points) {
+      if (point.id == _selectedMapPointId) return point;
+    }
+    return points.first;
+  }
+
+  Widget _legendChip(
+    String label,
+    Color color, {
+    bool active = false,
+    VoidCallback? onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: active ? color.withValues(alpha: 0.16) : color.withValues(alpha: 0.10),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(color: active ? color : color.withValues(alpha: 0.28), width: active ? 1.5 : 1),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+            ),
+            const SizedBox(width: 6),
+            Text(label, style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: color)),
+          ],
+        ),
       ),
     );
+  }
+
+  Widget _buildMapSelectionPanel(DashboardGeoPoint? point) {
+    final canOpenReview = point != null && _canOpenReview(point);
+    final canViewPdf = point != null && _canViewPdf(point);
+    final isValidated = point != null && _isValidated(point);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceMutedFor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: point == null
+          ? const _EmptyState(
+              icon: Icons.touch_app_rounded,
+              iconColor: SaoColors.info,
+              message: 'Selecciona un punto en el mapa para ver detalle y acciones.',
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Detalle del punto', style: TextStyle(fontWeight: FontWeight.w700)),
+                const SizedBox(height: 10),
+                Text(point.label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _legendChip(_effectiveMapStatus(point).replaceAll('_', ' '), _statusColor(_effectiveMapStatus(point))),
+                    _legendChip(point.risk.toUpperCase(), SaoColors.getRiskColor(point.risk)),
+                    if (isValidated)
+                      _legendChip('Validada', SaoColors.success)
+                    else if (canOpenReview)
+                      _legendChip('En validación', SaoColors.info),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _mapDetailRow(Icons.folder_open_rounded, 'Frente', point.front.isEmpty ? 'Sin frente' : point.front),
+                _mapDetailRow(Icons.place_rounded, 'Ubicación', '${point.municipality.isEmpty ? 'Sin municipio' : point.municipality}${point.state.isNotEmpty ? ' / ${point.state}' : ''}'),
+                _mapDetailRow(Icons.person_outline_rounded, 'Responsable', (point.assignedName ?? '').trim().isEmpty ? 'Sin responsable' : point.assignedName!),
+                _mapDetailRow(Icons.tag_rounded, 'ID', point.id),
+                _mapDetailRow(Icons.gps_fixed_rounded, 'Coordenadas', '${point.lat.toStringAsFixed(5)}, ${point.lon.toStringAsFixed(5)}'),
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (canOpenReview)
+                      FilledButton.icon(
+                        onPressed: () => _openReviewPage(point.id),
+                        icon: const Icon(Icons.rate_review_rounded, size: 16),
+                        label: const Text('Abrir revisión'),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: (isValidated ? SaoColors.success : SaoColors.gray600).withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: (isValidated ? SaoColors.success : SaoColors.gray600).withValues(alpha: 0.30),
+                          ),
+                        ),
+                        child: Text(
+                          isValidated ? 'Validada' : 'Sin revisión activa',
+                          style: TextStyle(
+                            color: isValidated ? SaoColors.success : SaoColors.gray700,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    if (canViewPdf)
+                      OutlinedButton.icon(
+                        onPressed: () => _openPdfForPoint(point),
+                        icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                        label: const Text('Ver PDF'),
+                      ),
+                    OutlinedButton.icon(
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: point.id));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('ID de actividad copiado')),
+                        );
+                      },
+                      icon: const Icon(Icons.copy_rounded, size: 16),
+                      label: const Text('Copiar ID'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+    );
+  }
+
+  Widget _mapDetailRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: SaoColors.gray600),
+          const SizedBox(width: 8),
+          Expanded(
+            child: RichText(
+              text: TextSpan(
+                style: const TextStyle(color: SaoColors.gray700, fontSize: 12),
+                children: [
+                  TextSpan(text: '$label: ', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  TextSpan(text: value),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _statusColor(String raw) {
+    return switch (_normalizeExecutionStatus(raw)) {
+      'COMPLETADA' => SaoColors.success,
+      'EN_CURSO' => SaoColors.warning,
+      'RECHAZADO' => SaoColors.error,
+      'REVISION_PENDIENTE' => SaoColors.info,
+      _ => SaoColors.primary,
+    };
+  }
+
+  bool _canOpenReview(DashboardGeoPoint point) {
+    final executionStatus = _effectiveMapStatus(point);
+    final reviewStatus = _normalizeReviewStatus(point.reviewStatus);
+    if (_isValidated(point)) return false;
+    return executionStatus == 'REVISION_PENDIENTE' || reviewStatus == 'PENDIENTE_REVISION';
+  }
+
+  bool _canViewPdf(DashboardGeoPoint point) {
+    return point.hasReport == true || _effectiveMapStatus(point) == 'COMPLETADA';
+  }
+
+  bool _isValidated(DashboardGeoPoint point) {
+    final reviewStatus = _normalizeReviewStatus(point.reviewStatus);
+    final reviewDecision = _normalizeReviewStatus(point.reviewDecision ?? '');
+    return reviewStatus == 'APROBADO' || reviewDecision == 'APROBADO';
+  }
+
+  Future<void> _openPdfForPoint(DashboardGeoPoint point) async {
+    try {
+      final activityId = point.id.trim();
+      final localPath = await findExistingLocalReportPath(
+        activityId: activityId,
+        projectId: point.projectId,
+        front: point.front,
+        state: point.state,
+        municipality: point.municipality,
+        activityType: point.label,
+      );
+
+      if (localPath != null && localPath.trim().isNotEmpty) {
+        final opened = await _openDashboardLocalPath(localPath);
+        if (opened) {
+          return;
+        }
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Se encontró el PDF local, pero no se pudo abrir')),
+        );
+        return;
+      }
+
+      if (activityId.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No se pudo identificar la actividad para recuperar el PDF')),
+        );
+        return;
+      }
+
+      if (!mounted) return;
+      final shouldDownload = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('PDF no encontrado localmente'),
+          content: const Text('Este PDF no está guardado en este equipo. ¿Quieres descargarlo de la nube?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('Descargar'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldDownload != true) return;
+
+      final detail = await ref.read(completedActivityDetailProvider(activityId).future);
+      final pdfEvidence = _selectPdfEvidenceForDownload(detail);
+      if (pdfEvidence == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay una copia PDF disponible en la nube para esta actividad')),
+        );
+        return;
+      }
+
+      final file = await _downloadPdfFromCloud(detail, pdfEvidence);
+      if (!mounted) return;
+      final opened = await _openDashboardLocalPath(file.path);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            opened ? 'PDF descargado y abierto' : 'PDF descargado en ${file.path}',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo abrir el PDF: $error')),
+      );
+    }
+  }
+
+  Future<File> _downloadPdfFromCloud(
+    CompletedActivityDetail detail,
+    EvidenceItem evidence,
+  ) async {
+    final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
+    final uri = Uri.parse(signedUrl);
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('No se pudo descargar PDF (${response.statusCode})');
+      }
+
+      final bytes = <int>[];
+      await for (final chunk in response) {
+        bytes.addAll(chunk);
+      }
+      if (bytes.isEmpty) {
+        throw const FileSystemException('El PDF descargado llegó vacío');
+      }
+
+      final docsRootPath = await _resolveDashboardDocumentsRootPath();
+      final projectFolder = _sanitizePdfFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
+      final frontFolder = _sanitizePdfFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
+      final stateFolder = _sanitizePdfFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
+      final municipalityFolder = _sanitizePdfFolderSegment(detail.summary.municipio, fallback: 'SIN_MUNICIPIO');
+      final activityFolder = _sanitizePdfFolderSegment(detail.summary.activityType, fallback: 'ACTIVIDAD');
+      final expedienteFolder = _sanitizePdfFolderSegment(detail.summary.id, fallback: 'SIN_ID');
+      final activityDir = Directory(
+        '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
+      );
+      if (!await activityDir.exists()) {
+        await activityDir.create(recursive: true);
+      }
+
+      final file = File('${activityDir.path}/${_inferPdfFileName(evidence, detail.summary.id)}');
+      await file.writeAsBytes(bytes, flush: true);
+
+      await registerDownloadedReportReference(
+        activityId: detail.summary.id,
+        file: file,
+        sourceEvidenceId: evidence.id,
+        generatedAt: evidence.uploadedAt,
+      );
+
+      return file;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  void _openReviewPage(String activityId) {
+    ref.read(operationsHubActivityIdProvider.notifier).state = activityId;
+    ref.read(operationsHubTabIndexProvider.notifier).state = 0;
+    ref.read(appShellIndexProvider.notifier).state = 2;
+    ref.read(appRefreshTokenProvider.notifier).state++;
   }
 }
 
@@ -1104,6 +1838,20 @@ class _GroupedGeoPoint {
     required this.lat,
     required this.lon,
     required this.items,
+  });
+}
+
+class _ExpandedGeoPoint {
+  final DashboardGeoPoint item;
+  final LatLng point;
+  final int groupIndex;
+  final int groupSize;
+
+  const _ExpandedGeoPoint({
+    required this.item,
+    required this.point,
+    required this.groupIndex,
+    required this.groupSize,
   });
 }
 

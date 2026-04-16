@@ -12,7 +12,11 @@ import 'package:latlong2/latlong.dart' hide Path;
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../data/repositories/assignments_repository.dart';
+import '../../data/repositories/evidence_repository.dart';
 import '../../ui/theme/sao_colors.dart';
+import '../completed_activities/completed_activities_provider.dart';
+import '../dashboard/dashboard_provider.dart';
+import '../reports/reports_provider.dart';
 import 'planning_provider.dart';
 
 class _ToggleCalendarIntent extends Intent {
@@ -73,9 +77,14 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
   Widget build(BuildContext context) {
     final assignmentsAsync = ref.watch(planningAssignmentsProvider);
     final monthlyAssignmentsAsync = ref.watch(planningMonthlyAssignmentsProvider);
+    final reportActivityIdsAsync = ref.watch(planningReportActivityIdsProvider);
     final selectedDate = ref.watch(selectedPlanningDateProvider);
     final selectedProject = ref.watch(activeProjectIdProvider);
     final projectsAsync = ref.watch(availableProjectsProvider);
+    final reportActivityIds = reportActivityIdsAsync.maybeWhen(
+      data: (ids) => ids,
+      orElse: () => const <String>{},
+    );
     final dateLabel = DateFormat('EEEE, d MMM yyyy', 'es').format(selectedDate);
 
     return Shortcuts(
@@ -306,6 +315,7 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
                         child: _HourlyAssignmentsView(
                           projectId: selectedProject,
                           assignments: uniqueAssignments,
+                          reportActivityIds: reportActivityIds,
                           selectedDate: selectedDate,
                           onEdited: () {
                             ScaffoldMessenger.of(context).showSnackBar(
@@ -579,51 +589,41 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   }
 
   int? _parsePkMeters(String raw) {
-    final value = raw.trim();
-    if (value.isEmpty) return null;
+    final compact = raw.trim().replaceAll(' ', '');
+    if (compact.isEmpty || compact == '—') return null;
 
-    final compact = value.replaceAll(' ', '');
     final chainage = RegExp(r'^(\d+)\+(\d{1,3})$').firstMatch(compact);
     if (chainage != null) {
-      final km = int.parse(chainage.group(1)!);
-      final meters = int.parse(chainage.group(2)!.padRight(3, '0'));
+      final km = int.tryParse(chainage.group(1)!);
+      final meters = int.tryParse(chainage.group(2)!.padRight(3, '0'));
+      if (km == null || meters == null || meters > 999) return null;
       return (km * 1000) + meters;
     }
 
+    final chainageNoMeters = RegExp(r'^(\d+)\+$').firstMatch(compact);
+    if (chainageNoMeters != null) {
+      final km = int.tryParse(chainageNoMeters.group(1)!);
+      if (km == null) return null;
+      return km * 1000;
+    }
+
     if (RegExp(r'^\d+$').hasMatch(compact)) {
-      return int.parse(compact);
+      final parsed = int.tryParse(compact);
+      if (parsed == null) return null;
+      if (compact.length <= 3) return parsed * 1000;
+      return parsed;
     }
 
     return null;
   }
 
   String _normalizePkInput(String raw) {
-    final value = raw.trim();
-    if (value.isEmpty) return '';
-    final compact = value.replaceAll(' ', '');
+    final compact = raw.trim().replaceAll(' ', '');
+    if (compact.isEmpty) return '';
 
-    final chainage = RegExp(r'^(\d+)\+(\d{1,3})$').firstMatch(compact);
-    if (chainage != null) {
-      return '${chainage.group(1)}+${chainage.group(2)!.padRight(3, '0')}';
-    }
-
-    final chainageNoMeters = RegExp(r'^(\d+)\+$').firstMatch(compact);
-    if (chainageNoMeters != null) {
-      return '${chainageNoMeters.group(1)}+000';
-    }
-
-    if (RegExp(r'^\d+$').hasMatch(compact)) {
-      if (compact.length <= 3) {
-        return '$compact+000';
-      }
-      final km = compact.substring(0, 3);
-      final meters = compact.length > 3
-          ? compact.substring(3, compact.length > 6 ? 6 : compact.length)
-          : '';
-      return '$km+${meters.padRight(3, '0')}';
-    }
-
-    return compact;
+    final meters = _parsePkMeters(compact);
+    if (meters == null) return compact;
+    return '${meters ~/ 1000}+${(meters % 1000).toString().padLeft(3, '0')}';
   }
 
   String _formatTimeValue(DateTime value) {
@@ -1851,6 +1851,162 @@ class _AssignmentActionsMenu extends ConsumerStatefulWidget {
 class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> {
   bool _loading = false;
 
+  Future<void> _transfer() async {
+    final assignmentsRepo = ref.read(assignmentsRepositoryProvider);
+    final projectId = widget.item.projectId.trim().isNotEmpty
+        ? widget.item.projectId.trim().toUpperCase()
+        : ref.read(activeProjectIdProvider).trim().toUpperCase();
+
+    if (projectId.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Selecciona un proyecto válido para transferir la actividad.')),
+      );
+      return;
+    }
+
+    setState(() => _loading = true);
+    List<AssignmentAssigneeOption> assignees;
+    try {
+      assignees = await assignmentsRepo.getTransferCandidates(projectId);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo cargar el equipo del proyecto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _loading = false);
+
+    final candidates = assignees
+        .where((item) => item.userId.trim() != widget.item.assigneeUserId.trim())
+        .toList()
+      ..sort((left, right) => left.fullName.toLowerCase().compareTo(right.fullName.toLowerCase()));
+
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No hay otro usuario disponible para recibir la actividad.')),
+      );
+      return;
+    }
+
+    final reasonController = TextEditingController();
+    AssignmentAssigneeOption selectedAssignee = candidates.first;
+
+    final selection = await showDialog<({AssignmentAssigneeOption assignee, String? reason})>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: const Text('Transferir actividad'),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Selecciona el nuevo responsable para ${widget.item.activityTypeName}.',
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<AssignmentAssigneeOption>(
+                    initialValue: selectedAssignee,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Nuevo responsable',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: candidates
+                        .map(
+                          (assignee) => DropdownMenuItem<AssignmentAssigneeOption>(
+                            value: assignee,
+                            child: Text(
+                              assignee.fullName.trim().isEmpty ? assignee.email : assignee.fullName,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        )
+                        .toList(),
+                    onChanged: (value) {
+                      if (value == null) return;
+                      setDialogState(() => selectedAssignee = value);
+                    },
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reasonController,
+                    minLines: 2,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      labelText: 'Motivo de transferencia',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(ctx).pop(),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: () {
+                  final reason = reasonController.text.trim();
+                  Navigator.of(ctx).pop((
+                    assignee: selectedAssignee,
+                    reason: reason.isEmpty ? null : reason,
+                  ));
+                },
+                icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                label: const Text('Transferir'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    reasonController.dispose();
+
+    if (selection == null || !mounted) {
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      await assignmentsRepo.transferAssignment(
+        assignmentId: widget.item.id,
+        assigneeUserId: selection.assignee.userId,
+        reason: selection.reason,
+      );
+      if (!mounted) return;
+      widget.onDeleted(widget.item.id);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Actividad transferida a ${selection.assignee.fullName}.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo transferir la actividad: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
+      }
+    }
+  }
+
   Future<void> _confirm() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -1917,6 +2073,10 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
           widget.onDuplicated();
           return;
         }
+        if (value == 'transfer') {
+          _transfer();
+          return;
+        }
         if (value == 'delete') {
           _confirm();
         }
@@ -1939,6 +2099,16 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
               Icon(Icons.copy_rounded, size: 16),
               SizedBox(width: 8),
               Text('Duplicar'),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'transfer',
+          child: Row(
+            children: [
+              Icon(Icons.swap_horiz_rounded, size: 16),
+              SizedBox(width: 8),
+              Text('Transferir'),
             ],
           ),
         ),
@@ -2447,6 +2617,7 @@ class _CollapsedCalendarRail extends StatelessWidget {
 class _HourlyAssignmentsView extends StatefulWidget {
   final String projectId;
   final List<AssignmentItem> assignments;
+  final Set<String> reportActivityIds;
   final DateTime selectedDate;
   final VoidCallback onEdited;
   final VoidCallback onDuplicated;
@@ -2456,6 +2627,7 @@ class _HourlyAssignmentsView extends StatefulWidget {
   const _HourlyAssignmentsView({
     required this.projectId,
     required this.assignments,
+    required this.reportActivityIds,
     required this.selectedDate,
     required this.onEdited,
     required this.onDuplicated,
@@ -2480,6 +2652,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
   final TextEditingController _pkFilterController = TextEditingController();
   bool _overdueBlinkOn = false;
   String? _hoveredAssignmentId;
+  String? _openingReportAssignmentId;
   Timer? _overdueBlinkTimer;
 
   @override
@@ -2571,7 +2744,14 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
       return km * 1000;
     }
 
-    return int.tryParse(compact);
+    if (RegExp(r'^\d+$').hasMatch(compact)) {
+      final parsed = int.tryParse(compact);
+      if (parsed == null) return null;
+      if (compact.length <= 3) return parsed * 1000;
+      return parsed;
+    }
+
+    return null;
   }
 
   (int?, int?) _pkFilterRange() {
@@ -2898,6 +3078,653 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     );
   }
 
+  bool _hasGeneratedReport(AssignmentItem item) {
+    return widget.reportActivityIds.contains(item.id.trim());
+  }
+
+  bool _isCompletedWithReport(AssignmentItem item) {
+    return _hasGeneratedReport(item) && _statusGroup(_effectiveStatus(item)) == 'terminada';
+  }
+
+  Future<CompletedActivityDetail> _fetchCompletedActivityDetail(String activityId) async {
+    const client = BackendApiClient();
+    final decoded = await client.getJson('/api/v1/completed-activities/$activityId');
+    if (decoded is! Map<String, dynamic>) {
+      throw Exception('Respuesta inesperada del servidor');
+    }
+    return CompletedActivityDetail.fromJson(decoded);
+  }
+
+  String _stringifyRegisteredValue(dynamic value) {
+    if (value == null) return '';
+    if (value is String) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty || trimmed.toLowerCase() == 'null') return '';
+      return trimmed;
+    }
+    if (value is num || value is bool) return value.toString();
+    if (value is List) {
+      final parts = value
+          .map(_stringifyRegisteredValue)
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+      return parts.join(', ');
+    }
+    if (value is Map) {
+      final parts = value.entries
+          .map((entry) {
+            final resolved = _stringifyRegisteredValue(entry.value);
+            if (resolved.isEmpty) return '';
+            return '${entry.key}: $resolved';
+          })
+          .where((entry) => entry.isNotEmpty)
+          .toList(growable: false);
+      return parts.join(' · ');
+    }
+    return value.toString().trim();
+  }
+
+  String _labelizeRegisteredField(String key) {
+    final normalized = key.trim().toLowerCase();
+    switch (normalized) {
+      case 'purpose':
+      case 'proposito':
+      case 'objetivo':
+        return 'Propósito';
+      case 'detail':
+      case 'description':
+      case 'descripcion':
+        return 'Descripción';
+      case 'agreements':
+      case 'acuerdos':
+        return 'Acuerdos';
+      case 'result':
+      case 'resultado':
+        return 'Resultado';
+      case 'notes':
+      case 'notas':
+        return 'Notas';
+      case 'colony':
+      case 'colonia':
+        return 'Colonia';
+      default:
+        return key
+            .replaceAll('_', ' ')
+            .split(' ')
+            .where((part) => part.trim().isNotEmpty)
+            .map((part) => '${part[0].toUpperCase()}${part.substring(1)}')
+            .join(' ');
+    }
+  }
+
+  String _formatRegisteredDate(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return '';
+    final parsed = DateTime.tryParse(trimmed)?.toLocal();
+    if (parsed == null) return trimmed;
+    return DateFormat("d 'de' MMM y · HH:mm", 'es_MX').format(parsed);
+  }
+
+  List<MapEntry<String, String>> _registeredSummaryRows(CompletedActivityDetail detail) {
+    final summary = detail.summary;
+    final rows = <MapEntry<String, String>>[];
+
+    void add(String label, String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      rows.add(MapEntry(label, trimmed));
+    }
+
+    add('Actividad', summary.title.trim().isEmpty ? summary.activityType : summary.title);
+    add('Tipo', summary.activityType);
+    add('Responsable', summary.assignedName);
+    add('PK', summary.pk);
+    add('Frente', summary.front);
+    return rows;
+  }
+
+  List<MapEntry<String, String>> _registeredLocationRows(CompletedActivityDetail detail) {
+    final summary = detail.summary;
+    final rows = <MapEntry<String, String>>[];
+
+    void add(String label, String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      rows.add(MapEntry(label, trimmed));
+    }
+
+    add('Estado', summary.estado);
+    add('Municipio', summary.municipio);
+    add('Colonia', detail.colonia);
+    return rows;
+  }
+
+  List<MapEntry<String, String>> _registeredReviewRows(CompletedActivityDetail detail) {
+    final summary = detail.summary;
+    final rows = <MapEntry<String, String>>[];
+
+    void add(String label, String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      rows.add(MapEntry(label, trimmed));
+    }
+
+    add('Revisó', summary.reviewedByName);
+    add('Fecha de revisión', _formatRegisteredDate(summary.reviewedAt));
+    add('Evidencias', detail.evidences.length == 1 ? '1 evidencia' : '${detail.evidences.length} evidencias');
+    add('Reporte', summary.hasReport ? 'Generado' : 'No generado');
+    return rows;
+  }
+
+  List<MapEntry<String, String>> _registeredNarrativeRows(CompletedActivityDetail detail) {
+    final rows = <MapEntry<String, String>>[];
+
+    void add(String label, String value) {
+      final trimmed = value.trim();
+      if (trimmed.isEmpty) return;
+      rows.add(MapEntry(label, trimmed));
+    }
+
+    const hiddenKeys = <String>{
+      'has_report',
+      'report_generated_at',
+      'sync_version',
+      'review_status',
+      'review_decision',
+      'evidences',
+      'audit_trail',
+      'estado',
+      'municipio',
+      'colonia',
+      'pk',
+      'front',
+      'frente',
+      'assigned_name',
+      'reviewed_by_name',
+      'reviewed_at',
+      'activity_type',
+      'title',
+    };
+
+    if (detail.reviewNotes.trim().isNotEmpty) {
+      add('Notas de revisión', detail.reviewNotes);
+    }
+
+    for (final entry in detail.dataFields.entries) {
+      final key = entry.key.trim();
+      if (key.isEmpty || hiddenKeys.contains(key.toLowerCase())) continue;
+      final value = _stringifyRegisteredValue(entry.value);
+      if (value.isEmpty) continue;
+      add(_labelizeRegisteredField(key), value);
+    }
+
+    return rows;
+  }
+
+  Widget _buildDetailSection(
+    String title,
+    IconData icon,
+    List<MapEntry<String, String>> rows,
+  ) {
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, size: 16, color: SaoColors.primary),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: SaoColors.gray800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            children: rows
+                .map(
+                  (row) => SizedBox(
+                    width: 300,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          row.key,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: SaoColors.gray600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          row.value,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            color: SaoColors.gray900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNarrativeSection(List<MapEntry<String, String>> rows) {
+    if (rows.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(Icons.notes_rounded, size: 16, color: SaoColors.primary),
+              SizedBox(width: 8),
+              Text(
+                'Datos registrados',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: SaoColors.gray800,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...rows.map(
+            (row) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    row.key,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: SaoColors.gray600,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    row.value,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      color: SaoColors.gray900,
+                      height: 1.35,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showCompletedActivityDetail(AssignmentItem item) async {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Row(
+          children: [
+            const Icon(Icons.assignment_turned_in_rounded, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                _displayActivityName(item),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 760,
+          child: FutureBuilder<CompletedActivityDetail>(
+            future: _fetchCompletedActivityDetail(item.id),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const SizedBox(
+                  height: 220,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError || !snapshot.hasData) {
+                return const SizedBox(
+                  height: 220,
+                  child: Center(
+                    child: Text('No se pudo cargar el detalle registrado de la actividad.'),
+                  ),
+                );
+              }
+
+              final detail = snapshot.data!;
+              final summaryRows = _registeredSummaryRows(detail);
+              final locationRows = _registeredLocationRows(detail);
+              final reviewRows = _registeredReviewRows(detail);
+              final narrativeRows = _registeredNarrativeRows(detail);
+
+              return SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: SaoColors.success.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: SaoColors.success.withValues(alpha: 0.35)),
+                      ),
+                      child: const Text(
+                        'Esta actividad ya fue completada y cuenta con reporte generado.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: SaoColors.success,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        const Chip(
+                          avatar: Icon(Icons.check_circle_rounded, size: 16, color: SaoColors.success),
+                          label: Text('Completada'),
+                        ),
+                        ActionChip(
+                          avatar: _openingReportAssignmentId == item.id
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(
+                                  Icons.picture_as_pdf_rounded,
+                                  size: 16,
+                                  color: SaoColors.error,
+                                ),
+                          label: Text(
+                            _openingReportAssignmentId == item.id
+                                ? 'Abriendo reporte...'
+                                : 'Reporte generado',
+                          ),
+                          onPressed: _openingReportAssignmentId == null
+                              ? () => _openActivityReport(item)
+                              : null,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    _buildDetailSection('Resumen', Icons.summarize_rounded, summaryRows),
+                    _buildDetailSection('Ubicación', Icons.place_rounded, locationRows),
+                    _buildDetailSection('Revisión', Icons.fact_check_rounded, reviewRows),
+                    _buildNarrativeSection(narrativeRows),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+        actions: [
+          FilledButton.icon(
+            onPressed: () => _openActivityReport(item),
+            icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+            label: const Text('Abrir reporte'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _handleAssignmentTap(
+    AssignmentItem item, {
+    required DateTime currentStart,
+    required DateTime currentEnd,
+  }) async {
+    if (_isCompletedWithReport(item)) {
+      await _showCompletedActivityDetail(item);
+      return;
+    }
+    await _openAssignmentDetailsEditor(
+      item,
+      currentStart: currentStart,
+      currentEnd: currentEnd,
+    );
+  }
+
+  String _sanitizeReportSegment(String raw, {String fallback = 'SIN_DATO'}) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return fallback;
+    final sanitized = trimmed
+        .replaceAll(RegExp(r'[\\/:*?"<>|]'), '_')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    if (sanitized.isEmpty) return fallback;
+    return sanitized.length <= 80 ? sanitized : sanitized.substring(0, 80).trim();
+  }
+
+  Directory _resolveReportDirectory(CompletedActivityDetail detail) {
+    final home = Platform.isWindows
+        ? Platform.environment['USERPROFILE']
+        : Platform.environment['HOME'];
+    final docsRoot = home != null && home.trim().isNotEmpty
+        ? '$home/Documents'
+        : Directory.current.path;
+    final summary = detail.summary;
+    final projectFolder = _sanitizeReportSegment(summary.projectId, fallback: 'GENERAL');
+    final frontFolder = _sanitizeReportSegment(summary.front, fallback: 'SIN_FRENTE');
+    final stateFolder = _sanitizeReportSegment(summary.estado, fallback: 'SIN_ESTADO');
+    final municipalityFolder = _sanitizeReportSegment(summary.municipio, fallback: 'SIN_MUNICIPIO');
+    final activityFolder = _sanitizeReportSegment(summary.activityType, fallback: 'ACTIVIDAD');
+    final expedienteFolder = _sanitizeReportSegment(summary.id, fallback: 'SIN_ID');
+    return Directory(
+      '$docsRoot/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
+    );
+  }
+
+  EvidenceItem? _pickReportPdfEvidence(CompletedActivityDetail detail) {
+    final candidates = detail.evidences.where((evidence) {
+      final typeToken = evidence.type.trim().toUpperCase();
+      final pathToken = evidence.gcsPath.trim().toLowerCase();
+      return typeToken.contains('PDF') ||
+          typeToken.contains('DOCUMENT') ||
+          pathToken.endsWith('.pdf');
+    }).toList(growable: false);
+    if (candidates.isEmpty) return null;
+
+    final sorted = [...candidates]..sort((a, b) {
+      final ad = DateTime.tryParse(a.uploadedAt)?.toLocal() ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bd = DateTime.tryParse(b.uploadedAt)?.toLocal() ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bd.compareTo(ad);
+    });
+    return sorted.first;
+  }
+
+  Future<void> _openLocalPath(String path) async {
+    final result = await Process.run('open', [path]);
+    if (result.exitCode != 0) {
+      throw ProcessException(
+        'open',
+        [path],
+        '${result.stdout}\n${result.stderr}',
+        result.exitCode,
+      );
+    }
+  }
+
+  Future<File> _downloadReportPdfForActivity(
+    CompletedActivityDetail detail,
+    EvidenceItem evidence,
+  ) async {
+    final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
+    final uri = Uri.parse(signedUrl);
+    final client = HttpClient();
+
+    try {
+      final request = await client.getUrl(uri);
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('No se pudo descargar PDF (${response.statusCode})');
+      }
+
+      final bytes = <int>[];
+      await for (final chunk in response) {
+        bytes.addAll(chunk);
+      }
+      if (bytes.isEmpty) {
+        throw const FileSystemException('El PDF descargado llegó vacío');
+      }
+
+      final targetDir = _resolveReportDirectory(detail);
+      if (!await targetDir.exists()) {
+        await targetDir.create(recursive: true);
+      }
+
+      final stamp = DateFormat('yyyyMMdd_HHmm').format(
+        DateTime.tryParse(evidence.uploadedAt)?.toLocal() ?? DateTime.now(),
+      );
+      final file = File(
+        '${targetDir.path}/SAO_${_sanitizeReportSegment(detail.summary.projectId, fallback: 'GENERAL')}_$stamp.pdf',
+      );
+      await file.writeAsBytes(bytes, flush: true);
+
+      await registerDownloadedReportReference(
+        activityId: detail.summary.id,
+        file: file,
+        sourceEvidenceId: evidence.id,
+        generatedAt: evidence.uploadedAt,
+      );
+
+      return file;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  Future<bool> _confirmReportDownload(AssignmentItem item) async {
+    final decision = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Descargar reporte'),
+        content: Text(
+          'El reporte de "${_displayActivityName(item)}" no está disponible localmente. ¿Deseas descargarlo y abrirlo ahora?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            icon: const Icon(Icons.download_rounded, size: 16),
+            label: const Text('Descargar'),
+          ),
+        ],
+      ),
+    );
+    return decision ?? false;
+  }
+
+  Future<void> _openActivityReport(AssignmentItem item) async {
+    if (_openingReportAssignmentId != null) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    setState(() => _openingReportAssignmentId = item.id);
+
+    try {
+      final localReference = await findGeneratedReportReference(item.id);
+      if (localReference != null && await File(localReference.filePath).exists()) {
+        await _openLocalPath(localReference.filePath);
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('Abriendo reporte local.')));
+        return;
+      }
+
+      const client = BackendApiClient();
+      final decoded = await client.getJson('/api/v1/completed-activities/${item.id}');
+      if (decoded is! Map<String, dynamic>) {
+        throw Exception('Respuesta inesperada del servidor');
+      }
+
+      final detail = CompletedActivityDetail.fromJson(decoded);
+      if (!detail.summary.hasReport) {
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('La actividad aún no tiene reporte generado.')));
+        return;
+      }
+
+      final pdfEvidence = _pickReportPdfEvidence(detail);
+      if (pdfEvidence == null) {
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('No se encontró el PDF del reporte.')));
+        return;
+      }
+
+      final shouldDownload = await _confirmReportDownload(item);
+      if (!shouldDownload) {
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('Descarga cancelada.')));
+        return;
+      }
+
+      final file = await _downloadReportPdfForActivity(detail, pdfEvidence);
+      await _openLocalPath(file.path);
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('Reporte abierto: ${file.path}')));
+    } catch (error) {
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text('No se pudo abrir el reporte: $error')));
+    } finally {
+      if (mounted) {
+        setState(() => _openingReportAssignmentId = null);
+      }
+    }
+  }
+
   Future<void> _addQuickNote(AssignmentItem item) async {
     final controller = TextEditingController(text: _notesByAssignmentId[item.id] ?? '');
     final saved = await showDialog<bool>(
@@ -2951,6 +3778,153 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     widget.onDeleted(assignmentId);
   }
 
+  Future<void> _transferAssignment(AssignmentItem item) async {
+    final projectId = item.projectId.trim().isNotEmpty
+        ? item.projectId.trim().toUpperCase()
+        : widget.projectId.trim().toUpperCase();
+
+    if (projectId.isEmpty || !mounted) return;
+
+    const assignmentsRepo = AssignmentsRepository(BackendApiClient());
+    List<AssignmentAssigneeOption> assignees;
+    try {
+      assignees = await assignmentsRepo.getTransferCandidates(projectId);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo cargar el equipo del proyecto: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    final candidates = assignees
+        .where((candidate) => candidate.userId.trim() != item.assigneeUserId.trim())
+        .toList()
+      ..sort((left, right) => left.fullName.toLowerCase().compareTo(right.fullName.toLowerCase()));
+
+    if (candidates.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay otro usuario disponible para recibir la actividad.'),
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+
+    final reasonController = TextEditingController();
+    AssignmentAssigneeOption selectedAssignee = candidates.first;
+
+    final selection = await showDialog<({AssignmentAssigneeOption assignee, String? reason})>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Transferir actividad'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Selecciona el nuevo responsable para ${_displayActivityName(item)}.',
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<AssignmentAssigneeOption>(
+                  initialValue: selectedAssignee,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Nuevo responsable',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: candidates
+                      .map(
+                        (assignee) => DropdownMenuItem<AssignmentAssigneeOption>(
+                          value: assignee,
+                          child: Text(
+                            assignee.fullName.trim().isEmpty ? assignee.email : assignee.fullName,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: (value) {
+                    if (value == null) return;
+                    setDialogState(() => selectedAssignee = value);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: reasonController,
+                  minLines: 2,
+                  maxLines: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Motivo de transferencia',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () {
+                final reason = reasonController.text.trim();
+                Navigator.of(ctx).pop((
+                  assignee: selectedAssignee,
+                  reason: reason.isEmpty ? null : reason,
+                ));
+              },
+              icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+              label: const Text('Transferir'),
+            ),
+          ],
+        ),
+      ),
+    );
+    reasonController.dispose();
+
+    if (selection == null || !mounted) return;
+
+    try {
+      await assignmentsRepo.transferAssignment(
+        assignmentId: item.id,
+        assigneeUserId: selection.assignee.userId,
+        reason: selection.reason,
+      );
+      if (!mounted) return;
+      final container = ProviderScope.containerOf(context, listen: false);
+      container.invalidate(planningAssignmentsProvider);
+      container.invalidate(planningMonthlyAssignmentsProvider);
+      container.invalidate(completedActivitiesProvider);
+      container.invalidate(completedFilterOptionsProvider);
+      container.invalidate(reportActivitiesProvider);
+      container.invalidate(dashboardProvider);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Actividad transferida a ${selection.assignee.fullName}.'),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('No se pudo transferir la actividad: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
   Future<void> _confirmDeleteAssignment(AssignmentItem item) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -2984,6 +3958,13 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
         await assignmentsRepo.cancelAssignment(item.id, reason: 'deleted_from_planning');
       }
       if (!mounted) return;
+      final container = ProviderScope.containerOf(context, listen: false);
+      container.invalidate(planningAssignmentsProvider);
+      container.invalidate(planningMonthlyAssignmentsProvider);
+      container.invalidate(completedActivitiesProvider);
+      container.invalidate(completedFilterOptionsProvider);
+      container.invalidate(reportActivitiesProvider);
+      container.invalidate(dashboardProvider);
       _handleAssignmentDeleted(item.id);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Actividad eliminada correctamente.')),
@@ -3786,6 +4767,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                 final item = row.item;
                                 final isHovered = _hoveredAssignmentId == item.id;
                                 final hasNote = _notesByAssignmentId.containsKey(item.id);
+                                final hasReport = _hasGeneratedReport(item);
                                 final estadoVal = _valueOrDash(_locationEstado(item));
                                 final municipioVal = _valueOrDash(_locationMunicipio(item));
                                 final pkVal = _locationPk(item);
@@ -3798,7 +4780,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                   onExit: (_) => setState(() => _hoveredAssignmentId = null),
                                   child: GestureDetector(
                                     behavior: HitTestBehavior.opaque,
-                                    onDoubleTap: () => _openAssignmentDetailsEditor(
+                                    onTap: () => _handleAssignmentTap(
                                       item,
                                       currentStart: row.start,
                                       currentEnd: row.end,
@@ -3989,9 +4971,43 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                     : SaoColors.gray400,
                                               ),
                                             ),
+                                            if (hasReport)
+                                              IconButton(
+                                                iconSize: 15,
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints.tightFor(
+                                                  width: 28,
+                                                  height: 28,
+                                                ),
+                                                visualDensity: VisualDensity.compact,
+                                                tooltip: _openingReportAssignmentId == item.id
+                                                    ? 'Abriendo reporte...'
+                                                    : 'Ver reporte PDF',
+                                                onPressed: _openingReportAssignmentId == null
+                                                    ? () => _openActivityReport(item)
+                                                    : null,
+                                                icon: _openingReportAssignmentId == item.id
+                                                    ? const SizedBox(
+                                                        width: 14,
+                                                        height: 14,
+                                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                                      )
+                                                    : const Icon(
+                                                        Icons.picture_as_pdf_rounded,
+                                                        color: SaoColors.error,
+                                                      ),
+                                              ),
                                             PopupMenuButton<String>(
                                               tooltip: 'Acciones',
                                               onSelected: (value) {
+                                                if (value == 'OPEN_REPORT') {
+                                                  _openActivityReport(item);
+                                                  return;
+                                                }
+                                                if (value == 'TRANSFER') {
+                                                  _transferAssignment(item);
+                                                  return;
+                                                }
                                                 if (value == 'RESCHEDULE') {
                                                   _openAssignmentDetailsEditor(
                                                     item,
@@ -4009,18 +5025,40 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                   return;
                                                 }
                                               },
-                                              itemBuilder: (context) => const [
-                                                PopupMenuItem<String>(
+                                              itemBuilder: (context) => [
+                                                if (hasReport)
+                                                  const PopupMenuItem<String>(
+                                                    value: 'OPEN_REPORT',
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(Icons.picture_as_pdf_rounded, size: 16),
+                                                        SizedBox(width: 8),
+                                                        Text('Ver reporte PDF'),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                if (hasReport) const PopupMenuDivider(),
+                                                const PopupMenuItem<String>(
+                                                  value: 'TRANSFER',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(Icons.swap_horiz_rounded, size: 16),
+                                                      SizedBox(width: 8),
+                                                      Text('Transferir'),
+                                                    ],
+                                                  ),
+                                                ),
+                                                const PopupMenuItem<String>(
                                                   value: 'RESCHEDULE',
                                                   child: Text('Reprogramar'),
                                                 ),
-                                                PopupMenuDivider(),
-                                                PopupMenuItem<String>(
+                                                const PopupMenuDivider(),
+                                                const PopupMenuItem<String>(
                                                   value: 'CANCELADA',
                                                   child: Text('Cancelada'),
                                                 ),
-                                                PopupMenuDivider(),
-                                                PopupMenuItem<String>(
+                                                const PopupMenuDivider(),
+                                                const PopupMenuItem<String>(
                                                   value: 'DELETE',
                                                   child: Row(
                                                     children: [

@@ -1,6 +1,7 @@
 name: Flutter Platform Builds
 
 on:
+  workflow_dispatch:
   pull_request:
     paths:
       - 'frontend_flutter/sao_windows/**'
@@ -134,3 +135,10 @@ jobs:
 
       - name: Build Windows app
         run: flutter build windows --dart-define=SAO_BACKEND_URL=https://sao-api-fjzra25vya-uc.a.run.app
+
+      - name: Upload Windows release bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: sao-desktop-windows-release
+          path: desktop_flutter/sao_desktop/build/windows/x64/runner/Release/
+          if-no-files-found: error
