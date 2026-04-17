@@ -1,10 +1,10 @@
-# BEST PRACTICES: State Management in SAO
+# Mejores prácticas: manejo de estados en SAO
 
-## Core Principle: Trust Backend Derivations
+## Principio central: confiar en las derivaciones del backend
 
-**Rule #1: Don't Recalculate States**  
-Backend provides derived states (operational_state, review_state, sync_state, next_action).  
-Frontend should **trust these values** unless there's a clear edge case.
+**Regla 1: no recalcular estados**  
+El backend ya entrega estados derivados como `operational_state`, `review_state`, `sync_state` y `next_action`.  
+El frontend debe **confiar en esos valores** salvo que exista un caso límite claramente identificado.
 
 ```dart
 // ✅ CORRECT: Use backend-provided states
@@ -25,7 +25,7 @@ final reviewState = inferReviewState(dto.executionState, dto.reviewDecision);
 
 ---
 
-## State Flow Architecture
+## Arquitectura del flujo de estados
 
 ### 1. Data Flows from Backend → Frontend (One Direction)
 ```
@@ -123,7 +123,7 @@ String label = _statusLabels[dto.operationalState] ?? 'Desconocido';  // "Requie
 
 ---
 
-## Sync State Mapping
+## Mapeo del estado de sincronización
 
 ### Converting Backend → Frontend Enum
 Use `SyncStatusMapper` instead of manual logic:
@@ -149,7 +149,7 @@ final status = switch(dto.syncState) {
 
 ---
 
-## Review State Handling
+## Manejo del estado de revisión
 
 ### Backend Always Returns English
 ```json
@@ -188,7 +188,7 @@ if (reviewState == 'PENDIENTE_REVISION') {  // ← Wrong, backend doesn't return
 
 ---
 
-## Safe Fallbacks (When Needed)
+## Fallbacks seguros, solo cuando hagan falta
 
 If you MUST recalculate locally (offline mode):
 
@@ -212,7 +212,7 @@ final status = dto.operationalState.isNotEmpty
 
 ---
 
-## Testing & Validation
+## Pruebas y validación
 
 ### Unit Tests: Verify Backend Derivations
 ```dart

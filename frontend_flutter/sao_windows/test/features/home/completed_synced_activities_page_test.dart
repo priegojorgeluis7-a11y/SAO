@@ -672,4 +672,165 @@ void main() {
       expect(find.text('Sincronizada · Pendiente'), findsNothing);
     },
   );
+
+  testWidgets(
+    'history kpis allow quick filtering to correction-required activities',
+    (tester) async {
+      final db = AppDb();
+      getIt.registerSingleton<AppDb>(db);
+      final now = DateTime.now();
+
+      await db
+          .into(db.roles)
+          .insertOnConflictUpdate(
+            const RolesCompanion(
+              id: drift.Value(4),
+              name: drift.Value('Operativo'),
+            ),
+          );
+      await db
+          .into(db.users)
+          .insertOnConflictUpdate(
+            UsersCompanion.insert(
+              id: 'user-1',
+              name: 'Usuario Operativo',
+              roleId: 4,
+            ),
+          );
+      await db
+          .into(db.projects)
+          .insertOnConflictUpdate(
+            ProjectsCompanion.insert(
+              id: 'TMQ',
+              code: 'TMQ',
+              name: 'Tren Mexico Queretaro',
+              isActive: const drift.Value(true),
+            ),
+          );
+      await db
+          .into(db.catalogActivityTypes)
+          .insertOnConflictUpdate(
+            CatalogActivityTypesCompanion.insert(
+              id: 'activity_type_approved',
+              code: 'APPROVED_ACTIVITY_TYPE',
+              name: 'Actividad aprobada',
+              requiresPk: const drift.Value(false),
+              requiresGeo: const drift.Value(false),
+              requiresMinuta: const drift.Value(false),
+              requiresEvidence: const drift.Value(false),
+              isActive: const drift.Value(true),
+              catalogVersion: const drift.Value(1),
+            ),
+          );
+      await db
+          .into(db.catalogActivityTypes)
+          .insertOnConflictUpdate(
+            CatalogActivityTypesCompanion.insert(
+              id: 'activity_type_rejected',
+              code: 'REJECTED_ACTIVITY_TYPE',
+              name: 'Actividad rechazada',
+              requiresPk: const drift.Value(false),
+              requiresGeo: const drift.Value(false),
+              requiresMinuta: const drift.Value(false),
+              requiresEvidence: const drift.Value(false),
+              isActive: const drift.Value(true),
+              catalogVersion: const drift.Value(1),
+            ),
+          );
+
+      await db.into(db.activities).insertOnConflictUpdate(
+            ActivitiesCompanion.insert(
+              id: 'act-approved',
+              projectId: 'TMQ',
+              activityTypeId: 'activity_type_approved',
+              title: 'Actividad aprobada',
+              createdAt: now,
+              createdByUserId: 'user-1',
+              assignedToUserId: const drift.Value('user-1'),
+              status: const drift.Value('SYNCED'),
+              startedAt: drift.Value(now.subtract(const Duration(hours: 1))),
+              finishedAt: drift.Value(now),
+              pk: const drift.Value(111),
+            ),
+          );
+      await db.into(db.activities).insertOnConflictUpdate(
+            ActivitiesCompanion.insert(
+              id: 'act-rejected',
+              projectId: 'TMQ',
+              activityTypeId: 'activity_type_rejected',
+              title: 'Actividad rechazada',
+              createdAt: now.add(const Duration(minutes: 1)),
+              createdByUserId: 'user-1',
+              assignedToUserId: const drift.Value('user-1'),
+              status: const drift.Value('RECHAZADA'),
+              pk: const drift.Value(222),
+            ),
+          );
+
+      await db.into(db.activityFields).insertOnConflictUpdate(
+            ActivityFieldsCompanion.insert(
+              id: 'act-approved:review_state',
+              activityId: 'act-approved',
+              fieldKey: 'review_state',
+              valueText: const drift.Value('APPROVED'),
+            ),
+          );
+      await db.into(db.activityFields).insertOnConflictUpdate(
+            ActivityFieldsCompanion.insert(
+              id: 'act-approved:next_action',
+              activityId: 'act-approved',
+              fieldKey: 'next_action',
+              valueText: const drift.Value('CERRADA_APROBADA'),
+            ),
+          );
+      await db.into(db.activityFields).insertOnConflictUpdate(
+            ActivityFieldsCompanion.insert(
+              id: 'act-rejected:review_state',
+              activityId: 'act-rejected',
+              fieldKey: 'review_state',
+              valueText: const drift.Value('CHANGES_REQUIRED'),
+            ),
+          );
+      await db.into(db.activityFields).insertOnConflictUpdate(
+            ActivityFieldsCompanion.insert(
+              id: 'act-rejected:next_action',
+              activityId: 'act-rejected',
+              fieldKey: 'next_action',
+              valueText: const drift.Value('CORREGIR_Y_REENVIAR'),
+            ),
+          );
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            currentUserProvider.overrideWith(
+              (ref) => auth.User(
+                id: 'user-1',
+                email: 'user1@example.com',
+                fullName: 'Usuario Operativo',
+                status: 'active',
+                createdAt: now,
+              ),
+            ),
+          ],
+          child: const MaterialApp(
+            home: CompletedSyncedActivitiesPage(selectedProject: 'TMQ'),
+          ),
+        ),
+      );
+
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      expect(find.text('2 actividades visibles'), findsWidgets);
+      expect(find.text('Por corregir'), findsOneWidget);
+
+      await tester.tap(find.text('Por corregir'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mostrando por corregir'), findsOneWidget);
+      expect(find.text('Actividad rechazada'), findsOneWidget);
+      expect(find.text('1 actividad visible'), findsWidgets);
+    },
+  );
 }

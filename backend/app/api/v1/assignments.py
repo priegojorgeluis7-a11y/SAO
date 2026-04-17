@@ -12,7 +12,7 @@ from app.core.config import settings
 from app.core.firestore import get_firestore_client
 from typing import Any
 from app.core.enums import UserStatus
-from app.services.audit_service import write_firestore_audit_log
+from app.services.audit_service import canonicalize_role_name, write_firestore_audit_log
 from app.services.firestore_identity_service import get_firestore_user_by_id, list_firestore_users
 from app.core.utils import parse_firestore_dt
 from app.schemas.assignment import (
@@ -80,22 +80,51 @@ def _assignment_window(payload: dict[str, Any]) -> tuple[datetime, datetime]:
 
 
 def _next_project_sync_version(client: Any, project_id: str) -> int:
-    # Fetch only the single highest sync_version using ORDER BY + LIMIT(1)
-    # to avoid a full project scan.
-    docs = list(
-        client.collection("activities")
-        .where("project_id", "==", project_id)
-        .order_by("sync_version", direction="DESCENDING")
-        .limit(1)
-        .stream()
-    )
-    if not docs:
+    normalized_project_id = str(project_id or "").strip().upper()
+    if not normalized_project_id:
         return 1
-    payload = docs[0].to_dict() or {}
+
+    base_query = client.collection("activities").where("project_id", "==", normalized_project_id)
+
     try:
-        return int(payload.get("sync_version") or 0) + 1
-    except (TypeError, ValueError):
+        docs = list(
+            base_query
+            .order_by("sync_version", direction="DESCENDING")
+            .limit(1)
+            .stream()
+        )
+        if docs:
+            payload = docs[0].to_dict() or {}
+            try:
+                return int(payload.get("sync_version") or 0) + 1
+            except (TypeError, ValueError):
+                return 1
+    except Exception as exc:
+        logger.warning(
+            "Falling back to project scan for sync_version on assignments project=%s: %s",
+            normalized_project_id,
+            exc,
+        )
+
+    max_sync_version = 0
+    try:
+        for doc in base_query.stream():
+            payload = doc.to_dict() or {}
+            try:
+                sync_version = int(payload.get("sync_version") or 0)
+            except (TypeError, ValueError):
+                sync_version = 0
+            if sync_version > max_sync_version:
+                max_sync_version = sync_version
+    except Exception as exc:
+        logger.warning(
+            "Unable to scan sync_version values for assignments project=%s: %s",
+            normalized_project_id,
+            exc,
+        )
         return 1
+
+    return max_sync_version + 1
 
 
 def _is_privileged_assignment_manager(current_user: Any) -> bool:
@@ -104,6 +133,19 @@ def _is_privileged_assignment_manager(current_user: Any) -> bool:
         ["ADMIN", "COORD", "SUPERVISOR", "DESARROLLADOR", "DEVELOPER", "DEV"],
         None,
     )
+
+
+def _principal_role_name(principal: Any | None) -> str | None:
+    if principal is None:
+        return None
+    roles = getattr(principal, "roles", []) or []
+    if isinstance(roles, str):
+        roles = [roles]
+    for role in roles:
+        normalized = canonicalize_role_name(role)
+        if normalized:
+            return normalized
+    return None
 
 
 def _validate_transfer_target(
@@ -119,8 +161,12 @@ def _validate_transfer_target(
             message="Assignee not found or inactive",
         )
 
-    allowed_roles = {"OPERATIVO", "OPERARIO", "TECNICO", "TÉCNICO", "SUPERVISOR", "COORD", "ADMIN"}
-    principal_roles = {role.strip().upper() for role in assignee_principal.roles if role.strip()}
+    allowed_roles = {"OPERATIVO", "SUPERVISOR", "COORD", "ADMIN"}
+    principal_roles = {
+        canonicalize_role_name(role) or ""
+        for role in assignee_principal.roles
+        if str(role).strip()
+    }
     if not principal_roles.intersection(allowed_roles):
         raise api_error(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -296,7 +342,7 @@ def list_assignees(
                     user_id=principal.id,
                     full_name=principal.full_name,
                     email=principal.email,
-                    role_name=(principal.roles[0] if principal.roles else ""),
+                    role_name=_principal_role_name(principal) or "",
                 )
             ]
         return []
@@ -306,7 +352,12 @@ def list_assignees(
     for p in principals:
         if p.status != UserStatus.ACTIVE:
             continue
-        if not any(r in _assignable_roles for r in p.roles):
+        principal_roles = {
+            canonicalize_role_name(role) or ""
+            for role in (p.roles or [])
+            if str(role).strip()
+        }
+        if not principal_roles.intersection(_assignable_roles):
             continue
         if p.project_ids and project_id.strip().upper() not in p.project_ids:
             continue
@@ -315,7 +366,7 @@ def list_assignees(
                 user_id=p.id,
                 full_name=p.full_name,
                 email=p.email,
-                role_name=(p.roles[0] if p.roles else ""),
+                role_name=_principal_role_name(p) or "",
             )
         )
     options.sort(key=lambda item: (item.full_name.lower(), item.email.lower()))
@@ -376,6 +427,24 @@ def create_assignment(
     }
     client.collection("activities").document(str(activity_uuid)).set(doc_payload)
     assignee_principal = get_firestore_user_by_id(payload.assignee_user_id)
+
+    write_firestore_audit_log(
+        action="ASSIGNMENT_CREATED",
+        entity="activity",
+        entity_id=str(activity_uuid),
+        actor=current_user,
+        details={
+            "project_id": project_id,
+            "title": title,
+            "assigned_to_user_id": str(payload.assignee_user_id),
+            "assigned_to_name": assignee_principal.full_name if assignee_principal else None,
+            "assigned_to_role": _principal_role_name(assignee_principal),
+            "start_at": payload.start_at.isoformat(),
+            "end_at": payload.end_at.isoformat(),
+            "risk": payload.risk,
+        },
+    )
+
     return AssignmentListItem(
         id=str(activity_uuid),
         project_id=project_id,
@@ -410,6 +479,12 @@ def cancel_assignment(
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="ASSIGNMENT_NOT_FOUND", message="Assignment not found")
     doc = snap.to_dict() or {}
     cancel_reason = payload.reason.strip() if payload and payload.reason else None
+    current_assignee_user_id = _safe_uuid_str(doc.get("assigned_to_user_id"))
+    current_assignee_principal = (
+        get_firestore_user_by_id(current_assignee_user_id)
+        if current_assignee_user_id
+        else None
+    )
 
     # If already soft-deleted, keep endpoint idempotent.
     if doc.get("deleted_at") is not None:
@@ -432,6 +507,20 @@ def cancel_assignment(
             "sync_version": _next_project_sync_version(client, str(doc.get("project_id") or "")),
         },
         merge=True,
+    )
+    write_firestore_audit_log(
+        action="ASSIGNMENT_CANCELLED",
+        entity="activity",
+        entity_id=str(assignment_id),
+        actor=current_user,
+        details={
+            "project_id": str(doc.get("project_id") or "").strip().upper() or None,
+            "title": str(doc.get("title") or "").strip() or None,
+            "previous_assignee_user_id": current_assignee_user_id or None,
+            "previous_assignee_name": current_assignee_principal.full_name if current_assignee_principal else None,
+            "previous_assignee_role": _principal_role_name(current_assignee_principal),
+            "reason": cancel_reason,
+        },
     )
     return AssignmentCancelResponse(
         id=str(assignment_id),
@@ -515,15 +604,17 @@ def transfer_assignment(
 
     write_firestore_audit_log(
         action="ASSIGNMENT_TRANSFERRED",
-        entity="assignment",
+        entity="activity",
         entity_id=str(assignment_id),
         actor=current_user,
         details={
             "project_id": project_id,
             "from_assignee_user_id": current_assignee_user_id,
             "from_assignee_name": previous_assignee_principal.full_name if previous_assignee_principal else None,
+            "from_assignee_role": _principal_role_name(previous_assignee_principal),
             "to_assignee_user_id": next_assignee_user_id,
             "to_assignee_name": next_assignee_principal.full_name,
+            "to_assignee_role": _principal_role_name(next_assignee_principal),
             "reason": payload.reason,
         },
     )

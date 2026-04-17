@@ -162,16 +162,25 @@ class AssignmentsDao implements AssignmentsLocalStore {
       final activityByLookupKey = await _loadActivitiesForAssignments(
         assignmentsInRange,
       );
+      final canonicalFlowByActivityId = await _loadCanonicalFlowByActivityId(
+        assignmentsInRange,
+        activityByLookupKey,
+      );
       final assignmentIdsToDelete = <String>{};
 
       for (final assignment in assignmentsInRange) {
+        final lookupKey = _effectiveActivityId(assignment);
         final activity =
-            activityByLookupKey[_effectiveActivityId(assignment)] ??
+            activityByLookupKey[lookupKey] ??
             activityByLookupKey[assignment.id.trim()];
+        final canonicalFlow =
+            canonicalFlowByActivityId[lookupKey] ??
+            canonicalFlowByActivityId[assignment.id.trim()] ??
+            const <String, String>{};
 
-        // Preserve items with real local progress (started/finished or already moved
-        // to a follow-up state) even if the server response omits them temporarily.
-        if (!_shouldPreserveLocalAgendaState(activity)) {
+        // Preserve items with real local progress or closed review outcomes
+        // even if the server omits them temporarily.
+        if (!_shouldPreserveLocalAgendaState(activity, canonicalFlow)) {
           assignmentIdsToDelete.add(assignment.id);
         }
       }
@@ -479,24 +488,39 @@ class AssignmentsDao implements AssignmentsLocalStore {
     return value;
   }
 
-  bool _shouldPreserveLocalAgendaState(Activity? activity) {
+  bool _shouldPreserveLocalAgendaState(
+    Activity? activity,
+    Map<String, String> canonicalFlow,
+  ) {
     if (activity == null) {
       return false;
     }
 
     final normalizedStatus = activity.status.trim().toUpperCase();
+    final normalizedReviewState =
+        (canonicalFlow['review_state'] ?? '').trim().toUpperCase();
+    final normalizedNextAction =
+        (canonicalFlow['next_action'] ?? '').trim().toUpperCase();
+
     if (normalizedStatus == 'CANCELED') {
       return false;
     }
 
-    if (activity.startedAt != null || activity.finishedAt != null) {
+    if (normalizedReviewState == 'APPROVED' ||
+        normalizedNextAction == 'CERRADA_APROBADA') {
       return true;
     }
 
-    return normalizedStatus == 'REVISION_PENDIENTE' ||
+    // Preserve only actionable local work when the backend temporarily omits an
+    // assignment, plus explicit closed review outcomes already decided.
+    if (normalizedStatus == 'REVISION_PENDIENTE' ||
         normalizedStatus == 'READY_TO_SYNC' ||
         normalizedStatus == 'RECHAZADA' ||
-        normalizedStatus == 'ERROR';
+        normalizedStatus == 'ERROR') {
+      return true;
+    }
+
+    return activity.startedAt != null && activity.finishedAt == null;
   }
 
   Future<Activity?> _resolveActivityForAssignment(AgendaAssignment row) async {
@@ -581,13 +605,6 @@ class AssignmentsDao implements AssignmentsLocalStore {
         .replaceAll('Ú', 'U')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-  }
-
-  bool _looksLikeUuid(String value) {
-    final normalized = value.trim();
-    return RegExp(
-      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
-    ).hasMatch(normalized);
   }
 
   String _syncLifecycleFromAssignmentStatus(SyncStatus status) {

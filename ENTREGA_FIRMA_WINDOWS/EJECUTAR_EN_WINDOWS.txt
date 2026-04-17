@@ -1,0 +1,15 @@
+PASOS RAPIDOS
+
+1. Copia esta carpeta a una PC Windows.
+2. Colócala en la raíz del repositorio del proyecto.
+3. Abre PowerShell como administrador.
+4. Entra a la carpeta ENTREGA_FIRMA_WINDOWS.
+5. Si no tienes certificado, ejecuta:
+   .\01_generar_certificado_interno.ps1
+6. Para generar el instalador firmado, ejecuta:
+   .\03_generar_instalador_firmado.ps1 -PfxPassword "TU_PASSWORD"
+
+SALIDA FINAL
+
+El instalador quedará en:
+..\desktop_flutter\sao_desktop\build\windows\installer\SAO_Desktop_Internal_Setup.exe

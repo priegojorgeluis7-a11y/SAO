@@ -215,7 +215,9 @@ def upload_complete(
             "object_path": object_path,
             "pending_object_path": None,
             "uploaded_at": _utc_now(),
+            "uploaded_by": str(getattr(current_user, "id", "")),
             "sync_version": int(payload.get("sync_version") or 0) + 1,
+            **({"caption": request.description.strip()} if request.description and request.description.strip() else {}),
         },
         merge=True,
     )

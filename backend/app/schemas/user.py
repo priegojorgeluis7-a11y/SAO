@@ -61,6 +61,10 @@ class AdminUserCreate(BaseModel):
     email: EmailStr
     full_name: str
     password: str
+    first_name: str | None = None
+    last_name: str | None = None
+    second_last_name: str | None = None
+    birth_date: str | None = None
     role: str | None = None
     project_id: str | None = None
     scopes: list[AdminUserScopeInput] | None = None
@@ -70,6 +74,10 @@ class AdminUserCreate(BaseModel):
 
 class AdminUserUpdate(BaseModel):
     full_name: str | None = None
+    first_name: str | None = None
+    last_name: str | None = None
+    second_last_name: str | None = None
+    birth_date: str | None = None
     status: UserStatus | None = None
     role: str | None = None
     project_id: str | None = None

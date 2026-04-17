@@ -1,0 +1,7 @@
+# Installer outputs
+*.exe
+*.msi
+*.zip
+
+# Keep folder in repo
+!.gitignore

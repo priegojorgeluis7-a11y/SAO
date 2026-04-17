@@ -9,6 +9,8 @@ class AuditLogOut(BaseModel):
     created_at: datetime
     actor_id: UUID | None = None
     actor_email: str | None = None
+    actor_name: str | None = None
+    actor_role: str | None = None
     action: str
     entity: str
     entity_id: str

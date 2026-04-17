@@ -1,0 +1,5 @@
+*.pfx
+*.cer
+*.key
+!.gitignore
+!COLOCA_TU_PFX_AQUI.txt

@@ -60,6 +60,8 @@ def list_audit_logs(
                 created_at=doc.get("created_at") or _EPOCH,
                 actor_id=actor_id,
                 actor_email=doc.get("actor_email"),
+                actor_name=doc.get("actor_name"),
+                actor_role=doc.get("actor_role"),
                 action=str(doc.get("action") or ""),
                 entity=str(doc.get("entity") or ""),
                 entity_id=str(doc.get("entity_id") or ""),

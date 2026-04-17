@@ -98,6 +98,10 @@ void main() {
       },
     );
 
+    test('shows approved closed actions as terminated', () {
+      expect(nextActionLabel('CERRADA_APROBADA'), 'Terminada');
+    });
+
     test('prefers canonical review outcomes when backend already decided', () {
       expect(
         hasAuthoritativeCanonicalReviewFlow(

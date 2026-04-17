@@ -108,9 +108,9 @@ SAO/
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Inicio rápido
 
-### Requisitos Previos
+### Requisitos previos
 
 - **Python 3.11+** (backend)
 - **Flutter 3.24+** (móvil + desktop)
@@ -204,7 +204,7 @@ Desktop debe apuntar a Cloud Run como backend operativo.
 
 ## 🎓 Conceptos Clave
 
-### 1. Catalog-Driven Architecture
+### 1. Arquitectura guiada por catálogo
 
 **TODO** en SAO es configurable por catálogos:
 
@@ -271,7 +271,7 @@ DRAFT → (validación) → PUBLISHED → (nuevo publish) → DEPRECATED
 
 ---
 
-## 🧪 Testing
+## 🧪 Pruebas
 
 ### Backend
 ```bash
@@ -293,7 +293,7 @@ flutter test
 
 ---
 
-## 🌟 Roadmap
+## 🌟 Hoja de ruta
 
 ### ✅ Fase 1: Fundamentos (Semana 1)
 - [x] Backend FastAPI + Auth JWT
@@ -326,7 +326,7 @@ flutter test
 - [ ] Convertir evento → actividad
 
 ### 🔄 Fase 7: Escritorio (Semana 6)
-- [ ] Setup Flutter Windows
+- [ ] Preparar Flutter Windows
 - [ ] Catalog CRUD
 - [ ] Form Builder visual
 - [ ] Workflow editor

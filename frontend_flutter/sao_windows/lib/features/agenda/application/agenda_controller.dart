@@ -244,6 +244,46 @@ class AgendaController extends StateNotifier<AgendaState> {
     );
   }
 
+  Future<List<Resource>> getTransferCandidates({required AgendaItem item}) async {
+    final projectId = item.projectCode.trim().isNotEmpty
+        ? item.projectCode.trim()
+        : _projectId;
+    if (projectId == null || projectId.isEmpty) {
+      return const <Resource>[];
+    }
+
+    final resources = await _usersRepository.getTransferCandidates(
+      projectId: projectId,
+      isOffline: false,
+    );
+
+    final candidates = resources
+        .where((resource) => resource.isActive && resource.id != item.resourceId)
+        .toList()
+      ..sort((left, right) => left.name.toLowerCase().compareTo(right.name.toLowerCase()));
+
+    return candidates;
+  }
+
+  Future<void> transferAssignment({
+    required AgendaItem item,
+    required Resource assignee,
+    String? reason,
+  }) async {
+    await _assignmentsRepository.transferAssignment(
+      assignmentId: item.id,
+      projectId: item.projectCode,
+      assigneeUserId: assignee.id,
+      assigneeName: assignee.name,
+      reason: reason,
+    );
+    await _loadCurrentWeekAssignments();
+    appLogger.i(
+      'AgendaController.transferAssignment id=${item.id} '
+      'assignee=${assignee.id}',
+    );
+  }
+
   /// Verifica que los recursos estén cargados; si no, los carga ahora.
   /// Guard antes de abrir el dispatcher para evitar retry manual en la UI.
   Future<void> ensureResourcesReady({required String? projectId}) async {

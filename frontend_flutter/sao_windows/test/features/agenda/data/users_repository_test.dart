@@ -88,5 +88,44 @@ void main() {
       expect(result.length, 1);
       expect(result.first.id, 'u2');
     });
+
+    test('transfer candidates include all active project members', () async {
+      final local = _FakeUsersLocalStore();
+
+      final repository = AgendaUsersRepository(
+        usersDao: local,
+        fetchUsers: ({String? projectId, required String role}) async {
+          expect(projectId, 'TMQ');
+          expect(role, '');
+          return [
+            {
+              'id': 'admin-1',
+              'full_name': 'Admin Uno',
+              'role_name': 'ADMIN',
+              'is_active': true,
+            },
+            {
+              'id': 'coord-1',
+              'full_name': 'Coord Uno',
+              'role_name': 'COORD',
+              'is_active': true,
+            },
+            {
+              'id': 'op-1',
+              'full_name': 'Operativo Uno',
+              'role_name': 'OPERATIVO',
+              'is_active': true,
+            },
+          ];
+        },
+      );
+
+      final result = await repository.getTransferCandidates(
+        projectId: 'TMQ',
+        isOffline: false,
+      );
+
+      expect(result.map((item) => item.id), ['admin-1', 'coord-1', 'op-1']);
+    });
   });
 }

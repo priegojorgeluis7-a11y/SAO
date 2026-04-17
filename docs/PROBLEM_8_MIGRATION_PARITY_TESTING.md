@@ -1,7 +1,7 @@
-# SQL→Firestore Migration — Parity Testing Suite
+# Migración SQL a Firestore — suite de pruebas de paridad
 
-## Overview
-Comprehensive parity tests validating that GET /activities and GET /events return identical results when data source swapped from SQL to Firestore.
+## Resumen
+Conjunto de pruebas de paridad para validar que GET /activities y GET /events entregan resultados equivalentes al cambiar la fuente de datos de SQL a Firestore.
 
 ## Test Coverage
 

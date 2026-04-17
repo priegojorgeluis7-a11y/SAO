@@ -21,6 +21,10 @@ class FirestoreUserPrincipal:
     last_login_at: datetime | None
     roles: list[str]
     project_ids: list[str]
+    first_name: str | None = None
+    last_name: str | None = None
+    second_last_name: str | None = None
+    birth_date: str | None = None
     scopes: list[dict[str, str | None]] = field(default_factory=list)
     permission_scopes: list[dict[str, str | None]] = field(default_factory=list)
     password_hash: str | None = None
@@ -127,6 +131,10 @@ def _principal_from_doc(payload: dict[str, Any]) -> FirestoreUserPrincipal | Non
         last_logout_at=_to_datetime(payload.get("last_logout_at")),
         roles=roles,
         project_ids=project_ids,
+        first_name=str(payload.get("first_name") or "") or None,
+        last_name=str(payload.get("last_name") or "") or None,
+        second_last_name=str(payload.get("second_last_name") or "") or None,
+        birth_date=str(payload.get("birth_date") or "") or None,
         scopes=_normalize_role_scopes(payload.get("scopes")),
         permission_scopes=_normalize_permission_scopes(payload.get("permission_scopes")),
         password_hash=str(payload.get("password_hash") or "") or None,
@@ -220,6 +228,10 @@ def create_firestore_user(
     password_hash: str,
     roles: list[str],
     project_ids: list[str],
+    first_name: str | None = None,
+    last_name: str | None = None,
+    second_last_name: str | None = None,
+    birth_date: str | None = None,
     scopes: list[dict[str, str | None]] | None = None,
     permission_scopes: list[dict[str, str | None]] | None = None,
 ) -> FirestoreUserPrincipal:
@@ -242,6 +254,14 @@ def create_firestore_user(
         "last_login_at": None,
         "pin_hash": None,
     }
+    if first_name is not None:
+        payload["first_name"] = first_name.strip()
+    if last_name is not None:
+        payload["last_name"] = last_name.strip()
+    if second_last_name is not None:
+        payload["second_last_name"] = second_last_name.strip()
+    if birth_date is not None:
+        payload["birth_date"] = birth_date
     client = get_firestore_client()
     client.collection("users").document(str(user_id)).set(payload)
     principal = _principal_from_doc(payload)
@@ -256,6 +276,10 @@ def update_firestore_user(
     status: str | None = None,
     roles: list[str] | None = None,
     project_ids: list[str] | None = None,
+    first_name: str | None = None,
+    last_name: str | None = None,
+    second_last_name: str | None = None,
+    birth_date: str | None = None,
     scopes: list[dict[str, str | None]] | None = None,
     permission_scopes: list[dict[str, str | None]] | None = None,
 ) -> FirestoreUserPrincipal | None:
@@ -275,6 +299,14 @@ def update_firestore_user(
         updates["roles"] = [r.strip().upper() for r in roles]
     if project_ids is not None:
         updates["project_ids"] = [p.strip().upper() for p in project_ids if p.strip()]
+    if first_name is not None:
+        updates["first_name"] = first_name.strip()
+    if last_name is not None:
+        updates["last_name"] = last_name.strip()
+    if second_last_name is not None:
+        updates["second_last_name"] = second_last_name.strip()
+    if birth_date is not None:
+        updates["birth_date"] = birth_date
     if scopes is not None:
         updates["scopes"] = _normalize_role_scopes(scopes)
     if permission_scopes is not None:

@@ -84,12 +84,17 @@ class EvidenceUploadRepository {
     );
   }
 
-  Future<void> uploadComplete({required String evidenceId}) async {
+  Future<void> uploadComplete({
+    required String evidenceId,
+    String? description,
+  }) async {
+    final data = {'evidenceId': evidenceId};
+    if (description != null && description.trim().isNotEmpty) {
+      data['description'] = description.trim();
+    }
     await _apiClient.post<dynamic>(
       '/evidences/upload-complete',
-      data: {
-        'evidenceId': evidenceId,
-      },
+      data: data,
     );
   }
 
@@ -99,9 +104,11 @@ class EvidenceUploadRepository {
     required String fileName,
     required String mimeType,
     required int sizeBytes,
+    String? description,
   }) async {
     final queueId = _uuid.v4();
     final now = DateTime.now();
+    final normalizedDescription = description?.trim();
 
     await _db.into(_db.pendingUploads).insert(
           PendingUploadsCompanion.insert(
@@ -111,6 +118,11 @@ class EvidenceUploadRepository {
             fileName: fileName,
             mimeType: mimeType,
             sizeBytes: sizeBytes,
+            description: Value(
+              normalizedDescription != null && normalizedDescription.isNotEmpty
+                  ? normalizedDescription
+                  : null,
+            ),
             status: const Value('PENDING_INIT'),
             createdAt: Value(now),
             updatedAt: Value(now),

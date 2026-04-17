@@ -1,4 +1,4 @@
-# SAO — Implementation Plan (Cierre del Sistema)
+# SAO — Plan de implementación (cierre del sistema)
 **Versión:** 2.0.0 | **Fecha:** 2026-03-04
 **Basado en:** Auditoría integral del repositorio (docs/AUDIT_REPORT.md)
 

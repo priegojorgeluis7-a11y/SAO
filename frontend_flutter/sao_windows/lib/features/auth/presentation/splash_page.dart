@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/config/app_config.dart';
+import '../../../ui/theme/sao_colors.dart';
 import '../data/auth_provider.dart';
 
 /// Splash screen que valida la sesión al iniciar
@@ -21,7 +23,7 @@ class _SplashPageState extends ConsumerState<SplashPage>
   @override
   void initState() {
     super.initState();
-    
+
     _controller = AnimationController(
       duration: const Duration(milliseconds: 1500),
       vsync: this,
@@ -70,8 +72,6 @@ class _SplashPageState extends ConsumerState<SplashPage>
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     // Escuchar cambios en el estado de autenticación
     ref.listen<AuthState>(authProvider, (previous, next) {
       if (!next.isLoading) {
@@ -86,14 +86,11 @@ class _SplashPageState extends ConsumerState<SplashPage>
 
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
+        decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [
-              theme.colorScheme.primary,
-              theme.colorScheme.secondary,
-            ],
+            colors: <Color>[SaoColors.actionPrimary, SaoColors.brandPrimary],
           ),
         ),
         child: Center(
@@ -104,10 +101,10 @@ class _SplashPageState extends ConsumerState<SplashPage>
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Logo
                   Container(
                     width: 120,
                     height: 120,
+                    padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
                       color: Colors.white,
                       shape: BoxShape.circle,
@@ -119,16 +116,14 @@ class _SplashPageState extends ConsumerState<SplashPage>
                         ),
                       ],
                     ),
-                    child: Icon(
-                      Icons.train,
-                      size: 60,
-                      color: theme.colorScheme.primary,
+                    child: SvgPicture.asset(
+                      'assets/icons/ic_sao_logo.svg',
+                      fit: BoxFit.contain,
                     ),
                   ),
                   const SizedBox(height: 32),
-                  // Nombre
                   const Text(
-                    'SAO Sistema',
+                    'SAO',
                     style: TextStyle(
                       fontSize: 36,
                       fontWeight: FontWeight.bold,
@@ -137,7 +132,6 @@ class _SplashPageState extends ConsumerState<SplashPage>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  // Subtítulo
                   Text(
                     AppConfig.appFullName,
                     style: TextStyle(
@@ -148,7 +142,6 @@ class _SplashPageState extends ConsumerState<SplashPage>
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 48),
-                  // Loading indicator
                   SizedBox(
                     width: 40,
                     height: 40,

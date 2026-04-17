@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
+import 'report_share_utils.dart';
 import 'wizard_controller.dart';
 
 class WizardStepConfirm extends StatelessWidget {
@@ -82,177 +83,196 @@ class WizardStepConfirm extends StatelessWidget {
     final reportNotes = controller.getReportNotes();
     final reportAgreements = controller.getReportAgreements();
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Confirmar registro',
-            style: SaoTypography.pageTitle,
-          ),
-          const SizedBox(height: 10),
-
-          // Información de la actividad (no editable)
-          _card(
+    return Column(
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(a.title, style: const TextStyle(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 6),
-                Text('Proyecto: ${controller.projectCode}', style: const TextStyle(color: SaoColors.gray500)),
-                Text('Frente: ${a.frente}', style: const TextStyle(color: SaoColors.gray500)),
-                Text('Ubicación: ${a.municipio}, ${a.estado}', style: const TextStyle(color: SaoColors.gray500)),
-              ],
-            ),
-          ),
+                const Text(
+                  'Confirmar registro',
+                  style: SaoTypography.pageTitle,
+                ),
+                const SizedBox(height: 10),
 
-          // Actividad no planeada (editable - paso 0)
-          if (controller.isUnplanned) ...[
-            const SizedBox(height: 12),
-            _editableCard(
-              context: context,
-              title: 'No planeada',
-              onEdit: () => onJumpToStep(0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _infoRow('Motivo', controller.unplannedReasonLabel),
-                  if (controller.unplannedReference.trim().isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    _infoRow('Referencia', controller.unplannedReference.trim()),
-                  ],
-                ],
-              ),
-            ),
-          ],
-
-          const SizedBox(height: 12),
-
-          // Contexto (editable - paso 0)
-          _editableCard(
-            context: context,
-            title: 'Contexto',
-            onEdit: () => onJumpToStep(0),
-            child: Row(
-              children: [
-                Container(
-                  width: 12,
-                  height: 12,
-                  decoration: BoxDecoration(
-                    color: riskColor,
-                    shape: BoxShape.circle,
+                _card(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(a.title, style: const TextStyle(fontWeight: FontWeight.w900)),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Proyecto: ${controller.projectCode}',
+                        style: const TextStyle(color: SaoColors.gray500),
+                      ),
+                      Text(
+                        'Frente: ${a.frente}',
+                        style: const TextStyle(color: SaoColors.gray500),
+                      ),
+                      Text(
+                        'Ubicación: ${a.municipio}, ${a.estado}',
+                        style: const TextStyle(color: SaoColors.gray500),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                Text('Riesgo: $riskText', style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
 
-          const SizedBox(height: 12),
-
-          // Clasificación (editable - paso 1)
-          _editableCard(
-            context: context,
-            title: 'Clasificación',
-            onEdit: () => onJumpToStep(1),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _infoRow('Subcategoría', sub),
-                const SizedBox(height: 4),
-                _infoRow('Propósito', pur),
-                const SizedBox(height: 4),
-                _infoRow('Resultado', res),
-                const Divider(height: 16),
-                _infoRow('Temas', topicsText),
-                const SizedBox(height: 4),
-                _infoRow('Asistentes', attendeesText),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Evidencia (editable - paso 2)
-          _editableCard(
-            context: context,
-            title: 'Evidencia',
-            onEdit: () => onJumpToStep(2),
-            child: Row(
-              children: [
-                Icon(
-                  hasEvidence ? Icons.check_circle : Icons.info_outline,
-                  size: 18,
-                  color: hasEvidence ? SaoColors.success : SaoColors.gray500,
-                ),
-                const SizedBox(width: 8),
-                Text(evidenceText, style: const TextStyle(fontWeight: FontWeight.w600)),
-              ],
-            ),
-          ),
-
-          if (reportNotes.isNotEmpty || reportAgreements.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _editableCard(
-              context: context,
-              title: 'Minuta / Reporte',
-              onEdit: () => onJumpToStep(1),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  if (reportNotes.isNotEmpty) ...[
-                    _infoRow('Desarrollo / Notas', reportNotes),
-                  ],
-                  if (reportAgreements.isNotEmpty) ...[
-                    if (reportNotes.isNotEmpty) const SizedBox(height: 8),
-                    Text(
-                      'Acuerdos / Pendientes:',
-                      style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
+                if (controller.isUnplanned) ...[
+                  const SizedBox(height: 12),
+                  _editableCard(
+                    context: context,
+                    title: 'No planeada',
+                    onEdit: () => onJumpToStep(0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _infoRow('Motivo', controller.unplannedReasonLabel),
+                        if (controller.unplannedReference.trim().isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          _infoRow('Referencia', controller.unplannedReference.trim()),
+                        ],
+                      ],
                     ),
-                    const SizedBox(height: 4),
-                    ...reportAgreements.map(
-                      (agreement) => Padding(
-                        padding: const EdgeInsets.only(bottom: 2),
-                        child: Text(
-                          '• $agreement',
-                          style: SaoTypography.bodyText.copyWith(color: SaoColors.primary),
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+
+                _editableCard(
+                  context: context,
+                  title: 'Contexto',
+                  onEdit: () => onJumpToStep(0),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: riskColor,
+                          shape: BoxShape.circle,
                         ),
                       ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-
-          const Spacer(),
-
-          Row(
-            children: [
-              Expanded(
-                child: TextButton(
-                  onPressed: onBack,
-                  child: const Text('Atrás'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                flex: 2,
-                child: FilledButton(
-                  onPressed: controller.canSave
-                      ? () => _handleSave(context, hasEvidence)
-                      : null,
-                  child: Text(
-                    controller.isUnplanned ? 'Enviar a revisión' : 'Guardar',
+                      const SizedBox(width: 8),
+                      Text(
+                        'Riesgo: $riskText',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
                   ),
                 ),
-              ),
-            ],
+
+                const SizedBox(height: 12),
+
+                _editableCard(
+                  context: context,
+                  title: 'Clasificación',
+                  onEdit: () => onJumpToStep(1),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _infoRow('Subcategoría', sub),
+                      const SizedBox(height: 4),
+                      _infoRow('Propósito', pur),
+                      const SizedBox(height: 4),
+                      _infoRow('Resultado', res),
+                      const Divider(height: 16),
+                      _infoRow('Temas', topicsText),
+                      const SizedBox(height: 4),
+                      _infoRow('Asistentes', attendeesText),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                _editableCard(
+                  context: context,
+                  title: 'Evidencia',
+                  onEdit: () => onJumpToStep(2),
+                  child: Row(
+                    children: [
+                      Icon(
+                        hasEvidence ? Icons.check_circle : Icons.info_outline,
+                        size: 18,
+                        color: hasEvidence ? SaoColors.success : SaoColors.gray500,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        evidenceText,
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ],
+                  ),
+                ),
+
+                if (reportNotes.isNotEmpty || reportAgreements.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _editableCard(
+                    context: context,
+                    title: 'Minuta / Reporte',
+                    onEdit: () => onJumpToStep(1),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (reportNotes.isNotEmpty) ...[
+                          _infoRow('Desarrollo / Notas', reportNotes),
+                        ],
+                        if (reportAgreements.isNotEmpty) ...[
+                          if (reportNotes.isNotEmpty) const SizedBox(height: 8),
+                          Text(
+                            'Acuerdos / Pendientes:',
+                            style: SaoTypography.bodyText.copyWith(color: SaoColors.gray500),
+                          ),
+                          const SizedBox(height: 4),
+                          ...reportAgreements.map(
+                            (agreement) => Padding(
+                              padding: const EdgeInsets.only(bottom: 2),
+                              child: Text(
+                                '• $agreement',
+                                style: SaoTypography.bodyText.copyWith(color: SaoColors.primary),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
           ),
-        ],
-      ),
+        ),
+        SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextButton(
+                    onPressed: onBack,
+                    child: const Text('Atrás'),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  flex: 2,
+                  child: FilledButton(
+                    onPressed: controller.canSave
+                        ? () => _handleSave(context, hasEvidence)
+                        : null,
+                    child: Text(
+                      controller.isUnplanned ? 'Enviar a revisión' : 'Guardar',
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -350,6 +370,98 @@ class WizardStepConfirm extends StatelessWidget {
     );
   }
 
+  String _shareableResultLabel() {
+    final raw = (controller.selectedResult?.name ?? '').trim();
+    if (raw.isEmpty) return '';
+    return raw.contains(' - ') ? raw.split(' - ').last.trim() : raw;
+  }
+
+  Future<void> _showQuickReportOptions(BuildContext context) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final titleController = TextEditingController();
+
+    String buildReportText() => buildInitialWhatsAppReport(
+      projectCode: controller.projectCode,
+      activity: controller.activity,
+      customTitle: titleController.text,
+      resultLabel: _shareableResultLabel(),
+      notes: controller.getReportNotes(),
+      agreements: controller.getReportAgreements(),
+      evidenceCount: controller.evidencias.length,
+    );
+
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        isScrollControlled: true,
+        builder: (sheetContext) => StatefulBuilder(
+          builder: (sheetContext, setSheetState) => SafeArea(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                16,
+                0,
+                16,
+                20 + MediaQuery.of(sheetContext).viewInsets.bottom,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Resumen listo para compartir',
+                    style: SaoTypography.cardTitle.copyWith(fontWeight: FontWeight.w900),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    'Copia el resumen y pégalo donde lo necesites.',
+                    style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray600),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: titleController,
+                    onChanged: (_) => setSheetState(() {}),
+                    decoration: InputDecoration(
+                      labelText: 'Título en negritas (opcional)',
+                      hintText: 'Ej. REPORTE DE CAMPO',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    child: FilledButton.icon(
+                      onPressed: () async {
+                        final reportText = buildReportText();
+                        await Clipboard.setData(ClipboardData(text: reportText));
+                        if (!sheetContext.mounted) return;
+                        Navigator.of(sheetContext).pop();
+                        messenger
+                          ?..hideCurrentSnackBar()
+                          ..showSnackBar(
+                            appSnackBar(
+                              message: 'Resumen copiado.',
+                              backgroundColor: SaoColors.success,
+                            ),
+                          );
+                      },
+                      icon: const Icon(Icons.copy_all_rounded),
+                      label: const Text('Copiar resumen'),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      titleController.dispose();
+    }
+  }
+
   Future<void> _handleSave(BuildContext context, bool hasEvidence) async {
     // Validación Gatekeeper antes de guardar
     final gk = controller.validateBeforeSave();
@@ -383,6 +495,8 @@ class WizardStepConfirm extends StatelessWidget {
           ),
         );
 
+        if (!context.mounted) return;
+
         if (savePending == true) {
           await _persistActivity(context, hasEvidence: false, allowPendingWithoutEvidence: true);
           return;
@@ -412,6 +526,8 @@ class WizardStepConfirm extends StatelessWidget {
           ],
         ),
       );
+
+      if (!context.mounted) return;
       
       // Saltar al paso con error
       if (gk.step != null) {
@@ -430,6 +546,8 @@ class WizardStepConfirm extends StatelessWidget {
     required bool hasEvidence,
     bool allowPendingWithoutEvidence = false,
   }) async {
+    final navigator = Navigator.of(context);
+
     // Mostrar loading
     showDialog<void>(
       context: context,
@@ -459,7 +577,7 @@ class WizardStepConfirm extends StatelessWidget {
       if (!context.mounted) return;
 
       // Cerrar loading
-      Navigator.of(context).pop();
+      navigator.pop();
 
       // Mostrar éxito
       final closeText = controller.isUnplanned
@@ -477,14 +595,19 @@ class WizardStepConfirm extends StatelessWidget {
         ),
       );
 
+      if (!allowPendingWithoutEvidence) {
+        await _showQuickReportOptions(context);
+        if (!context.mounted) return;
+      }
+
       // Cerrar wizard
-      Navigator.of(context).pop(activityId);
+      navigator.pop(activityId);
       
     } catch (e) {
       if (!context.mounted) return;
 
       // Cerrar loading
-      Navigator.of(context).pop();
+      navigator.pop();
 
       // Mostrar error
       showTransientSnackBar(

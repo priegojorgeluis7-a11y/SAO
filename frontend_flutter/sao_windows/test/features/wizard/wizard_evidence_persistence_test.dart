@@ -21,6 +21,7 @@ class _FlakyEvidenceUploadRepository extends EvidenceUploadRepository {
   int initCalls = 0;
   int uploadCalls = 0;
   int completeCalls = 0;
+  String? lastCompletedDescription;
 
   _FlakyEvidenceUploadRepository({required AppDb db})
     : super(
@@ -60,8 +61,12 @@ class _FlakyEvidenceUploadRepository extends EvidenceUploadRepository {
   }
 
   @override
-  Future<void> uploadComplete({required String evidenceId}) async {
+  Future<void> uploadComplete({
+    required String evidenceId,
+    String? description,
+  }) async {
     completeCalls += 1;
+    lastCompletedDescription = description;
   }
 }
 
@@ -333,6 +338,17 @@ void main() {
       final photo = File('${tempDir.path}/retry.jpg');
       await photo.writeAsBytes(const [5, 4, 3, 2, 1]);
 
+      await db.into(db.evidences).insert(
+        EvidencesCompanion.insert(
+          id: 'evidence-retry-1',
+          activityId: 'act-upload-retry',
+          type: 'PHOTO',
+          filePathLocal: photo.path,
+          caption: const drift.Value('Foto con pie de foto persistente'),
+          status: const drift.Value('QUEUED'),
+        ),
+      );
+
       await db.into(db.pendingUploads).insert(
         PendingUploadsCompanion.insert(
           id: 'upload-retry-1',
@@ -371,6 +387,10 @@ void main() {
       expect(repository.initCalls, equals(2));
       expect(repository.uploadCalls, equals(1));
       expect(repository.completeCalls, equals(1));
+      expect(
+        repository.lastCompletedDescription,
+        equals('Foto con pie de foto persistente'),
+      );
     },
   );
 }

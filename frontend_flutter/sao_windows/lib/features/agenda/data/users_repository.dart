@@ -131,6 +131,41 @@ class AgendaUsersRepository {
     }
   }
 
+  Future<List<Resource>> getTransferCandidates({
+    String? projectId,
+    required bool isOffline,
+  }) async {
+    if (isOffline) {
+      return getOperationalUsers(projectId: projectId, isOffline: true);
+    }
+
+    try {
+      final responseData = await _fetchUsers(
+        projectId: projectId,
+        role: '',
+      );
+      final projectUsers = _parseOperationalUsers(responseData);
+      appLogger.i(
+        'Agenda transfer users parsed_count=${projectUsers.length} project=$projectId',
+      );
+
+      if (projectUsers.isNotEmpty) {
+        try {
+          await _usersDao.upsertUsers(projectUsers);
+        } catch (e) {
+          appLogger.w('Agenda transfer users cache update failed: $e');
+        }
+        return _mapResources(projectUsers);
+      }
+    } on DioException catch (e) {
+      appLogger.w('Agenda transfer users fetch failed, falling back to operatives: $e');
+    } catch (e) {
+      appLogger.w('Agenda transfer users unexpected error, falling back to operatives: $e');
+    }
+
+    return getOperationalUsers(projectId: projectId, isOffline: false);
+  }
+
   Future<dynamic> _fetchAssignees({String? projectId}) async {
     final client = _apiClient;
     if (client == null) {
@@ -243,8 +278,10 @@ class AgendaUsersRepository {
   int _roleIdFromRoleName(String roleName) {
     switch (roleName.trim()) {
       case 'ADMIN':
+      case 'ADMINISTRADOR':
         return 1;
       case 'COORD':
+      case 'COORDINADOR':
         return 2;
       case 'SUPERVISOR':
         return 3;
@@ -264,12 +301,16 @@ class AgendaUsersRepository {
 
   ResourceRole _resourceRoleFromRoleId(int roleId) {
     switch (roleId) {
+      case 1:
+        return ResourceRole.administrador;
+      case 2:
+        return ResourceRole.coordinador;
       case 3:
         return ResourceRole.supervisor;
-      case 4:
-        return ResourceRole.tecnico;
+      case 5:
+        return ResourceRole.lector;
       default:
-        return ResourceRole.ingeniero;
+        return ResourceRole.operativo;
     }
   }
 }

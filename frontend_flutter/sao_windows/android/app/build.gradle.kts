@@ -50,6 +50,12 @@ android {
         versionName = flutter.versionName
     }
 
+    packaging {
+        jniLibs {
+            keepDebugSymbols += setOf("**/*.so")
+        }
+    }
+
     buildTypes {
         release {
             // Use production signing only when key.properties is present.

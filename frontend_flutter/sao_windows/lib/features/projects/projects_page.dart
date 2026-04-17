@@ -52,7 +52,10 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
     super.initState();
     final initialCode = widget.selectedCode.trim().toUpperCase();
     if (initialCode.isNotEmpty) {
-      ref.read(projectSelectionControllerProvider).setActiveProject(initialCode);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(projectSelectionControllerProvider).setActiveProject(initialCode);
+      });
     }
     _loadProjects();
   }

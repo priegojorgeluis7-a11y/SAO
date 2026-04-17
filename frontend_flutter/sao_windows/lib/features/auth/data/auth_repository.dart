@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/network/api_client.dart';
@@ -41,11 +43,11 @@ class AuthRepository {
     required KvStore kvStore,
     PinStorage? pinStorage,
     SharedPreferences? prefs,
-  })  : _apiClient = apiClient,
-        _tokenStorage = tokenStorage,
-        _kvStore = kvStore,
-        _pinStorage = pinStorage,
-        _prefs = prefs;
+  }) : _apiClient = apiClient,
+       _tokenStorage = tokenStorage,
+       _kvStore = kvStore,
+       _pinStorage = pinStorage,
+       _prefs = prefs;
 
   /// Login with email and password
   /// Returns TokenResponse on success
@@ -101,16 +103,10 @@ class AuthRepository {
           e.stackTrace,
         );
       } else if (e.type == DioExceptionType.connectionError) {
-        throw NetworkException(
-          'No internet connection',
-          e.stackTrace,
-        );
+        throw NetworkException('No internet connection', e.stackTrace);
       }
 
-      throw AuthException(
-        'Login failed: ${e.message}',
-        e.stackTrace,
-      );
+      throw AuthException('Login failed: ${e.message}', e.stackTrace);
     } catch (e, stackTrace) {
       appLogger.e('Unexpected login error: $e');
       throw AuthException('Unexpected error during login: $e', stackTrace);
@@ -139,7 +135,10 @@ class AuthRepository {
           : e.message;
 
       if (statusCode == 403) {
-        throw AuthException(detail ?? 'Invite code invalid or forbidden', e.stackTrace);
+        throw AuthException(
+          detail ?? 'Invite code invalid or forbidden',
+          e.stackTrace,
+        );
       }
       if (statusCode == 409) {
         throw AuthException(detail ?? 'Email already registered', e.stackTrace);
@@ -155,39 +154,45 @@ class AuthRepository {
         );
       }
       if (e.type == DioExceptionType.connectionError) {
-        throw NetworkException(
-          'No internet connection',
-          e.stackTrace,
-        );
+        throw NetworkException('No internet connection', e.stackTrace);
       }
 
-      throw AuthException(
-        detail ?? 'Signup failed',
-        e.stackTrace,
-      );
+      throw AuthException(detail ?? 'Signup failed', e.stackTrace);
     } catch (e, stackTrace) {
       throw AuthException('Unexpected error during signup: $e', stackTrace);
     }
   }
 
   Future<List<String>> fetchSignupRoles() async {
+    const fallbackRoles = <String>['OPERATIVO', 'COORD', 'SUPERVISOR', 'LECTOR'];
+
     try {
       final response = await _apiClient.get<dynamic>('/auth/roles');
       final data = response.data;
 
       if (data is! List) {
-        throw AuthException('Invalid roles response format', StackTrace.current);
+        appLogger.w('Signup roles endpoint returned an invalid format, using fallback roles');
+        return fallbackRoles;
       }
 
-      return data
+      final roles = data
           .whereType<Object?>()
           .map((item) => item?.toString() ?? '')
           .where((role) => role.isNotEmpty)
           .toList(growable: false);
+
+      if (roles.isEmpty) {
+        appLogger.w('Signup roles endpoint returned an empty list, using fallback roles');
+        return fallbackRoles;
+      }
+
+      return roles;
     } on DioException catch (e) {
-      throw AuthException('Failed to fetch roles: ${e.message}', e.stackTrace);
-    } catch (e, stackTrace) {
-      throw AuthException('Unexpected error fetching roles: $e', stackTrace);
+      appLogger.w('Failed to fetch signup roles, using fallback roles: ${e.message}');
+      return fallbackRoles;
+    } catch (e) {
+      appLogger.w('Unexpected error fetching signup roles, using fallback roles: $e');
+      return fallbackRoles;
     }
   }
 
@@ -293,7 +298,14 @@ class AuthRepository {
       }
 
       try {
-        await getCurrentUser();
+        final user = await getCurrentUser().timeout(const Duration(seconds: 5));
+        if (_pinStorage != null) {
+          try {
+            await _pinStorage.saveCachedUser(user.toJson());
+          } catch (_) {
+            // Non-critical: startup can continue even if caching fails.
+          }
+        }
         appLogger.i('Bootstrap successful - user authenticated');
         return BootstrapResult.authenticated;
       } on AuthExpiredException catch (e) {
@@ -329,7 +341,10 @@ class AuthRepository {
   }
 
   /// Changes the authenticated user's password.
-  Future<void> changePassword(String currentPassword, String newPassword) async {
+  Future<void> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
     try {
       await _apiClient.put<dynamic>(
         '/auth/me/password',
@@ -342,9 +357,15 @@ class AuthRepository {
       if (e.response?.statusCode == 400) {
         throw AuthException('La contraseña actual es incorrecta', e.stackTrace);
       }
-      throw AuthException('Error al cambiar contraseña: ${e.message}', e.stackTrace);
+      throw AuthException(
+        'Error al cambiar contraseña: ${e.message}',
+        e.stackTrace,
+      );
     } catch (e, stackTrace) {
-      throw AuthException('Error inesperado al cambiar contraseña: $e', stackTrace);
+      throw AuthException(
+        'Error inesperado al cambiar contraseña: $e',
+        stackTrace,
+      );
     }
   }
 

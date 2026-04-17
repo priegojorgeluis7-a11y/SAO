@@ -17,6 +17,8 @@ class SaoInput extends StatelessWidget {
   final Widget? suffixIcon;
   final String? Function(String?)? validator;
   final ValueChanged<String>? onChanged;
+  final bool readOnly;
+  final VoidCallback? onTap;
 
   const SaoInput({
     super.key,
@@ -30,6 +32,8 @@ class SaoInput extends StatelessWidget {
     this.suffixIcon,
     this.validator,
     this.onChanged,
+    this.readOnly = false,
+    this.onTap,
   });
 
   @override
@@ -41,6 +45,8 @@ class SaoInput extends StatelessWidget {
       keyboardType: keyboardType,
       validator: validator,
       onChanged: onChanged,
+      readOnly: readOnly,
+      onTap: onTap,
       decoration: InputDecoration(
         labelText: label,
         hintText: hint,

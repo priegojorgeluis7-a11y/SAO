@@ -214,6 +214,10 @@ class AssignmentsRepository {
 
   Future<dynamic> _defaultCreateAssignment(AgendaItem item) async {
     final activityTypeCode = await _resolveActivityTypeCodeForApi(item);
+    final safeFront = item.frente.trim();
+    final safeEstado = item.estado.trim();
+    final safeMunicipio = item.municipio.trim();
+
     final response = await _apiClientOrThrow.post<dynamic>(
       '/assignments',
       data: {
@@ -221,6 +225,9 @@ class AssignmentsRepository {
         'assignee_user_id': item.resourceId,
         'activity_type_code': activityTypeCode,
         'title': item.title,
+        if (safeFront.isNotEmpty) 'front_ref': safeFront,
+        if (safeEstado.isNotEmpty) 'estado': safeEstado,
+        if (safeMunicipio.isNotEmpty) 'municipio': safeMunicipio,
         'pk': item.pk ?? 0,
         'start_at': item.start.toUtc().toIso8601String(),
         'end_at': item.end.toUtc().toIso8601String(),

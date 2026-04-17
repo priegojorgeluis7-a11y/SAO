@@ -1,5 +1,6 @@
 """Completed Activities endpoint — read-only view of approved activities with full traceability."""
 
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -39,6 +40,125 @@ def _iso(val: Any) -> str:
     if isinstance(val, datetime):
         return val.isoformat()
     return str(val) if val else ""
+
+
+def _normalize_action_token(action: Any) -> str:
+    return str(action or "").strip().upper()
+
+
+def _parse_log_details(log: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    details: dict[str, Any] = {}
+    raw_details = log.get("details_json")
+    if isinstance(raw_details, str) and raw_details.strip():
+        try:
+            decoded = json.loads(raw_details)
+            if isinstance(decoded, dict):
+                details = decoded
+        except (TypeError, ValueError, json.JSONDecodeError):
+            details = {}
+    elif isinstance(raw_details, dict):
+        details = {str(key): value for key, value in raw_details.items()}
+
+    legacy_changes = log.get("changes")
+    if isinstance(legacy_changes, dict):
+        details = {**legacy_changes, **details}
+
+    notes = str(
+        details.get("message")
+        or details.get("notes")
+        or details.get("note")
+        or log.get("notes")
+        or log.get("comment")
+        or ""
+    ).strip()
+    return details, notes
+
+
+def _build_supplemental_audit_trail(
+    doc: dict[str, Any],
+    users_map: dict[str, str],
+    assigned_name: str,
+    reviewed_by_name: str,
+    evidences: list[dict[str, Any]],
+    documents: list[dict[str, Any]],
+    existing_actions: set[str],
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    has_create_event = any("CREATE" in action or "ASSIGN" in action for action in existing_actions)
+    has_review_event = any(
+        "REVIEW" in action or "APPROVE" in action or "REJECT" in action
+        for action in existing_actions
+    )
+    has_report_event = any("REPORT" in action for action in existing_actions)
+    has_evidence_event = any("EVIDENCE" in action for action in existing_actions)
+
+    created_at = doc.get("created_at")
+    created_by_uid = str(doc.get("created_by_user_id") or "").strip()
+    if created_at and not has_create_event:
+        actor_name = users_map.get(created_by_uid, "") or assigned_name
+        entries.append(
+            {
+                "id": f"synthetic-create-{str(doc.get('uuid') or '')}",
+                "action": "ACTIVITY_CREATED",
+                "actor_email": "",
+                "actor_name": actor_name,
+                "changes": {},
+                "notes": "Actividad registrada en expediente.",
+                "timestamp": _iso(created_at),
+            }
+        )
+
+    if evidences and not has_evidence_event:
+        latest_evidence = max(evidences, key=lambda item: item.get("uploaded_at") or "")
+        entries.append(
+            {
+                "id": f"synthetic-evidence-{latest_evidence.get('id') or 'latest'}",
+                "action": "EVIDENCE_UPLOADED",
+                "actor_email": "",
+                "actor_name": str(latest_evidence.get("uploader_name") or assigned_name),
+                "changes": {},
+                "notes": str(latest_evidence.get("description") or "Evidencia agregada al expediente."),
+                "timestamp": str(latest_evidence.get("uploaded_at") or ""),
+            }
+        )
+
+    reviewed_at = doc.get("last_reviewed_at")
+    review_decision = _normalize_action_token(doc.get("review_decision"))
+    review_notes = str(doc.get("review_notes") or doc.get("rejection_reason") or "").strip()
+    if reviewed_at and not has_review_event:
+        review_action = "REVIEW_UPDATED"
+        if review_decision in {"APPROVE", "APPROVE_EXCEPTION"}:
+            review_action = "REVIEW_APPROVED"
+        elif review_decision == "REJECT":
+            review_action = "REVIEW_REJECTED"
+        entries.append(
+            {
+                "id": f"synthetic-review-{str(doc.get('uuid') or '')}",
+                "action": review_action,
+                "actor_email": "",
+                "actor_name": reviewed_by_name or assigned_name,
+                "changes": {"review_decision": review_decision},
+                "notes": review_notes or "Revisión registrada en expediente.",
+                "timestamp": _iso(reviewed_at),
+            }
+        )
+
+    report_generated_at = doc.get("report_generated_at")
+    if documents and not has_report_event:
+        latest_document = max(documents, key=lambda item: item.get("uploaded_at") or "")
+        entries.append(
+            {
+                "id": f"synthetic-report-{latest_document.get('id') or 'latest'}",
+                "action": "REPORT_GENERATE",
+                "actor_email": "",
+                "actor_name": str(latest_document.get("uploader_name") or reviewed_by_name or assigned_name),
+                "changes": {},
+                "notes": str(latest_document.get("description") or "Reporte operativo generado."),
+                "timestamp": _iso(report_generated_at) or str(latest_document.get("uploaded_at") or ""),
+            }
+        )
+
+    return [entry for entry in entries if entry.get("timestamp")]
 
 
 def _effective_assignee_user_id(activity_payload: dict[str, Any]) -> str:
@@ -168,17 +288,55 @@ def _resolve_activity_front_name(
     return None
 
 
+def _is_document_evidence(evidence_payload: dict[str, Any]) -> bool:
+    type_token = str(
+        evidence_payload.get("evidence_type")
+        or evidence_payload.get("type")
+        or evidence_payload.get("mime_type")
+        or ""
+    ).strip().lower()
+    gcs_path = str(
+        evidence_payload.get("gcs_path")
+        or evidence_payload.get("storage_path")
+        or evidence_payload.get("object_path")
+        or ""
+    ).strip().lower()
+    file_name = str(evidence_payload.get("original_file_name") or "").strip().lower()
+    return (
+        "pdf" in type_token
+        or "document" in type_token
+        or gcs_path.endswith(".pdf")
+        or file_name.endswith(".pdf")
+    )
+
+
 def _evidence_count_map(client, activity_ids: set[str]) -> dict[str, int]:
     result: dict[str, int] = {}
     for activity_id in activity_ids:
         if not activity_id:
             continue
-        result[activity_id] = sum(
-            1
-            for _ in client.collection("evidences")
-            .where("activity_id", "==", activity_id)
-            .stream()
-        )
+        count = 0
+        for doc in client.collection("evidences").where("activity_id", "==", activity_id).stream():
+            ev = doc.to_dict() or {}
+            gcs_path = str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or "").strip()
+            if gcs_path and not _is_document_evidence(ev):
+                count += 1
+        result[activity_id] = count
+    return result
+
+
+def _document_count_map(client, activity_ids: set[str]) -> dict[str, int]:
+    result: dict[str, int] = {}
+    for activity_id in activity_ids:
+        if not activity_id:
+            continue
+        count = 0
+        for doc in client.collection("evidences").where("activity_id", "==", activity_id).stream():
+            ev = doc.to_dict() or {}
+            gcs_path = str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or "").strip()
+            if gcs_path and _is_document_evidence(ev):
+                count += 1
+        result[activity_id] = count
     return result
 
 
@@ -214,6 +372,44 @@ def _fetch_evidence_rows(client, activity_ids: set[str]) -> list[dict[str, Any]]
             seen.add(ev_doc.id)
             rows.append({"id": str(ev_doc.id), "payload": ev_doc.to_dict() or {}})
     return rows
+
+
+def _resolve_uploader_name(
+    evidence_payload: dict[str, Any],
+    users_map: dict[str, str],
+    uploader_uid: str,
+) -> str:
+    for key in (
+        "uploader_name",
+        "uploaded_by_name",
+        "user_name",
+        "actor_name",
+        "created_by_name",
+        "uploaded_by_email",
+        "uploader_email",
+        "created_by_email",
+        "created_by_user_email",
+    ):
+        value = str(evidence_payload.get(key) or "").strip()
+        if value:
+            return value
+
+    for candidate_uid in (
+        uploader_uid,
+        str(evidence_payload.get("uploaded_by") or "").strip(),
+        str(evidence_payload.get("user_id") or "").strip(),
+        str(evidence_payload.get("created_by") or "").strip(),
+        str(evidence_payload.get("created_by_user_id") or "").strip(),
+    ):
+        if not candidate_uid:
+            continue
+        mapped_name = str(users_map.get(candidate_uid) or "").strip()
+        if mapped_name:
+            return mapped_name
+        if "@" in candidate_uid:
+            return candidate_uid
+
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -330,6 +526,7 @@ def list_completed_activities(
             "reviewed_at":      _iso(doc.get("last_reviewed_at")),
             "created_at":       _iso(doc.get("created_at")),
             "evidence_count":   0,
+            "document_count":   0,
             "assigned_name":    assigned_name,
             "reviewed_by_name": users_map.get(reviewer_uid, ""),
             "review_decision":  decision,
@@ -339,9 +536,14 @@ def list_completed_activities(
     total = len(items)
     start = (page - 1) * page_size
     paged_items = items[start : start + page_size]
-    counts = _evidence_count_map(client, {str(item["id"]) for item in paged_items})
+    activity_ids = {str(item["id"]) for item in paged_items}
+    counts = _evidence_count_map(client, activity_ids)
+    document_counts = _document_count_map(client, activity_ids)
     for item in paged_items:
         item["evidence_count"] = counts.get(str(item["id"]), 0)
+        item["document_count"] = max(document_counts.get(str(item["id"]), 0), 1 if item.get("has_report") else 0)
+        if item["document_count"] > 0:
+            item["has_report"] = True
 
     return {
         "items":        paged_items,
@@ -478,45 +680,85 @@ def get_completed_activity_detail(
     project_front_scope_map = _load_project_front_scope_map(client, {project_id} if project_id else set())
     front_name = _resolve_activity_front_name(doc, front_lookup, project_front_scope_map) or ""
 
+    assigned_uid = _effective_assignee_user_id(doc)
+    reviewer_uid = str(doc.get("last_reviewed_by") or "").strip()
+    creator_uid = str(doc.get("created_by_user_id") or "").strip()
+    users_map = _build_users_map(client, {assigned_uid, reviewer_uid, creator_uid})
+
     # ── Audit trail ───────────────────────────────────────────────────────────
     audit_trail: list[dict] = []
     for row in _fetch_audit_logs_for_entity_ids(client, {resolved_id, snap.id}):
         log = row["payload"]
         ts = log.get("timestamp") or log.get("created_at")
+        changes, notes = _parse_log_details(log)
+        actor_id = str(log.get("actor_id") or "").strip()
+        actor_name = str(log.get("actor_name") or "").strip() or users_map.get(actor_id, "")
         audit_trail.append({
             "id":          row["id"],
             "action":      str(log.get("action") or ""),
             "actor_email": str(log.get("actor_email") or ""),
-            "actor_name":  str(log.get("actor_name") or ""),
-            "changes":     log.get("changes") or {},
-            "notes":       str(log.get("notes") or log.get("comment") or ""),
+            "actor_name":  actor_name,
+            "changes":     changes,
+            "notes":       notes,
             "timestamp":   _iso(ts),
         })
-    audit_trail.sort(key=lambda x: x["timestamp"], reverse=True)
 
-    # ── Evidences ─────────────────────────────────────────────────────────────
+    # ── Evidences / Documents ─────────────────────────────────────────────────
     evidences: list[dict] = []
+    documents: list[dict] = []
     evidence_rows = _fetch_evidence_rows(client, {resolved_id, snap.id})
     uploader_ids = {
-        str(row["payload"].get("uploaded_by") or row["payload"].get("user_id") or "").strip()
+        str(
+            row["payload"].get("uploaded_by")
+            or row["payload"].get("user_id")
+            or row["payload"].get("created_by")
+            or row["payload"].get("created_by_user_id")
+            or ""
+        ).strip()
         for row in evidence_rows
     }
-    assigned_uid  = _effective_assignee_user_id(doc)
-    reviewer_uid  = str(doc.get("last_reviewed_by") or "").strip()
-    users_map = _build_users_map(client, uploader_ids | {assigned_uid, reviewer_uid})
+    users_map = _build_users_map(client, uploader_ids | {assigned_uid, reviewer_uid, creator_uid})
     for row in evidence_rows:
         ev = row["payload"]
+        gcs_path = str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or "").strip()
+        if not gcs_path:
+            continue  # skip evidencias sin archivo adjunto
         ts = ev.get("uploaded_at") or ev.get("created_at")
-        uploader_uid = str(ev.get("uploaded_by") or ev.get("user_id") or "")
-        evidences.append({
+        uploader_uid = str(
+            ev.get("uploaded_by")
+            or ev.get("user_id")
+            or ev.get("created_by")
+            or ev.get("created_by_user_id")
+            or ""
+        ).strip()
+        entry = {
             "id":            row["id"],
             "type":          str(ev.get("evidence_type") or ev.get("type") or "PHOTO"),
             "description":   str(ev.get("description") or ev.get("caption") or ev.get("notes") or ""),
-            "gcs_path":      str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or ""),
+            "gcs_path":      gcs_path,
             "uploaded_at":   _iso(ts),
-            "uploader_name": users_map.get(uploader_uid, ""),
-        })
+            "uploader_name": _resolve_uploader_name(ev, users_map, uploader_uid),
+        }
+        if _is_document_evidence(ev):
+            documents.append(entry)
+        else:
+            evidences.append(entry)
     evidences.sort(key=lambda x: x["uploaded_at"], reverse=True)
+    documents.sort(key=lambda x: x["uploaded_at"], reverse=True)
+
+    existing_actions = {_normalize_action_token(entry.get("action")) for entry in audit_trail}
+    audit_trail.extend(
+        _build_supplemental_audit_trail(
+            doc,
+            users_map,
+            users_map.get(assigned_uid, ""),
+            users_map.get(reviewer_uid, ""),
+            evidences,
+            documents,
+            existing_actions,
+        )
+    )
+    audit_trail.sort(key=lambda x: x["timestamp"], reverse=True)
 
     # ── Build response ────────────────────────────────────────────────────────
     decision      = str(doc.get("review_decision") or "").upper()
@@ -533,10 +775,11 @@ def get_completed_activity_detail(
         "front":            front_name,
         "estado":           str(doc.get("estado") or doc.get("state") or ""),
         "municipio":        str(doc.get("municipio") or doc.get("municipality") or ""),
-        "has_report":       bool(doc.get("report_generated_at")),
+        "has_report":       bool(doc.get("report_generated_at")) or bool(documents),
         "reviewed_at":      _iso(doc.get("last_reviewed_at")),
         "created_at":       _iso(doc.get("created_at")),
         "evidence_count":   len(evidences),
+        "document_count":   len(documents),
         "assigned_name":    users_map.get(assigned_uid, ""),
         "reviewed_by_name": users_map.get(reviewer_uid, ""),
         "review_decision":  decision,
@@ -547,6 +790,7 @@ def get_completed_activity_detail(
         "sync_version":     int(doc.get("sync_version") or 0),
         "audit_trail":      audit_trail,
         "evidences":        evidences,
+        "documents":        documents,
     }
 
 

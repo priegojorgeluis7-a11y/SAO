@@ -357,6 +357,89 @@ void main() {
       );
     });
 
+    test('replaceSyncedInRange preserves approved finished items even when omitted remotely', () async {
+      final db = AppDb();
+      addTearDown(db.close);
+      final dao = AssignmentsDao(db);
+      final now = DateTime.now();
+      await seedActivityParents(db);
+
+      await db.batch((batch) {
+        batch.insert(
+          db.agendaAssignments,
+          AgendaAssignmentsCompanion.insert(
+            id: 'asg-approved-deleted',
+            projectId: 'TMQ',
+            resourceId: 'user-1',
+            activityId: const drift.Value('act-approved-deleted'),
+            title: 'Actividad aprobada y borrada',
+            frente: const drift.Value('Frente Z'),
+            municipio: const drift.Value('Toluca'),
+            estado: const drift.Value('EDOMEX'),
+            pk: const drift.Value(146000),
+            startAt: now,
+            endAt: now.add(const Duration(hours: 1)),
+            syncStatus: const drift.Value('synced'),
+          ),
+        );
+
+        batch.insert(
+          db.activities,
+          ActivitiesCompanion.insert(
+            id: 'act-approved-deleted',
+            projectId: 'TMQ',
+            activityTypeId: 'unknown_activity_type',
+            title: 'Actividad aprobada y borrada',
+            createdAt: now,
+            createdByUserId: 'user-1',
+            status: const drift.Value('SYNCED'),
+            startedAt: drift.Value(now.subtract(const Duration(minutes: 45))),
+            finishedAt: drift.Value(now.subtract(const Duration(minutes: 5))),
+          ),
+        );
+      });
+
+      await db.batch((batch) {
+        batch.insert(
+          db.activityFields,
+          ActivityFieldsCompanion.insert(
+            id: 'act-approved-deleted:review_state',
+            activityId: 'act-approved-deleted',
+            fieldKey: 'review_state',
+            valueText: const drift.Value('APPROVED'),
+          ),
+        );
+        batch.insert(
+          db.activityFields,
+          ActivityFieldsCompanion.insert(
+            id: 'act-approved-deleted:next_action',
+            activityId: 'act-approved-deleted',
+            fieldKey: 'next_action',
+            valueText: const drift.Value('CERRADA_APROBADA'),
+          ),
+        );
+      });
+
+      await dao.replaceSyncedInRange(
+        projectId: 'TMQ',
+        from: now.subtract(const Duration(days: 1)),
+        to: now.add(const Duration(days: 1)),
+        records: const [],
+      );
+
+      final result = await dao.queryRange(
+        projectId: 'TMQ',
+        from: now.subtract(const Duration(days: 1)),
+        to: now.add(const Duration(days: 1)),
+      );
+
+      expect(result.map((item) => item.id), contains('asg-approved-deleted'));
+      expect(
+        result.firstWhere((item) => item.id == 'asg-approved-deleted').nextAction,
+        'CERRADA_APROBADA',
+      );
+    });
+
     test('queryRange falls back to persisted assignee when assignment resource is unassigned', () async {
       final db = AppDb();
       addTearDown(db.close);

@@ -72,6 +72,22 @@ void main() {
       expect(dto.scopes, ['ADMIN', 'AUDIT']);
     });
 
+    test('should parse /me/projects response shape from backend', () {
+      final json = {
+        'project_id': 'tap',
+        'project_name': 'Tren AIFA–Pachuca',
+        'role_names': ['OPERATIVO']
+      };
+
+      final dto = ProjectDto.fromJson(json);
+
+      expect(dto.id, 'tap');
+      expect(dto.code, 'TAP');
+      expect(dto.name, 'Tren AIFA–Pachuca');
+      expect(dto.scopes, ['OPERATIVO']);
+      expect(dto.isActive, true);
+    });
+
     test('should handle alternative field names (code vs id)', () {
       final json = {
         'code': 'ALT_CODE',

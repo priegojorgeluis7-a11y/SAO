@@ -1,6 +1,6 @@
-# REPO_MAP.md — Mapa Exacto del Repositorio SAO
+# REPO_MAP.md — mapa exacto del repositorio SAO
 
-> Fuente de verdad sobre qué archivo contiene qué.
+> Fuente de verdad sobre qué archivo contiene cada responsabilidad.
 > Usar junto con [AGENT_CONTEXT.md](AGENT_CONTEXT.md).
 > Última actualización: 2026-02-25
 

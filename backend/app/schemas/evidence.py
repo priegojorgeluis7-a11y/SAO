@@ -45,6 +45,11 @@ class UploadCompleteRequest(BaseModel):
         min_length=1,
         validation_alias=AliasChoices("evidenceId", "evidence_id"),
     )
+    description: str | None = Field(
+        None,
+        max_length=500,
+        validation_alias=AliasChoices("description", "caption"),
+    )
 
 
 class UploadCompleteResponse(BaseModel):

@@ -1,0 +1,4 @@
+Coloca aquí tu archivo PFX corporativo o el que generes con el script 01.
+
+Nombre sugerido:
+sao-internal-code-signing.pfx

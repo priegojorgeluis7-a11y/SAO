@@ -66,6 +66,15 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   bool _loadingProjects = true;
   String? _projectsError;
 
+  List<String> _stateOptions = const [];
+  String? _selectedEstado;
+  List<String> _municipioOptions = const [];
+  String? _selectedMunicipio;
+  bool _loadingStates = true;
+  bool _loadingMunicipios = false;
+  String? _locationError;
+
+  final _titleController = TextEditingController();
   final _pkController = TextEditingController();
   final _frontController = TextEditingController();
 
@@ -83,6 +92,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
 
   @override
   void dispose() {
+    _titleController.dispose();
     _pkController.dispose();
     _frontController.dispose();
     super.dispose();
@@ -170,11 +180,12 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     }
 
     await _loadProjectFronts();
+    await _loadStatesForProject();
   }
 
   Future<void> _loadProjectFronts() async {
-    final projectId = _selectedProject?.id.trim();
-    if (projectId == null || projectId.isEmpty) {
+    final projectKey = (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '').trim();
+    if (projectKey.isEmpty) {
       setState(() {
         _loadingFronts = false;
         _frontsError = 'No hay proyecto seleccionado para cargar frentes.';
@@ -190,11 +201,33 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     });
 
     try {
-      final rows = await _activityDao.listActiveSegmentsByProject(projectId);
-      final fronts = rows
-          .map((segment) => FrontOption(id: segment.id, name: segment.segmentName))
-          .toList()
-        ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+      await _catalogRepo.init();
+      final remoteFronts = await _catalogRepo.fetchFrontsForProject(projectKey);
+
+      List<FrontOption> fronts;
+      if (remoteFronts.isNotEmpty) {
+        fronts = remoteFronts
+            .map(
+              (front) => FrontOption(
+                id: front.id,
+                name: front.name,
+                code: front.code,
+              ),
+            )
+            .toList();
+      } else {
+        final rows = await _activityDao.listActiveSegmentsByProject(projectKey);
+        fronts = rows
+            .map(
+              (segment) => FrontOption(
+                id: segment.id,
+                name: segment.segmentName,
+              ),
+            )
+            .toList();
+      }
+
+      fronts.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
 
       if (!mounted) return;
       setState(() {
@@ -203,6 +236,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         _frontFreeText = '';
         _frontController.text = '';
         _loadingFronts = false;
+        _frontsError = fronts.isEmpty
+            ? 'No hay frentes disponibles en el catálogo del proyecto.'
+            : null;
       });
     } catch (_) {
       if (!mounted) return;
@@ -211,6 +247,93 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         _frontOptions = const [];
         _selectedFront = null;
         _loadingFronts = false;
+      });
+    }
+  }
+
+  Future<void> _loadStatesForProject() async {
+    final projectKey = (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '').trim();
+    if (projectKey.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _loadingStates = false;
+        _loadingMunicipios = false;
+        _stateOptions = const [];
+        _municipioOptions = const [];
+        _selectedEstado = null;
+        _selectedMunicipio = null;
+        _locationError = 'No hay proyecto seleccionado para cargar estado y municipio.';
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _loadingStates = true;
+      _loadingMunicipios = false;
+      _locationError = null;
+      _stateOptions = const [];
+      _municipioOptions = const [];
+      _selectedEstado = null;
+      _selectedMunicipio = null;
+    });
+
+    try {
+      await _catalogRepo.init();
+      final states = await _catalogRepo.fetchStatesForProject(projectKey);
+      if (!mounted) return;
+      setState(() {
+        _stateOptions = states;
+        _selectedEstado = states.isNotEmpty ? states.first : null;
+        _loadingStates = false;
+      });
+      await _loadMunicipiosForState(_selectedEstado);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingStates = false;
+        _loadingMunicipios = false;
+        _locationError = 'No se pudieron cargar estado y municipio del proyecto.';
+      });
+    }
+  }
+
+  Future<void> _loadMunicipiosForState(String? estado) async {
+    final projectKey = (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '').trim();
+    final normalizedEstado = (estado ?? '').trim();
+
+    if (projectKey.isEmpty || normalizedEstado.isEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMunicipios = false;
+        _municipioOptions = const [];
+        _selectedMunicipio = null;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _loadingMunicipios = true;
+      _municipioOptions = const [];
+      _selectedMunicipio = null;
+    });
+
+    try {
+      final municipios = await _catalogRepo.fetchMunicipiosForProject(projectKey, normalizedEstado);
+      if (!mounted) return;
+      setState(() {
+        _municipioOptions = municipios;
+        _selectedMunicipio = municipios.isNotEmpty ? municipios.first : null;
+        _loadingMunicipios = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _loadingMunicipios = false;
+        _municipioOptions = const [];
+        _selectedMunicipio = null;
+        _locationError = 'No se pudieron cargar los municipios del estado seleccionado.';
       });
     }
   }
@@ -533,8 +656,16 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                 _frontsError = null;
                 _frontOptions = const [];
                 _selectedFront = null;
+                _loadingStates = true;
+                _loadingMunicipios = false;
+                _stateOptions = const [];
+                _municipioOptions = const [];
+                _selectedEstado = null;
+                _selectedMunicipio = null;
+                _locationError = null;
               });
               await _loadProjectFronts();
+              await _loadStatesForProject();
             },
           ),
         const SizedBox(height: 12),
@@ -570,7 +701,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                   (front) => DropdownMenuItem<FrontOption>(
                     value: front,
                     child: Text(
-                      front.name,
+                      front.label,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
@@ -601,11 +732,93 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
               ),
               const SizedBox(height: 6),
               const Text(
-                'TODO: conectar selector de frentes desde catálogo real cuando el backend lo exponga.',
+                'Si el proyecto no trae frentes catalogados, puedes capturarlo manualmente.',
                 style: SaoTypography.caption,
               ),
             ],
           ),
+        const SizedBox(height: 12),
+        if (_loadingStates)
+          const LinearProgressIndicator(minHeight: 2)
+        else if (_locationError != null)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.25)),
+            ),
+            child: Text(
+              _locationError!,
+              style: const TextStyle(
+                color: SaoColors.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          )
+        else if (_stateOptions.isNotEmpty)
+          DropdownButtonFormField<String>(
+            initialValue: _selectedEstado,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Estado',
+              border: OutlineInputBorder(),
+            ),
+            items: _stateOptions
+                .map(
+                  (estado) => DropdownMenuItem<String>(
+                    value: estado,
+                    child: Text(
+                      estado,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) async {
+              setState(() {
+                _selectedEstado = value;
+              });
+              await _loadMunicipiosForState(value);
+            },
+          ),
+        const SizedBox(height: 12),
+        if (_loadingMunicipios)
+          const LinearProgressIndicator(minHeight: 2)
+        else if (_selectedEstado != null && _municipioOptions.isNotEmpty)
+          DropdownButtonFormField<String>(
+            initialValue: _selectedMunicipio,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Municipio',
+              border: OutlineInputBorder(),
+            ),
+            items: _municipioOptions
+                .map(
+                  (municipio) => DropdownMenuItem<String>(
+                    value: municipio,
+                    child: Text(
+                      municipio,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: (value) {
+              setState(() {
+                _selectedMunicipio = value;
+              });
+            },
+          ),
+        const SizedBox(height: 12),
+        TextField(
+          controller: _titleController,
+          decoration: const InputDecoration(
+            labelText: 'Título opcional',
+            border: OutlineInputBorder(),
+          ),
+        ),
         const SizedBox(height: 12),
         TextField(
           controller: _pkController,
@@ -800,11 +1013,15 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         final hasFront = _frontOptions.isEmpty
             ? _frontFreeText.trim().isNotEmpty
             : _selectedFront != null;
+        final hasEstado = _stateOptions.isEmpty || _selectedEstado != null;
+        final hasMunicipio = _municipioOptions.isEmpty || _selectedMunicipio != null;
         return hasProject &&
           _selectedActivity != null &&
           _selectedRisk != null &&
           _pk.isNotEmpty &&
-          hasFront;
+          hasFront &&
+          hasEstado &&
+          hasMunicipio;
       case 2:
         return _startTime != null && _endTime != null;
       default:
@@ -874,7 +1091,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       orElse: () => const Resource(
         id: 'unknown',
         name: 'Desconocido',
-        role: ResourceRole.tecnico,
+        role: ResourceRole.operativo,
         isActive: true,
       ),
     );
@@ -934,10 +1151,10 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
 
     final selectedActivity = _selectedActivity;
     if (selectedActivity == null) return;
-    final projectCode = (_selectedProject?.id ?? widget.projectId ?? '').trim();
+    final projectCode = (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '').trim();
     final frontName = (_selectedFront?.name ?? _frontFreeText).trim();
 
-    final item = _assignmentFactory.build(
+    final baseItem = _assignmentFactory.build(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       resourceId: _selectedResourceId!,
       activity: EffectiveActivityInput(
@@ -953,9 +1170,14 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       pk: _pk.isNotEmpty ? int.tryParse(_pk) : null,
       risk: _selectedRisk!,
       effectiveVersionId: effectiveVersionId,
-      municipio: null,
-      estado: null,
+      municipio: _selectedMunicipio,
+      estado: _selectedEstado,
     );
+
+    final typedTitle = _titleController.text.trim();
+    final item = typedTitle.isNotEmpty
+        ? baseItem.copyWith(title: typedTitle)
+        : baseItem;
 
     widget.onCreate(item);
     if (!mounted) return;
@@ -1132,11 +1354,15 @@ class _DurationChip extends StatelessWidget {
 class FrontOption {
   final String id;
   final String name;
+  final String code;
 
   const FrontOption({
     required this.id,
     required this.name,
+    this.code = '',
   });
+
+  String get label => code.trim().isEmpty ? name : '$code · $name';
 }
 
 class ProjectOption {

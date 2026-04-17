@@ -1,14 +1,14 @@
-# STATE SYSTEM SPECIFICATION - Unified Reference
+# Especificación del sistema de estados - referencia unificada
 
-## Overview
-This document serves as the single source of truth for all state definitions and mappings across SAO backend and frontend.
+## Resumen
+Este documento funciona como fuente única de verdad para las definiciones de estado y sus mapeos entre backend y frontend en SAO.
 
 ---
 
-## EXECUTION STATE
-**Purpose:** Primary state that controls the activity lifecycle (mobile controls this)  
-**Scope:** Only mobile can change this value  
-**Persistence:** Firestore `activities.execution_state`
+## Estado de ejecución
+**Propósito:** Estado principal que controla el ciclo de vida de la actividad; la app móvil lo actualiza.  
+**Alcance:** Solo móvil puede modificar este valor.  
+**Persistencia:** Firestore `activities.execution_state`
 
 | Value | Meaning | Mobile Action | Backend Derives |
 |-------|---------|---------------|-----------------|
@@ -25,10 +25,10 @@ This document serves as the single source of truth for all state definitions and
 
 ---
 
-## OPERATIONAL STATE  
-**Purpose:** Normalized state for UI logic (always derived)  
-**Scope:** Read-only on frontend, always recalculated on backend read  
-**Derivation:** `infer_operational_state(execution_state)`
+## Estado operativo  
+**Propósito:** Estado normalizado para la lógica de interfaz; siempre se deriva.  
+**Alcance:** Es de solo lectura en frontend y se recalcula en backend al leer.  
+**Derivación:** `infer_operational_state(execution_state)`
 
 | Derived From | Value | Meaning |
 |---|---|---|
@@ -43,10 +43,10 @@ This document serves as the single source of truth for all state definitions and
 
 ---
 
-## SYNC STATE  
-**Purpose:** Track synchronization status with server  
-**Scope:** frontend manages lifecycle, backend reports on read  
-**Persistence:** Mobile app tracks in SQLite `timeline_sync_status`
+## Estado de sincronización  
+**Propósito:** Dar seguimiento al estado de sincronización con el servidor.  
+**Alcance:** El frontend gestiona el ciclo de vida y el backend lo reporta al leer.  
+**Persistencia:** La app móvil lo registra en SQLite `timeline_sync_status`
 
 ### Backend Valid Values (VALID_SYNC_STATES)
 ```
@@ -86,10 +86,10 @@ enum SyncStatus {
 
 ---
 
-## REVIEW STATE
-**Purpose:** Decision status from coordinator/supervisor  
-**Scope:** Applies only if execution_state in {REVISION_PENDIENTE, COMPLETADA}  
-**Derivation:** `infer_review_state(execution_state, review_decision)`
+## Estado de revisión
+**Propósito:** Reflejar la decisión del coordinador o supervisor.  
+**Alcance:** Solo aplica cuando `execution_state` está en `REVISION_PENDIENTE` o `COMPLETADA`.  
+**Derivación:** `infer_review_state(execution_state, review_decision)`
 
 ### Valid Values (VALID_REVIEW_STATES)
 ```
@@ -112,10 +112,10 @@ enum SyncStatus {
 
 ---
 
-## NEXT ACTION
-**Purpose:** Recommended action for frontend to suggest to user  
-**Scope:** Purely informational, frontend drives actual flow  
-**Priority:** review_state > sync_state > operational_state
+## Acción siguiente
+**Propósito:** Sugerir al frontend la acción más conveniente para el usuario.  
+**Alcance:** Es informativa; el frontend sigue controlando el flujo real.  
+**Prioridad:** `review_state` > `sync_state` > `operational_state`
 
 | Condition | Value | UX Impact |
 |---|---|---|
@@ -135,31 +135,31 @@ enum SyncStatus {
 
 ---
 
-## ACTIVITY STATUS (Desktop Catalog)
-**Purpose:** Desktop-specific activity states  
-**Scope:** Desktop only, not used by mobile  
-**Values:** `pendingReview`, `approved`, `rejected`, `needsFix`, `corrected`, `conflict`
+## Estado de actividad en escritorio
+**Propósito:** Estados específicos del cliente desktop.  
+**Alcance:** Solo escritorio; no lo usa móvil.  
+**Valores:** `pendingReview`, `approved`, `rejected`, `needsFix`, `corrected`, `conflict`
 
-**Note:** Desktop should map these to operational_state/review_state values  
-**Code:** `desktop_flutter/sao_desktop/lib/data/catalog/activity_status.dart`
+**Nota:** Desktop debe mapearlos a `operational_state` y `review_state`.  
+**Código:** `desktop_flutter/sao_desktop/lib/data/catalog/activity_status.dart`
 
-**Migration Note:** This should eventually consolidate with operational_state
-
----
-
-## UI STATES (STATUS CATALOG)
-**Purpose:** Workflow rules and allowed transitions for UI  
-**Scope:** Frontend (mobile + desktop)  
-**Values:** `borrador`, `nuevo`, `enRevision`, `requiereCambios`, `aprobado`, `rechazado`, `sincronizado`, `offline`, `conflicto`
-
-**Code:** `frontend_flutter/sao_windows/lib/catalog/status_catalog.dart`
-
-**Relationship:** Maps from execution_state → UI presentation  
-**Fallback:** If workflow not found in catalog, return empty list (ISSUE: Add default transitions)
+**Nota de migración:** A futuro debe consolidarse con `operational_state`.
 
 ---
 
-## VALIDATION RULES
+## Estados de interfaz
+**Propósito:** Definir reglas de workflow y transiciones permitidas para la UI.  
+**Alcance:** Frontend móvil y desktop.  
+**Valores:** `borrador`, `nuevo`, `enRevision`, `requiereCambios`, `aprobado`, `rechazado`, `sincronizado`, `offline`, `conflicto`
+
+**Código:** `frontend_flutter/sao_windows/lib/catalog/status_catalog.dart`
+
+**Relación:** Se mapean desde `execution_state` hacia la presentación visual.  
+**Fallback:** Si el workflow no existe en catálogo, debe devolverse una lista vacía o transiciones por defecto según política del cliente.
+
+---
+
+## Reglas de validación
 
 ### Execution State Transitions (Mobile Driven)
 ```
@@ -199,7 +199,7 @@ NOT_APPLICABLE ──→ (if execution_state changes to REVISION_PENDIENTE/COMPL
 
 ---
 
-## API CONTRACTS
+## Contratos de API
 
 ### /sync/pull Response
 ```json
@@ -229,7 +229,7 @@ NOT_APPLICABLE ──→ (if execution_state changes to REVISION_PENDIENTE/COMPL
 
 ---
 
-## CONSTANTS (Copy-Paste Reference)
+## Constantes de referencia
 
 ### Backend Constants
 ```python
@@ -251,38 +251,37 @@ enum SyncStatus {
 
 ---
 
-## TROUBLESHOOTING
+## Solución de problemas
 
-### "Activity shows different status in Home vs Agenda"
-- **Likely Cause:** Different data sources (sync/pull vs /assignments endpoint)
-- **Home:** Uses `/sync/pull` + local SQLite filtering
-- **Agenda:** Uses `/assignments` + backend filtering
+### "La actividad muestra distinto estado en Inicio y Agenda"
+- **Causa probable:** Se están usando fuentes de datos diferentes, por ejemplo `sync/pull` contra `assignments`.
+- **Inicio:** usa `/sync/pull` y filtrado local en SQLite.
+- **Agenda:** usa `/assignments` y filtrado desde backend.
 
-### "States diverged between Backend and Frontend"
-- **Cause:** Frontend recalculating instead of trusting Backend projections
-- **Solution:** Use values from API response directly, don't recalculate
-- **Files to Check:**
+### "Los estados divergen entre backend y frontend"
+- **Causa:** el frontend recalcula estados que ya vienen proyectados desde backend.
+- **Solución:** consumir directamente los valores de la API y evitar duplicar la lógica.
+- **Archivos a revisar:**
   - `frontend_flutter/sao_windows/lib/features/sync/services/sync_service.dart:816+`
-  - Remove any state recalculation that duplicates Backend logic
 
-### "Unknown sync_state value received"
-- **Cause:** API returning value not in VALID_SYNC_STATES
-- **Solution:** Update VALID_SYNC_STATES and SyncStatusMapper
-- **Safe Default:** Treat unknown as "SYNCED" (safest assumption)
+### "Llegó un valor desconocido en sync_state"
+- **Causa:** la API devolvió un valor fuera de `VALID_SYNC_STATES`.
+- **Solución:** actualizar `VALID_SYNC_STATES` y `SyncStatusMapper`.
+- **Fallback seguro:** tratarlo como `SYNCED` mientras se corrige el contrato.
 
-### "UI stuck, no transitions available"
-- **Cause:** StatusCatalog.nextStatesFor() returned empty list
-- **Solution:** Add fallback transitions or ensure catalog updated
-- **Safe Defaults:** Allow CANCELED transition from any state
+### "La UI quedó bloqueada y no hay transiciones disponibles"
+- **Causa:** `StatusCatalog.nextStatesFor()` devolvió una lista vacía.
+- **Solución:** agregar transiciones de fallback o corregir el catálogo.
+- **Valor seguro:** permitir `CANCELED` desde cualquier estado cuando aplique.
 
 ---
 
-## IMPLEMENTATION TODOS
+## Pendientes de implementación
 
-- [ ] Ensure all API responses use consistent English values
-- [ ] Add explicit SyncStatusMapper for all Backend→Frontend conversions
-- [ ] Remove state recalculation from Frontend
-- [ ] Add fallback empty transitions in StatusCatalog
-- [ ] Document API contracts in OpenAPI/Swagger
-- [ ] Add tests for state derivation determinism
-- [ ] Consolidate ActivityStatus (Desktop) with operational_state
+- [ ] Asegurar respuestas API con valores consistentes.
+- [ ] Agregar un `SyncStatusMapper` explícito para todas las conversiones backend a frontend.
+- [ ] Eliminar recálculos redundantes de estado en frontend.
+- [ ] Definir transiciones de respaldo en `StatusCatalog`.
+- [ ] Documentar contratos en OpenAPI o Swagger.
+- [ ] Añadir pruebas de determinismo para derivación de estados.
+- [ ] Consolidar `ActivityStatus` de escritorio con `operational_state`.

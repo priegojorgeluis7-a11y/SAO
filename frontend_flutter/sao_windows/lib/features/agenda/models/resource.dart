@@ -1,10 +1,11 @@
 // lib/features/agenda/models/resource.dart
 
 enum ResourceRole {
-  ingeniero,
-  topografo,
-  tecnico,
+  administrador,
+  coordinador,
+  operativo,
   supervisor,
+  lector,
 }
 
 class Resource {
@@ -19,7 +20,7 @@ class Resource {
     required this.id,
     required this.name,
     this.avatarUrl,
-    this.role = ResourceRole.ingeniero,
+    this.role = ResourceRole.operativo,
     this.email,
     this.isActive = true,
   });
@@ -50,14 +51,16 @@ class Resource {
 
   String get roleLabel {
     switch (role) {
-      case ResourceRole.ingeniero:
-        return 'Ingeniero';
-      case ResourceRole.topografo:
-        return 'Topógrafo';
-      case ResourceRole.tecnico:
-        return 'Técnico';
+      case ResourceRole.administrador:
+        return 'Administrador';
+      case ResourceRole.coordinador:
+        return 'Coordinador';
+      case ResourceRole.operativo:
+        return 'Operativo';
       case ResourceRole.supervisor:
         return 'Supervisor';
+      case ResourceRole.lector:
+        return 'Lector';
     }
   }
 }

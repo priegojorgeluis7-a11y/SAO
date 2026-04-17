@@ -266,9 +266,10 @@ class ApiClient {
 
   bool _shouldSkipAuth(String path) {
     return path.contains('/auth/login') ||
-      path.contains('/auth/signup') ||
+        path.contains('/auth/signup') ||
         path.contains('/auth/refresh') ||
-        path.contains('/auth/register');
+        path.contains('/auth/register') ||
+        path.contains('/auth/roles');
   }
 
   Interceptor _createLoggingInterceptor() {

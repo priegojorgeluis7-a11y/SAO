@@ -19,17 +19,18 @@ def _dashboard_kpis_firestore(project_id: str | None, now: datetime) -> dict:
         query = query.where("project_id", "==", project_id.strip().upper())
 
     docs = list(query.stream())
-    total = len(docs)
     pending_review = 0
     in_progress = 0
     completed = 0
     completed_today = 0
+    total = 0
     recent_docs: list[dict] = []
 
     for doc in docs:
         payload = doc.to_dict() or {}
         if payload.get("deleted_at") is not None:
             continue
+        total += 1
         state = str(payload.get("execution_state") or "")
         updated_at_raw = payload.get("updated_at")
         updated_at_str = updated_at_raw.isoformat() if hasattr(updated_at_raw, "isoformat") else str(updated_at_raw or "")

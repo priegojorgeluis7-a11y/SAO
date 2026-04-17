@@ -695,6 +695,7 @@ def test_firestore_completed_activity_detail_returns_traceability_payload(client
         {
             "activity_id": activity_uuid,
             "description": "Pie de foto",
+            "gcs_path": "gs://bucket/pie_de_foto.jpg",
             "created_at": now,
             "uploaded_by": str(principal.id),
         }
@@ -724,6 +725,108 @@ def test_firestore_completed_activity_detail_returns_traceability_payload(client
     assert payload["assigned_name"] == "Jesus Perez Lopez"
     assert payload["evidence_count"] == 1
     assert payload["evidences"][0]["description"] == "Pie de foto"
+
+
+def test_firestore_completed_activity_detail_separates_report_pdf_from_real_evidence(client, monkeypatch, force_firestore_backend):
+    fake_client = _FakeFirestoreClient()
+    project_id = "TMQ"
+    principal = _make_principal("fernanda.pdf@example.com", project_id)
+    principal.roles = ["ADMIN"]
+
+    fake_client.collection("projects").document(project_id).set(
+        {
+            "front_location_scope": [
+                {
+                    "front_name": "Frente PDF",
+                    "municipio": "Doctor Mora",
+                }
+            ]
+        }
+    )
+
+    fake_client.collection("users").document(str(principal.id)).set(
+        {
+            "full_name": "Fernanda PDF",
+            "email": principal.email,
+        }
+    )
+
+    activity_uuid = str(uuid4())
+    now = datetime.now(timezone.utc)
+    fake_client.collection("activities").document(activity_uuid).set(
+        {
+            "uuid": activity_uuid,
+            "project_id": project_id,
+            "municipio": "Doctor Mora",
+            "execution_state": "COMPLETADA",
+            "review_decision": "APPROVE",
+            "assigned_to_user_id": str(principal.id),
+            "created_by_user_id": str(principal.id),
+            "catalog_version_id": str(uuid4()),
+            "activity_type_code": "CAM",
+            "title": "Actividad con PDF",
+            "created_at": now,
+            "updated_at": now,
+            "last_reviewed_by": str(principal.id),
+            "last_reviewed_at": now,
+        }
+    )
+    fake_client.collection("evidences").document(str(uuid4())).set(
+        {
+            "activity_id": activity_uuid,
+            "evidence_type": "PHOTO",
+            "description": "Foto real",
+            "gcs_path": "gs://bucket/evidencia_real.jpg",
+            "created_at": now,
+            "uploaded_by": str(principal.id),
+        }
+    )
+    fake_client.collection("evidences").document(str(uuid4())).set(
+        {
+            "activity_id": activity_uuid,
+            "evidence_type": "PDF",
+            "description": "Reporte generado",
+            "gcs_path": "gs://bucket/reporte_generado.pdf",
+            "original_file_name": "reporte_generado.pdf",
+            "mime_type": "application/pdf",
+            "created_at": now,
+            "uploaded_by": str(principal.id),
+        }
+    )
+
+    monkeypatch.setattr(
+        auth_api,
+        "get_firestore_user_by_email",
+        lambda email: principal if email == principal.email else None,
+    )
+    monkeypatch.setattr(
+        deps_api,
+        "get_firestore_user_by_id",
+        lambda pid: principal if str(pid) == str(principal.id) else None,
+    )
+    monkeypatch.setattr(auth_api, "update_last_login", lambda _: None)
+    monkeypatch.setattr(completed_activities_api, "get_firestore_client", lambda: fake_client)
+
+    login_response = client.post("/api/v1/auth/login", json={"email": principal.email, "password": "testpass123"})
+    assert login_response.status_code == 200
+    headers = {"Authorization": f"Bearer {login_response.json()['access_token']}"}
+
+    list_response = client.get(
+        f"/api/v1/completed-activities?project_id={project_id}&page=1&page_size=20",
+        headers=headers,
+    )
+    assert list_response.status_code == 200
+    list_payload = list_response.json()
+    assert list_payload["items"][0]["evidence_count"] == 1
+
+    detail_response = client.get(f"/api/v1/completed-activities/{activity_uuid}", headers=headers)
+    assert detail_response.status_code == 200
+    payload = detail_response.json()
+    assert payload["evidence_count"] == 1
+    assert len(payload["evidences"]) == 1
+    assert payload["evidences"][0]["description"] == "Foto real"
+    assert len(payload["documents"]) == 1
+    assert payload["documents"][0]["description"] == "Reporte generado"
 
 
 def test_firestore_review_queue_uses_creator_full_name_when_assigned_user_is_missing(client, monkeypatch, force_firestore_backend):

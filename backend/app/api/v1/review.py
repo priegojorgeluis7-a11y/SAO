@@ -2,7 +2,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID, NAMESPACE_URL, uuid4, uuid5
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from app.core.api_errors import api_error
@@ -27,6 +27,8 @@ from app.schemas.review import (
 from app.schemas.activity import build_canonical_flow_projection, infer_sync_state
 from app.services.push_notification_service import notify_review_decision
 from app.services.audit_redaction import sanitize_audit_details
+from app.services.audit_service import write_firestore_audit_log
+from app.services.firestore_identity_service import get_firestore_user_by_id
 
 router = APIRouter(prefix="/review", tags=["review"])
 logger = logging.getLogger(__name__)
@@ -270,6 +272,49 @@ def _count_evidences(client, activity_ids: set[str]) -> dict[str, int]:
     return counts
 
 
+def _wizard_payload_evidence_rows(activity_payload: dict[str, Any]) -> list[dict[str, Any]]:
+    wizard_payload = activity_payload.get("wizard_payload")
+    if not isinstance(wizard_payload, dict):
+        return []
+    raw = wizard_payload.get("evidences")
+    if not isinstance(raw, list):
+        return []
+    return [row for row in raw if isinstance(row, dict)]
+
+
+def _wizard_payload_evidence_count(activity_payload: dict[str, Any]) -> int:
+    return len(_wizard_payload_evidence_rows(activity_payload))
+
+
+def _required_fields_ok(activity_payload: dict[str, Any]) -> bool:
+    title_ok = bool(str(activity_payload.get("title") or "").strip())
+    description_ok = bool(str(activity_payload.get("description") or "").strip())
+    if title_ok and description_ok:
+        return True
+
+    wizard_payload = activity_payload.get("wizard_payload")
+    if not isinstance(wizard_payload, dict):
+        return False
+
+    context_payload = wizard_payload.get("context")
+    if not isinstance(context_payload, dict):
+        return False
+
+    required_context_keys = (
+        "activity_type",
+        "subcategory",
+        "topic",
+        "purpose",
+    )
+    present = 0
+    for key in required_context_keys:
+        if str(context_payload.get(key) or "").strip():
+            present += 1
+
+    # Consider fields complete if at least key context fields are already captured.
+    return present >= 2
+
+
 def _sync_state_from_activity(activity_payload: dict) -> str:
     return infer_sync_state(
         str(activity_payload.get("sync_state") or ""),
@@ -365,7 +410,19 @@ def review_queue(
         lat = activity.get("latitude")
         lon = activity.get("longitude")
         gps_critical = bool(activity.get("gps_mismatch", False)) or not (lat and lon)
-        evidence_count = evidence_count_by_activity.get(str(activity.get("uuid") or ""), 0)
+        activity_uuid_str = str(activity.get("uuid") or "").strip()
+        evidence_count = evidence_count_by_activity.get(activity_uuid_str, 0)
+        if evidence_count == 0:
+            legacy_activity_id = str(activity.get("server_id") or "").strip()
+            if legacy_activity_id:
+                evidence_count = sum(
+                    1
+                    for _ in client.collection("evidences")
+                    .where("activity_id", "==", legacy_activity_id)
+                    .stream()
+                )
+        if evidence_count == 0:
+            evidence_count = _wizard_payload_evidence_count(activity)
         execution_state = _normalize_execution_state(activity.get("execution_state"))
         review_decision = _normalize_review_decision(activity.get("review_decision"))
         status_value = _review_status_from_firestore(activity)
@@ -375,7 +432,8 @@ def review_queue(
         catalog_change_pending = bool(activity.get("catalog_changed", False)) or bool(
             activity.get("description") and "catalog" in str(activity.get("description")).lower()
         )
-        checklist_incomplete = missing_evidence or gps_critical
+        # GPS remains informational for now; it must not block approval flow.
+        checklist_incomplete = missing_evidence
         has_conflicts = catalog_change_pending or checklist_incomplete
         severity = _severity_from_flags(gps_critical, has_conflicts, missing_evidence)
         pk_label = _pk_label(activity.get("pk_start"), activity.get("pk_end")) or "PK 0+000"
@@ -499,11 +557,14 @@ def review_activity_detail(
             .where("activity_id", "==", str(activity_uuid))
             .stream()
     ]
+    wizard_payload_evidence_rows = _wizard_payload_evidence_rows(activity)
+    total_evidence_count = max(len(evidences), len(wizard_payload_evidence_rows))
     quality_flags = {
-        "evidence_ok": len(evidences) > 0,
+        "evidence_ok": total_evidence_count > 0,
         "gps_ok": not gps_critical,
         "catalog_ok": not bool(activity.get("catalog_changed", False)),
-        "required_fields_ok": bool(activity.get("title") and activity.get("description")),
+        # Keep required_fields tied to business fields only (not GPS).
+        "required_fields_ok": _required_fields_ok(activity),
     }
     changeset: list[ReviewChangeFieldOut] = []
     if bool(activity.get("catalog_changed", False)):
@@ -565,13 +626,16 @@ def review_activity_evidences(
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_ACTIVITY_ID", message="Invalid activity id")
 
     client = get_firestore_client()
-    # Use a targeted query instead of streaming all evidences.
+    # Query evidences for this activity from Firestore.
     evidences_docs = [
         d.to_dict() or {}
         for d in client.collection("evidences")
             .where("activity_id", "==", str(activity_uuid))
             .stream()
     ]
+    # Only return evidences that have actually been uploaded (have valid object_path).
+    # Do NOT create fallback evidences from wizard_payload; if no evidences exist in Firestore,
+    # the activity either has no evidence or evidence was not yet uploaded properly.
     evidences_docs.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)))
     return [
         ReviewEvidenceOut(
@@ -581,12 +645,12 @@ def review_activity_evidences(
             lng=None,
             accuracy=None,
             device=None,
-            description=row.get("caption"),
+            description=row.get("caption") or row.get("description") or row.get("descripcion"),
             gcsKey=row.get("object_path"),
             status="UPLOADED" if row.get("object_path") else "PENDING",
         )
         for row in evidences_docs
-        if row.get("id")
+        if row.get("id") and row.get("object_path")
     ]
 
 
@@ -618,17 +682,16 @@ def review_validate_evidence(
             "created_at": now,
         }
     )
-    client.collection("audit_logs").document(str(uuid4())).set(
-        {
-            "id": str(uuid4()),
-            "created_at": now,
-            "actor_id": str(getattr(current_user, "id", "")),
-            "actor_email": getattr(current_user, "email", ""),
-            "action": "REVIEW_EVIDENCE_VALIDATE",
-            "entity": "evidence",
-            "entity_id": str(evidence_uuid),
-            "details_json": json.dumps({"status": body.status, "reason_code": body.reason_code, "comment": body.comment}),
-        }
+    write_firestore_audit_log(
+        action="REVIEW_EVIDENCE_VALIDATE",
+        entity="evidence",
+        entity_id=str(evidence_uuid),
+        actor=current_user,
+        details={
+            "status": body.status,
+            "reason_code": body.reason_code,
+            "comment": body.comment,
+        },
     )
     return {"ok": True}
 
@@ -659,6 +722,13 @@ def review_patch_evidence(
             "actor_email": getattr(current_user, "email", ""),
             "created_at": now,
         }
+    )
+    write_firestore_audit_log(
+        action="REVIEW_EVIDENCE_PATCH",
+        entity="evidence",
+        entity_id=str(evidence_uuid),
+        actor=current_user,
+        details={"description": body.description},
     )
     return {"ok": True}
 
@@ -778,6 +848,29 @@ def review_decision(
         )
     except Exception:
         logger.exception("REVIEW_NOTIFY_FAILED activity_id=%s", activity_uuid)
+
+    assignee_principal = (
+        get_firestore_user_by_id(effective_assignee_user_id)
+        if effective_assignee_user_id
+        else None
+    )
+    write_firestore_audit_log(
+        action=action,
+        entity="activity",
+        entity_id=str(activity_uuid),
+        actor=current_user,
+        details={
+            "project_id": str(activity_payload.get("project_id") or "").strip().upper() or None,
+            "decision": decision,
+            "status": "REJECTED" if decision == "REJECT" else "APPROVED",
+            "next_state": next_state,
+            "reject_reason_code": body.reject_reason_code,
+            "comment": body.comment,
+            "assigned_to_user_id": effective_assignee_user_id,
+            "assigned_to_name": assignee_principal.full_name if assignee_principal else None,
+            "assigned_to_role": (assignee_principal.roles[0] if assignee_principal and assignee_principal.roles else None),
+        },
+    )
 
     return ReviewDecisionOut(
         ok=True,

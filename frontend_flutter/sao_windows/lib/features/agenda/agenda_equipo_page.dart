@@ -49,7 +49,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
             projectId: projectId,
             isOffline: isOffline,
             selfResource: selfResource,
-        preferSelfFilter: preferSelfFilter,
+            preferSelfFilter: preferSelfFilter,
           );
     });
   }
@@ -60,7 +60,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
       id: authUser.id,
       name: authUser.fullName,
       email: authUser.email,
-      role: ResourceRole.tecnico,
+      role: ResourceRole.operativo,
       // Must be selectable for self-assignment even if backend status varies.
       isActive: true,
     );
@@ -231,6 +231,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
             child: TimelineList(
               resources: state.resources,
               items: filtered,
+              onOpenItem: _openAgendaItemDetails,
               onAdvanceState: _advanceActivityStateFromAgenda,
               onCancelItem: (item) async {
                 await controller.cancelAssignment(item);
@@ -244,6 +245,8 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
                   );
                 }
               },
+              onTransferItem: _transferAgendaItem,
+              canTransferItem: _canTransferAgendaItem,
             ),
           ),
         ],
@@ -259,6 +262,11 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     final now = DateTime.now();
 
     try {
+      if (_shouldOpenReadOnlyAgendaDetails(item)) {
+        await _openAgendaItemDetails(item);
+        return;
+      }
+
       final existing = await _activityDao.getActivityById(activityId);
       final typeSeed = (item.activityTypeId?.trim().isNotEmpty ?? false)
           ? item.activityTypeId!.trim()
@@ -293,7 +301,9 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
             backgroundColor: SaoColors.success,
           ),
         );
-      } else {
+      } else if (nextAction == 'TERMINAR_ACTIVIDAD' ||
+          nextAction == 'COMPLETAR_WIZARD' ||
+          nextAction == 'CORREGIR_Y_REENVIAR') {
         final startedAt = existing?.startedAt ?? item.start;
         await _activityDao.markActivityStarted(activityId: activityId, startedAt: startedAt);
         await _activityDao.markActivityRevisionPendiente(
@@ -318,6 +328,8 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
             assignedToUserId: item.resourceId,
           ),
         );
+      } else {
+        await _openAgendaItemDetails(item);
       }
 
       await controller.refresh();
@@ -328,6 +340,137 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
         context,
         appSnackBar(
           message: 'No se pudo actualizar el estado de la actividad en Agenda.',
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  bool _shouldOpenReadOnlyAgendaDetails(AgendaItem item) {
+    final nextAction = item.nextAction.trim().toUpperCase();
+    final reviewState = item.reviewState.trim().toUpperCase();
+    return nextAction == 'CERRADA_APROBADA' ||
+        reviewState == 'APPROVED' ||
+        nextAction == 'SIN_ACCION';
+  }
+
+  Future<void> _openAgendaItemDetails(AgendaItem item) async {
+    final activityId = (item.activityId?.trim().isNotEmpty ?? false)
+        ? item.activityId!.trim()
+        : item.id.trim();
+    if (activityId.isEmpty || !mounted) return;
+
+    final executionState = _shouldOpenReadOnlyAgendaDetails(item)
+        ? ExecutionState.terminada
+        : ExecutionState.revisionPendiente;
+
+    await context.push(
+      '/activity/$activityId?project=${item.projectCode}',
+      extra: TodayActivity(
+        id: activityId,
+        title: item.title,
+        frente: item.frente,
+        municipio: item.municipio,
+        estado: item.estado,
+        pk: item.pk,
+        status: ActivityStatus.hoy,
+        createdAt: item.start,
+        executionState: executionState,
+        horaInicio: item.start,
+        horaFin: item.end,
+        operationalState: item.operationalState,
+        reviewState: item.reviewState,
+        nextAction: item.nextAction,
+        assignedToUserId: item.resourceId,
+      ),
+    );
+  }
+
+  bool _canTransferAgendaItem(AgendaItem item) {
+    if (ref.read(offlineModeProvider)) {
+      return false;
+    }
+
+    if (item.id.trim().isEmpty) {
+      return false;
+    }
+
+    final normalizedNextAction = item.nextAction.trim().toUpperCase();
+    final normalizedReviewState = item.reviewState.trim().toUpperCase();
+    final isCompleted = normalizedNextAction == 'SIN_ACCION' ||
+        normalizedNextAction == 'CERRADA_APROBADA' ||
+        normalizedReviewState == 'APPROVED';
+
+    // En Agenda privilegiamos el estado real de la actividad y dejamos que el
+    // backend confirme permisos al ejecutar la transferencia.
+    return !isCompleted;
+  }
+
+  Future<void> _transferAgendaItem(AgendaItem item) async {
+    if (!_canTransferAgendaItem(item)) {
+      return;
+    }
+
+    final controller = ref.read(agendaControllerProvider.notifier);
+    List<Resource> candidates;
+    try {
+      candidates = await controller.getTransferCandidates(item: item);
+    } catch (_) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo cargar el equipo del proyecto para transferir.',
+        ),
+      );
+      return;
+    }
+
+    if (candidates.isEmpty) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No hay otra persona disponible en el proyecto para recibir la actividad.',
+        ),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final selection = await showModalBottomSheet<_AgendaTransferSelection>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _AgendaTransferSheet(
+        item: item,
+        candidates: candidates,
+      ),
+    );
+
+    if (!mounted || selection == null) return;
+
+    try {
+      await controller.transferAssignment(
+        item: item,
+        assignee: selection.resource,
+        reason: selection.reason,
+      );
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Actividad transferida a ${selection.resource.name}',
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    } catch (e, st) {
+      appLogger.w('Agenda transfer failed assignment=${item.id}: $e\n$st');
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo transferir la actividad. Intenta de nuevo.',
           backgroundColor: SaoColors.error,
         ),
       );
@@ -414,5 +557,151 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     } catch (_) {
       return 'Recurso desconocido';
     }
+  }
+}
+
+class _AgendaTransferSelection {
+  final Resource resource;
+  final String? reason;
+
+  const _AgendaTransferSelection({required this.resource, this.reason});
+}
+
+class _AgendaTransferSheet extends StatefulWidget {
+  final AgendaItem item;
+  final List<Resource> candidates;
+
+  const _AgendaTransferSheet({
+    required this.item,
+    required this.candidates,
+  });
+
+  @override
+  State<_AgendaTransferSheet> createState() => _AgendaTransferSheetState();
+}
+
+class _AgendaTransferSheetState extends State<_AgendaTransferSheet> {
+  late String _selectedResourceId;
+  final TextEditingController _reasonController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedResourceId = widget.candidates.first.id;
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Transferir actividad',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            widget.item.title,
+            style: const TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: SaoColors.gray700,
+            ),
+          ),
+          const SizedBox(height: 14),
+          const Text(
+            'Selecciona a quién transferir esta actividad.',
+            style: TextStyle(fontSize: 13, color: SaoColors.gray600),
+          ),
+          const SizedBox(height: 10),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: widget.candidates.length,
+              itemBuilder: (context, index) {
+                final candidate = widget.candidates[index];
+                final isSelected = candidate.id == _selectedResourceId;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: isSelected
+                        ? SaoColors.success
+                        : SaoColors.gray400,
+                  ),
+                  title: Text(candidate.name),
+                  subtitle: Text(candidate.roleLabel),
+                  trailing: isSelected
+                      ? const Icon(Icons.check_circle, color: SaoColors.success)
+                      : null,
+                  onTap: () => setState(() => _selectedResourceId = candidate.id),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _reasonController,
+            minLines: 2,
+            maxLines: 4,
+            decoration: InputDecoration(
+              labelText: 'Motivo de transferencia',
+              hintText: 'Opcional',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Cancelar'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton.icon(
+                  onPressed: () {
+                    final selected = widget.candidates.firstWhere(
+                      (candidate) => candidate.id == _selectedResourceId,
+                    );
+                    Navigator.of(context).pop(
+                      _AgendaTransferSelection(
+                        resource: selected,
+                        reason: _reasonController.text.trim().isEmpty
+                            ? null
+                            : _reasonController.text.trim(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.swap_horiz_rounded),
+                  label: const Text('Transferir'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }

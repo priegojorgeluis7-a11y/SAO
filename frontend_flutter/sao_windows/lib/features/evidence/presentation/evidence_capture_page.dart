@@ -179,6 +179,7 @@ class _EvidenceCapturePageState extends State<EvidenceCapturePage> {
       appLogger.d('🏁 Finalizing upload...');
       await _uploadRepository.uploadComplete(
         evidenceId: initResult.evidenceId,
+        description: _evidence?.description,
       );
       appLogger.i(
         '✅ Evidence submitted successfully: ${initResult.evidenceId}',
@@ -219,6 +220,7 @@ class _EvidenceCapturePageState extends State<EvidenceCapturePage> {
         fileName: _evidence!.fileName,
         mimeType: _evidence!.mimeType,
         sizeBytes: _evidence!.sizeBytes,
+        description: _evidence!.description,
       );
 
       if (mounted) {

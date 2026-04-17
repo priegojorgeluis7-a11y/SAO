@@ -18,15 +18,24 @@ class TimelineList extends StatefulWidget {
   final void Function(AgendaItem)? onCancelItem;
   /// Invocado para avanzar estado operativo desde Agenda.
   final Future<void> Function(AgendaItem)? onAdvanceState;
+  /// Invocado para abrir una actividad en modo consulta/lectura.
+  final Future<void> Function(AgendaItem)? onOpenItem;
+  /// Invocado para transferir la actividad a otro usuario.
+  final Future<void> Function(AgendaItem)? onTransferItem;
+  /// Determina si se debe mostrar la acción de transferir para el item.
+  final bool Function(AgendaItem)? canTransferItem;
 
   const TimelineList({
     super.key,
     required this.items,
     required this.resources,
     this.startHour = 7,
-    this.endHour = 19,
+    this.endHour = 23,
     this.onCancelItem,
     this.onAdvanceState,
+    this.onOpenItem,
+    this.onTransferItem,
+    this.canTransferItem,
   });
 
   @override
@@ -155,17 +164,32 @@ class _TimelineListState extends State<TimelineList> {
                               return const Resource(
                                 id: 'unknown',
                                 name: 'Desconocido',
-                                role: ResourceRole.tecnico,
+                                role: ResourceRole.operativo,
                                 isActive: true,
                               );
                             },
                           );
+                          final canTransfer = widget.onTransferItem != null &&
+                              (widget.canTransferItem?.call(it) ?? true);
                           return Padding(
                             padding: const EdgeInsets.fromLTRB(8, 0, 12, 8),
                             child: AgendaMiniCard(
                               item: it,
                               resource: resource,
-                              onTap: () => _showItemDetails(context, it, resource),
+                              showTransferAction: canTransfer,
+                              onTransferTap: canTransfer
+                                  ? () async {
+                                      await widget.onTransferItem!(it);
+                                    }
+                                  : null,
+                              onTap: () {
+                                if (_opensDetailsDirectly(it) &&
+                                    widget.onOpenItem != null) {
+                                  widget.onOpenItem!(it);
+                                  return;
+                                }
+                                _showItemDetails(context, it, resource);
+                              },
                             ),
                           );
                         },
@@ -202,6 +226,14 @@ class _TimelineListState extends State<TimelineList> {
       ..sort((a, b) => a.start.compareTo(b.start));
   }
 
+  bool _opensDetailsDirectly(AgendaItem item) {
+    final nextAction = item.nextAction.trim().toUpperCase();
+    final reviewState = item.reviewState.trim().toUpperCase();
+    return nextAction == 'CERRADA_APROBADA' ||
+        reviewState == 'APPROVED' ||
+        nextAction == 'SIN_ACCION';
+  }
+
   void _showItemDetails(
     BuildContext context,
     AgendaItem item,
@@ -216,6 +248,8 @@ class _TimelineListState extends State<TimelineList> {
         resource: resource,
         onCancelItem: widget.onCancelItem,
         onAdvanceState: widget.onAdvanceState,
+        onTransferItem: widget.onTransferItem,
+        canTransferItem: widget.canTransferItem,
       ),
     );
   }
@@ -231,12 +265,16 @@ class _ItemDetailSheet extends StatelessWidget {
     required this.resource,
     this.onCancelItem,
     this.onAdvanceState,
+    this.onTransferItem,
+    this.canTransferItem,
   });
 
   final AgendaItem item;
   final Resource resource;
   final void Function(AgendaItem)? onCancelItem;
   final Future<void> Function(AgendaItem)? onAdvanceState;
+  final Future<void> Function(AgendaItem)? onTransferItem;
+  final bool Function(AgendaItem)? canTransferItem;
 
   @override
   Widget build(BuildContext context) {
@@ -342,6 +380,21 @@ class _ItemDetailSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 8),
+          ],
+
+          if (onTransferItem != null && (canTransferItem?.call(item) ?? true)) ...[
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                icon: const Icon(Icons.swap_horiz_rounded),
+                label: const Text('Transferir'),
+                onPressed: () async {
+                  Navigator.of(context).pop();
+                  await onTransferItem!(item);
+                },
+              ),
+            ),
+            const SizedBox(height: 12),
           ],
 
           if (onCancelItem != null) ...[
@@ -471,6 +524,8 @@ IconData _agendaActionIconFor(String nextAction) {
     case 'COMPLETAR_WIZARD':
     case 'CORREGIR_Y_REENVIAR':
       return Icons.assignment_turned_in_rounded;
+    case 'CERRADA_APROBADA':
+      return Icons.visibility_rounded;
     default:
       return Icons.open_in_new_rounded;
   }
@@ -484,6 +539,8 @@ String _agendaActionLabelFor(String nextAction) {
     case 'COMPLETAR_WIZARD':
     case 'CORREGIR_Y_REENVIAR':
       return 'Abrir captura';
+    case 'CERRADA_APROBADA':
+      return 'Ver actividad';
     default:
       return 'Abrir actividad';
   }

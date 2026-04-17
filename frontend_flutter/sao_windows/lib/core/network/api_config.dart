@@ -1,24 +1,55 @@
 /// API networking configuration
 /// Defines base URLs, timeouts, and other HTTP settings
 class ApiConfig {
-  static const String defaultBaseUrl = String.fromEnvironment(
-    'SAO_API_BASE',
-    defaultValue: 'https://sao-api-fjzra25vya-uc.a.run.app/api/v1',
+  static const String _deployedBackendRoot =
+      'https://sao-api-fjzra25vya-uc.a.run.app';
+  static const String _definedSaoBackendUrl = String.fromEnvironment(
+    'SAO_BACKEND_URL',
+    defaultValue: '',
   );
+  static const String _legacyDefinedBaseUrl = String.fromEnvironment(
+    'SAO_API_BASE',
+    defaultValue: '',
+  );
+
+  static String normalizeBaseUrl(String rawUrl) {
+    final trimmed = rawUrl.trim();
+    if (trimmed.isEmpty) {
+      return '$_deployedBackendRoot/api/v1';
+    }
+
+    final sanitized = trimmed.endsWith('/')
+        ? trimmed.substring(0, trimmed.length - 1)
+        : trimmed;
+
+    if (sanitized.endsWith('/api/v1')) {
+      return sanitized;
+    }
+    if (sanitized.endsWith('/api')) {
+      return '$sanitized/v1';
+    }
+    return '$sanitized/api/v1';
+  }
+
+  static String get defaultBaseUrl {
+    if (_definedSaoBackendUrl.trim().isNotEmpty) {
+      return normalizeBaseUrl(_definedSaoBackendUrl);
+    }
+    if (_legacyDefinedBaseUrl.trim().isNotEmpty) {
+      return normalizeBaseUrl(_legacyDefinedBaseUrl);
+    }
+    return normalizeBaseUrl(_deployedBackendRoot);
+  }
 
   // Singleton instance
   static final ApiConfig _instance = ApiConfig._internal();
   factory ApiConfig() => _instance;
   ApiConfig._internal();
 
-  /// Base URL for the API
-  /// 
-  /// Environment-specific URLs:
-  /// - Development (Windows): 'http://localhost:8000/api/v1'
-  /// - Development (Android emulator): 'http://10.0.2.2:8000/api/v1'
-  /// - Development (Android device): 'http://192.168.1.100:8000/api/v1'
-  /// - Development (iOS simulator): 'http://localhost:8000/api/v1'
-  /// - Production: 'https://sao-api-fjzra25vya-uc.a.run.app/api/v1'
+  /// Base URL for the API.
+  ///
+  /// By default mobile now points to the same deployed SAO backend as desktop.
+  /// If needed, it can still be overridden with SAO_BACKEND_URL or SAO_API_BASE.
   String get baseUrl {
     // TODO: Use flavor-based configuration for prod/dev/staging
     return _baseUrl ?? defaultBaseUrl;
@@ -28,7 +59,7 @@ class ApiConfig {
 
   /// Override base URL (useful for testing or environment switching)
   void setBaseUrl(String url) {
-    _baseUrl = url;
+    _baseUrl = normalizeBaseUrl(url);
   }
 
   /// Clears runtime override and restores the default URL.

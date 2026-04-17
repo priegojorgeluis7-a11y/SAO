@@ -142,7 +142,11 @@ class EvidenceUploadRetryWorker {
           );
         }
 
-        await _repository.uploadComplete(evidenceId: evidenceId);
+        final description = await _resolveDescription(currentRow);
+        await _repository.uploadComplete(
+          evidenceId: evidenceId,
+          description: description,
+        );
 
         await _updateRow(
           currentRow.id,
@@ -211,6 +215,25 @@ class EvidenceUploadRetryWorker {
     );
 
     return resumed;
+  }
+
+  Future<String?> _resolveDescription(PendingUpload row) async {
+    final queuedDescription = row.description?.trim();
+    if (queuedDescription != null && queuedDescription.isNotEmpty) {
+      return queuedDescription;
+    }
+
+    final evidenceQuery = _db.select(_db.evidences)
+      ..where(
+        (t) =>
+            t.activityId.equals(row.activityId) &
+            t.filePathLocal.equals(row.localPath),
+      )
+      ..limit(1);
+
+    final evidenceRow = await evidenceQuery.getSingleOrNull();
+    final caption = evidenceRow?.caption?.trim();
+    return (caption != null && caption.isNotEmpty) ? caption : null;
   }
 
   int _backoffSeconds(int attempts) {

@@ -217,6 +217,8 @@ String nextActionLabel(String nextAction) {
       return 'Esperando revision';
     case 'CERRADA_CANCELADA':
       return 'Cancelada';
+    case 'CERRADA_APROBADA':
+      return 'Terminada';
     default:
       return 'Sin accion';
   }

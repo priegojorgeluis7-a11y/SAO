@@ -16,6 +16,7 @@ from app.api.v1 import (
     audit,
     auth,
     catalog,
+    invitations,
     completed_activities,
     dashboard,
     dashboard_kpis,
@@ -153,6 +154,7 @@ app.include_router(events.router, prefix=settings.API_V1_STR)
 app.include_router(notifications.router, prefix=settings.API_V1_STR)
 app.include_router(me.router, prefix=settings.API_V1_STR)
 app.include_router(users.router, prefix=settings.API_V1_STR)
+app.include_router(invitations.router, prefix=settings.API_V1_STR)
 app.include_router(assignments.router, prefix=settings.API_V1_STR)
 app.include_router(projects.router, prefix=settings.API_V1_STR)
 app.include_router(territory.router, prefix=settings.API_V1_STR)

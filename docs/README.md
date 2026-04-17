@@ -3,6 +3,9 @@
 ## Objetivo
 Este documento organiza toda la documentacion del repositorio en un unico punto de entrada.
 
+## Idioma oficial
+Toda la documentacion operativa vigente del repositorio debe mantenerse en español. Si existe contenido historico o externo en otro idioma, debe traducirse o marcarse como referencia no canonica.
+
 ## Ruta recomendada de lectura
 1. `docs/DOCUMENTO_MAESTRO_EJECUCION_SAO.md`
 2. `docs/DOCUMENTO_MAESTRO_SISTEMA.md`
@@ -34,9 +37,11 @@ Este documento organiza toda la documentacion del repositorio en un unico punto 
 - `docs/FLUJO_APP_AS_IS.md` - flujo actual.
 - `docs/FLUJO_APP_TO_BE.md` - flujo objetivo.
 - `docs/WORKFLOW.md` - estados y transiciones de actividades.
+- `docs/MATRIZ_ROLES_Y_PERMISOS.md` - matriz vigente de roles, permisos y alcances operativos.
 - `docs/SYNC.md` - sincronizacion y comportamiento offline.
 - `docs/ACTIVITY_MODEL_V1.md` - modelo de actividad.
-- `docs/VISION_TUTORIAL_APP.md` - vision y guia de uso.
+- `docs/VISION_TUTORIAL_APP.md` - vision funcional del modo tutorial.
+- `docs/TUTORIAL_OPERATIVO_SAO.md` - guia tutorial paso a paso para uso operativo y de validacion.
 - `docs/WIZARD_REGISTRO_Y_CATALOGOS_ACTUALES.md` - wizard y catalogos.
 
 ## 4) Catalogos y contratos

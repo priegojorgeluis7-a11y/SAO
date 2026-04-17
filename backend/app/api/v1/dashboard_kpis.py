@@ -72,7 +72,11 @@ def get_operational_kpis(
                 .where("project_id", "==", pid)
                 .stream()
             )
-            all_activities.extend([doc.to_dict() for doc in docs if doc.to_dict()])
+            for doc in docs:
+                payload = doc.to_dict() or {}
+                if payload.get("deleted_at") is not None:
+                    continue
+                all_activities.append(payload)
 
         if not all_activities:
             return {
@@ -236,6 +240,8 @@ def get_daily_kpi_trend(
 
                 for doc in docs:
                     activity = doc.to_dict() or {}
+                    if activity.get("deleted_at") is not None:
+                        continue
                     state = activity.get("execution_state", "PENDIENTE")
                     if state == "COMPLETADA":
                         completed_count += 1

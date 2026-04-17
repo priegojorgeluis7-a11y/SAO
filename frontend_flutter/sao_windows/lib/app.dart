@@ -12,7 +12,7 @@ class App extends ConsumerWidget {
 
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
-      title: 'SAO Windows',
+      title: 'SAO',
       theme: AppTheme.lightTheme,
       routerConfig: router,
     );

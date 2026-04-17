@@ -949,9 +949,10 @@ class _PKInputState extends State<_PKInput> {
   }
 
   (int, int) _parsePK(int? pk) {
-    if (pk == null) return (0, 0);
-    final km = pk ~/ 1000;
-    final metros = pk % 1000;
+    final normalized = normalizePkMeters(pk);
+    if (normalized == null) return (0, 0);
+    final km = normalized ~/ 1000;
+    final metros = normalized % 1000;
     return (km, metros);
   }
 
@@ -1033,7 +1034,7 @@ class _PKInputState extends State<_PKInput> {
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
-              'PK completo: ${formatPk(widget.value!)}',
+              'PK completo: ${formatPk(widget.value)}',
               style: SaoTypography.caption.copyWith(
                 fontWeight: FontWeight.w600,
                 color: SaoColors.info,

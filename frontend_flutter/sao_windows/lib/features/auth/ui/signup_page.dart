@@ -20,12 +20,16 @@ class SignupPage extends ConsumerStatefulWidget {
 
 class _SignupPageState extends ConsumerState<SignupPage> {
   final _formKey = GlobalKey<FormState>();
-  final _displayNameController = TextEditingController();
+  final _firstNameController = TextEditingController();
+  final _lastNameController = TextEditingController();
+  final _secondLastNameController = TextEditingController();
+  final _birthDateController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   final _inviteCodeController = TextEditingController();
 
+  DateTime? _birthDate;
   bool _obscurePassword = true;
   bool _obscureConfirmPassword = true;
   bool _obscureInviteCode = true;
@@ -61,16 +65,20 @@ class _SignupPageState extends ConsumerState<SignupPage> {
         _rolesError = 'No se pudieron cargar los roles';
       });
     } finally {
-      if (!mounted) return;
-      setState(() {
-        _loadingRoles = false;
-      });
+      if (mounted) {
+        setState(() {
+          _loadingRoles = false;
+        });
+      }
     }
   }
 
   @override
   void dispose() {
-    _displayNameController.dispose();
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _secondLastNameController.dispose();
+    _birthDateController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
@@ -109,11 +117,90 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     return null;
   }
 
-  String? _validateDisplayName(String? value) {
+  String? _validateRequiredName(String? value, String label) {
     if (value == null || value.trim().isEmpty) {
-      return 'Ingresa tu nombre';
+      return 'Ingresa $label';
     }
     return null;
+  }
+
+  String? _validateBirthDate(String? value) {
+    if (value == null || value.trim().isEmpty) {
+      return 'Selecciona tu cumpleaños';
+    }
+    return null;
+  }
+
+  String _normalizeName(String value) {
+    final compact = value.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (compact.isEmpty) return '';
+    return compact
+        .split(' ')
+        .map((word) => word.isEmpty
+            ? word
+            : '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}')
+        .join(' ');
+  }
+
+  void _normalizeControllerText(
+    TextEditingController controller,
+    String raw,
+    String Function(String) normalizer,
+  ) {
+    final normalized = normalizer(raw);
+    if (normalized == raw) return;
+    controller.value = TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+    );
+  }
+
+  void _handleNameChanged(TextEditingController controller, String value) {
+    _normalizeControllerText(controller, value, _normalizeName);
+  }
+
+  void _handleEmailChanged(String value) {
+    _normalizeControllerText(
+      _emailController,
+      value,
+      (input) => input.toLowerCase(),
+    );
+  }
+
+  String _buildFullName() {
+    return [
+      _normalizeName(_firstNameController.text),
+      _normalizeName(_lastNameController.text),
+      _normalizeName(_secondLastNameController.text),
+    ].where((part) => part.isNotEmpty).join(' ');
+  }
+
+  String? _birthDateIso() {
+    final selected = _birthDate;
+    if (selected == null) return null;
+    final month = selected.month.toString().padLeft(2, '0');
+    final day = selected.day.toString().padLeft(2, '0');
+    return '${selected.year}-$month-$day';
+  }
+
+  Future<void> _pickBirthDate() async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _birthDate ?? DateTime(now.year - 18, now.month, now.day),
+      firstDate: DateTime(1900, 1, 1),
+      lastDate: now,
+      helpText: 'Selecciona la fecha de cumpleaños',
+      cancelText: 'Cancelar',
+      confirmText: 'Aceptar',
+    );
+    if (picked == null || !mounted) return;
+    setState(() {
+      _birthDate = picked;
+      final month = picked.month.toString().padLeft(2, '0');
+      final day = picked.day.toString().padLeft(2, '0');
+      _birthDateController.text = '$day/$month/${picked.year}';
+    });
   }
 
   String? _validateInviteCode(String? value) {
@@ -133,9 +220,18 @@ class _SignupPageState extends ConsumerState<SignupPage> {
       return;
     }
 
+    final firstName = _normalizeName(_firstNameController.text);
+    final lastName = _normalizeName(_lastNameController.text);
+    final secondLastName = _normalizeName(_secondLastNameController.text);
+    final birthDateIso = _birthDateIso();
+
     final request = SignupRequest(
-      displayName: _displayNameController.text.trim(),
-      email: _emailController.text.trim(),
+      displayName: _buildFullName(),
+      firstName: firstName,
+      lastName: lastName,
+      secondLastName: secondLastName,
+      birthDate: birthDateIso,
+      email: _emailController.text.trim().toLowerCase(),
       password: _passwordController.text,
       role: _selectedRole!,
       inviteCode: _inviteCodeController.text.trim(),
@@ -179,7 +275,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(
+                    const Text(
                       'Registro de usuario',
                       style: SaoTypography.pageTitle,
                       textAlign: TextAlign.center,
@@ -187,15 +283,45 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                     const SizedBox(height: SaoSpacing.xl),
                     SaoInput(
                       label: 'Nombre',
-                      controller: _displayNameController,
-                      validator: _validateDisplayName,
+                      controller: _firstNameController,
+                      onChanged: (value) => _handleNameChanged(_firstNameController, value),
+                      validator: (value) => _validateRequiredName(value, 'tu nombre'),
                       prefixIcon: const Icon(Icons.person_outline),
+                    ),
+                    const SizedBox(height: SaoSpacing.lg),
+                    SaoInput(
+                      label: 'Apellido paterno',
+                      controller: _lastNameController,
+                      onChanged: (value) => _handleNameChanged(_lastNameController, value),
+                      validator: (value) => _validateRequiredName(value, 'tu apellido paterno'),
+                      prefixIcon: const Icon(Icons.badge_outlined),
+                    ),
+                    const SizedBox(height: SaoSpacing.lg),
+                    SaoInput(
+                      label: 'Segundo apellido',
+                      controller: _secondLastNameController,
+                      onChanged: (value) => _handleNameChanged(_secondLastNameController, value),
+                      prefixIcon: const Icon(Icons.badge_outlined),
+                    ),
+                    const SizedBox(height: SaoSpacing.lg),
+                    SaoInput(
+                      label: 'Cumpleaños',
+                      controller: _birthDateController,
+                      readOnly: true,
+                      onTap: _pickBirthDate,
+                      validator: _validateBirthDate,
+                      prefixIcon: const Icon(Icons.cake_outlined),
+                      suffixIcon: IconButton(
+                        icon: const Icon(Icons.calendar_month_outlined),
+                        onPressed: _pickBirthDate,
+                      ),
                     ),
                     const SizedBox(height: SaoSpacing.lg),
                     SaoInput(
                       label: 'Correo electrónico',
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,
+                      onChanged: _handleEmailChanged,
                       validator: _validateEmail,
                       prefixIcon: const Icon(Icons.email_outlined),
                     ),

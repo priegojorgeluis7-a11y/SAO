@@ -44,10 +44,11 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
 
   // API Configuration (singleton)
   final apiConfig = ApiConfig();
+  const defineBackendUrl = String.fromEnvironment('SAO_BACKEND_URL', defaultValue: '');
   const defineBaseUrl = String.fromEnvironment('SAO_API_BASE', defaultValue: '');
   final storedBaseUrl = prefs.getString('api_base_url_override');
-  if (defineBaseUrl.trim().isNotEmpty) {
-    apiConfig.setBaseUrl(defineBaseUrl.trim());
+  if (defineBackendUrl.trim().isNotEmpty || defineBaseUrl.trim().isNotEmpty) {
+    apiConfig.setBaseUrl(ApiConfig.defaultBaseUrl);
   } else if (storedBaseUrl != null && storedBaseUrl.trim().isNotEmpty) {
     apiConfig.setBaseUrl(storedBaseUrl.trim());
   }

@@ -40,6 +40,8 @@ class _HistoryFilterValues {
   });
 }
 
+enum _HistorySummaryFilter { all, synced, correction }
+
 class _CompletedSyncedActivitiesPageState
     extends ConsumerState<CompletedSyncedActivitiesPage> {
   late final ActivityDao _dao;
@@ -53,6 +55,7 @@ class _CompletedSyncedActivitiesPageState
   String _stateFilter = 'TODOS';
   String _query = '';
   DateTime? _dateFilter;
+  _HistorySummaryFilter _summaryFilter = _HistorySummaryFilter.all;
 
   String get _defaultProjectFilter {
     final value = widget.selectedProject.trim().toUpperCase();
@@ -63,7 +66,8 @@ class _CompletedSyncedActivitiesPageState
     return _projectFilter != _defaultProjectFilter ||
         _frontFilter != 'TODOS' ||
         _stateFilter != 'TODOS' ||
-        _dateFilter != null;
+        _dateFilter != null ||
+        _summaryFilter != _HistorySummaryFilter.all;
   }
 
   bool get _hasAnyFilterApplied =>
@@ -116,30 +120,6 @@ class _CompletedSyncedActivitiesPageState
             _isHistoryVisible(row);
       }).toList();
 
-      final activityIds = candidateRows.map((e) => e.activity.id).toList();
-
-      final evidenceRows = activityIds.isEmpty
-          ? <Evidence>[]
-          : await (_db.select(
-              _db.evidences,
-            )..where((t) => t.activityId.isIn(activityIds))).get();
-      final pendingUploads = activityIds.isEmpty
-          ? <PendingUpload>[]
-          : await (_db.select(
-              _db.pendingUploads,
-            )..where((t) => t.activityId.isIn(activityIds))).get();
-
-      final evidenceByActivity = <String, List<Evidence>>{};
-      for (final ev in evidenceRows) {
-        evidenceByActivity
-            .putIfAbsent(ev.activityId, () => <Evidence>[])
-            .add(ev);
-      }
-      final hasPendingUploadByActivity = <String, bool>{
-        for (final up in pendingUploads)
-          if (up.status != 'DONE') up.activityId: true,
-      };
-
       final historyRows = candidateRows.toList()
         ..sort(
           (a, b) =>
@@ -164,6 +144,16 @@ class _CompletedSyncedActivitiesPageState
 
   List<HomeActivityRecord> get _items {
     return _allItems.where((row) {
+      if (_summaryFilter == _HistorySummaryFilter.synced &&
+          _isRejectedForCorrection(row)) {
+        return false;
+      }
+
+      if (_summaryFilter == _HistorySummaryFilter.correction &&
+          !_isRejectedForCorrection(row)) {
+        return false;
+      }
+
       if (!_matchesQuery(row)) {
         return false;
       }
@@ -253,6 +243,29 @@ class _CompletedSyncedActivitiesPageState
     return '$dd/$mm/$yy';
   }
 
+  String _visibleItemsLabel(int count) {
+    return count == 1 ? '1 actividad visible' : '$count actividades visibles';
+  }
+
+  String _summaryFilterText() {
+    switch (_summaryFilter) {
+      case _HistorySummaryFilter.synced:
+        return 'Mostrando sincronizadas';
+      case _HistorySummaryFilter.correction:
+        return 'Mostrando por corregir';
+      case _HistorySummaryFilter.all:
+        return _visibleItemsLabel(_items.length);
+    }
+  }
+
+  void _toggleSummaryFilter(_HistorySummaryFilter filter) {
+    setState(() {
+      _summaryFilter = _summaryFilter == filter
+          ? _HistorySummaryFilter.all
+          : filter;
+    });
+  }
+
   String _formatPk(int? pk) {
     if (pk == null) return 'S/PK';
     final km = pk ~/ 1000;
@@ -317,20 +330,30 @@ class _CompletedSyncedActivitiesPageState
 
   IconData _activityIcon(String raw, String? activityTypeName) {
     final title = _title(raw, activityTypeName).toLowerCase();
-    if (title.contains('reu') || title.contains('junta'))
+    if (title.contains('reu') || title.contains('junta')) {
       return Icons.groups_rounded;
-    if (title.contains('reunion')) return Icons.groups_rounded;
+    }
+    if (title.contains('reunion')) {
+      return Icons.groups_rounded;
+    }
     if (title.contains('ins') || title.contains('inspeccion')) {
       return Icons.photo_camera_rounded;
     }
     if (title.contains('cam') || title.contains('caminamiento')) {
       return Icons.directions_walk_rounded;
     }
-    if (title.contains('sup') || title.contains('supervision'))
+    if (title.contains('sup') || title.contains('supervision')) {
       return Icons.rule_rounded;
-    if (title.contains('liberacion')) return Icons.alt_route_rounded;
-    if (title.contains('levantamiento')) return Icons.map_rounded;
-    if (title.contains('verificacion')) return Icons.fact_check_rounded;
+    }
+    if (title.contains('liberacion')) {
+      return Icons.alt_route_rounded;
+    }
+    if (title.contains('levantamiento')) {
+      return Icons.map_rounded;
+    }
+    if (title.contains('verificacion')) {
+      return Icons.fact_check_rounded;
+    }
     return Icons.assignment_turned_in_rounded;
   }
 
@@ -385,16 +408,25 @@ class _CompletedSyncedActivitiesPageState
     return value;
   }
 
+  bool _hasText(String value) => value.isNotEmpty;
+
+  String _projectCodeOf(HomeActivityRecord row) {
+    return row.activity.projectId.trim().toUpperCase();
+  }
+
+  bool _isSyncedHistoryRow(HomeActivityRecord row) {
+    return _isHistorySynced(row.activity);
+  }
+
+  bool _isCorrectionRow(HomeActivityRecord row) {
+    return _isRejectedForCorrection(row);
+  }
+
   String _statusLabel(DateTime finishedAt, DateTime? startedAt) {
     if (startedAt != null) {
       return 'Terminada (${_fmtTime(startedAt)}-${_fmtTime(finishedAt)})';
     }
     return 'Terminada (${_fmtTime(finishedAt)})';
-  }
-
-  bool _isSyncedCompleted(Activity activity) {
-    return activity.status.trim().toUpperCase() == 'SYNCED' &&
-        activity.finishedAt != null;
   }
 
   bool _isHistorySynced(Activity activity) {
@@ -452,6 +484,7 @@ class _CompletedSyncedActivitiesPageState
       _stateFilter = 'TODOS';
       _dateFilter = null;
       _query = '';
+      _summaryFilter = _HistorySummaryFilter.all;
     });
   }
 
@@ -742,7 +775,7 @@ class _CompletedSyncedActivitiesPageState
                       ),
                       const SizedBox(height: 16),
                       DropdownButtonFormField<String>(
-                        value: tempProject,
+                        initialValue: tempProject,
                         isExpanded: true,
                         decoration: decoration('Proyecto'),
                         items: _projectOptions
@@ -760,7 +793,7 @@ class _CompletedSyncedActivitiesPageState
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: tempFront,
+                        initialValue: tempFront,
                         isExpanded: true,
                         decoration: decoration('Frente'),
                         items: _frontOptions
@@ -778,7 +811,7 @@ class _CompletedSyncedActivitiesPageState
                       ),
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        value: tempState,
+                        initialValue: tempState,
                         isExpanded: true,
                         decoration: decoration('Estado'),
                         items: _stateOptions
@@ -1037,52 +1070,100 @@ class _CompletedSyncedActivitiesPageState
     required Color color,
     required Color background,
     bool compact = false,
+    bool selected = false,
+    VoidCallback? onTap,
   }) {
-    return Container(
-      padding: EdgeInsets.all(compact ? 10 : 12),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(compact ? 14 : 16),
-        border: Border.all(color: color.withValues(alpha: 0.18)),
+    final radius = BorderRadius.circular(compact ? 14 : 16);
+    final effectiveBackground = selected
+        ? color.withValues(alpha: 0.14)
+        : background;
+
+    final child = AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 10 : 12,
+        vertical: compact ? 9 : 10,
       ),
-      child: Row(
+      decoration: BoxDecoration(
+        color: effectiveBackground,
+        borderRadius: radius,
+        border: Border.all(
+          color: selected ? color : color.withValues(alpha: 0.18),
+          width: selected ? 1.4 : 1,
+        ),
+        boxShadow: selected
+            ? [
+                BoxShadow(
+                  color: color.withValues(alpha: 0.12),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ]
+            : null,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: compact ? 34 : 38,
-            height: compact ? 34 : 38,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.20),
-              borderRadius: BorderRadius.circular(compact ? 11 : 12),
-            ),
-            child: Icon(icon, size: compact ? 18 : 19, color: color),
+          Row(
+            children: [
+              Container(
+                width: compact ? 30 : 34,
+                height: compact ? 30 : 34,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(compact ? 10 : 11),
+                ),
+                child: Icon(icon, size: compact ? 16 : 18, color: color),
+              ),
+              const Spacer(),
+              if (onTap != null)
+                Icon(
+                  selected
+                      ? Icons.check_circle_rounded
+                      : Icons.touch_app_rounded,
+                  size: compact ? 15 : 16,
+                  color: selected ? color : SaoColors.gray500,
+                ),
+            ],
           ),
-          SizedBox(width: compact ? 8 : 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  value,
-                  style: TextStyle(
-                    fontSize: compact ? 16 : 18,
-                    fontWeight: FontWeight.w900,
-                    color: SaoColors.gray900,
-                  ),
-                ),
-                Text(
-                  label,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: compact ? 11 : 12,
-                    fontWeight: FontWeight.w700,
-                    color: SaoColors.gray600,
-                  ),
-                ),
-              ],
+          SizedBox(height: compact ? 8 : 10),
+          Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: compact ? 18 : 20,
+              fontWeight: FontWeight.w900,
+              color: SaoColors.gray900,
+            ),
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: compact ? 11 : 12,
+              height: 1.15,
+              fontWeight: FontWeight.w800,
+              color: selected ? color : SaoColors.gray800,
             ),
           ),
         ],
+      ),
+    );
+
+    if (onTap == null) {
+      return child;
+    }
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: radius,
+        onTap: onTap,
+        child: child,
       ),
     );
   }
@@ -1090,19 +1171,22 @@ class _CompletedSyncedActivitiesPageState
   @override
   Widget build(BuildContext context) {
     final visibleItems = _items;
-    final syncedCount = _allItems
-        .where((row) => _isHistorySynced(row.activity))
-        .length;
-    final rejectedCount = _allItems
-        .where((row) => _isRejectedForCorrection(row))
-        .length;
+    final syncedCount = _allItems.where(_isSyncedHistoryRow).length;
+    final rejectedCount = _allItems.where(_isCorrectionRow).length;
     final projectsCount = _allItems
-        .map((row) => row.activity.projectId.trim().toUpperCase())
-        .where((value) => value.isNotEmpty)
+        .map(_projectCodeOf)
+        .where(_hasText)
         .toSet()
         .length;
     final showSummary = _allItems.isNotEmpty || _hasAnyFilterApplied;
-    final compactSummary = visibleItems.isEmpty || _allItems.isEmpty;
+    final activeFilterCount = [
+      if (_query.trim().isNotEmpty) 1,
+      if (_projectFilter != _defaultProjectFilter) 1,
+      if (_frontFilter != 'TODOS') 1,
+      if (_stateFilter != 'TODOS') 1,
+      if (_dateFilter != null) 1,
+      if (_summaryFilter != _HistorySummaryFilter.all) 1,
+    ].length;
 
     return Scaffold(
       backgroundColor: SaoColors.gray50,
@@ -1126,9 +1210,9 @@ class _CompletedSyncedActivitiesPageState
                         if (showSummary) ...[
                           Container(
                             width: double.infinity,
-                            padding: EdgeInsets.all(compactSummary ? 14 : 16),
+                            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
                             decoration: BoxDecoration(
-                              borderRadius: BorderRadius.circular(20),
+                              borderRadius: BorderRadius.circular(18),
                               gradient: const LinearGradient(
                                 colors: [
                                   SaoColors.actionPrimary,
@@ -1144,93 +1228,137 @@ class _CompletedSyncedActivitiesPageState
                                 Row(
                                   children: [
                                     Container(
-                                      padding: EdgeInsets.all(
-                                        compactSummary ? 9 : 10,
-                                      ),
+                                      padding: const EdgeInsets.all(8),
                                       decoration: BoxDecoration(
                                         color: Colors.white.withValues(
                                           alpha: 0.14,
                                         ),
-                                        borderRadius: BorderRadius.circular(14),
+                                        borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: const Icon(
                                         Icons.history_rounded,
                                         color: Colors.white,
-                                        size: 21,
+                                        size: 18,
                                       ),
                                     ),
-                                    const SizedBox(width: 12),
+                                    const SizedBox(width: 10),
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           const Text(
-                                            'Tu historial reciente',
+                                            'Resumen del historial',
                                             style: TextStyle(
                                               color: Colors.white,
-                                              fontSize: 18,
+                                              fontSize: 16,
                                               fontWeight: FontWeight.w900,
                                             ),
                                           ),
                                           Text(
-                                            compactSummary
-                                                ? '${visibleItems.length} resultados visibles'
-                                                : '${visibleItems.length} actividades visibles con los filtros actuales',
+                                            _summaryFilterText(),
                                             style: TextStyle(
                                               color: Colors.white.withValues(
                                                 alpha: 0.82,
                                               ),
-                                              fontSize: 12,
+                                              fontSize: 11,
                                               fontWeight: FontWeight.w600,
                                             ),
                                           ),
                                         ],
                                       ),
                                     ),
+                                    if (activeFilterCount > 0)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 8,
+                                          vertical: 5,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(
+                                            alpha: 0.12,
+                                          ),
+                                          borderRadius: BorderRadius.circular(
+                                            999,
+                                          ),
+                                        ),
+                                        child: Text(
+                                          '$activeFilterCount filtros',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w800,
+                                          ),
+                                        ),
+                                      ),
                                   ],
                                 ),
-                                const SizedBox(height: 12),
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _summaryCard(
-                                        label: 'Sincronizadas',
-                                        value: '$syncedCount',
-                                        icon: Icons.cloud_done_rounded,
-                                        color: SaoColors.success,
-                                        background: SaoColors.successBg,
-                                        compact: compactSummary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: _summaryCard(
-                                        label: 'Por corregir',
-                                        value: '$rejectedCount',
-                                        icon: Icons.assignment_late_rounded,
-                                        color: SaoColors.riskHigh,
-                                        background: SaoColors.riskHighBg,
-                                        compact: compactSummary,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: _summaryCard(
-                                        label: 'Proyectos',
-                                        value: '$projectsCount',
-                                        icon: Icons.apartment_rounded,
-                                        color: SaoColors.info,
-                                        background: SaoColors.infoBg,
-                                        compact: compactSummary,
-                                      ),
-                                    ),
-                                  ],
+                                const SizedBox(height: 10),
+                                LayoutBuilder(
+                                  builder: (context, constraints) {
+                                    const spacing = 8.0;
+                                    final cardWidth =
+                                        (constraints.maxWidth - (spacing * 2)) /
+                                        3;
+
+                                    return Wrap(
+                                      spacing: spacing,
+                                      runSpacing: spacing,
+                                      children: [
+                                        SizedBox(
+                                          width: cardWidth,
+                                          child: _summaryCard(
+                                            label: 'Sincronizadas',
+                                            value: '$syncedCount',
+                                            icon: Icons.cloud_done_rounded,
+                                            color: SaoColors.success,
+                                            background: SaoColors.successBg,
+                                            compact: true,
+                                            selected: _summaryFilter ==
+                                                _HistorySummaryFilter.synced,
+                                            onTap: () => _toggleSummaryFilter(
+                                              _HistorySummaryFilter.synced,
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(
+                                          width: cardWidth,
+                                          child: _summaryCard(
+                                            label: 'Por corregir',
+                                            value: '$rejectedCount',
+                                            icon: Icons.assignment_late_rounded,
+                                            color: SaoColors.riskHigh,
+                                            background: SaoColors.riskHighBg,
+                                            compact: true,
+                                            selected: _summaryFilter ==
+                                                _HistorySummaryFilter.correction,
+                                            onTap: () => _toggleSummaryFilter(
+                                              _HistorySummaryFilter.correction,
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(
+                                          width: cardWidth,
+                                          child: _summaryCard(
+                                            label: 'Proyectos',
+                                            value: '$projectsCount',
+                                            icon: Icons.apartment_rounded,
+                                            color: SaoColors.info,
+                                            background: SaoColors.infoBg,
+                                            compact: true,
+                                            selected: _projectFilter !=
+                                                _defaultProjectFilter,
+                                            onTap: _showFiltersSheet,
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 12),
+                          const SizedBox(height: 10),
                         ],
                         TextField(
                           controller: _searchCtrl,
@@ -1278,9 +1406,13 @@ class _CompletedSyncedActivitiesPageState
                                 onPressed: _showFiltersSheet,
                                 style: OutlinedButton.styleFrom(
                                   minimumSize: const Size.fromHeight(48),
-                                  backgroundColor: SaoColors.surface,
-                                  side: const BorderSide(
-                                    color: SaoColors.gray200,
+                                  backgroundColor: _hasFilterSelection
+                                      ? SaoColors.infoBg
+                                      : SaoColors.surface,
+                                  side: BorderSide(
+                                    color: _hasFilterSelection
+                                        ? SaoColors.info.withValues(alpha: 0.28)
+                                        : SaoColors.gray200,
                                   ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
@@ -1293,7 +1425,7 @@ class _CompletedSyncedActivitiesPageState
                                 ),
                                 label: Text(
                                   _hasFilterSelection
-                                      ? 'Editar filtros'
+                                      ? 'Filtros ($activeFilterCount)'
                                       : 'Filtrar',
                                 ),
                               ),
@@ -1315,9 +1447,17 @@ class _CompletedSyncedActivitiesPageState
                                 },
                                 style: OutlinedButton.styleFrom(
                                   minimumSize: const Size.fromHeight(48),
-                                  backgroundColor: SaoColors.surface,
-                                  side: const BorderSide(
-                                    color: SaoColors.gray200,
+                                  backgroundColor: _dateFilter != null
+                                      ? SaoColors.brandPrimary.withValues(
+                                          alpha: 0.08,
+                                        )
+                                      : SaoColors.surface,
+                                  side: BorderSide(
+                                    color: _dateFilter != null
+                                        ? SaoColors.brandPrimary.withValues(
+                                            alpha: 0.24,
+                                          )
+                                        : SaoColors.gray200,
                                   ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(14),
@@ -1331,6 +1471,53 @@ class _CompletedSyncedActivitiesPageState
                                 ),
                               ),
                             ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: SaoColors.gray100,
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(color: SaoColors.gray200),
+                              ),
+                              child: Text(
+                                _visibleItemsLabel(visibleItems.length),
+                                style: const TextStyle(
+                                  color: SaoColors.gray700,
+                                  fontWeight: FontWeight.w800,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ),
+                            if (activeFilterCount > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 6,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: SaoColors.brandPrimary.withValues(
+                                    alpha: 0.08,
+                                  ),
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  'Filtros activos: $activeFilterCount',
+                                  style: const TextStyle(
+                                    color: SaoColors.brandPrimary,
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                         if (_hasAnyFilterApplied) ...[
@@ -1485,7 +1672,7 @@ class _CompletedSyncedActivitiesPageState
                         : ListView.separated(
                             padding: const EdgeInsets.all(12),
                             itemCount: visibleItems.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, index) =>
                                 const SizedBox(height: 10),
                             itemBuilder: (context, index) {
                               final row = visibleItems[index];
@@ -1760,18 +1947,40 @@ class _CompletedSyncedActivitiesPageState
                                                 ),
                                               ),
                                             ),
-                                            const Text(
-                                              'Ver detalle',
-                                              style: TextStyle(
-                                                color: SaoColors.gray500,
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 12,
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: SaoColors.gray50,
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                                border: Border.all(
+                                                  color: SaoColors.gray200,
+                                                ),
                                               ),
-                                            ),
-                                            const SizedBox(width: 2),
-                                            const Icon(
-                                              Icons.chevron_right_rounded,
-                                              color: SaoColors.gray400,
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Text(
+                                                    'Ver detalle',
+                                                    style: TextStyle(
+                                                      color: SaoColors.gray700,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      fontSize: 12,
+                                                    ),
+                                                  ),
+                                                  SizedBox(width: 2),
+                                                  Icon(
+                                                    Icons.chevron_right_rounded,
+                                                    color: SaoColors.gray500,
+                                                    size: 18,
+                                                  ),
+                                                ],
+                                              ),
                                             ),
                                           ],
                                         ),

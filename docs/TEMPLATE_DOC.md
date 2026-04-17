@@ -2,8 +2,8 @@
 
 **Fecha:** YYYY-MM-DD  
 **Version:** X.Y  
-**Estado:** Draft | En revision | Vigente | Historico  
-**Owner:** <equipo o responsable>
+**Estado:** Borrador | En revision | Vigente | Historico  
+**Responsable:** <equipo o responsable>
 
 ## 1. Objetivo
 Describe en 2-4 lineas para que existe este documento y que decision o proceso soporta.

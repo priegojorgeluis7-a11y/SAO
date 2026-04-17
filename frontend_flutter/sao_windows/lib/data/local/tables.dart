@@ -375,6 +375,7 @@ class PendingUploads extends Table {
   TextColumn get evidenceId => text().nullable()();
   TextColumn get objectPath => text().nullable()();
   TextColumn get signedUrl => text().nullable()();
+  TextColumn get description => text().nullable()();
 
   // PENDING_INIT | PENDING_UPLOAD | PENDING_COMPLETE | DONE | ERROR
   TextColumn get status => text().withDefault(const Constant('PENDING_INIT'))();

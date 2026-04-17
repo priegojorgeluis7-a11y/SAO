@@ -1,9 +1,9 @@
-# SAO — Audit Report
+# SAO — Informe de auditoría
 **Fecha:** 2026-03-04
-**Auditor:** Arquitecto Principal (automated scan)
+**Auditor:** Arquitecto principal (escaneo automatizado)
 **Alcance:** backend/ · frontend_flutter/sao_windows/ · desktop_flutter/sao_desktop/
 
-## Addendum 2026-03-09 — Cierre Fase 1 CI/CD
+## Adenda 2026-03-09 — cierre de fase 1 de CI/CD
 
 Resultado de revalidacion de despliegue automatizado:
 - Workflow backend en GitHub Actions completo y en verde.
@@ -14,7 +14,7 @@ Conclusión:
 - Criterio de cierre de Fase 1 (CI/CD end-to-end) queda **CERRADO**.
 - La ruta principal de despliegue pasa a pipeline automatizado en `main`.
 
-## Addendum 2026-03-05 — Corrida E2E Real en Staging (flujo operativo -> review -> pull)
+## Adenda 2026-03-05 — corrida E2E real en staging (flujo operativo a revisión y pull)
 
 Resultado de validacion en entorno real Cloud Run:
 - Script ejecutado: `backend/scripts/e2e_staging_flow.py`

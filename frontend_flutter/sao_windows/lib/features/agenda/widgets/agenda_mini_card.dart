@@ -10,12 +10,16 @@ class AgendaMiniCard extends StatelessWidget {
   final AgendaItem item;
   final Resource resource;
   final VoidCallback? onTap;
+  final VoidCallback? onTransferTap;
+  final bool showTransferAction;
 
   const AgendaMiniCard({
     super.key,
     required this.item,
     required this.resource,
     this.onTap,
+    this.onTransferTap,
+    this.showTransferAction = false,
   });
 
   @override
@@ -90,6 +94,24 @@ class AgendaMiniCard extends StatelessWidget {
               const SizedBox(width: 8),
               Column(
                 children: [
+                  if (showTransferAction) ...[
+                    IconButton(
+                      tooltip: 'Transferir actividad',
+                      visualDensity: VisualDensity.compact,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 28,
+                        height: 28,
+                      ),
+                      onPressed: onTransferTap,
+                      icon: const Icon(
+                        Icons.swap_horiz_rounded,
+                        size: 18,
+                        color: SaoColors.info,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                  ],
                   CircleAvatar(
                     radius: 16,
                     backgroundColor: SaoColors.info,

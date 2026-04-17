@@ -19,7 +19,7 @@ from app.schemas.user import (
     AdminUserUpdate,
     UserAgendaListItem,
 )
-from app.services.audit_service import write_firestore_audit_log
+from app.services.audit_service import canonicalize_role_name, write_firestore_audit_log
 from app.services.firestore_identity_service import (
     list_firestore_users,
     create_firestore_user,
@@ -183,7 +183,7 @@ def list_users(
                 id=principal.id,
                 full_name=principal.full_name,
                 email=principal.email,
-                role_name=(principal.roles[0] if principal.roles else ""),
+                role_name=canonicalize_role_name(principal.roles[0] if principal.roles else "") or "",
                 project_id=(principal.project_ids[0] if principal.project_ids else None),
                 is_active=principal.status == UserStatus.ACTIVE,
             )
@@ -204,7 +204,7 @@ def list_users(
                 id=principal.id,
                 full_name=principal.full_name,
                 email=principal.email,
-                role_name=(principal.roles[0] if principal.roles else ""),
+                role_name=canonicalize_role_name(principal.roles[0] if principal.roles else "") or "",
                 project_id=(principal.project_ids[0] if principal.project_ids else None),
                 is_active=principal.status == UserStatus.ACTIVE,
             )
@@ -226,9 +226,9 @@ def list_admin_users(
             email=p.email,
             full_name=p.full_name,
             status=p.status,
-            role_name=(p.roles[0] if p.roles else ""),
+            role_name=canonicalize_role_name(p.roles[0] if p.roles else "") or "",
             project_id=(p.project_ids[0] if p.project_ids else None),
-            roles=p.roles,
+            roles=[canonicalize_role_name(role) or str(role).strip().upper() for role in p.roles],
             project_ids=p.project_ids,
             scopes=_build_scopes_from_persisted_or_fallback(p.scopes, p.roles, p.project_ids),
             permission_codes=_firestore_merge_permission_codes(p.roles, p.permission_scopes),
@@ -293,6 +293,10 @@ def create_admin_user(
         password_hash=get_password_hash(payload.password),
         roles=roles,
         project_ids=project_ids,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        second_last_name=payload.second_last_name,
+        birth_date=payload.birth_date,
         scopes=firestore_scopes,
         permission_scopes=firestore_permission_scopes,
     )
@@ -309,7 +313,7 @@ def create_admin_user(
         email=principal.email,
         full_name=principal.full_name,
         status=principal.status,
-        role_name=(roles[0] if roles else ""),
+        role_name=canonicalize_role_name(roles[0] if roles else "") or "",
         project_id=(project_ids[0] if project_ids else None),
         roles=roles,
         project_ids=project_ids,
@@ -378,6 +382,10 @@ def update_admin_user(
         status=status_value,
         roles=new_roles,
         project_ids=new_project_ids,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        second_last_name=payload.second_last_name,
+        birth_date=payload.birth_date,
         scopes=firestore_scopes,
         permission_scopes=firestore_permission_scopes,
     )
@@ -396,7 +404,7 @@ def update_admin_user(
         email=updated.email,
         full_name=updated.full_name,
         status=updated.status,
-        role_name=(updated.roles[0] if updated.roles else ""),
+        role_name=canonicalize_role_name(updated.roles[0] if updated.roles else "") or "",
         project_id=(updated.project_ids[0] if updated.project_ids else None),
         roles=updated.roles,
         project_ids=updated.project_ids,

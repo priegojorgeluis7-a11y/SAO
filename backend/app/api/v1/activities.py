@@ -11,7 +11,12 @@ from app.core.api_errors import api_error
 from app.core.config import settings
 
 from app.core.firestore import get_firestore_client
-from app.api.deps import get_current_user, user_has_permission, verify_project_access
+from app.api.deps import (
+    get_current_user,
+    user_has_any_role,
+    user_has_permission,
+    verify_project_access,
+)
 from typing import Any
 from app.schemas.activity import (
     ActivityCreate,
@@ -22,6 +27,7 @@ from app.schemas.activity import (
     ActivityUpdate,
 )
 from app.services.audit_redaction import sanitize_audit_details
+from app.services.audit_service import write_firestore_audit_log
 
 router = APIRouter(prefix="/activities", tags=["activities"])
 logger = logging.getLogger(__name__)
@@ -48,6 +54,20 @@ def _dto_from_firestore_doc(doc: dict) -> ActivityDTO:
         "catalog_changed": bool(payload.get("catalog_changed", False)),
     }
     return ActivityDTO.model_validate(payload)
+
+
+def _enforce_admin_delete_activity(current_user: Any, project_id: str) -> None:
+    verify_project_access(current_user, project_id, None)
+    if not user_has_any_role(current_user, ["ADMIN"], None):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only administrators can delete activities",
+        )
+    if not user_has_permission(current_user, "activity.delete", None, project_id=project_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing permission: activity.delete for project: {project_id}",
+        )
 
 
 def _list_activities_firestore(
@@ -282,6 +302,106 @@ def _firestore_activity_dto(doc_ref, uuid: str) -> ActivityDTO:
     return _dto_from_firestore_doc(snap.to_dict() or {})
 
 
+@router.get("/{uuid}/readiness")
+async def get_activity_readiness(
+    uuid: str,
+    current_user: Any = Depends(get_current_user),
+):
+    """Return a lightweight readiness summary used by clients before approval/submission."""
+    dto = _get_activity_by_uuid_firestore(uuid)
+    if dto is None:
+        raise api_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="ACTIVITY_NOT_FOUND",
+            message=f"Activity {uuid} not found",
+        )
+
+    _enforce_activity_permission(current_user, "activity.view", dto.project_id)
+
+    client = get_firestore_client()
+    evidence_count = 0
+    try:
+        activity_snapshot = client.collection("activities").document(str(dto.uuid)).get()
+        activity_payload = activity_snapshot.to_dict() or {}
+        evidence_aliases = {str(dto.uuid)}
+        legacy_id = str(activity_payload.get("server_id") or "").strip()
+        if legacy_id:
+            evidence_aliases.add(legacy_id)
+
+        for evidence_activity_id in evidence_aliases:
+            evidence_count = max(
+                evidence_count,
+                sum(
+                    1
+                    for _ in client.collection("evidences")
+                    .where("activity_id", "==", evidence_activity_id)
+                    .limit(1)
+                    .stream()
+                ),
+            )
+
+        if evidence_count == 0:
+            wizard_payload = activity_payload.get("wizard_payload")
+            if isinstance(wizard_payload, dict):
+                wizard_evidences = wizard_payload.get("evidences")
+                if isinstance(wizard_evidences, list):
+                    evidence_count = len([row for row in wizard_evidences if isinstance(row, dict)])
+
+    except Exception:
+        logger.exception("Firestore evidence readiness read failed for activity uuid=%s", uuid)
+
+    has_gps = dto.latitude is not None and dto.longitude is not None
+    has_required_fields = bool(dto.activity_type_code)
+    has_evidence = evidence_count > 0
+
+    missing: list[dict[str, Any]] = []
+    if not has_required_fields:
+        missing.append(
+            {
+                "category": "checklist",
+                "code": "required",
+                "message": "Falta completar la clasificación obligatoria antes de enviar.",
+                "step": "clasificacion",
+                "detail": {"field": "contexto.clasificacion", "reason": "required"},
+            }
+        )
+    if not has_evidence:
+        missing.append(
+            {
+                "category": "evidencias",
+                "code": "at_least_1",
+                "message": "Se requiere al menos una evidencia antes de validar y enviar.",
+                "step": "evidencias",
+                "detail": {"field": "evidencias", "reason": "at_least_1"},
+            }
+        )
+    # GPS is currently non-blocking for readiness/approval.
+
+    checklist_total = 2
+    checklist_completed = int(has_required_fields) + int(has_evidence)
+    ready = len(missing) == 0
+
+    return {
+        "activity_id": str(dto.uuid),
+        "ready": ready,
+        "is_ready": ready,
+        "evidence_count": evidence_count,
+        "has_gps": has_gps,
+        "wizard_filled": has_required_fields,
+        "missing": missing,
+        "checklist_summary": {
+            "total": checklist_total,
+            "completed": checklist_completed,
+        },
+        "checks": {
+            "has_required_fields": has_required_fields,
+            "has_evidence": has_evidence,
+            "has_gps": has_gps,
+            "gps_blocking": False,
+        },
+    }
+
+
 @router.put("/{uuid}", response_model=ActivityDTO)
 async def update_activity(
     uuid: str,
@@ -326,10 +446,24 @@ async def delete_activity(
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="ACTIVITY_NOT_FOUND", message=f"Activity {uuid} not found")
     existing = snap.to_dict() or {}
     project_id = str(existing.get("project_id") or "").strip().upper()
-    _enforce_activity_permission(current_user, "activity.delete", project_id)
+    _enforce_admin_delete_activity(current_user, project_id)
     now = datetime.now(timezone.utc)
     next_sync = int(existing.get("sync_version") or 0) + 1
     doc_ref.update({"deleted_at": now, "updated_at": now, "sync_version": next_sync})
+    write_firestore_audit_log(
+        action="ACTIVITY_DELETE",
+        entity="activity",
+        entity_id=str(uuid),
+        actor=current_user,
+        details=sanitize_audit_details({
+            "project_id": project_id,
+            "title": existing.get("title"),
+            "activity_type_code": existing.get("activity_type_code"),
+            "execution_state": existing.get("execution_state"),
+            "soft_delete": True,
+            "deleted_at": now.isoformat(),
+        }),
+    )
     return _firestore_activity_dto(doc_ref, uuid)
 
 
@@ -387,7 +521,11 @@ async def get_activity_timeline(
                       .order_by("created_at", direction="DESCENDING")
                       .limit(50)
                       .stream()]
-    raw_logs = [d for d in _fetched if d.get("entity") == "activity"]
+    raw_logs = [
+        d
+        for d in _fetched
+        if str(d.get("entity") or "").strip().lower() in {"activity", "assignment"}
+    ]
     timeline: list[ActivityTimelineItem] = []
     for log in raw_logs:
         details: dict | None = None
@@ -398,9 +536,19 @@ async def get_activity_timeline(
                 details = sanitize_audit_details(parsed)
             except Exception:
                 details = {"value": "[REDACTED]"}
+
+        actor_name = str(log.get("actor_name") or "").strip()
+        actor_email = str(log.get("actor_email") or "").strip()
+        actor_role = str(log.get("actor_role") or "").strip().upper()
+        actor_label = actor_email or None
+        if actor_name:
+            actor_label = actor_name
+            if actor_role:
+                actor_label = f"{actor_name} · {actor_role}"
+
         timeline.append(ActivityTimelineItem(
             at=log.get("created_at") or datetime.now(timezone.utc),
-            actor=log.get("actor_email"),
+            actor=actor_label,
             action=str(log.get("action") or ""),
             details=details,
         ))

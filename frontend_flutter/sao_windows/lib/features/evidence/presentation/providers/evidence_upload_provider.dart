@@ -101,6 +101,7 @@ class EvidenceUploadNotifier extends StateNotifier<EvidenceUploadState> {
       appLogger.d('🏁 Finalizing upload...');
       await _uploadRepository.uploadComplete(
         evidenceId: initResult.evidenceId,
+        description: evidence.description,
       );
       appLogger.i(
         '✅ Evidence upload complete: ${initResult.evidenceId}',

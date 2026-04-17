@@ -14,6 +14,7 @@ _SENSITIVE_KEYS = {
     "details",
     "extracted_fields",
     "invite_code",
+    "invite_id",
     "message",
     "new_password",
     "password",

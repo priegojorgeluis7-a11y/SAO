@@ -19,6 +19,7 @@ import '../../features/auth/ui/login_page.dart';
 import '../../features/auth/ui/signup_page.dart';
 import '../../features/auth/ui/pin_unlock_page.dart';
 import '../../features/auth/ui/pin_setup_page.dart';
+import '../../features/auth/application/auth_controller.dart';
 import '../../features/auth/application/auth_providers.dart';
 import '../../features/sync/sync_center_page.dart';
 import '../constants.dart';
@@ -34,12 +35,20 @@ import 'auth_redirect_resolver.dart';
 
 /// Provider for GoRouter with authentication redirect
 final goRouterProvider = Provider<GoRouter>((ref) {
-  final authStateAsync = ref.watch(authStateProvider);
+  final refreshStream = GoRouterRefreshStream(
+    ref.read(authControllerProvider.notifier).stream,
+  );
+  ref.onDispose(refreshStream.dispose);
 
   return GoRouter(
     initialLocation: '/',
-    refreshListenable: GoRouterRefreshStream(ref.watch(authControllerProvider.notifier).stream),
+    refreshListenable: refreshStream,
     redirect: (context, state) {
+      final authState = ref.read(authControllerProvider);
+      final authStateAsync = authState.isLoading
+          ? const AsyncValue<AuthState>.loading()
+          : AsyncValue<AuthState>.data(authState);
+
       return resolveAuthRedirect(
         authStateAsync: authStateAsync,
         uri: state.uri,
@@ -72,10 +81,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'pin-setup',
         builder: (context, state) => const PinSetupPage(),
       ),
-      GoRoute(
-        path: '/home',
-        redirect: (context, state) => '/',
-      ),
+      GoRoute(path: '/home', redirect: (context, state) => '/'),
       ShellRoute(
         builder: (context, state, child) {
           // Shell with bottom navigation
@@ -88,7 +94,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             pageBuilder: (context, state) {
               final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
               final normalizedProject = projectCode.trim().toUpperCase();
-              final isTutorialGuest = state.uri.queryParameters['tutorial'] == '1';
+              final isTutorialGuest =
+                  state.uri.queryParameters['tutorial'] == '1';
 
               if (isTutorialGuest) {
                 return NoTransitionPage(
@@ -98,14 +105,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       final selected = await context.push<String>(
                         '/projects?selected=${Uri.encodeQueryComponent(normalizedProject)}&tutorial=1',
                       );
-                      if (!context.mounted || selected == null || selected.trim().isEmpty) {
+                      if (!context.mounted ||
+                          selected == null ||
+                          selected.trim().isEmpty) {
                         return;
                       }
                       final normalized = selected.trim().toUpperCase();
                       if (normalized == normalizedProject) {
                         return;
                       }
-                      context.go('/?project=${Uri.encodeQueryComponent(normalized)}&tutorial=1');
+                      context.go(
+                        '/?project=${Uri.encodeQueryComponent(normalized)}&tutorial=1',
+                      );
                     },
                   ),
                 );
@@ -119,14 +130,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       final selected = await context.push<String>(
                         '/projects?selected=${Uri.encodeQueryComponent(normalizedProject)}',
                       );
-                      if (!context.mounted || selected == null || selected.trim().isEmpty) {
+                      if (!context.mounted ||
+                          selected == null ||
+                          selected.trim().isEmpty) {
                         return;
                       }
                       final normalized = selected.trim().toUpperCase();
                       if (normalized == normalizedProject) {
                         return;
                       }
-                      context.go('/?project=${Uri.encodeQueryComponent(normalized)}');
+                      context.go(
+                        '/?project=${Uri.encodeQueryComponent(normalized)}',
+                      );
                     },
                   ),
                 );
@@ -141,14 +156,18 @@ final goRouterProvider = Provider<GoRouter>((ref) {
                       final selected = await context.push<String>(
                         '/projects?selected=${Uri.encodeQueryComponent(normalizedProject)}',
                       );
-                      if (!context.mounted || selected == null || selected.trim().isEmpty) {
+                      if (!context.mounted ||
+                          selected == null ||
+                          selected.trim().isEmpty) {
                         return;
                       }
                       final normalized = selected.trim().toUpperCase();
                       if (normalized == normalizedProject) {
                         return;
                       }
-                      context.go('/?project=${Uri.encodeQueryComponent(normalized)}');
+                      context.go(
+                        '/?project=${Uri.encodeQueryComponent(normalized)}',
+                      );
                     },
                   ),
                 ),
@@ -159,7 +178,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/projects',
             name: 'projects',
             pageBuilder: (context, state) {
-              final selected = state.uri.queryParameters['selected'] ??
+              final selected =
+                  state.uri.queryParameters['selected'] ??
                   state.uri.queryParameters['project'] ??
                   'TMQ';
               return NoTransitionPage(
@@ -171,27 +191,21 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/agenda',
             name: 'agenda',
             pageBuilder: (context, state) {
-              return const NoTransitionPage(
-                child: AgendaEquipoPage(),
-              );
+              return const NoTransitionPage(child: AgendaEquipoPage());
             },
           ),
           GoRoute(
             path: '/sync',
             name: 'sync',
             pageBuilder: (context, state) {
-              return const NoTransitionPage(
-                child: SyncCenterPage(),
-              );
+              return const NoTransitionPage(child: SyncCenterPage());
             },
           ),
           GoRoute(
             path: '/settings',
             name: 'settings',
             pageBuilder: (context, state) {
-              return const NoTransitionPage(
-                child: SettingsPage(),
-              );
+              return const NoTransitionPage(child: SettingsPage());
             },
           ),
           GoRoute(
@@ -217,7 +231,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           final activityId = state.pathParameters['id']!;
           final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
 
-          final activity = state.extra as TodayActivity? ??
+          final activity =
+              state.extra as TodayActivity? ??
               TodayActivity(
                 id: activityId,
                 title: '',
@@ -244,7 +259,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
           final catalogRepo = GetIt.I<CatalogRepository>();
           final pendingStore = GetIt.I<PendingEvidenceStore>();
 
-          final activity = state.extra as TodayActivity? ??
+          final activity =
+              state.extra as TodayActivity? ??
               TodayActivity(
                 id: activityId,
                 title: '',
@@ -308,7 +324,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'admin-history-detail',
         builder: (context, state) {
           final activityId = state.pathParameters['activityId'] ?? '';
-          final projectCode = (state.uri.queryParameters['project'] ?? '').trim().toUpperCase();
+          final projectCode = (state.uri.queryParameters['project'] ?? '')
+              .trim()
+              .toUpperCase();
           return AdminActivityDetailPage(
             activityId: activityId,
             projectCode: projectCode,
@@ -333,7 +351,9 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/home/completed',
         redirect: (context, state) {
           final query = state.uri.query;
-          return query.isEmpty ? '/history/completed' : '/history/completed?$query';
+          return query.isEmpty
+              ? '/history/completed'
+              : '/history/completed?$query';
         },
       ),
       GoRoute(
@@ -369,11 +389,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
 /// Shell personalizado con bottom navigation
 class ShellWithBottomNav extends StatefulWidget {
   final Widget child;
-  
-  const ShellWithBottomNav({
-    super.key,
-    required this.child,
-  });
+
+  const ShellWithBottomNav({super.key, required this.child});
 
   @override
   State<ShellWithBottomNav> createState() => _ShellWithBottomNavState();
@@ -428,7 +445,7 @@ class _ShellWithBottomNavState extends State<ShellWithBottomNav> {
   @override
   Widget build(BuildContext context) {
     final selectedIndex = _calculateSelectedIndex(context);
-    
+
     return Scaffold(
       body: widget.child,
       bottomNavigationBar: BottomNavigationBar(
@@ -477,10 +494,7 @@ class _NavItemIcon extends StatelessWidget {
   final IconData icon;
   final bool active;
 
-  const _NavItemIcon({
-    required this.icon,
-    this.active = false,
-  });
+  const _NavItemIcon({required this.icon, this.active = false});
 
   @override
   Widget build(BuildContext context) {
@@ -511,10 +525,9 @@ class _NavItemIcon extends StatelessWidget {
 /// Helper class to make GoRouter reactive to stream changes
 class GoRouterRefreshStream extends ChangeNotifier {
   GoRouterRefreshStream(Stream<dynamic> stream) {
-    notifyListeners();
     _subscription = stream.asBroadcastStream().listen(
-          (dynamic _) => notifyListeners(),
-        );
+      (dynamic _) => notifyListeners(),
+    );
   }
 
   late final StreamSubscription<dynamic> _subscription;

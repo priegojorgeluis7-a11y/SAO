@@ -1,4 +1,4 @@
-# SAO — Architecture Reference
+# SAO — Referencia de arquitectura
 **Sistema de Administración Operativa**
 **Versión:** 1.3.0 | **Fecha:** 2026-03-05
 
@@ -294,7 +294,7 @@ Versión actual del schema: **8**
 
 ---
 
-## 6. Sync Architecture
+## 6. Arquitectura de sincronización
 
 Ver [SYNC.md](docs/SYNC.md) para detalle completo.
 

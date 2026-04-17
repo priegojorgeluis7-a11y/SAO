@@ -155,4 +155,40 @@ void main() {
     expect(find.text('Falta informacion obligatoria'), findsOneWidget);
     expect(find.text('Informacion obligatoria ausente'), findsOneWidget);
   });
+
+  testWidgets('completed activity detail hides shared summary preview text', (
+    tester,
+  ) async {
+    final db = AppDb();
+    getIt.registerSingleton<AppDb>(db);
+    final now = DateTime.now();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ActivityDetailPage(
+          projectCode: 'TMQ',
+          activity: TodayActivity(
+            id: 'act-share-summary',
+            title: 'Caminamiento finalizado',
+            frente: 'F7',
+            municipio: 'San Luis de la Paz',
+            estado: 'Guanajuato',
+            pk: 142900,
+            status: ActivityStatus.hoy,
+            createdAt: now,
+            executionState: ExecutionState.terminada,
+            horaInicio: now.subtract(const Duration(hours: 2)),
+            horaFin: now,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(find.text('Compartir resumen'), findsOneWidget);
+    expect(find.text('Copiar resumen'), findsOneWidget);
+    expect(find.textContaining('*Proyecto:*'), findsNothing);
+  });
 }

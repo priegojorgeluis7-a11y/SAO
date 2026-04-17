@@ -36,60 +36,63 @@ class AuthState {
   });
 
   const AuthState.initial()
-      : user = null,
-        isLoading = false,
-        error = null,
-        isAuthenticated = false,
-        tutorialMode = false,
-        requiresPinUnlock = false,
-        needsPinSetup = false,
-        isOfflineSession = false;
+    : user = null,
+      isLoading = false,
+      error = null,
+      isAuthenticated = false,
+      tutorialMode = false,
+      requiresPinUnlock = false,
+      needsPinSetup = false,
+      isOfflineSession = false;
 
   const AuthState.loading()
-      : user = null,
-        isLoading = true,
-        error = null,
-        isAuthenticated = false,
-        tutorialMode = false,
-        requiresPinUnlock = false,
-        needsPinSetup = false,
-        isOfflineSession = false;
+    : user = null,
+      isLoading = true,
+      error = null,
+      isAuthenticated = false,
+      tutorialMode = false,
+      requiresPinUnlock = false,
+      needsPinSetup = false,
+      isOfflineSession = false;
 
-  const AuthState.authenticated(this.user, {this.tutorialMode = false, this.needsPinSetup = false})
-      : isLoading = false,
-        error = null,
-        isAuthenticated = true,
-        requiresPinUnlock = false,
-        isOfflineSession = false;
+  const AuthState.authenticated(
+    this.user, {
+    this.tutorialMode = false,
+    this.needsPinSetup = false,
+  }) : isLoading = false,
+       error = null,
+       isAuthenticated = true,
+       requiresPinUnlock = false,
+       isOfflineSession = false;
 
   const AuthState.unauthenticated([this.error])
-      : user = null,
-        isLoading = false,
-        isAuthenticated = false,
-        tutorialMode = false,
-        requiresPinUnlock = false,
-        needsPinSetup = false,
-        isOfflineSession = false;
+    : user = null,
+      isLoading = false,
+      isAuthenticated = false,
+      tutorialMode = false,
+      requiresPinUnlock = false,
+      needsPinSetup = false,
+      isOfflineSession = false;
 
   /// Estado de PIN bloqueado: tokens existen pero sin red.
   const AuthState.pinLocked(this.user)
-      : isLoading = false,
-        error = null,
-        isAuthenticated = false,
-        tutorialMode = false,
-        requiresPinUnlock = true,
-        needsPinSetup = false,
-        isOfflineSession = false;
+    : isLoading = false,
+      error = null,
+      isAuthenticated = false,
+      tutorialMode = false,
+      requiresPinUnlock = true,
+      needsPinSetup = false,
+      isOfflineSession = false;
 
   /// Sesión offline restaurada exitosamente con PIN correcto.
   const AuthState.offlineAuthenticated(this.user)
-      : isLoading = false,
-        error = null,
-        isAuthenticated = true,
-        tutorialMode = false,
-        requiresPinUnlock = false,
-        needsPinSetup = false,
-        isOfflineSession = true;
+    : isLoading = false,
+      error = null,
+      isAuthenticated = true,
+      tutorialMode = false,
+      requiresPinUnlock = false,
+      needsPinSetup = false,
+      isOfflineSession = true;
 
   AuthState copyWith({
     User? user,
@@ -149,9 +152,9 @@ class AuthController extends StateNotifier<AuthState> {
     this._repository, {
     required BiometricService biometricService,
     PinStorage? pinStorage,
-  })  : _biometricService = biometricService,
-        _pinStorage = pinStorage,
-        super(const AuthState.initial()) {
+  }) : _biometricService = biometricService,
+       _pinStorage = pinStorage,
+       super(const AuthState.initial()) {
     bootstrap();
   }
 
@@ -163,18 +166,28 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       appLogger.d('Bootstrapping authentication');
 
-      final result = await _repository.bootstrap();
+      final result = await _repository.bootstrap().timeout(
+        const Duration(seconds: 6),
+        onTimeout: () {
+          appLogger.w('Bootstrap timeout — falling back to unauthenticated');
+          return BootstrapResult.unauthenticated;
+        },
+      );
 
       switch (result) {
         case BootstrapResult.authenticated:
-          final user = await _repository.getCurrentUser();
+          final cachedJson = await _repository.getCachedUserJson();
+          final user = cachedJson != null
+              ? User.fromJson(cachedJson)
+              : await _repository.getCurrentUser();
           state = AuthState.authenticated(user);
           appLogger.i('Bootstrap complete - user authenticated: ${user.email}');
 
         case BootstrapResult.pinLocked:
           final cachedJson = await _repository.getCachedUserJson();
-          final cachedUser =
-              cachedJson != null ? User.fromJson(cachedJson) : null;
+          final cachedUser = cachedJson != null
+              ? User.fromJson(cachedJson)
+              : null;
           state = AuthState.pinLocked(cachedUser);
           appLogger.i('Bootstrap complete - PIN unlock required');
 
@@ -189,17 +202,18 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   /// Login with email and password
-  Future<void> login(String email, String password, {bool tutorialMode = false}) async {
+  Future<void> login(
+    String email,
+    String password, {
+    bool tutorialMode = false,
+  }) async {
     state = const AuthState.loading();
 
     try {
       appLogger.i('Login attempt: $email');
 
       // Call repository to login
-      await _repository.login(LoginRequest(
-        email: email,
-        password: password,
-      ));
+      await _repository.login(LoginRequest(email: email, password: password));
 
       // Fetch current user after successful login
       final user = await _repository.getCurrentUser();
@@ -211,7 +225,9 @@ class AuthController extends StateNotifier<AuthState> {
         tutorialMode: tutorialMode,
         needsPinSetup: !pinConfigured,
       );
-      appLogger.i('Login successful: ${user.email} (needsPinSetup=${!pinConfigured})');
+      appLogger.i(
+        'Login successful: ${user.email} (needsPinSetup=${!pinConfigured})',
+      );
     } on InvalidCredentialsException catch (e) {
       appLogger.w('Invalid credentials: $e');
       state = const AuthState.unauthenticated('Invalid email or password');
@@ -270,10 +286,7 @@ class AuthController extends StateNotifier<AuthState> {
         case BootstrapResult.authenticated:
           final user = await _repository.getCurrentUser();
           final pinConfigured = await _repository.isPinConfigured();
-          state = AuthState.authenticated(
-            user,
-            needsPinSetup: !pinConfigured,
-          );
+          state = AuthState.authenticated(user, needsPinSetup: !pinConfigured);
           return;
 
         case BootstrapResult.pinLocked:
@@ -339,16 +352,20 @@ class AuthController extends StateNotifier<AuthState> {
       final isValid = await _pinStorage.verifyPin(pin);
       if (!isValid) {
         final cachedJson = await _repository.getCachedUserJson();
-        final cachedUser =
-            cachedJson != null ? User.fromJson(cachedJson) : null;
-        state = AuthState.pinLocked(cachedUser)
-            .copyWith(error: 'PIN incorrecto. Intenta de nuevo.');
+        final cachedUser = cachedJson != null
+            ? User.fromJson(cachedJson)
+            : null;
+        state = AuthState.pinLocked(
+          cachedUser,
+        ).copyWith(error: 'PIN incorrecto. Intenta de nuevo.');
         return;
       }
 
       final cachedJson = await _repository.getCachedUserJson();
       if (cachedJson == null) {
-        state = const AuthState.unauthenticated('Sesión expirada. Inicia sesión en línea.');
+        state = const AuthState.unauthenticated(
+          'Sesión expirada. Inicia sesión en línea.',
+        );
         return;
       }
 
@@ -411,7 +428,10 @@ class AuthController extends StateNotifier<AuthState> {
   }
 
   /// Changes authenticated user password.
-  Future<void> changePassword(String currentPassword, String newPassword) async {
+  Future<void> changePassword(
+    String currentPassword,
+    String newPassword,
+  ) async {
     try {
       await _repository.changePassword(currentPassword, newPassword);
     } on AuthException {
@@ -448,7 +468,10 @@ class AuthController extends StateNotifier<AuthState> {
       );
       if (!authResult.authenticated) {
         final failure = authResult.failure ?? BiometricAuthFailure.other;
-        throw AuthException(_biometricFailureMessage(failure), StackTrace.current);
+        throw AuthException(
+          _biometricFailureMessage(failure),
+          StackTrace.current,
+        );
       }
     }
 
@@ -480,5 +503,4 @@ class AuthController extends StateNotifier<AuthState> {
       state = state.copyWith(error: null);
     }
   }
-
 }

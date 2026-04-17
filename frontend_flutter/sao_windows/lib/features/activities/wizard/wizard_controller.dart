@@ -14,6 +14,7 @@ import '../../../core/constants.dart';
 import '../../../core/catalog/sync/catalog_sync_service.dart';
 import '../../../core/services/connectivity_service.dart';
 import '../../../core/utils/logger.dart';
+import '../../../core/utils/format_utils.dart';
 import '../../home/models/today_activity.dart';
 import '../../catalog/catalog_repository.dart';
 import '../../evidence/pending_evidence_store.dart';
@@ -344,7 +345,7 @@ class WizardController extends ChangeNotifier {
 
     // Pre-cargar PK desde la actividad
     if (_hasMeaningfulPk(activity.pk)) {
-      pkInicio = activity.pk;
+      pkInicio = normalizePkMeters(activity.pk);
       tipoUbicacion = TipoUbicacion.puntual;
     }
 
@@ -501,7 +502,7 @@ class WizardController extends ChangeNotifier {
           estadoId = assignment.estado.trim();
         }
         if (!_hasMeaningfulPk(pkInicio) && _hasMeaningfulPk(assignment.pk)) {
-          pkInicio = assignment.pk;
+          pkInicio = normalizePkMeters(assignment.pk);
           tipoUbicacion = TipoUbicacion.puntual;
         }
 
@@ -932,12 +933,12 @@ class WizardController extends ChangeNotifier {
   }
 
   void setPkInicio(int? pk) {
-    pkInicio = pk;
+    pkInicio = normalizePkMeters(pk);
     notifyListeners();
   }
 
   void setPkFin(int? pk) {
-    pkFin = pk;
+    pkFin = normalizePkMeters(pk);
     notifyListeners();
   }
 
@@ -2070,12 +2071,12 @@ class WizardController extends ChangeNotifier {
     final draftPkInicioField = fields['draft_pk_inicio'];
     if (draftPkInicioField?.valueText != null &&
         draftPkInicioField!.valueText!.trim().isNotEmpty) {
-      pkInicio ??= int.tryParse(draftPkInicioField.valueText!.trim());
+      pkInicio ??= parsePkMeters(draftPkInicioField.valueText!.trim());
     }
     final draftPkFinField = fields['draft_pk_fin'];
     if (draftPkFinField?.valueText != null &&
         draftPkFinField!.valueText!.trim().isNotEmpty) {
-      pkFin ??= int.tryParse(draftPkFinField.valueText!.trim());
+      pkFin ??= parsePkMeters(draftPkFinField.valueText!.trim());
     }
 
     // Nivel de riesgo
@@ -2198,7 +2199,7 @@ class WizardController extends ChangeNotifier {
 
     // PK desde actividad existente
     if (_hasMeaningfulPk(existingActivity?.pk) && !_hasMeaningfulPk(pkInicio)) {
-      pkInicio = existingActivity!.pk;
+      pkInicio = normalizePkMeters(existingActivity!.pk);
     }
 
     // Hora inicio / fin guardadas como draft fields
@@ -2923,6 +2924,11 @@ class WizardController extends ChangeNotifier {
                 fileName: fileName,
                 mimeType: mimeType,
                 sizeBytes: await file.length(),
+                description: drift.Value(
+                  evidence.caption?.trim().isNotEmpty == true
+                      ? evidence.caption!.trim()
+                      : null,
+                ),
                 status: const drift.Value('PENDING_INIT'),
               ),
             );

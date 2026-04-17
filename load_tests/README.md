@@ -1,11 +1,11 @@
-# Load Testing Quick Start
+# Inicio rápido de pruebas de carga
 
-**Status:** 🚀 Ready to Execute  
-**Date:** February 24, 2026  
+**Estado:** 🚀 Listo para ejecutar  
+**Fecha:** 24 de febrero de 2026  
 
 ---
 
-## ⚡ Quick Setup (5 Minutes)
+## ⚡ Configuración rápida (5 minutos)
 
 ### 1. Install Dependencies
 
@@ -95,7 +95,7 @@ Test finished
 
 ---
 
-## 📊 Test Scenarios
+## 📊 Escenarios de prueba
 
 ### Scenario 1: Quick Test (5 minutes)
 ```powershell
@@ -173,7 +173,7 @@ k6 run --vus 100 stress_test.js `
 
 ---
 
-## 🎯 Results Analysis
+## 🎯 Análisis de resultados
 
 ### Automatic Analysis
 
@@ -213,7 +213,7 @@ start load_tests/results/light_load_stats.csv
 
 ---
 
-## 🔧 Troubleshooting
+## 🔧 Solución de problemas
 
 ### Problem: ImportError for locust
 
@@ -262,7 +262,7 @@ locust -f locust_light_load.py `
 
 ---
 
-## 📊 Expected Results
+## 📊 Resultados esperados
 
 ### Light Load Test (100 users, 5 min)
 ```
@@ -326,7 +326,7 @@ Before declaring success:
 
 ---
 
-## 📞 Common Commands
+## 📞 Comandos comunes
 
 ```powershell
 # Install dependencies
@@ -350,7 +350,7 @@ Stop-Process -Name python -Force
 
 ---
 
-## 🎯 Next Steps
+## 🎯 Siguientes pasos
 
 1. ✅ Install dependencies (5 min)
 2. ✅ Start backend server (< 1 min)
@@ -361,7 +361,7 @@ Stop-Process -Name python -Force
 
 ---
 
-## 📚 Documentation Links
+## 📚 Enlaces de documentación
 
 - [PHASE_7_LOAD_TESTING_FRAMEWORK.md](../PHASE_7_LOAD_TESTING_FRAMEWORK.md) - Full framework docs
 - [PHASE_7_QA_LOAD_TESTING_PLAN.md](../PHASE_7_QA_LOAD_TESTING_PLAN.md) - Test scenarios and targets

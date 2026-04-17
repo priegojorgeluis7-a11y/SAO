@@ -85,4 +85,85 @@ void main() {
     expect(find.text('Juan Perez'), findsOneWidget);
     expect(find.text('08:00 - 09:00'), findsWidgets);
   });
+
+  testWidgets('approved agenda items open the activity directly on tap', (tester) async {
+    final item = _agendaItem(id: 'A3', nextAction: 'CERRADA_APROBADA');
+    AgendaItem? openedItem;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TimelineList(
+            items: [item],
+            resources: const [_resource],
+            startHour: 8,
+            endHour: 10,
+            onOpenItem: (agendaItem) async {
+              openedItem = agendaItem;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Inspeccion A3'));
+    await tester.pumpAndSettle();
+
+    expect(openedItem?.id, 'A3');
+    expect(find.text('Juan Perez'), findsNothing);
+    expect(find.text('Terminada'), findsOneWidget);
+  });
+
+  testWidgets('TimelineList exposes a visible transfer action on agenda cards', (tester) async {
+    final item = _agendaItem(id: 'A4', nextAction: 'INICIAR_ACTIVIDAD');
+    AgendaItem? transferredItem;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TimelineList(
+            items: [item],
+            resources: const [_resource],
+            startHour: 8,
+            endHour: 10,
+            onTransferItem: (agendaItem) async {
+              transferredItem = agendaItem;
+            },
+            canTransferItem: (_) => true,
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.swap_horiz_rounded), findsOneWidget);
+    await tester.tap(find.byIcon(Icons.swap_horiz_rounded));
+    await tester.pumpAndSettle();
+
+    expect(transferredItem?.id, 'A4');
+  });
+
+  testWidgets('TimelineList shows the extended schedule until 23:00', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: TimelineList(
+            items: [],
+            resources: [_resource],
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+
+    await tester.scrollUntilVisible(
+      find.text('23:00'),
+      300,
+      scrollable: find.byType(Scrollable),
+    );
+    expect(find.text('23:00'), findsOneWidget);
+  });
 }

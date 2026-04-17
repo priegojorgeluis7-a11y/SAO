@@ -1,7 +1,7 @@
-# 🚀 Checklist: ¿Qué Falta Para Producción?
+# 🚀 Checklist: ¿qué falta para producción?
 
-**Status:** Phase 7 - 20% Complete  
-**Última actualización:** 24 Febrero 2026
+**Estado:** Fase 7, avance parcial  
+**Última actualización:** 24 de febrero de 2026
 
 ---
 
@@ -70,7 +70,7 @@
 
 ---
 
-### FASE 3: Decisión Go/No-Go (5 minutos) 🚦
+### FASE 3: decisión de salida o bloqueo (5 minutos) 🚦
 
 #### Criterios
 
@@ -82,13 +82,13 @@
    - Cero crashes o failures críticos
    - Equipo confirma readiness
 
-⚠️  CONDITIONAL GO SI:
+⚠️  SALIDA CONDICIONADA SI:
    - Tests mostly pass but minor issues
    - Plan de monitoring intenso
    - Escalabilidad demostrada
    - Rollback plan listo
 
-❌ NO-GO SI:
+❌ NO SALIR SI:
    - Any test fails SLA targets
    - Performance issues sistémicos
    - Error rate > 0.1%
@@ -321,7 +321,7 @@ curl -X POST https://sao-backend.run.app/auth/login \
 
 ## 🎯 Pasos Inmediatos (Próximas 3 Horas)
 
-### NOW - Opción 1: Quick Path (Mínimo)
+### Ahora - Opción 1: ruta rápida (mínima)
 ```
 1. Ejecutar Realistic Test (30 min)
 2. Analizar resultados (10 min)
@@ -331,7 +331,7 @@ curl -X POST https://sao-backend.run.app/auth/login \
 = ~85 minutos
 ```
 
-### NOW - Opción 2: Safe Path (Recomendado)
+### Ahora - Opción 2: ruta segura (recomendada)
 ```
 1. Ejecutar Realistic Test (30 min)
 2. Ejecutar Stress Test (20 min)
@@ -343,7 +343,7 @@ curl -X POST https://sao-backend.run.app/auth/login \
 = ~195 minutos (pero borradores en paralelo)
 ```
 
-### Option 3: Enterprise Path (Full)
+### Opción 3: ruta empresarial (completa)
 ```
 1. Todos los tests (Realistic, Stress, Spike, Soak)
 2. Análisis detallado

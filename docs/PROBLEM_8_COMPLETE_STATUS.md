@@ -1,10 +1,10 @@
-# PROBLEM 8 — SQL→Firestore Migration: COMPLETE (Code + Validation Plan)
+# PROBLEMA 8 — migración SQL a Firestore: completa (código + plan de validación)
 
-## Status: ✅ IMPLEMENTATION COMPLETE | ⏳ STAGING VALIDATION PENDING
+## Estado: ✅ implementación completa | ⏳ validación en staging pendiente
 
 ---
 
-## What's Done ✅
+## Qué ya quedó listo ✅
 
 ### Code Implementation
 - ✅ **GET /activities** — 100% Firestore-only (no SQL fallback)
@@ -197,7 +197,7 @@ pytest tests/test_firestore_sql_parity.py::TestMigrationRollback -v
 
 ---
 
-## Next Steps (Owner: QA Lead)
+## Siguientes pasos (responsable: líder de QA)
 
 1. **Review parity test scenarios** (15 min)
 2. **Deploy staging version** with tests (5 min)

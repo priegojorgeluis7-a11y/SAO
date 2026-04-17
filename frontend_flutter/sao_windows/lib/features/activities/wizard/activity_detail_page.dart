@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 
 import '../../../core/utils/format_utils.dart';
@@ -12,6 +13,7 @@ import '../../home/models/today_activity.dart';
 import '../../sync/services/sync_service.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
+import 'report_share_utils.dart';
 
 class ActivityDetailPage extends StatefulWidget {
   final TodayActivity activity;
@@ -296,6 +298,84 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
     return rows;
   }
 
+  bool _canShareQuickReport() {
+    final status = (_dbActivity?.status ?? '').trim().toUpperCase();
+    return widget.activity.executionState == ExecutionState.terminada ||
+        _dbActivity?.finishedAt != null ||
+        status == 'READY_TO_SYNC' ||
+        status == 'SYNCED';
+  }
+
+  String _resultLabel() {
+    final raw = (_fields['result_label']?.valueText ?? _fields['result']?.valueText ?? '').trim();
+    if (raw.isEmpty) return '';
+    return raw.contains(' - ') ? raw.split(' - ').last.trim() : raw;
+  }
+
+  String _quickReportText({String? customTitle}) {
+    return buildInitialWhatsAppReport(
+      projectCode: widget.projectCode,
+      activity: widget.activity.copyWith(
+        horaInicio: _dbActivity?.startedAt ?? widget.activity.horaInicio,
+        horaFin: _dbActivity?.finishedAt ?? widget.activity.horaFin,
+      ),
+      customTitle: customTitle,
+      resultLabel: _resultLabel(),
+      notes: (_fields['report_notes']?.valueText ?? '').trim(),
+      agreements: _agreements(),
+      evidenceCount: _evidences.length,
+    );
+  }
+
+  Future<String?> _promptShareTitle(BuildContext context) async {
+    final titleController = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Título en negritas'),
+          content: TextField(
+            controller: titleController,
+            autofocus: true,
+            decoration: const InputDecoration(
+              hintText: 'Opcional',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(null),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(''),
+              child: const Text('Sin título'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(titleController.text.trim()),
+              child: const Text('Continuar'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      titleController.dispose();
+    }
+  }
+
+  Future<void> _copyQuickReport(BuildContext context) async {
+    final customTitle = await _promptShareTitle(context);
+    if (!context.mounted || customTitle == null) return;
+
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    await Clipboard.setData(ClipboardData(text: _quickReportText(customTitle: customTitle)));
+    if (!context.mounted) return;
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('Resumen copiado.')),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final a = widget.activity;
@@ -351,6 +431,31 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                     ],
                   ),
                 ),
+
+                if (_canShareQuickReport()) ...[
+                  const SizedBox(height: 16),
+                  _detailCard(
+                    title: 'Compartir resumen',
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Copia el resumen y pégalo donde lo necesites.',
+                          style: SaoTypography.bodyTextSmall.copyWith(color: SaoColors.gray600),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: () => _copyQuickReport(context),
+                            icon: const Icon(Icons.copy_rounded),
+                            label: const Text('Copiar resumen'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
 
                 if (_isRejectedForCorrection()) ...[
                   const SizedBox(height: 16),
@@ -578,7 +683,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                         ),
                       ),
                       if (_evidences.isNotEmpty)
-                        ..._evidences.map((ev) => _evidenceTile(ev)),
+                        ..._evidences.map(_evidenceTile),
                     ],
                   ),
                 ),
@@ -593,30 +698,34 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
     required String title,
     Widget? trailing,
     required Widget child,
-  }) => Container(
-        width: double.infinity,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: SaoColors.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: SaoColors.border),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(title, style: SaoTypography.sectionTitle),
-                ),
-                if (trailing != null) trailing,
-              ],
-            ),
-            const SizedBox(height: 8),
-            child,
-          ],
-        ),
-      );
+  }) {
+    final titleChildren = <Widget>[
+      Expanded(
+        child: Text(title, style: SaoTypography.sectionTitle),
+      ),
+    ];
+    if (trailing != null) {
+      titleChildren.add(trailing);
+    }
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: SaoColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: SaoColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(children: titleChildren),
+          const SizedBox(height: 8),
+          child,
+        ],
+      ),
+    );
+  }
 
   static Widget _subsection(String title) => Padding(
         padding: const EdgeInsets.only(bottom: 6),

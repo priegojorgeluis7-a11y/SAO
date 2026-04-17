@@ -11240,6 +11240,17 @@ class $PendingUploadsTable extends PendingUploads
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _descriptionMeta = const VerificationMeta(
+    'description',
+  );
+  @override
+  late final GeneratedColumn<String> description = GeneratedColumn<String>(
+    'description',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -11319,6 +11330,7 @@ class $PendingUploadsTable extends PendingUploads
     evidenceId,
     objectPath,
     signedUrl,
+    description,
     status,
     attempts,
     nextRetryAt,
@@ -11399,6 +11411,15 @@ class $PendingUploadsTable extends PendingUploads
       context.handle(
         _signedUrlMeta,
         signedUrl.isAcceptableOrUnknown(data['signed_url']!, _signedUrlMeta),
+      );
+    }
+    if (data.containsKey('description')) {
+      context.handle(
+        _descriptionMeta,
+        description.isAcceptableOrUnknown(
+          data['description']!,
+          _descriptionMeta,
+        ),
       );
     }
     if (data.containsKey('status')) {
@@ -11485,6 +11506,10 @@ class $PendingUploadsTable extends PendingUploads
         DriftSqlType.string,
         data['${effectivePrefix}signed_url'],
       ),
+      description: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}description'],
+      ),
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
@@ -11528,6 +11553,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
   final String? evidenceId;
   final String? objectPath;
   final String? signedUrl;
+  final String? description;
   final String status;
   final int attempts;
   final DateTime? nextRetryAt;
@@ -11544,6 +11570,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
     this.evidenceId,
     this.objectPath,
     this.signedUrl,
+    this.description,
     required this.status,
     required this.attempts,
     this.nextRetryAt,
@@ -11568,6 +11595,9 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
     }
     if (!nullToAbsent || signedUrl != null) {
       map['signed_url'] = Variable<String>(signedUrl);
+    }
+    if (!nullToAbsent || description != null) {
+      map['description'] = Variable<String>(description);
     }
     map['status'] = Variable<String>(status);
     map['attempts'] = Variable<int>(attempts);
@@ -11599,6 +11629,9 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
       signedUrl: signedUrl == null && nullToAbsent
           ? const Value.absent()
           : Value(signedUrl),
+      description: description == null && nullToAbsent
+          ? const Value.absent()
+          : Value(description),
       status: Value(status),
       attempts: Value(attempts),
       nextRetryAt: nextRetryAt == null && nullToAbsent
@@ -11627,6 +11660,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
       evidenceId: serializer.fromJson<String?>(json['evidenceId']),
       objectPath: serializer.fromJson<String?>(json['objectPath']),
       signedUrl: serializer.fromJson<String?>(json['signedUrl']),
+      description: serializer.fromJson<String?>(json['description']),
       status: serializer.fromJson<String>(json['status']),
       attempts: serializer.fromJson<int>(json['attempts']),
       nextRetryAt: serializer.fromJson<DateTime?>(json['nextRetryAt']),
@@ -11648,6 +11682,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
       'evidenceId': serializer.toJson<String?>(evidenceId),
       'objectPath': serializer.toJson<String?>(objectPath),
       'signedUrl': serializer.toJson<String?>(signedUrl),
+      'description': serializer.toJson<String?>(description),
       'status': serializer.toJson<String>(status),
       'attempts': serializer.toJson<int>(attempts),
       'nextRetryAt': serializer.toJson<DateTime?>(nextRetryAt),
@@ -11667,6 +11702,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
     Value<String?> evidenceId = const Value.absent(),
     Value<String?> objectPath = const Value.absent(),
     Value<String?> signedUrl = const Value.absent(),
+    Value<String?> description = const Value.absent(),
     String? status,
     int? attempts,
     Value<DateTime?> nextRetryAt = const Value.absent(),
@@ -11683,6 +11719,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
     evidenceId: evidenceId.present ? evidenceId.value : this.evidenceId,
     objectPath: objectPath.present ? objectPath.value : this.objectPath,
     signedUrl: signedUrl.present ? signedUrl.value : this.signedUrl,
+    description: description.present ? description.value : this.description,
     status: status ?? this.status,
     attempts: attempts ?? this.attempts,
     nextRetryAt: nextRetryAt.present ? nextRetryAt.value : this.nextRetryAt,
@@ -11707,6 +11744,9 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
           ? data.objectPath.value
           : this.objectPath,
       signedUrl: data.signedUrl.present ? data.signedUrl.value : this.signedUrl,
+      description: data.description.present
+          ? data.description.value
+          : this.description,
       status: data.status.present ? data.status.value : this.status,
       attempts: data.attempts.present ? data.attempts.value : this.attempts,
       nextRetryAt: data.nextRetryAt.present
@@ -11730,6 +11770,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
           ..write('evidenceId: $evidenceId, ')
           ..write('objectPath: $objectPath, ')
           ..write('signedUrl: $signedUrl, ')
+          ..write('description: $description, ')
           ..write('status: $status, ')
           ..write('attempts: $attempts, ')
           ..write('nextRetryAt: $nextRetryAt, ')
@@ -11751,6 +11792,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
     evidenceId,
     objectPath,
     signedUrl,
+    description,
     status,
     attempts,
     nextRetryAt,
@@ -11771,6 +11813,7 @@ class PendingUpload extends DataClass implements Insertable<PendingUpload> {
           other.evidenceId == this.evidenceId &&
           other.objectPath == this.objectPath &&
           other.signedUrl == this.signedUrl &&
+          other.description == this.description &&
           other.status == this.status &&
           other.attempts == this.attempts &&
           other.nextRetryAt == this.nextRetryAt &&
@@ -11789,6 +11832,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
   final Value<String?> evidenceId;
   final Value<String?> objectPath;
   final Value<String?> signedUrl;
+  final Value<String?> description;
   final Value<String> status;
   final Value<int> attempts;
   final Value<DateTime?> nextRetryAt;
@@ -11806,6 +11850,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
     this.evidenceId = const Value.absent(),
     this.objectPath = const Value.absent(),
     this.signedUrl = const Value.absent(),
+    this.description = const Value.absent(),
     this.status = const Value.absent(),
     this.attempts = const Value.absent(),
     this.nextRetryAt = const Value.absent(),
@@ -11824,6 +11869,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
     this.evidenceId = const Value.absent(),
     this.objectPath = const Value.absent(),
     this.signedUrl = const Value.absent(),
+    this.description = const Value.absent(),
     this.status = const Value.absent(),
     this.attempts = const Value.absent(),
     this.nextRetryAt = const Value.absent(),
@@ -11847,6 +11893,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
     Expression<String>? evidenceId,
     Expression<String>? objectPath,
     Expression<String>? signedUrl,
+    Expression<String>? description,
     Expression<String>? status,
     Expression<int>? attempts,
     Expression<DateTime>? nextRetryAt,
@@ -11865,6 +11912,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
       if (evidenceId != null) 'evidence_id': evidenceId,
       if (objectPath != null) 'object_path': objectPath,
       if (signedUrl != null) 'signed_url': signedUrl,
+      if (description != null) 'description': description,
       if (status != null) 'status': status,
       if (attempts != null) 'attempts': attempts,
       if (nextRetryAt != null) 'next_retry_at': nextRetryAt,
@@ -11885,6 +11933,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
     Value<String?>? evidenceId,
     Value<String?>? objectPath,
     Value<String?>? signedUrl,
+    Value<String?>? description,
     Value<String>? status,
     Value<int>? attempts,
     Value<DateTime?>? nextRetryAt,
@@ -11903,6 +11952,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
       evidenceId: evidenceId ?? this.evidenceId,
       objectPath: objectPath ?? this.objectPath,
       signedUrl: signedUrl ?? this.signedUrl,
+      description: description ?? this.description,
       status: status ?? this.status,
       attempts: attempts ?? this.attempts,
       nextRetryAt: nextRetryAt ?? this.nextRetryAt,
@@ -11943,6 +11993,9 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
     if (signedUrl.present) {
       map['signed_url'] = Variable<String>(signedUrl.value);
     }
+    if (description.present) {
+      map['description'] = Variable<String>(description.value);
+    }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
@@ -11979,6 +12032,7 @@ class PendingUploadsCompanion extends UpdateCompanion<PendingUpload> {
           ..write('evidenceId: $evidenceId, ')
           ..write('objectPath: $objectPath, ')
           ..write('signedUrl: $signedUrl, ')
+          ..write('description: $description, ')
           ..write('status: $status, ')
           ..write('attempts: $attempts, ')
           ..write('nextRetryAt: $nextRetryAt, ')
@@ -23642,6 +23696,7 @@ typedef $$PendingUploadsTableCreateCompanionBuilder =
       Value<String?> evidenceId,
       Value<String?> objectPath,
       Value<String?> signedUrl,
+      Value<String?> description,
       Value<String> status,
       Value<int> attempts,
       Value<DateTime?> nextRetryAt,
@@ -23661,6 +23716,7 @@ typedef $$PendingUploadsTableUpdateCompanionBuilder =
       Value<String?> evidenceId,
       Value<String?> objectPath,
       Value<String?> signedUrl,
+      Value<String?> description,
       Value<String> status,
       Value<int> attempts,
       Value<DateTime?> nextRetryAt,
@@ -23721,6 +23777,11 @@ class $$PendingUploadsTableFilterComposer
 
   ColumnFilters<String> get signedUrl => $composableBuilder(
     column: $table.signedUrl,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get description => $composableBuilder(
+    column: $table.description,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -23809,6 +23870,11 @@ class $$PendingUploadsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get status => $composableBuilder(
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
@@ -23882,6 +23948,11 @@ class $$PendingUploadsTableAnnotationComposer
   GeneratedColumn<String> get signedUrl =>
       $composableBuilder(column: $table.signedUrl, builder: (column) => column);
 
+  GeneratedColumn<String> get description => $composableBuilder(
+    column: $table.description,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
 
@@ -23943,6 +24014,7 @@ class $$PendingUploadsTableTableManager
                 Value<String?> evidenceId = const Value.absent(),
                 Value<String?> objectPath = const Value.absent(),
                 Value<String?> signedUrl = const Value.absent(),
+                Value<String?> description = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
                 Value<DateTime?> nextRetryAt = const Value.absent(),
@@ -23960,6 +24032,7 @@ class $$PendingUploadsTableTableManager
                 evidenceId: evidenceId,
                 objectPath: objectPath,
                 signedUrl: signedUrl,
+                description: description,
                 status: status,
                 attempts: attempts,
                 nextRetryAt: nextRetryAt,
@@ -23979,6 +24052,7 @@ class $$PendingUploadsTableTableManager
                 Value<String?> evidenceId = const Value.absent(),
                 Value<String?> objectPath = const Value.absent(),
                 Value<String?> signedUrl = const Value.absent(),
+                Value<String?> description = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<int> attempts = const Value.absent(),
                 Value<DateTime?> nextRetryAt = const Value.absent(),
@@ -23996,6 +24070,7 @@ class $$PendingUploadsTableTableManager
                 evidenceId: evidenceId,
                 objectPath: objectPath,
                 signedUrl: signedUrl,
+                description: description,
                 status: status,
                 attempts: attempts,
                 nextRetryAt: nextRetryAt,

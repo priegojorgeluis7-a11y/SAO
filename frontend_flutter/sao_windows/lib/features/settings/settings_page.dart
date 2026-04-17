@@ -174,7 +174,7 @@ class SettingsPage extends ConsumerWidget {
     if (submittedUrl == '__RESET__') {
       await prefs.remove(_apiBaseUrlKey);
       apiConfig.resetBaseUrl();
-      const defaultUrl = ApiConfig.defaultBaseUrl;
+      final defaultUrl = ApiConfig.defaultBaseUrl;
       apiClient.updateBaseUrl(defaultUrl);
       authService.updateBaseUrl(defaultUrl);
       if (context.mounted) {
@@ -189,14 +189,15 @@ class SettingsPage extends ConsumerWidget {
       return;
     }
 
-    await prefs.setString(_apiBaseUrlKey, submittedUrl);
-    apiClient.updateBaseUrl(submittedUrl);
-  authService.updateBaseUrl(submittedUrl);
+    final normalizedUrl = ApiConfig.normalizeBaseUrl(submittedUrl);
+    await prefs.setString(_apiBaseUrlKey, normalizedUrl);
+    apiClient.updateBaseUrl(normalizedUrl);
+    authService.updateBaseUrl(normalizedUrl);
     if (context.mounted) {
       showTransientSnackBar(
         context,
         appSnackBar(
-          message: 'Backend actualizado a: $submittedUrl',
+          message: 'Backend actualizado a: $normalizedUrl',
           backgroundColor: SaoColors.success,
         ),
       );
@@ -688,7 +689,7 @@ class _BiometricTile extends ConsumerWidget {
           child: CircularProgressIndicator(strokeWidth: 2),
         ),
       ),
-      error: (_, __) => ListTile(
+      error: (_, _) => ListTile(
         leading: const Icon(Icons.fingerprint, color: SaoColors.warning),
         title: const Text('Inicio rápido con biometría'),
         subtitle: const Text('No se pudo cargar el estado de biometría'),
@@ -755,7 +756,7 @@ class _CatalogVersionTile extends ConsumerWidget {
         title: Text('Catálogo'),
         subtitle: Text('Cargando...'),
       ),
-      error: (_, __) => ListTile(
+      error: (_, _) => ListTile(
         leading: const Icon(Icons.menu_book_outlined, color: SaoColors.warning),
         title: const Text('Catálogo'),
         subtitle: const Text('No se pudo cargar el proyecto seleccionado'),
@@ -780,7 +781,7 @@ class _CatalogVersionTile extends ConsumerWidget {
             title: Text('Catálogo'),
             subtitle: Text('Cargando versión...'),
           ),
-          error: (_, __) => ListTile(
+          error: (_, _) => ListTile(
             leading: const Icon(Icons.menu_book_outlined, color: SaoColors.warning),
             title: Text('Catálogo · $projectId'),
             subtitle: const Text('No se pudo cargar la versión local'),

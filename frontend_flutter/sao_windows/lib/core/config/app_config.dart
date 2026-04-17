@@ -1,16 +1,12 @@
+import '../network/api_config.dart';
+
 /// Configuración de la aplicación
 class AppConfig {
-  /// URL del backend API
-  /// 
-  /// Para desarrollo local:
-  /// - Windows: 'http://localhost:8000/api/v1'
-  /// - Android (dispositivo): 'http://192.168.1.100:8000/api/v1' (IP de tu PC en la red)
-  /// - Android (emulador): 'http://10.0.2.2:8000/api/v1' (apunta al localhost de la PC)
-  /// - iOS (simulador): 'http://localhost:8000/api/v1'
-  static const String baseApiUrl = String.fromEnvironment(
-    'SAO_API_BASE',
-    defaultValue: 'http://localhost:8000/api/v1',
-  );
+  /// URL del backend API.
+  ///
+  /// Usa el mismo backend desplegado que SAO desktop por defecto.
+  /// También acepta SAO_BACKEND_URL o SAO_API_BASE como override.
+  static String get baseApiUrl => ApiConfig.defaultBaseUrl;
   
   /// Timeout para conexiones HTTP
   static const Duration connectionTimeout = Duration(seconds: 10);

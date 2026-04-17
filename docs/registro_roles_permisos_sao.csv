@@ -1,0 +1,25 @@
+Fecha de solicitud,Nombre completo,Correo,Área / Equipo,Proyecto,Rol solicitado,Permisos adicionales (allow),Permisos restringidos (deny),Justificación,Solicitado por,Aprobador,Estado,Fecha de atención,Observaciones
+2026-04-17,,,,,,,,,,,Pendiente,,
+
+MATRIZ DE PERMISOS
+Permiso / capacidad,ADMIN,COORD,SUPERVISOR,OPERATIVO,LECTOR
+Ver actividades,✅,✅,✅,✅,✅
+Crear actividades,✅,✅,✅,✅,❌
+Editar actividades,✅,✅,✅,✅,❌
+Eliminar actividades,✅,❌,❌,❌,❌
+Aprobar actividades,✅,✅,✅,❌,❌
+Rechazar actividades,✅,✅,✅,❌,❌
+Crear eventos,✅,✅,✅,✅,❌
+Editar eventos,✅,✅,✅,❌,❌
+Ver eventos,✅,✅,✅,✅,✅
+Ver catálogo,✅,✅,❌,✅,✅
+Editar catálogo,✅,❌,❌,❌,❌
+Publicar catálogo,✅,❌,❌,❌,❌
+Crear usuarios,✅,❌,❌,❌,❌
+Editar usuarios,✅,❌,❌,❌,❌
+Ver usuarios,✅,❌,❌,❌,✅
+Ver reportes,✅,✅,✅,❌,✅
+Exportar reportes,✅,✅,❌,❌,❌
+Administrar asignaciones,✅,✅,❌,❌,❌
+Administrar proyectos,✅,❌,❌,❌,❌
+Aprobar excepciones de flujo,✅,❌,❌,❌,❌

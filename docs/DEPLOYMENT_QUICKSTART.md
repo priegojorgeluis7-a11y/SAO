@@ -1,14 +1,14 @@
-# 🚀 DEPLOY QUICK START (Copy & Paste Ready)
+# 🚀 Guía rápida de despliegue
 
-**Duration:** ~2 hours  
-**Complexity:** Medium  
-**Status:** Ready to Execute
+**Duración:** ~2 horas  
+**Complejidad:** media  
+**Estado:** lista para ejecutar
 
 ---
 
-## 🎯 Before You Start
+## 🎯 Antes de empezar
 
-### Prerequisites Check
+### Revisión de prerrequisitos
 ```bash
 ✅ Docker installed
 ✅ gcloud CLI installed

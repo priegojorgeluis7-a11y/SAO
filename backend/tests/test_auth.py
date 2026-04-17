@@ -120,3 +120,42 @@ def test_login_nonexistent_user_returns_401(client, monkeypatch, force_firestore
     monkeypatch.setattr("app.api.v1.auth.get_firestore_user_by_email", lambda _email: None)
     response = _login(client, "nonexistent@example.com", "anypassword")
     assert response.status_code == 401
+
+
+def test_signup_accepts_name_parts_and_birth_date(client, monkeypatch, force_firestore_backend):
+    captured: dict[str, object] = {}
+    principal = _build_firestore_principal(
+        email="new.user@example.com",
+        password="Password123!",
+    )
+
+    monkeypatch.setattr(settings, "SIGNUP_INVITE_CODE", "TEST-INVITE", raising=False)
+    monkeypatch.setattr("app.api.v1.auth.get_firestore_user_by_email", lambda _email: None)
+
+    def _create_user(**kwargs):
+        captured.update(kwargs)
+        return principal
+
+    monkeypatch.setattr("app.api.v1.auth.create_firestore_user", _create_user)
+
+    response = client.post(
+        "/api/v1/auth/signup",
+        json={
+            "first_name": "jUaN",
+            "last_name": "péREZ",
+            "second_last_name": "lóPEZ",
+            "birth_date": "1990-01-02",
+            "email": "New.User@Example.COM",
+            "password": "Password123!",
+            "role": "OPERATIVO",
+            "invite_code": "TEST-INVITE",
+        },
+    )
+
+    assert response.status_code == 201
+    assert captured["email"] == "new.user@example.com"
+    assert captured["full_name"] == "Juan Pérez López"
+    assert captured["first_name"] == "Juan"
+    assert captured["last_name"] == "Pérez"
+    assert captured["second_last_name"] == "López"
+    assert captured["birth_date"] == "1990-01-02"

@@ -1,0 +1,11 @@
+# Keep private signing material out of git
+*.pfx
+*.pvk
+*.key
+*.snk
+
+# Optional exported certs
+*.cer
+
+# Keep the folder
+!.gitignore

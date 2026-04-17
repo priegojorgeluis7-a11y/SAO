@@ -6,6 +6,7 @@ from app.api.deps import get_current_user
 from app.core.firestore import get_firestore_client
 from typing import Any
 from app.schemas.user import MyProjectItem
+from app.services.audit_service import canonicalize_role_name
 
 router = APIRouter(prefix="/me", tags=["me"])
 _HIDDEN_TEMPLATE_PROJECT_IDS = {"PROJECT_0", "P0"}
@@ -25,7 +26,7 @@ async def list_my_projects(
 ):
     """Return projects the user can access, including assigned role names."""
     role_names = [
-        str(role).strip().upper()
+        canonicalize_role_name(role) or str(role).strip().upper()
         for role in (getattr(current_user, "roles", []) or [])
         if str(role).strip()
     ]

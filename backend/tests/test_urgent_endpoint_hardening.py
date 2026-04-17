@@ -5,6 +5,7 @@ from uuid import uuid4
 import pytest
 from fastapi import HTTPException
 
+from app.api.v1 import dashboard as dashboard_api
 from app.api.v1 import dashboard_kpis as dashboard_kpis_api
 from app.api.v1 import reports as reports_api
 from app.api.v1 import review as review_api
@@ -23,6 +24,42 @@ def test_dashboard_kpis_requires_accessible_projects(monkeypatch):
 
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "No accessible projects"
+
+
+def test_dashboard_kpis_excludes_soft_deleted_from_total(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    now = datetime.now(timezone.utc)
+
+    fake_client.collection("activities").document("active-1").set(
+        {
+            "uuid": "active-1",
+            "project_id": "TMQ",
+            "execution_state": "COMPLETADA",
+            "created_at": now,
+            "updated_at": now,
+            "deleted_at": None,
+        }
+    )
+    fake_client.collection("activities").document("deleted-1").set(
+        {
+            "uuid": "deleted-1",
+            "project_id": "TMQ",
+            "execution_state": "COMPLETADA",
+            "created_at": now,
+            "updated_at": now,
+            "deleted_at": now,
+        }
+    )
+
+    monkeypatch.setattr(dashboard_api, "get_firestore_client", lambda: fake_client)
+
+    payload = dashboard_api.get_dashboard_kpis(
+        project_id="TMQ",
+        _current_user=SimpleNamespace(id=str(uuid4()), project_ids=["TMQ"]),
+    )
+
+    assert payload["kpis"]["total"] == 1
+    assert payload["kpis"]["completed"] == 1
 
 
 def test_reports_activities_paginates_and_preserves_meta(monkeypatch):

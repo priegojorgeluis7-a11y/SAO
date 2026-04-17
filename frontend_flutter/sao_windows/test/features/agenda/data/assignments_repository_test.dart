@@ -1,8 +1,12 @@
 import 'dart:io';
 
+import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/services.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sao_windows/core/auth/token_storage.dart';
+import 'package:sao_windows/core/network/api_client.dart';
 import 'package:sao_windows/data/local/app_db.dart';
 import 'package:sao_windows/features/agenda/data/assignments_dao.dart';
 import 'package:sao_windows/features/agenda/data/assignments_repository.dart';
@@ -125,6 +129,8 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   const pathProviderChannel = MethodChannel('plugins.flutter.io/path_provider');
+  const secureStorageChannel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
+  final secureStorageState = <String, String>{};
 
   setUpAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -134,11 +140,34 @@ void main() {
       }
       return null;
     });
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(secureStorageChannel, (call) async {
+      switch (call.method) {
+        case 'read':
+          final key = (call.arguments as Map)['key'] as String;
+          return secureStorageState[key];
+        case 'write':
+          final args = call.arguments as Map;
+          secureStorageState[args['key'] as String] = args['value'] as String;
+          return null;
+        case 'delete':
+          final key = (call.arguments as Map)['key'] as String;
+          secureStorageState.remove(key);
+          return null;
+        case 'deleteAll':
+          secureStorageState.clear();
+          return null;
+        default:
+          return null;
+      }
+    });
   });
 
   tearDownAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pathProviderChannel, null);
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(secureStorageChannel, null);
   });
 
   group('AssignmentsRepository', () {
@@ -248,6 +277,98 @@ void main() {
       expect(result.length, 1);
       expect(result.first.id, 'a2');
       expect(result.first.syncStatus, SyncStatus.synced);
+    });
+
+    test('pushOne envía frente, estado y municipio al backend', () async {
+      final local = _FakeAssignmentsLocalStore();
+      final database = AppDb();
+      addTearDown(database.close);
+      final now = DateTime.now();
+
+      await database.into(database.projects).insert(
+            ProjectsCompanion.insert(
+              id: 'project-uuid-1',
+              code: 'TMQ',
+              name: 'Tren Mexico Queretaro',
+              isActive: const drift.Value(true),
+            ),
+          );
+      await database.into(database.catalogActivityTypes).insert(
+            CatalogActivityTypesCompanion.insert(
+              id: 'act-cam',
+              code: 'CAM',
+              name: 'Caminamiento',
+              requiresPk: const drift.Value(false),
+              requiresGeo: const drift.Value(false),
+              requiresMinuta: const drift.Value(false),
+              requiresEvidence: const drift.Value(false),
+              isActive: const drift.Value(true),
+              catalogVersion: const drift.Value(1),
+            ),
+          );
+
+      final tokenStorage = TokenStorage(const FlutterSecureStorage());
+      await tokenStorage.saveTokens(accessToken: 'test-token');
+      final apiClient = ApiClient(tokenStorage: tokenStorage);
+
+      Map<String, dynamic>? capturedData;
+      apiClient.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            capturedData = Map<String, dynamic>.from(
+              (options.data as Map).cast<String, dynamic>(),
+            );
+            handler.resolve(
+              Response(
+                requestOptions: options,
+                data: {
+                  'id': 'server-1',
+                  'project_id': 'TMQ',
+                  'assignee_user_id': 'user-1',
+                  'activity_id': 'act-cam',
+                  'title': 'Caminamiento',
+                  'frente': 'Frente Norte',
+                  'municipio': 'Toluca',
+                  'estado': 'EDOMEX',
+                  'pk': 142000,
+                  'start_at': now.toIso8601String(),
+                  'end_at': now.add(const Duration(hours: 1)).toIso8601String(),
+                  'risk': 'medio',
+                },
+              ),
+            );
+          },
+        ),
+      );
+
+      final repo = AssignmentsRepository(
+        apiClient: apiClient,
+        localStore: local,
+        database: database,
+      );
+
+      final ok = await repo.pushOne(
+        AgendaItem(
+          id: 'local-1',
+          resourceId: 'user-1',
+          title: 'Caminamiento',
+          activityId: 'act-cam',
+          activityTypeId: 'act-cam',
+          projectCode: 'TMQ',
+          frente: 'Frente Norte',
+          municipio: 'Toluca',
+          estado: 'EDOMEX',
+          pk: 142000,
+          start: now,
+          end: now.add(const Duration(hours: 1)),
+          risk: RiskLevel.medio,
+        ),
+      );
+
+      expect(ok, isTrue);
+      expect(capturedData?['front_ref'], 'Frente Norte');
+      expect(capturedData?['estado'], 'EDOMEX');
+      expect(capturedData?['municipio'], 'Toluca');
     });
   });
 }

@@ -24,7 +24,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
-  bool _tutorialMode = false;
   bool _biometricReady = false;
   bool _biometricEnabled = false;
 
@@ -53,22 +52,22 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     });
   }
 
-  Future<void> _handleLogin() async {
-    if (_tutorialMode) {
-      if (mounted) {
-        context.go('/tutorial');
-      }
-      return;
-    }
+  void _handleEmailChanged(String value) {
+    final normalized = value.toLowerCase();
+    if (normalized == value) return;
+    _emailController.value = TextEditingValue(
+      text: normalized,
+      selection: TextSelection.collapsed(offset: normalized.length),
+    );
+  }
 
+  Future<void> _handleLogin() async {
     if (!_formKey.currentState!.validate()) return;
 
-    final email = _emailController.text.trim();
+    final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text;
 
-    await ref
-      .read(authControllerProvider.notifier)
-      .login(email, password);
+    await ref.read(authControllerProvider.notifier).login(email, password);
   }
 
   Future<void> _handleBiometricLogin() async {
@@ -79,7 +78,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     if (value == null || value.isEmpty) {
       return 'Ingresa tu correo electrónico';
     }
-    final emailRegex = RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$');
+    final emailRegex = RegExp(r'^[\w.+-]+@([A-Za-z0-9-]+\.)+[A-Za-z]{2,}$');
     if (!emailRegex.hasMatch(value)) {
       return 'Formato de correo inválido';
     }
@@ -113,124 +112,178 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     });
 
     return Scaffold(
-      backgroundColor: SaoColors.surface,
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(SaoSpacing.xxl),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    // Logo/Branding
-                    const Icon(
-                      Icons.account_balance_outlined,
-                      size: 64,
-                      color: SaoColors.primary,
-                    ),
-                    const SizedBox(height: SaoSpacing.lg),
-
-                    // Title
-                    const Text(
-                      'SAO',
-                      style: SaoTypography.pageTitle,
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: SaoSpacing.xs),
-
-                    // Subtitle
-                    Text(
-                      'Sistema de Administración de Obras',
-                      style: SaoTypography.bodyText.copyWith(
-                        color: SaoColors.gray600,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: SaoSpacing.xxxl),
-
-                    // Email Input
-                    SaoInput(
-                      label: 'Correo electrónico',
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      prefixIcon: const Icon(Icons.email_outlined),
-                      validator: _validateEmail,
-                    ),
-                    const SizedBox(height: SaoSpacing.lg),
-
-                    // Password Input
-                    SaoInput(
-                      label: 'Contraseña',
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      prefixIcon: const Icon(Icons.lock_outlined),
-                      suffixIcon: IconButton(
-                        icon: Icon(
-                          _obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: <Color>[SaoColors.actionPrimary, SaoColors.brandPrimary],
+          ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -120,
+              right: -70,
+              child: _AmbientBlob(
+                size: 260,
+                color: SaoColors.warning.withValues(alpha: 0.18),
+              ),
+            ),
+            Positioned(
+              bottom: -140,
+              left: -90,
+              child: _AmbientBlob(
+                size: 310,
+                color: SaoColors.info.withValues(alpha: 0.16),
+              ),
+            ),
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(SaoSpacing.xxl),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 420),
+                    child: Container(
+                      padding: const EdgeInsets.all(SaoSpacing.xxl),
+                      decoration: BoxDecoration(
+                        color: SaoColors.surface.withValues(alpha: 0.96),
+                        borderRadius: BorderRadius.circular(28),
+                        border: Border.all(
+                          color: SaoColors.gray200.withValues(alpha: 0.7),
                         ),
-                        onPressed: () {
-                          setState(() {
-                            _obscurePassword = !_obscurePassword;
-                          });
-                        },
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.22),
+                            blurRadius: 32,
+                            offset: const Offset(0, 18),
+                          ),
+                        ],
                       ),
-                      validator: _validatePassword,
-                    ),
-                    const SizedBox(height: SaoSpacing.md),
-
-                    SwitchListTile.adaptive(
-                      value: _tutorialMode,
-                      contentPadding: EdgeInsets.zero,
-                      title: const Text('Entrar en modo tutorial'),
-                      subtitle: Text(
-                        'Al iniciar sesión se abrirá una guía del flujo operativo',
-                        style: SaoTypography.bodyTextSmall.copyWith(
-                          color: SaoColors.gray600,
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Center(
+                              child: Container(
+                                width: 108,
+                                height: 108,
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: SaoColors.surface,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: SaoColors.gray200),
+                                ),
+                                child: Image.asset(
+                                  'assets/branding/sao_logo.png',
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: SaoSpacing.lg),
+                            const Text(
+                              'SAO',
+                              style: SaoTypography.pageTitle,
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: SaoSpacing.xs),
+                            Text(
+                              'Sistema de administración Operativa',
+                              style: SaoTypography.bodyText.copyWith(
+                                color: SaoColors.gray600,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: SaoSpacing.sm),
+                            Text(
+                              'Accede para continuar con tu operación diaria',
+                              style: SaoTypography.bodyText.copyWith(
+                                color: SaoColors.gray500,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: SaoSpacing.xxxl),
+                            SaoInput(
+                              label: 'Correo electrónico',
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              onChanged: _handleEmailChanged,
+                              prefixIcon: const Icon(Icons.email_outlined),
+                              validator: _validateEmail,
+                            ),
+                            const SizedBox(height: SaoSpacing.lg),
+                            SaoInput(
+                              label: 'Contraseña',
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              prefixIcon: const Icon(Icons.lock_outlined),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _obscurePassword = !_obscurePassword;
+                                  });
+                                },
+                              ),
+                              validator: _validatePassword,
+                            ),
+                            const SizedBox(height: SaoSpacing.xxxl),
+                            SaoButton.primary(
+                              label: 'Iniciar sesión',
+                              onPressed: isLoading ? null : _handleLogin,
+                              isLoading: isLoading,
+                              icon: Icons.login,
+                            ),
+                            if (_biometricEnabled && _biometricReady) ...[
+                              const SizedBox(height: SaoSpacing.md),
+                              SaoButton.secondary(
+                                label: 'Entrar con huella',
+                                onPressed: isLoading
+                                    ? null
+                                    : _handleBiometricLogin,
+                                icon: Icons.fingerprint,
+                              ),
+                            ],
+                            const SizedBox(height: SaoSpacing.md),
+                            TextButton(
+                              onPressed: isLoading
+                                  ? null
+                                  : () => context.go('/auth/signup'),
+                              child: const Text('Crear cuenta'),
+                            ),
+                          ],
                         ),
                       ),
-                      onChanged: isLoading
-                          ? null
-                          : (value) {
-                              setState(() {
-                                _tutorialMode = value;
-                              });
-                            },
                     ),
-                    const SizedBox(height: SaoSpacing.xxxl),
-
-                    // Login Button
-                    SaoButton.primary(
-                      label: _tutorialMode ? 'Entrar a tutorial' : 'Iniciar sesión',
-                      onPressed: isLoading ? null : _handleLogin,
-                      isLoading: isLoading,
-                      icon: _tutorialMode ? Icons.school_outlined : Icons.login,
-                    ),
-                    if (!_tutorialMode && _biometricEnabled && _biometricReady) ...[
-                      const SizedBox(height: SaoSpacing.md),
-                      SaoButton.secondary(
-                        label: 'Entrar con huella',
-                        onPressed: isLoading ? null : _handleBiometricLogin,
-                        icon: Icons.fingerprint,
-                      ),
-                    ],
-                    const SizedBox(height: SaoSpacing.md),
-                    TextButton(
-                      onPressed: isLoading ? null : () => context.go('/auth/signup'),
-                      child: const Text('Crear cuenta'),
-                    ),
-                  ],
+                  ),
                 ),
               ),
             ),
-          ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+class _AmbientBlob extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _AmbientBlob({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(shape: BoxShape.circle, color: color),
     );
   }
 }

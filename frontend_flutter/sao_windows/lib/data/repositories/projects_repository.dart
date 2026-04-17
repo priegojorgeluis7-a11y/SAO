@@ -21,17 +21,25 @@ class ProjectDto {
   });
 
   factory ProjectDto.fromJson(Map<String, dynamic> json) {
-    final rawId = json['id'] ?? json['code'] ?? '';
-    final rawCode = json['code'] ?? '';
-    final rawName = json['name'] ?? json['displayName'] ?? '';
+    final rawId = json['id'] ?? json['code'] ?? json['project_id'] ?? '';
+    final rawCode = json['code'] ?? json['project_id'] ?? json['id'] ?? '';
+    final rawName =
+        json['name'] ??
+        json['displayName'] ??
+        json['project_name'] ??
+        rawCode;
     final rawIsActive = json['isActive'] ?? json['is_active'] ?? true;
+    final rawScopes = json['scopes'] ?? json['role_names'];
 
     return ProjectDto(
       id: rawId.toString(),
-      code: rawCode.toString().toUpperCase(),
-      name: rawName.toString(),
-      isActive: rawIsActive is bool ? rawIsActive : rawIsActive.toString().toLowerCase() == 'true',
-      scopes: json['scopes'] != null ? List<String>.from(json['scopes'] as List) : null,
+      code: rawCode.toString().trim().toUpperCase(),
+      name: rawName.toString().trim(),
+      isActive:
+          rawIsActive is bool
+              ? rawIsActive
+              : rawIsActive.toString().toLowerCase() == 'true',
+      scopes: rawScopes is List ? List<String>.from(rawScopes) : null,
     );
   }
 }
@@ -45,7 +53,7 @@ class ProjectsRepository {
   Future<List<ProjectDto>> getMyProjects() async {
     try {
       appLogger.i('Fetching /me/projects...');
-      final response = await _apiClient.get('/me/projects');
+      final response = await _apiClient.get<dynamic>('/me/projects');
       final data = response.data;
 
       if (data is List) {
@@ -75,7 +83,7 @@ class ProjectsRepository {
   Future<List<ProjectDto>> getAllProjects() async {
     try {
       appLogger.i('Fetching /projects (fallback)...');
-      final response = await _apiClient.get('/projects');
+      final response = await _apiClient.get<dynamic>('/projects');
       final data = response.data;
 
       if (data is List) {
@@ -160,7 +168,17 @@ class ProjectSelectionController {
   ProjectSelectionController(this._ref);
 
   void setActiveProject(String projectCode) {
-    _ref.read(activeProjectCodeProvider.notifier).state = projectCode.toUpperCase();
+    final normalizedCode = projectCode.trim().toUpperCase();
+    if (normalizedCode.isEmpty) {
+      return;
+    }
+
+    final notifier = _ref.read(activeProjectCodeProvider.notifier);
+    if (notifier.state == normalizedCode) {
+      return;
+    }
+
+    notifier.state = normalizedCode;
   }
 
   String? getActiveProject() {
@@ -172,6 +190,6 @@ class ProjectSelectionController {
     final repository = _ref.read(projectsRepositoryProvider);
     await repository.getProjects();
     // Trigger refresh
-    _ref.refresh(allProjectsProvider);
+    _ref.invalidate(allProjectsProvider);
   }
 }

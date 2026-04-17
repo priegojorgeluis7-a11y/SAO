@@ -30,7 +30,7 @@ from app.schemas.auth import (
 )
 from app.core.firestore import get_firestore_client
 from app.schemas.user import UserResponse
-from app.services.audit_service import write_firestore_audit_log
+from app.services.audit_service import canonicalize_role_name, write_firestore_audit_log
 from app.services.firestore_identity_service import (
     create_firestore_user,
     get_firestore_user_by_id,
@@ -38,6 +38,10 @@ from app.services.firestore_identity_service import (
     list_firestore_users,
     update_last_login,
     update_last_logout,
+)
+from app.services.invitation_service import (
+    mark_invitation_used,
+    validate_user_invitation,
 )
 
 logger = logging.getLogger(__name__)
@@ -59,35 +63,37 @@ async def signup(
     )
     role_name = payload.role.upper().strip()
     invite_code = payload.invite_code.strip()
+    email_normalized = payload.email.strip().lower()
+    invitation_to_consume = None
 
     if role_name == "ADMIN":
-        if not settings.ADMIN_INVITE_CODE:
-            raise api_error(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="AUTH_ADMIN_SIGNUP_DISABLED",
-                message="ADMIN signup is disabled",
+        static_admin_code = (settings.ADMIN_INVITE_CODE or "").strip()
+        if not static_admin_code or invite_code != static_admin_code:
+            invitation_to_consume = validate_user_invitation(
+                invite_code,
+                role_name,
+                email_normalized,
             )
-        if invite_code != settings.ADMIN_INVITE_CODE:
-            raise api_error(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="AUTH_INVALID_INVITE_CODE",
-                message="Invalid invite code",
-            )
+            if invitation_to_consume is None:
+                raise api_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="AUTH_INVALID_INVITE_CODE",
+                    message="Invalid invite code",
+                )
     else:
-        if not settings.SIGNUP_INVITE_CODE:
-            raise api_error(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="AUTH_SIGNUP_DISABLED",
-                message="Signup is disabled",
+        static_signup_code = (settings.SIGNUP_INVITE_CODE or "").strip()
+        if not static_signup_code or invite_code != static_signup_code:
+            invitation_to_consume = validate_user_invitation(
+                invite_code,
+                role_name,
+                email_normalized,
             )
-        if invite_code != settings.SIGNUP_INVITE_CODE:
-            raise api_error(
-                status_code=status.HTTP_403_FORBIDDEN,
-                code="AUTH_INVALID_INVITE_CODE",
-                message="Invalid invite code",
-            )
-
-    email_normalized = payload.email.strip().lower()
+            if invitation_to_consume is None:
+                raise api_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="AUTH_INVALID_INVITE_CODE",
+                    message="Invalid invite code",
+                )
     if get_firestore_user_by_email(email_normalized):
         raise api_error(
             status_code=status.HTTP_409_CONFLICT,
@@ -95,13 +101,26 @@ async def signup(
             message="Email already registered",
         )
 
+    first_name = payload.first_name.strip() if payload.first_name else None
+    last_name = payload.last_name.strip() if payload.last_name else None
+    second_last_name = (
+        payload.second_last_name.strip() if payload.second_last_name else None
+    )
+    birth_date = payload.birth_date.isoformat() if payload.birth_date else None
+
     principal = create_firestore_user(
         email=email_normalized,
         full_name=payload.display_name.strip(),
         password_hash=get_password_hash(payload.password),
         roles=[role_name],
         project_ids=[],
+        first_name=first_name,
+        last_name=last_name,
+        second_last_name=second_last_name,
+        birth_date=birth_date,
     )
+    if invitation_to_consume is not None:
+        mark_invitation_used(invitation_to_consume.invite_id, email_normalized)
 
     return SignupResponse(
         user_id=str(principal.id),
@@ -253,7 +272,11 @@ async def get_me(current_user: Any = Depends(get_current_user)) -> UserResponse:
         "status": getattr(current_user, "status", UserStatus.ACTIVE),
         "last_login_at": getattr(current_user, "last_login_at", None),
         "created_at": getattr(current_user, "created_at", now),
-        "roles": getattr(current_user, "roles", []),
+        "roles": [
+            canonicalize_role_name(role) or str(role).strip().upper()
+            for role in (getattr(current_user, "roles", []) or [])
+            if str(role).strip()
+        ],
     }
     return UserResponse.model_validate(payload)
 

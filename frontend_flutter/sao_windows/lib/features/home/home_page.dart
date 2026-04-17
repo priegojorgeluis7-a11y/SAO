@@ -38,6 +38,25 @@ enum FilterMode { totales, vencidas, completadas, pendienteSync }
 
 enum DateRangeFilter { hoy, semana, mes }
 
+bool canTransferResponsibilityForViewer({
+  required bool isPrivilegedAssignmentManager,
+  required bool isOperativeViewer,
+  required bool isAssignedToCurrentUser,
+  required bool isOfflineMode,
+  required ExecutionState executionState,
+}) {
+  if (isOfflineMode || executionState == ExecutionState.terminada) {
+    return false;
+  }
+  if (isPrivilegedAssignmentManager) {
+    return true;
+  }
+  if (!isOperativeViewer) {
+    return false;
+  }
+  return isAssignedToCurrentUser;
+}
+
 class _HomeNotification {
   final TodayActivity activity;
   final String title;
@@ -92,6 +111,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
   // ====== Estado de ejecución usando ExecutionState ======
   bool _isAdminViewer = false;
+  bool _hasPrivilegedAssignmentTransferAccess = false;
   // Default: filterrar por asignado al usuario (seguro por defecto) hasta que se resuelva el rol.
   bool _isOperativeViewer = true;
 
@@ -466,6 +486,7 @@ class _HomePageState extends ConsumerState<HomePage>
       if (!mounted) return;
       setState(() {
         _isAdminViewer = false;
+        _hasPrivilegedAssignmentTransferAccess = false;
         _isOperativeViewer = false;
       });
       // initState already triggers _loadHomeActivities — no need to repeat here.
@@ -481,24 +502,37 @@ class _HomePageState extends ConsumerState<HomePage>
         : await (db.select(
             db.roles,
           )..where((t) => t.id.equals(localUser.roleId))).getSingleOrNull();
+    final normalizedRoleName = role?.name.trim().toUpperCase();
     final isAdminByRole = localUser?.roleId == 1;
     final hasKnownRole = localUser != null;
     final isOperativeByRole =
-        localUser?.roleId == 4 ||
-        role?.name.trim().toUpperCase() == 'OPERATIVO';
+        localUser?.roleId == 4 || normalizedRoleName == 'OPERATIVO';
+    final isPrivilegedManagerByRole =
+        localUser?.roleId == 2 ||
+        localUser?.roleId == 3 ||
+        normalizedRoleName == 'COORD' ||
+        normalizedRoleName == 'COORDINATOR' ||
+        normalizedRoleName == 'SUPERVISOR';
     final email = user.email.trim().toLowerCase();
     final isAdminByEmail =
         email == 'admin@sao.mx' || email.startsWith('admin.');
 
     if (!mounted) return;
     final nextIsAdmin = isAdminByRole || isAdminByEmail;
+    final nextHasPrivilegedAssignmentTransferAccess =
+        nextIsAdmin || isPrivilegedManagerByRole;
     // Least-privilege fallback: if role cannot be resolved locally and user is not admin,
     // keep strict assignee filtering to avoid exposing activities from other operatives.
     final nextIsOperative = hasKnownRole ? isOperativeByRole : !nextIsAdmin;
     final changed =
-        nextIsAdmin != _isAdminViewer || nextIsOperative != _isOperativeViewer;
+        nextIsAdmin != _isAdminViewer ||
+        nextIsOperative != _isOperativeViewer ||
+        nextHasPrivilegedAssignmentTransferAccess !=
+            _hasPrivilegedAssignmentTransferAccess;
     setState(() {
       _isAdminViewer = nextIsAdmin;
+      _hasPrivilegedAssignmentTransferAccess =
+          nextHasPrivilegedAssignmentTransferAccess;
       _isOperativeViewer = nextIsOperative;
     });
 
@@ -1125,19 +1159,16 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   bool _canTransferResponsibility(TodayActivity activity) {
-    if (!_isOperativeViewer || _isAdminViewer) {
-      return false;
-    }
-    if (ref.read(offlineModeProvider)) {
-      return false;
-    }
-    if (activity.executionState == ExecutionState.terminada) {
-      return false;
-    }
-
-    return _isAssignedToCurrentUser(
-      assignedToUserId: activity.assignedToUserId,
-      assignedToName: activity.assignedToName,
+    return canTransferResponsibilityForViewer(
+      isPrivilegedAssignmentManager:
+          _hasPrivilegedAssignmentTransferAccess,
+      isOperativeViewer: _isOperativeViewer,
+      isAssignedToCurrentUser: _isAssignedToCurrentUser(
+        assignedToUserId: activity.assignedToUserId,
+        assignedToName: activity.assignedToName,
+      ),
+      isOfflineMode: ref.read(offlineModeProvider),
+      executionState: activity.executionState,
     );
   }
 
@@ -1160,7 +1191,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
     List<Resource> resources;
     try {
-      resources = await _agendaUsersRepository.getOperationalUsers(
+      resources = await _agendaUsersRepository.getTransferCandidates(
         projectId: projectId,
         isOffline: false,
       );
@@ -1169,7 +1200,7 @@ class _HomePageState extends ConsumerState<HomePage>
       showTransientSnackBar(
         context,
         appSnackBar(
-          message: 'No se pudo cargar el equipo operativo para transferir.',
+          message: 'No se pudo cargar el equipo del proyecto para transferir.',
         ),
       );
       return;
@@ -1193,7 +1224,7 @@ class _HomePageState extends ConsumerState<HomePage>
         context,
         appSnackBar(
           message:
-              'No hay otro operativo disponible para recibir la actividad.',
+              'No hay otra persona disponible en el proyecto para recibir la actividad.',
         ),
       );
       return;

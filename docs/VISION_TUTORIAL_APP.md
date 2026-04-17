@@ -3,6 +3,9 @@
 ## Propósito
 Este modo ayuda a personal nuevo a entender, en menos de 5 minutos, el flujo completo de trabajo en SAO antes de operar en producción.
 
+## Documento relacionado
+Para la guia operativa paso a paso, consultar `docs/TUTORIAL_OPERATIVO_SAO.md`.
+
 ## ¿Cómo se activa?
 1. Usuario llega a login.
 2. Activa el switch **Entrar en modo tutorial**.
