@@ -1,6 +1,6 @@
 # Matriz de roles y permisos de SAO
 
-**Fecha:** 2026-04-16  
+**Fecha:** 2026-04-17  
 **Estado:** Vigente  
 **Fuente canónica:** backend actual en modo Firestore
 
@@ -60,22 +60,22 @@ Los permisos base actualmente contemplados por el backend son:
 | Ver actividades | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Crear actividades | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Editar actividades | ✅ | ✅ | ✅ | ✅ | ❌ |
-| Eliminar actividades | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Eliminar actividades | ✅ | ✅ | ❌ | ❌ | ❌ |
 | Aprobar actividades | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Rechazar actividades | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Crear eventos | ✅ | ✅ | ✅ | ✅ | ❌ |
 | Editar eventos | ✅ | ✅ | ✅ | ❌ | ❌ |
 | Ver eventos | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Ver catálogo | ✅ | ✅ | ❌ | ✅ | ✅ |
-| Editar catálogo | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Publicar catálogo | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Ver catálogo | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Editar catálogo | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Publicar catálogo | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Crear usuarios | ✅ | ❌ | ❌ | ❌ | ❌ |
 | Editar usuarios | ✅ | ❌ | ❌ | ❌ | ❌ |
-| Ver usuarios | ✅ | ❌ | ❌ | ❌ | ✅ |
+| Ver usuarios | ✅ | ✅ | ❌ | ❌ | ✅ |
 | Ver reportes | ✅ | ✅ | ✅ | ❌ | ✅ |
-| Exportar reportes | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Administrar asignaciones | ✅ | ✅ | ❌ | ❌ | ❌ |
-| Administrar proyectos | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Exportar reportes | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Administrar asignaciones | ✅ | ✅ | ✅ | ❌ | ❌ |
+| Administrar proyectos | ✅ | ❌ | ✅ | ❌ | ❌ |
 | Aprobar excepciones de flujo | ✅ | ❌ | ❌ | ❌ | ❌ |
 
 ---
@@ -97,15 +97,16 @@ Puede administrar el sistema completo:
 ### COORD
 Puede coordinar la operación diaria y validar trabajo:
 
-- ver, crear y editar actividades
+- ver, crear, editar y eliminar actividades
 - aprobar o rechazar actividades en revisión
 - crear y editar eventos
-- consultar catálogo
+- consultar y editar catálogo
+- ver usuarios
 - consultar y exportar reportes
 - administrar asignaciones
 - operar dashboard y flujos de revisión
 
-No tiene permisos base para administrar usuarios, proyectos ni publicar catálogo.
+No tiene permisos base para crear o editar usuarios, administrar proyectos, publicar catálogo ni aprobar excepciones de flujo.
 
 ### SUPERVISOR
 Puede supervisar y validar expedientes:
@@ -113,10 +114,12 @@ Puede supervisar y validar expedientes:
 - ver, crear y editar actividades
 - aprobar o rechazar actividades
 - crear, editar y consultar eventos
-- consultar reportes operativos
-- acceder a paneles de revisión, seguimiento y algunas vistas de control
+- ver, editar y publicar catálogo
+- consultar y exportar reportes operativos
+- administrar asignaciones y proyectos
+- acceder a paneles de revisión, seguimiento y control
 
-No tiene permisos base para usuarios, proyectos, publicación de catálogo ni aprobación de excepciones.
+No tiene permisos base para usuarios, eliminar actividades ni aprobar excepciones de flujo.
 
 ### OPERATIVO
 Es el rol de ejecución en campo:

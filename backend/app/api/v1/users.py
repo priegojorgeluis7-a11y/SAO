@@ -5,10 +5,11 @@ from fastapi import APIRouter, Depends, Query, status
 from app.core.api_errors import api_error
 
 from app.api.deps import get_current_user, require_any_role, user_has_any_role
-from app.core.permission_catalog import CANONICAL_PERMISSION_CODES, DEFAULT_ROLE_PERMISSION_CODES
+from app.core.permission_catalog import CANONICAL_PERMISSION_CODES
 from app.core.security import get_password_hash
 from app.core.enums import UserStatus
 from app.schemas.user import (
+    AdminRolePermissionsUpdate,
     AdminUserCreate,
     AdminUserCreateResponse,
     AdminUserListItem,
@@ -28,6 +29,7 @@ from app.services.firestore_identity_service import (
     delete_firestore_user,
     update_firestore_user,
 )
+from app.services.role_permission_service import get_role_permission_map, save_role_permission_map
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -123,10 +125,14 @@ def _build_firestore_permission_scope_items(
 def _firestore_merge_permission_codes(
     roles: list[str],
     permission_scopes: list[dict[str, str | None]],
+    role_permissions_map: dict[str, list[str]] | None = None,
 ) -> list[str]:
+    resolved_role_permissions = role_permissions_map or get_role_permission_map()
     role_permission_codes: list[str] = []
     for role_name in roles:
-        role_permission_codes.extend(DEFAULT_ROLE_PERMISSION_CODES.get(role_name.strip().upper(), []))
+        role_permission_codes.extend(
+            resolved_role_permissions.get(role_name.strip().upper(), [])
+        )
 
     allow_codes = {
         str(item.get("permission_code") or "")
@@ -153,7 +159,30 @@ def list_admin_permissions(
 def list_admin_role_permissions(
     _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR"])),
 ):
-    return dict(DEFAULT_ROLE_PERMISSION_CODES)
+    return get_role_permission_map()
+
+
+@router.put("/admin/role-permissions", response_model=dict[str, list[str]])
+def update_admin_role_permissions(
+    payload: AdminRolePermissionsUpdate,
+    current_user: Any = Depends(require_any_role(["ADMIN"])),
+):
+    try:
+        updated_permissions = save_role_permission_map(payload.role_permissions)
+        write_firestore_audit_log(
+            action="admin.role_permissions.updated",
+            entity="system_settings",
+            entity_id="role_permissions",
+            actor=current_user,
+            details={"role_permissions": updated_permissions},
+        )
+        return updated_permissions
+    except Exception as exc:
+        raise api_error(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            code="ROLE_PERMISSION_SETTINGS_UNAVAILABLE",
+            message=f"No se pudieron guardar los permisos globales: {exc}",
+        )
 
 
 @router.get("", response_model=list[UserAgendaListItem])
@@ -220,6 +249,7 @@ def list_admin_users(
     _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR"])),
 ):
     principals = list_firestore_users(role=role)
+    role_permissions_map = get_role_permission_map()
     return [
         AdminUserListItem(
             id=p.id,
@@ -231,7 +261,11 @@ def list_admin_users(
             roles=[canonicalize_role_name(role) or str(role).strip().upper() for role in p.roles],
             project_ids=p.project_ids,
             scopes=_build_scopes_from_persisted_or_fallback(p.scopes, p.roles, p.project_ids),
-            permission_codes=_firestore_merge_permission_codes(p.roles, p.permission_scopes),
+            permission_codes=_firestore_merge_permission_codes(
+                p.roles,
+                p.permission_scopes,
+                role_permissions_map=role_permissions_map,
+            ),
             permission_scopes=_build_firestore_permission_scope_items(p.permission_scopes),
         )
         for p in principals

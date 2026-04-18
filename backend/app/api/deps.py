@@ -8,9 +8,9 @@ from fastapi.security import OAuth2PasswordBearer
 
 from app.core.config import settings
 from app.core.enums import UserStatus
-from app.core.permission_catalog import DEFAULT_ROLE_PERMISSION_CODES
 from app.core.security import verify_token
 from app.services.firestore_identity_service import get_firestore_user_by_id
+from app.services.role_permission_service import get_role_permission_map
 
 logger = logging.getLogger(__name__)
 
@@ -178,10 +178,11 @@ def user_has_permission(
         if _permission_matches(scope_code, permission_code) and scope_effect == "deny" and _scope_applies(scope_project_id):
             return False
 
+    role_permissions_map = get_role_permission_map()
     role_codes: set[str] = set()
     for role_name in getattr(user, "roles", []) or []:
         role_codes.update(
-            DEFAULT_ROLE_PERMISSION_CODES.get(str(role_name).strip().upper(), [])
+            role_permissions_map.get(str(role_name).strip().upper(), [])
         )
     if any(_permission_matches(code, permission_code) for code in role_codes):
         return True

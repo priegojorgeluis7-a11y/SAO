@@ -57,6 +57,10 @@ class AdminUserPermissionItem(BaseModel):
     effect: Literal["allow", "deny"] = "allow"
 
 
+class AdminRolePermissionsUpdate(BaseModel):
+    role_permissions: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class AdminUserCreate(BaseModel):
     email: EmailStr
     full_name: str

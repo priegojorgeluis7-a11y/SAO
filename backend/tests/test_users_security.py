@@ -146,3 +146,49 @@ def test_delete_admin_user_allows_inactive_user(client, monkeypatch):
         app.dependency_overrides.pop(deps_module.get_current_user, None)
 
     assert response.status_code == 204
+
+
+def test_update_role_permissions_requires_admin(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="supervisor@example.com", roles=["SUPERVISOR"])
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.put(
+            "/api/v1/users/admin/role-permissions",
+            json={"role_permissions": {"COORD": ["Ver actividades"]}},
+        )
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 403
+
+
+def test_update_role_permissions_allows_admin(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="admin@example.com", roles=["ADMIN"])
+    captured: dict[str, list[str]] = {}
+
+    def _save_role_permissions(payload):
+        captured.update(payload)
+        return payload
+
+    monkeypatch.setattr(users_api, "save_role_permission_map", _save_role_permissions, raising=False)
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.put(
+            "/api/v1/users/admin/role-permissions",
+            json={
+                "role_permissions": {
+                    "COORD": ["Ver actividades", "Editar catálogo"],
+                    "LECTOR": ["Ver reportes"],
+                }
+            },
+        )
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 200
+    assert captured["COORD"] == ["Ver actividades", "Editar catálogo"]
+    assert response.json()["COORD"] == ["Ver actividades", "Editar catálogo"]

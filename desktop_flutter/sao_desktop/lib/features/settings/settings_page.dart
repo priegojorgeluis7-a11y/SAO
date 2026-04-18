@@ -10,6 +10,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/config/data_mode.dart';
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/settings/report_export_settings.dart';
+import '../../data/repositories/backend_api_client.dart';
 import '../../features/auth/app_session_controller.dart';
 
 enum _ConnectionProbeStatus {
@@ -18,6 +19,14 @@ enum _ConnectionProbeStatus {
   online,
   error,
 }
+
+const List<String> _rolePermissionEditorRoles = <String>[
+  'ADMIN',
+  'COORD',
+  'SUPERVISOR',
+  'OPERATIVO',
+  'LECTOR',
+];
 
 class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
@@ -201,9 +210,27 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     return '$dd/$mm/${local.year} $hh:$min';
   }
 
+  bool _isAdminUser(AppUser? user) {
+    if (user == null) return false;
+    final roles = <String>{
+      user.role.trim().toUpperCase(),
+      ...user.roles.map((role) => role.trim().toUpperCase()),
+    };
+    return roles.contains('ADMIN');
+  }
+
+  Future<void> _openRolePermissionManager() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => const _RolePermissionSettingsDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cs        = Theme.of(context).colorScheme;
+    final cs = Theme.of(context).colorScheme;
+    final currentUser = ref.watch(currentAppUserProvider);
+    final canManageRolePermissions = _isAdminUser(currentUser);
     const backendUrl = AppDataMode.backendBaseUrl;
     final reportsRootLabel =
       _defaultReportsRootPath ?? 'Documentos del usuario (predeterminado)';
@@ -425,6 +452,64 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 ],
               ),
               const SizedBox(height: 28),
+
+              if (canManageRolePermissions) ...[
+                const _SectionHeader(
+                  title: 'Administración',
+                  icon: Icons.admin_panel_settings_rounded,
+                ),
+                const SizedBox(height: 12),
+                _SettingsCard(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Permisos generales de roles',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w500,
+                                    color: cs.onSurface,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'Modifica la matriz base que usan los roles del sistema.',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: cs.onSurface.withValues(alpha: 0.5),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          OutlinedButton.icon(
+                            onPressed: _openRolePermissionManager,
+                            icon: const Icon(Icons.security_rounded, size: 16),
+                            label: const Text('Modificar'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const _Divider(),
+                    const _InfoRow(
+                      label: 'Acceso',
+                      value: 'Solo administradores',
+                      hint: 'Aplica cambios globales a los permisos base por rol.',
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 28),
+              ],
 
               // ── Acerca de ────────────────────────────────────────────────
               const _SectionHeader(
@@ -700,6 +785,302 @@ class _CopyRowState extends State<_CopyRow> {
   }
 }
 
+
+class _RolePermissionSettingsDialog extends StatefulWidget {
+  const _RolePermissionSettingsDialog();
+
+  @override
+  State<_RolePermissionSettingsDialog> createState() =>
+      _RolePermissionSettingsDialogState();
+}
+
+class _RolePermissionSettingsDialogState
+    extends State<_RolePermissionSettingsDialog> {
+  bool _loading = true;
+  bool _saving = false;
+  String? _errorMessage;
+  List<String> _permissionCatalog = const <String>[];
+  Map<String, Set<String>> _rolePermissions = <String, Set<String>>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRolePermissions();
+  }
+
+  Future<void> _loadRolePermissions() async {
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final catalogResponse =
+          await const BackendApiClient().getJson('/api/v1/users/admin/permissions');
+      final roleResponse = await const BackendApiClient()
+          .getJson('/api/v1/users/admin/role-permissions');
+
+      final permissionCatalog = catalogResponse is List
+          ? catalogResponse
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toList()
+          : <String>[];
+
+      final rolePermissions = <String, Set<String>>{
+        for (final role in _rolePermissionEditorRoles) role: <String>{},
+      };
+
+      if (roleResponse is Map<String, dynamic>) {
+        roleResponse.forEach((key, value) {
+          final role = key.trim().toUpperCase();
+          if (!rolePermissions.containsKey(role) || value is! List) return;
+          rolePermissions[role] = value
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toSet();
+        });
+      }
+
+      final resolvedCatalog = permissionCatalog.isNotEmpty
+          ? permissionCatalog
+          : rolePermissions.values.expand((items) => items).toSet().toList();
+      rolePermissions['ADMIN'] = resolvedCatalog.toSet();
+
+      if (!mounted) return;
+      setState(() {
+        _permissionCatalog = resolvedCatalog;
+        _rolePermissions = rolePermissions;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'No se pudieron cargar los permisos globales: $error';
+        _loading = false;
+      });
+    }
+  }
+
+  void _togglePermission(String role, String permissionCode, bool enabled) {
+    if (role == 'ADMIN') return;
+    final updated = Set<String>.from(_rolePermissions[role] ?? <String>{});
+    if (enabled) {
+      updated.add(permissionCode);
+    } else {
+      updated.remove(permissionCode);
+    }
+    setState(() {
+      _rolePermissions[role] = updated;
+    });
+  }
+
+  Future<void> _saveRolePermissions() async {
+    setState(() => _saving = true);
+    try {
+      final payload = <String, List<String>>{
+        for (final role in _rolePermissionEditorRoles)
+          role: role == 'ADMIN'
+              ? List<String>.from(_permissionCatalog)
+              : _permissionCatalog
+                  .where((permission) =>
+                      (_rolePermissions[role] ?? const <String>{})
+                          .contains(permission))
+                  .toList(),
+      };
+
+      final response = await const BackendApiClient().putJson(
+        '/api/v1/users/admin/role-permissions',
+        {'role_permissions': payload},
+      );
+
+      if (response is Map<String, dynamic>) {
+        final normalized = <String, Set<String>>{
+          for (final role in _rolePermissionEditorRoles) role: <String>{},
+        };
+        response.forEach((key, value) {
+          final role = key.trim().toUpperCase();
+          if (!normalized.containsKey(role) || value is! List) return;
+          normalized[role] = value
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toSet();
+        });
+        normalized['ADMIN'] = _permissionCatalog.toSet();
+        _rolePermissions = normalized;
+      }
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Permisos generales actualizados correctamente.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'No se pudieron guardar los cambios: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.security_rounded),
+          SizedBox(width: 8),
+          Expanded(child: Text('Permisos generales de roles')),
+        ],
+      ),
+      content: SizedBox(
+        width: 760,
+        child: _loading
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : _errorMessage != null
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _errorMessage!,
+                        style: TextStyle(color: cs.error),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _loadRolePermissions,
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('Reintentar'),
+                      ),
+                    ],
+                  )
+                : SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Define qué permisos base recibe cada rol al entrar al sistema.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: cs.onSurface.withValues(alpha: 0.7),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        for (final role in _rolePermissionEditorRoles)
+                          _RolePermissionGroup(
+                            role: role,
+                            permissionCatalog: _permissionCatalog,
+                            selectedPermissions:
+                                _rolePermissions[role] ?? const <String>{},
+                            locked: role == 'ADMIN',
+                            onChanged: (permissionCode, enabled) =>
+                                _togglePermission(role, permissionCode, enabled),
+                          ),
+                      ],
+                    ),
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cerrar'),
+        ),
+        FilledButton.icon(
+          onPressed: _loading || _saving || _permissionCatalog.isEmpty
+              ? null
+              : _saveRolePermissions,
+          icon: _saving
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save_rounded, size: 16),
+          label: Text(_saving ? 'Guardando...' : 'Guardar cambios'),
+        ),
+      ],
+    );
+  }
+}
+
+class _RolePermissionGroup extends StatelessWidget {
+  final String role;
+  final List<String> permissionCatalog;
+  final Set<String> selectedPermissions;
+  final bool locked;
+  final void Function(String permissionCode, bool enabled) onChanged;
+
+  const _RolePermissionGroup({
+    required this.role,
+    required this.permissionCatalog,
+    required this.selectedPermissions,
+    required this.locked,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ExpansionTile(
+        initiallyExpanded: role != 'LECTOR',
+        title: Text(role),
+        subtitle: Text(
+          locked
+              ? 'Acceso total protegido'
+              : '${selectedPermissions.length} permisos activos',
+        ),
+        children: [
+          if (locked)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'ADMIN conserva acceso total para evitar bloqueos del sistema.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+            ),
+          for (final permissionCode in permissionCatalog)
+            CheckboxListTile(
+              dense: true,
+              value: selectedPermissions.contains(permissionCode),
+              onChanged: locked
+                  ? null
+                  : (value) => onChanged(permissionCode, value ?? false),
+              title: Text(
+                permissionCode,
+                style: const TextStyle(fontSize: 13),
+              ),
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Divider extends StatelessWidget {
   const _Divider();
