@@ -15,10 +15,13 @@ Genera un archivo tipo Setup que:
 - Inno Setup 6 instalado
 
 ## Uso rápido
-1. Copia esta carpeta a la raíz del repositorio.
-2. Abre PowerShell en Windows.
-3. Entra a esta carpeta.
-4. Ejecuta el script crear_instalador_sao.ps1
+1. Actualiza el repo con la última rama main.
+2. Copia esta carpeta a la raíz del repositorio.
+3. Abre PowerShell en Windows.
+4. Entra a esta carpeta.
+5. Ejecuta el script crear_instalador_sao.ps1
+
+> El script ahora limpia la compilación anterior y reconstruye la app para evitar que el instalador tome binarios viejos.
 
 ## Salida esperada
 El instalador final se generará en:

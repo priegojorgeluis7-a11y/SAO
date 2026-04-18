@@ -1,7 +1,7 @@
 name: sao_desktop
 description: SAO Desktop - Sistema de Administración y Control
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: '>=3.2.0 <4.0.0'

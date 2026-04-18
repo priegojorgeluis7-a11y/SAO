@@ -28,6 +28,11 @@ $installerScript = Join-Path $bundleRoot "sao_desktop_instalador.iss"
 Push-Location $ProjectRoot
 try {
     Set-Location "desktop_flutter\sao_desktop"
+    if (Test-Path "build\windows") {
+        Remove-Item "build\windows" -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    flutter clean
+    flutter pub get
     flutter build windows --release
     Set-Location $ProjectRoot
 

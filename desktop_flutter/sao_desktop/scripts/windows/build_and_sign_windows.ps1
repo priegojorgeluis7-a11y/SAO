@@ -33,6 +33,13 @@ function Resolve-SignTool {
 Push-Location $ProjectRoot
 try {
     if (-not $SkipBuild -and -not $VerifyOnly) {
+        Write-Host "Cleaning previous Windows build..." -ForegroundColor Cyan
+        if (Test-Path "build\windows") {
+            Remove-Item "build\windows" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        flutter clean
+        flutter pub get
+
         Write-Host "Building Flutter Windows release..." -ForegroundColor Cyan
         flutter build windows --release
     }

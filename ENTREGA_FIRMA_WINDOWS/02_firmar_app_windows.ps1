@@ -26,6 +26,11 @@ Push-Location $ProjectRoot
 try {
     if (-not $SkipBuild) {
         Set-Location "desktop_flutter\sao_desktop"
+        if (Test-Path "build\windows") {
+            Remove-Item "build\windows" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        flutter clean
+        flutter pub get
         flutter build windows --release
         Set-Location $ProjectRoot
     }
