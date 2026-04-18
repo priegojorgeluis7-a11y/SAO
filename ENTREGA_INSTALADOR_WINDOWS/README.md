@@ -11,8 +11,8 @@ Genera un archivo tipo Setup que:
 
 ## Requisitos en la PC Windows
 - tener el repositorio del proyecto
-- Flutter instalado
 - Inno Setup 6 instalado
+- Flutter solo es necesario si no viene la carpeta compilada en dist/windows_release
 
 ## Uso rápido
 1. Actualiza el repo con la última rama main.
@@ -26,3 +26,5 @@ Genera un archivo tipo Setup que:
 ## Salida esperada
 El instalador final se generará en:
 - desktop_flutter/sao_desktop/build/windows/installer/SAO_Desktop_Setup.exe
+
+> Si la carpeta dist/windows_release/SAO Desktop Windows Release ya viene en el repo, el script usará esa compilación lista y solo empaquetará el instalador.

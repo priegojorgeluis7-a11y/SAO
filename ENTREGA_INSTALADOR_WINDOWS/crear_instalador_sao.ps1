@@ -24,17 +24,29 @@ function Resolve-Tool {
 
 $bundleRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $installerScript = Join-Path $bundleRoot "sao_desktop_instalador.iss"
+$precompiledSource = Join-Path $ProjectRoot "dist\windows_release\SAO Desktop Windows Release"
+$releaseTarget = Join-Path $ProjectRoot "desktop_flutter\sao_desktop\build\windows\x64\runner\Release"
 
 Push-Location $ProjectRoot
 try {
-    Set-Location "desktop_flutter\sao_desktop"
-    if (Test-Path "build\windows") {
-        Remove-Item "build\windows" -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $precompiledSource) {
+        Write-Host "Usando compilación Windows ya preparada del repositorio..." -ForegroundColor Cyan
+        if (Test-Path $releaseTarget) {
+            Remove-Item $releaseTarget -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        New-Item -ItemType Directory -Force -Path $releaseTarget | Out-Null
+        Copy-Item (Join-Path $precompiledSource '*') $releaseTarget -Recurse -Force
     }
-    flutter clean
-    flutter pub get
-    flutter build windows --release
-    Set-Location $ProjectRoot
+    else {
+        Set-Location "desktop_flutter\sao_desktop"
+        if (Test-Path "build\windows") {
+            Remove-Item "build\windows" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+        flutter clean
+        flutter pub get
+        flutter build windows --release
+        Set-Location $ProjectRoot
+    }
 
     $iscc = Resolve-Tool -CommandName $InnoSetupCompiler -FallbackPaths @(
         "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
