@@ -1,6 +1,9 @@
 // lib/features/sync/data/sync_api_repository.dart
+import 'dart:convert';
+
 import 'package:get_it/get_it.dart';
 import '../../../core/network/api_client.dart';
+import '../../../data/local/app_db.dart';
 import '../../../core/network/exceptions.dart';
 import '../../../core/utils/logger.dart';
 import '../models/sync_dto.dart';
@@ -175,13 +178,73 @@ class SyncApiRepository {
 
   /// Get sync status summary for a project.
   Future<SyncStatus> getSyncStatus(String projectId) async {
-    // Placeholder — real implementation reads from local Drift DB
-    return const SyncStatus(
-      lastSyncVersion: 0,
-      lastSyncAt: null,
+    final normalizedProject = projectId.trim().toUpperCase();
+    final db = GetIt.instance<AppDb>();
+
+    final state = await (db.select(db.syncState)..where((s) => s.id.equals(1)))
+        .getSingleOrNull();
+    final pendingRows = await (db.select(db.syncQueue)
+          ..where((s) => s.status.isNotIn(const ['DONE'])))
+        .get();
+
+    final relevantRows = normalizedProject.isEmpty
+        ? pendingRows
+        : pendingRows.where((row) => _matchesProject(row, normalizedProject)).toList();
+
+    return SyncStatus(
+      lastSyncVersion: _extractLastSyncVersion(state?.lastServerCursor, normalizedProject),
+      lastSyncAt: state?.lastSyncAt,
       pendingPullCount: 0,
-      pendingPushCount: 0,
+      pendingPushCount: relevantRows.length,
     );
+  }
+
+  bool _matchesProject(SyncQueueData row, String projectId) {
+    try {
+      final decoded = jsonDecode(row.payloadJson);
+      if (decoded is Map) {
+        final candidates = <String?>[
+          decoded['project_id']?.toString(),
+          decoded['projectId']?.toString(),
+          decoded['project_code']?.toString(),
+          decoded['projectCode']?.toString(),
+        ];
+        for (final candidate in candidates) {
+          if ((candidate ?? '').trim().toUpperCase() == projectId) {
+            return true;
+          }
+        }
+      }
+    } catch (_) {
+      // ignore malformed payloads and fall back below
+    }
+    return row.entityId.toUpperCase().contains(projectId);
+  }
+
+  int _extractLastSyncVersion(String? rawCursor, String projectId) {
+    final raw = (rawCursor ?? '').trim();
+    if (raw.isEmpty) return 0;
+
+    final legacy = int.tryParse(raw);
+    if (legacy != null) return legacy;
+
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) {
+        return 0;
+      }
+      final projectCursor = decoded[projectId];
+      if (projectCursor is Map<String, dynamic>) {
+        return (projectCursor['since_version'] as num?)?.toInt() ?? 0;
+      }
+      if (projectCursor is num) {
+        return projectCursor.toInt();
+      }
+    } catch (_) {
+      return 0;
+    }
+
+    return 0;
   }
 }
 

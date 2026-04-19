@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../data/database/app_database.dart';
@@ -45,6 +47,8 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   final EvidenceRepository _defaultEvidenceRepository = EvidenceRepository();
   final Map<String, String> _signedUrlCache = {};
   final Map<String, Future<String?>> _signedUrlFutureCache = {};
+  final Map<String, Timer> _notesSaveTimers = {};
+  final Map<String, String> _persistedNotesCache = {};
   int? _lastPrefetchIndex;
 
   EvidenceRepository get _evidenceRepository =>
@@ -54,6 +58,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   void initState() {
     super.initState();
     _initializeControllers();
+    unawaited(_loadPersistedInternalNotes());
   }
 
   void _initializeControllers() {
@@ -67,8 +72,9 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
         _captionControllers[evidence.id] = TextEditingController(
           text: _resolvedCaptionForEvidence(evidence, indexHint: entry.key),
         );
-        _notesControllers[evidence.id] =
-            TextEditingController(text: ''); // TODO: Load from DB if exists
+        _notesControllers[evidence.id] = TextEditingController(
+          text: _persistedNotesCache[evidence.id] ?? '',
+        );
         _isEditingCaption[evidence.id] = false;
       }
     }
@@ -88,6 +94,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
         _lastPrefetchIndex = null;
       }
       _initializeControllers();
+      unawaited(_loadPersistedInternalNotes());
     }
   }
 
@@ -96,10 +103,82 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     for (var controller in _captionControllers.values) {
       controller.dispose();
     }
+    for (final timer in _notesSaveTimers.values) {
+      timer.cancel();
+    }
     for (var controller in _notesControllers.values) {
       controller.dispose();
     }
     super.dispose();
+  }
+
+  Future<File> _notesStoreFile() async {
+    final supportDir = await getApplicationSupportDirectory();
+    final notesDir = Directory('${supportDir.path}/review_notes');
+    if (!notesDir.existsSync()) {
+      notesDir.createSync(recursive: true);
+    }
+    return File('${notesDir.path}/evidence_internal_notes.json');
+  }
+
+  Future<Map<String, String>> _readStoredNotes() async {
+    try {
+      final file = await _notesStoreFile();
+      if (!file.existsSync()) {
+        return <String, String>{};
+      }
+      final raw = await file.readAsString();
+      if (raw.trim().isEmpty) {
+        return <String, String>{};
+      }
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) {
+        return <String, String>{};
+      }
+      return decoded.map(
+        (key, value) => MapEntry(key.toString(), (value ?? '').toString()),
+      );
+    } catch (_) {
+      return <String, String>{};
+    }
+  }
+
+  Future<void> _loadPersistedInternalNotes() async {
+    final activity = widget.activity;
+    if (activity == null) return;
+
+    final stored = await _readStoredNotes();
+    if (!mounted) return;
+
+    for (final evidence in activity.evidences) {
+      final value = stored[evidence.id] ?? '';
+      _persistedNotesCache[evidence.id] = value;
+      final controller = _notesControllers[evidence.id];
+      if (controller != null && controller.text != value) {
+        controller.text = value;
+      }
+    }
+  }
+
+  void _scheduleInternalNoteSave(String evidenceId, String value) {
+    _persistedNotesCache[evidenceId] = value;
+    _notesSaveTimers[evidenceId]?.cancel();
+    _notesSaveTimers[evidenceId] = Timer(
+      const Duration(milliseconds: 350),
+      () => unawaited(_persistInternalNote(evidenceId, value)),
+    );
+  }
+
+  Future<void> _persistInternalNote(String evidenceId, String value) async {
+    final stored = await _readStoredNotes();
+    final normalized = value.trim();
+    if (normalized.isEmpty) {
+      stored.remove(evidenceId);
+    } else {
+      stored[evidenceId] = normalized;
+    }
+    final file = await _notesStoreFile();
+    await file.writeAsString(jsonEncode(stored));
   }
 
   String? _firstNonEmptyText(Iterable<Object?> values) {
@@ -518,7 +597,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     );
     _notesControllers.putIfAbsent(
       evidence.id,
-      () => TextEditingController(text: ''),
+      () => TextEditingController(text: _persistedNotesCache[evidence.id] ?? ''),
     );
     _isEditingCaption.putIfAbsent(evidence.id, () => false);
 
@@ -890,7 +969,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                           ),
                           style: SaoTypography.bodyText,
                           onChanged: (value) {
-                            // Auto-save notes (debounced in real implementation)
+                            _scheduleInternalNoteSave(evidence.id, value);
                           },
                         ),
                         const SizedBox(height: SaoSpacing.sm),

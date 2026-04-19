@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/network/exceptions.dart';
 import '../../../core/auth/pin_storage.dart';
@@ -147,6 +149,7 @@ class AuthController extends StateNotifier<AuthState> {
   final AuthRepository _repository;
   final PinStorage? _pinStorage;
   final BiometricService _biometricService;
+  Timer? _bootstrapTimeoutTimer;
 
   AuthController(
     this._repository, {
@@ -166,13 +169,29 @@ class AuthController extends StateNotifier<AuthState> {
     try {
       appLogger.d('Bootstrapping authentication');
 
-      final result = await _repository.bootstrap().timeout(
-        const Duration(seconds: 6),
-        onTimeout: () {
+      final completer = Completer<BootstrapResult>();
+      _bootstrapTimeoutTimer?.cancel();
+      _bootstrapTimeoutTimer = Timer(const Duration(seconds: 6), () {
+        if (!completer.isCompleted) {
           appLogger.w('Bootstrap timeout — falling back to unauthenticated');
-          return BootstrapResult.unauthenticated;
-        },
+          completer.complete(BootstrapResult.unauthenticated);
+        }
+      });
+
+      unawaited(
+        _repository.bootstrap().then((result) {
+          if (!completer.isCompleted) {
+            completer.complete(result);
+          }
+        }).catchError((Object error, StackTrace stackTrace) {
+          if (!completer.isCompleted) {
+            completer.completeError(error, stackTrace);
+          }
+        }),
       );
+
+      final result = await completer.future;
+      _bootstrapTimeoutTimer?.cancel();
 
       switch (result) {
         case BootstrapResult.authenticated:
@@ -199,6 +218,12 @@ class AuthController extends StateNotifier<AuthState> {
       appLogger.e('Bootstrap error: $e');
       state = const AuthState.unauthenticated('Failed to restore session');
     }
+  }
+
+  @override
+  void dispose() {
+    _bootstrapTimeoutTimer?.cancel();
+    super.dispose();
   }
 
   /// Login with email and password

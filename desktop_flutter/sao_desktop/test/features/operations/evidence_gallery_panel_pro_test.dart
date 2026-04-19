@@ -4,6 +4,7 @@ import 'package:sao_desktop/data/database/app_database.dart';
 import 'package:sao_desktop/data/models/activity_model.dart';
 import 'package:sao_desktop/data/repositories/evidence_repository.dart';
 import 'package:sao_desktop/features/operations/widgets/evidence_gallery_panel_pro.dart';
+import 'package:sao_desktop/ui/widgets/sao_evidence_viewer.dart';
 
 class _DelayedEvidenceRepository extends EvidenceRepository {
   _DelayedEvidenceRepository(this.delay);
@@ -163,7 +164,8 @@ void main() {
       }
 
       await tester.pumpWidget(buildSubject());
-      expect(find.textContaining('Cargando evidencia del servidor'), findsOneWidget);
+      expect(find.textContaining('Cargando evidencia del servidor'),
+          findsOneWidget);
       expect(repository.callCount, 1);
 
       await tester.pump(const Duration(milliseconds: 100));
@@ -172,6 +174,38 @@ void main() {
 
       await tester.pump(const Duration(seconds: 1));
       await tester.pumpAndSettle();
+    },
+  );
+
+  testWidgets(
+    'updates zoom controls in the shared evidence viewer',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 900,
+              height: 640,
+              child: SaoEvidenceViewer(
+                imageUrl: 'https://example.com/evidence.jpg',
+                caption: 'Evidencia de prueba',
+              ),
+            ),
+          ),
+        ),
+      );
+
+      expect(find.byTooltip('Alejar'), findsOneWidget);
+      expect(find.byTooltip('Acercar'), findsOneWidget);
+      expect(find.text('100%'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Acercar'));
+      await tester.pump();
+      expect(find.text('125%'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Restablecer zoom'));
+      await tester.pump();
+      expect(find.text('100%'), findsOneWidget);
     },
   );
 }

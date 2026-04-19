@@ -1,7 +1,11 @@
 // lib/core/navigation/shell.dart
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../core/di/service_locator.dart';
+import '../../data/local/app_db.dart';
 import '../../features/home/home_page.dart';
+import '../../features/settings/settings_page.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../features/sync/sync_center_page.dart';
 
@@ -14,58 +18,79 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int _index = 0;
+  String _selectedProject = 'TMQ';
+  late final AppDb _db;
 
-  // ✅ Estado global (luego lo conectas a Drift/User prefs)
-  final String _selectedProject = 'TMQ';
+  @override
+  void initState() {
+    super.initState();
+    _db = getIt<AppDb>();
+    _loadSelectedProject();
+  }
 
-  // ✅ Pendiente conectar a Drift (vencidas, urgentes, sync pendientes)
-  final int urgentCount = 1;
+  Future<void> _loadSelectedProject() async {
+    if (!getIt.isRegistered<SharedPreferences>()) return;
+    final prefs = getIt<SharedPreferences>();
+    final stored = (prefs.getString('selected_project') ?? '').trim().toUpperCase();
+    if (stored.isNotEmpty && mounted) {
+      setState(() => _selectedProject = stored);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
       HomePage(
         selectedProject: _selectedProject,
-        onTapProject: () {}, // Sin funcionalidad de proyectos
+        onTapProject: _loadSelectedProject,
       ),
-      const SyncCenterPage(), // 🔄 Sincronización
-      const _SettingsPage(),
+      const SyncCenterPage(),
+      const SettingsPage(),
     ];
 
-    return Scaffold(
-      body: IndexedStack(
-        index: _index,
-        children: pages,
-      ),
-      bottomNavigationBar: BottomNavigationBar(
-        currentIndex: _index,
-        onTap: (i) => setState(() => _index = i),
-        type: BottomNavigationBarType.fixed,
-        showUnselectedLabels: true,
-        items: [
-          BottomNavigationBarItem(
-            label: 'Inicio',
-            icon: _Badge(
-              show: urgentCount > 0,
-              child: const Icon(Icons.home_outlined),
-            ),
-            activeIcon: _Badge(
-              show: urgentCount > 0,
-              child: const Icon(Icons.home),
-            ),
+    return StreamBuilder<List<SyncQueueData>>(
+      stream: (_db.select(_db.syncQueue)
+            ..where((s) => s.status.isIn(const ['PENDING', 'IN_PROGRESS', 'ERROR'])))
+          .watch(),
+      builder: (context, snapshot) {
+        final urgentCount = snapshot.data?.length ?? 0;
+
+        return Scaffold(
+          body: IndexedStack(
+            index: _index,
+            children: pages,
           ),
-          const BottomNavigationBarItem(
-            label: 'Sincronizar',
-            icon: Icon(Icons.sync_outlined),
-            activeIcon: Icon(Icons.sync),
+          bottomNavigationBar: BottomNavigationBar(
+            currentIndex: _index,
+            onTap: (i) => setState(() => _index = i),
+            type: BottomNavigationBarType.fixed,
+            showUnselectedLabels: true,
+            items: [
+              BottomNavigationBarItem(
+                label: 'Inicio',
+                icon: _Badge(
+                  show: urgentCount > 0,
+                  child: const Icon(Icons.home_outlined),
+                ),
+                activeIcon: _Badge(
+                  show: urgentCount > 0,
+                  child: const Icon(Icons.home),
+                ),
+              ),
+              const BottomNavigationBarItem(
+                label: 'Sincronizar',
+                icon: Icon(Icons.sync_outlined),
+                activeIcon: Icon(Icons.sync),
+              ),
+              const BottomNavigationBarItem(
+                label: 'Ajustes',
+                icon: Icon(Icons.settings_outlined),
+                activeIcon: Icon(Icons.settings),
+              ),
+            ],
           ),
-          const BottomNavigationBarItem(
-            label: 'Ajustes',
-            icon: Icon(Icons.settings_outlined),
-            activeIcon: Icon(Icons.settings),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -102,21 +127,3 @@ class _Badge extends StatelessWidget {
   }
 }
 
-class _SettingsPage extends StatelessWidget {
-  const _SettingsPage();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: EdgeInsets.all(16),
-          child: Text(
-            'Ajustes (placeholder)',
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
-          ),
-        ),
-      ),
-    );
-  }
-}

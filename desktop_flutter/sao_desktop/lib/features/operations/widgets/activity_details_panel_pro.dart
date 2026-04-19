@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../data/catalog/activity_status.dart';
 import '../../../data/repositories/catalog_repository.dart';
@@ -11,6 +12,7 @@ import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../activity_queue_projection.dart';
 import 'catalog_substitution_modal.dart';
+import 'flag_resolution_dialog.dart';
 
 /// Panel Central PRO con 3 Tabs:
 /// 1. Detalles (editable con diff view)
@@ -946,7 +948,7 @@ class _ActivityDetailsPanelProState
             const SizedBox(height: SaoSpacing.xl),
 
           // ALERTA GPS
-          _buildGPSWarningPanel(),
+          _buildGPSWarningPanel(activity),
         ],
       ),
     );
@@ -2207,6 +2209,7 @@ class _ActivityDetailsPanelProState
     final message = hasMismatch
         ? 'GPS con discrepancia respecto al PK declarado'
         : 'GPS consistente con el PK declarado';
+    final justification = _extractGpsJustification(activity.activity.description);
 
     return Container(
       padding: const EdgeInsets.all(SaoSpacing.md),
@@ -2240,29 +2243,34 @@ class _ActivityDetailsPanelProState
               ),
             ],
           ),
+          if (justification != null && justification.trim().isNotEmpty) ...[
+            const SizedBox(height: SaoSpacing.sm),
+            Text(
+              'Justificación registrada: $justification',
+              style: SaoTypography.caption.copyWith(
+                color: SaoColors.gray700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
           const SizedBox(height: SaoSpacing.md),
-          Row(
+          Wrap(
+            spacing: SaoSpacing.sm,
+            runSpacing: SaoSpacing.sm,
             children: [
               ElevatedButton.icon(
-                onPressed: () {
-                  // TODO: Abrir mapa
-                },
+                onPressed: () => _openGpsMap(activity),
                 icon: const Icon(Icons.map_rounded),
                 label: const Text('Ver en Mapa'),
               ),
-              const SizedBox(width: SaoSpacing.sm),
               if (hasMismatch)
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: () {
-                      // TODO: Abrir modal de justificación
-                    },
-                    icon: const Icon(Icons.note_add_rounded),
-                    label: const Text('Agregar Justificación'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: SaoColors.error.withValues(alpha: 0.1),
-                      foregroundColor: SaoColors.error,
-                    ),
+                ElevatedButton.icon(
+                  onPressed: () => _handleGpsJustification(activity),
+                  icon: const Icon(Icons.note_add_rounded),
+                  label: const Text('Agregar Justificación'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: SaoColors.error.withValues(alpha: 0.1),
+                    foregroundColor: SaoColors.error,
                   ),
                 ),
             ],
@@ -2272,12 +2280,31 @@ class _ActivityDetailsPanelProState
     );
   }
 
-  Widget _buildGPSWarningPanel() {
+  Widget _buildGPSWarningPanel(ActivityWithDetails activity) {
+    final hasCoordinates =
+        activity.activity.latitude != null && activity.activity.longitude != null;
+    final hasMismatch = activity.flags.gpsMismatch;
+    final title = !hasCoordinates
+        ? 'GPS pendiente de validar'
+        : hasMismatch
+            ? 'Discrepancia GPS crítica'
+            : 'GPS validado';
+    final message = !hasCoordinates
+        ? 'La actividad no tiene coordenadas completas. No podrá aprobarse hasta contar con ubicación verificable.'
+        : hasMismatch
+            ? 'La ubicación GPS no coincide con el PK declarado. Registra una justificación técnica y revisa el flag antes de aprobar.'
+            : 'La geolocalización quedó verificada y ya puedes continuar con la validación técnica.';
+    final tone = !hasCoordinates
+        ? SaoColors.warning
+        : hasMismatch
+            ? SaoColors.error
+            : SaoColors.success;
+
     return Container(
       padding: const EdgeInsets.all(SaoSpacing.md),
       decoration: BoxDecoration(
-        color: SaoColors.error.withValues(alpha: 0.1),
-        border: Border.all(color: SaoColors.error),
+        color: tone.withValues(alpha: 0.1),
+        border: Border.all(color: tone),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
       child: Column(
@@ -2285,37 +2312,185 @@ class _ActivityDetailsPanelProState
         children: [
           Row(
             children: [
-              const Icon(Icons.warning_rounded, color: SaoColors.error),
+              Icon(
+                hasMismatch ? Icons.warning_rounded : Icons.gps_fixed_rounded,
+                color: tone,
+              ),
               const SizedBox(width: SaoSpacing.sm),
               Expanded(
                 child: Text(
-                  'Discrepancia GPS crítica',
-                  style: SaoTypography.bodyTextBold
-                      .copyWith(color: SaoColors.error),
+                  title,
+                  style: SaoTypography.bodyTextBold.copyWith(color: tone),
                 ),
               ),
             ],
           ),
           const SizedBox(height: SaoSpacing.md),
           Text(
-            'La ubicación GPS está a más de 800m del PK declarado. Se requiere justificación técnica antes de aprobar.',
+            message,
             style: SaoTypography.bodyText.copyWith(color: SaoColors.gray700),
           ),
           const SizedBox(height: SaoSpacing.md),
-          ElevatedButton.icon(
-            onPressed: () {
-              // TODO: Modal de justificación
-            },
-            icon: const Icon(Icons.check_circle_rounded),
-            label: const Text('Agregar Justificación'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: SaoColors.error.withValues(alpha: 0.1),
-              foregroundColor: SaoColors.error,
-            ),
+          Wrap(
+            spacing: SaoSpacing.sm,
+            runSpacing: SaoSpacing.sm,
+            children: [
+              if (hasCoordinates)
+                OutlinedButton.icon(
+                  onPressed: () => _openGpsMap(activity),
+                  icon: const Icon(Icons.map_rounded),
+                  label: const Text('Ver en Mapa'),
+                ),
+              if (hasMismatch)
+                ElevatedButton.icon(
+                  onPressed: () => _handleGpsJustification(activity),
+                  icon: const Icon(Icons.check_circle_rounded),
+                  label: const Text('Agregar Justificación'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: SaoColors.error.withValues(alpha: 0.1),
+                    foregroundColor: SaoColors.error,
+                  ),
+                ),
+            ],
           ),
         ],
       ),
     );
+  }
+
+  Future<void> _openGpsMap(ActivityWithDetails activity) async {
+    final latitude = activity.activity.latitude;
+    final longitude = activity.activity.longitude;
+    if (latitude == null || longitude == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Esta actividad aún no tiene coordenadas GPS disponibles.'),
+        ),
+      );
+      return;
+    }
+
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
+    );
+    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+    if (!opened && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No fue posible abrir el mapa externo.'),
+        ),
+      );
+    }
+  }
+
+  Future<void> _handleGpsJustification(ActivityWithDetails activity) async {
+    final justification = await _showGpsJustificationDialog(activity);
+    if (justification == null || justification.trim().isEmpty) return;
+
+    final updatedDescription = _mergeGpsJustification(
+      activity.activity.description,
+      justification.trim(),
+    );
+    if (updatedDescription != (activity.activity.description ?? '').trim()) {
+      widget.onFieldChanged?.call('description', updatedDescription);
+    }
+
+    if (!mounted) return;
+    final flagUpdated = await showFlagResolutionDialog(
+      context,
+      activity: activity,
+    );
+
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          flagUpdated
+              ? 'Justificación GPS guardada y revisión actualizada.'
+              : 'Justificación GPS registrada. Puedes resolver el flag cuando corresponda.',
+        ),
+        backgroundColor: flagUpdated ? SaoColors.success : SaoColors.info,
+      ),
+    );
+  }
+
+  Future<String?> _showGpsJustificationDialog(ActivityWithDetails activity) async {
+    final controller = TextEditingController(
+      text: _extractGpsJustification(activity.activity.description) ?? '',
+    );
+
+    final result = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Justificación GPS'),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Documenta por qué la coordenada capturada difiere del PK declarado.',
+                  style: SaoTypography.bodyText.copyWith(color: SaoColors.gray700),
+                ),
+                const SizedBox(height: SaoSpacing.md),
+                TextField(
+                  controller: controller,
+                  autofocus: true,
+                  minLines: 3,
+                  maxLines: 5,
+                  decoration: InputDecoration(
+                    hintText: 'Ej. Captura tomada desde camino lateral por restricciones de acceso.',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(SaoRadii.sm),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = controller.text.trim();
+              if (value.isEmpty) return;
+              Navigator.of(dialogContext).pop(value);
+            },
+            child: const Text('Guardar'),
+          ),
+        ],
+      ),
+    );
+
+    return result;
+  }
+
+  String? _extractGpsJustification(String? description) {
+    return _extractLabeledField(
+      description,
+      const ['Justificación GPS', 'Justificacion GPS'],
+    );
+  }
+
+  String _mergeGpsJustification(String? description, String justification) {
+    final base = (description ?? '').trim();
+    final lines = base.isEmpty
+        ? <String>[]
+        : base
+            .split('\n')
+            .where((line) =>
+                !_normalizeLabelToken(line).startsWith('justificacion gps:'))
+            .toList(growable: true);
+    lines.add('Justificación GPS: $justification');
+    return lines.join('\n').trim();
   }
 
   Widget _buildTimelineItem({

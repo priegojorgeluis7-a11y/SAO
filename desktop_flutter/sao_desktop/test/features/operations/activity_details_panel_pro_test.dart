@@ -53,6 +53,9 @@ ActivityWithDetails _buildActivity({
   String assignedFullName = 'Jesús Pérez López',
   String assignedEmail = 'jesus.perez.lopez@sao.mx',
   String colony = 'Centro',
+  bool gpsMismatch = false,
+  double? latitude,
+  double? longitude,
 }) {
   return ActivityWithDetails(
     activity: Activity(
@@ -63,6 +66,8 @@ ActivityWithDetails _buildActivity({
       title: title,
       description: 'Actividad de prueba',
       status: 'PENDING_REVIEW',
+      latitude: latitude,
+      longitude: longitude,
       createdAt: DateTime(2026, 4, 6, 17, 10),
     ),
     activityType: ActivityType(
@@ -82,7 +87,7 @@ ActivityWithDetails _buildActivity({
     front: Front(id: 'front-1', name: 'Frente 1', projectId: 'TMQ'),
     municipality: Municipality(id: 'mun-1', name: 'Doctor Mora', state: 'Guanajuato'),
     evidences: const [],
-    flags: const ActivityFlags(),
+    flags: ActivityFlags(gpsMismatch: gpsMismatch),
     wizardPayload: {
       'subcategory': {'name': subcategory},
       'topics': [
@@ -192,6 +197,40 @@ void main() {
       expect(editableTop <= locationTop, isTrue);
       expect(locationTop <= identityTop, isTrue);
       expect(identityTop <= trackingTop, isTrue);
+    },
+  );
+
+  testWidgets(
+    'opens justification dialog when GPS mismatch requires review',
+    (tester) async {
+      await tester.pumpWidget(
+        _buildSubject(
+          _buildActivity(
+            gpsMismatch: true,
+            latitude: 21.0190,
+            longitude: -100.7120,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Ver en Mapa'), findsOneWidget);
+      expect(find.text('Agregar Justificación'), findsWidgets);
+
+      await tester.ensureVisible(find.text('Agregar Justificación').first);
+      await tester.tap(find.text('Agregar Justificación').first);
+      await tester.pumpAndSettle();
+
+      expect(find.text('Justificación GPS'), findsOneWidget);
+      await tester.enterText(
+        find.byType(TextField).last,
+        'Captura tomada desde acceso lateral por seguridad.',
+      );
+      await tester.tap(find.text('Guardar'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Flags de revisión'), findsOneWidget);
+      expect(find.text('Desajuste de GPS'), findsOneWidget);
     },
   );
 }

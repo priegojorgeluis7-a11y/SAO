@@ -62,6 +62,42 @@ def test_document_count_map_counts_all_pdf_documents():
     assert evidence_counts['act-1'] == 1
 
 
+def test_normalize_related_activity_ids_dedupes_and_excludes_self():
+    normalized = completed_api._normalize_related_activity_ids(
+        ['act-2', 'act-2', '', 'act-1', 'act-3'],
+        current_id='act-1',
+    )
+
+    assert normalized == ['act-2', 'act-3']
+
+
+def test_normalize_related_links_preserves_tracking_metadata():
+    normalized = completed_api._normalize_related_links(
+        [
+            {
+                'activity_id': 'act-2',
+                'relation_type': 'seguimiento',
+                'status': 'en_seguimiento',
+                'reason': 'Mismo tema social',
+                'next_action': 'Llamada con ejidatarios',
+                'due_date': '2026-04-25',
+            },
+            {
+                'activity_id': 'act-2',
+                'relation_type': 'seguimiento',
+            },
+            'act-3',
+            None,
+        ],
+        current_id='act-1',
+    )
+
+    assert [item['activity_id'] for item in normalized] == ['act-2', 'act-3']
+    assert normalized[0]['reason'] == 'Mismo tema social'
+    assert normalized[0]['next_action'] == 'Llamada con ejidatarios'
+    assert normalized[1]['relation_type'] == 'seguimiento'
+
+
 def test_supplemental_audit_trail_infers_review_and_report_events():
     created_at = datetime(2026, 4, 16, 18, 0, tzinfo=timezone.utc)
     reviewed_at = datetime(2026, 4, 16, 19, 0, tzinfo=timezone.utc)

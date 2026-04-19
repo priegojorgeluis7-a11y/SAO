@@ -20,4 +20,92 @@ void main() {
     expect(activity.hasReport, isTrue);
     expect(activity.documentCount, 2);
   });
+
+  test('CompletedActivityDetail normalizes invalid related IDs', () {
+    final detail = CompletedActivityDetail.fromJson({
+      'id': 'act-1',
+      'project_id': 'TMQ',
+      'title': 'Actividad base',
+      'activity_type': 'Reunión',
+      'related_activity_ids': [null, 'act-2', '', ' null ', 'act-2', 'act-3'],
+    });
+
+    expect(detail.relatedActivityIds, ['act-2', 'act-3']);
+  });
+
+  test('CompletedActivityDetail parses related link tracking metadata', () {
+    final detail = CompletedActivityDetail.fromJson({
+      'id': 'act-1',
+      'project_id': 'TMQ',
+      'title': 'Actividad base',
+      'activity_type': 'Reunión',
+      'related_links': [
+        {
+          'activity_id': 'act-2',
+          'relation_type': 'seguimiento',
+          'status': 'en_seguimiento',
+          'reason': 'Se está atendiendo el mismo caso',
+          'next_action': 'Llamar al comisariado',
+          'due_date': '2026-04-25',
+        },
+      ],
+    });
+
+    expect(detail.relatedActivityIds, ['act-2']);
+    expect(detail.relatedLinks, hasLength(1));
+    expect(detail.relatedLinks.single.relationType, 'seguimiento');
+    expect(detail.relatedLinks.single.status, 'en_seguimiento');
+    expect(detail.relatedLinks.single.nextAction, 'Llamar al comisariado');
+  });
+
+  test(
+      'resolveManualRelatedActivities keeps only manually linked items in order',
+      () {
+    final current = CompletedActivity.fromJson({
+      'id': 'act-1',
+      'project_id': 'TMQ',
+      'title': 'Reunión con ejidatarios por liberación de vía',
+      'activity_type': 'Reunión',
+      'pk': 'PK 20+000',
+      'front': 'Frente Norte',
+      'estado': 'Guanajuato',
+      'municipio': 'Doctor Mora',
+      'assigned_name': 'María Pérez',
+    });
+
+    final related = CompletedActivity.fromJson({
+      'id': 'act-2',
+      'project_id': 'TMQ',
+      'title': 'Seguimiento con ejidatarios para liberación de vía',
+      'activity_type': 'Reunión',
+      'pk': 'PK 20+000',
+      'front': 'Frente Norte',
+      'estado': 'Guanajuato',
+      'municipio': 'Doctor Mora',
+      'assigned_name': 'María Pérez',
+      'created_at': '2026-04-18T10:00:00Z',
+    });
+
+    final other = CompletedActivity.fromJson({
+      'id': 'act-3',
+      'project_id': 'TMQ',
+      'title': 'Asamblea informativa distinta',
+      'activity_type': 'Asamblea',
+      'pk': 'PK 99+999',
+      'front': 'Frente Sur',
+      'estado': 'Querétaro',
+      'municipio': 'Cadereyta',
+      'assigned_name': 'Otro Responsable',
+    });
+
+    final linked = resolveManualRelatedActivities(
+      current: current,
+      relatedActivityIds: const ['act-2', 'act-3', 'act-1', 'missing'],
+      candidates: [other, related],
+    );
+
+    expect(linked, hasLength(2));
+    expect(linked.first.id, 'act-2');
+    expect(linked.last.id, 'act-3');
+  });
 }

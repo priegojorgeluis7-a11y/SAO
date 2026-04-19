@@ -32,6 +32,7 @@ Toda la documentacion operativa vigente del repositorio debe mantenerse en espa√
 - `docs/FUNCIONES_SISTEMA.md` - funciones principales por modulo.
 - `docs/DESIGN_SYSTEM.md` - lineamientos de UI.
 - `docs/DESIGN_TOKENS.md` - tokens visuales.
+- `docs/GUIDE_ESTANDAR_NUEVOS_DESARROLLOS.md` - guia base para nuevos modulos, apps y automatizaciones con criterios de dise√±o y buenas practicas.
 
 ## 3) Dominio funcional y flujos
 - `docs/FLUJO_APP_AS_IS.md` - flujo actual.

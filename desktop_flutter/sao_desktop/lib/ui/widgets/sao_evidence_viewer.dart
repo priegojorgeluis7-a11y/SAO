@@ -10,7 +10,7 @@ import '../theme/sao_radii.dart';
 import '../theme/sao_typography.dart';
 
 /// Visor avanzado de evidencias con funciones profesionales
-/// 
+///
 /// Características:
 /// - Zoom con rueda del mouse (1x - 5x)
 /// - Rotación de imagen (90° incrementos)
@@ -52,30 +52,56 @@ class SaoEvidenceViewer extends StatefulWidget {
 }
 
 class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
+  final TransformationController _transformationController =
+      TransformationController();
+
   double _scale = 1.0;
-  Offset _offset = Offset.zero;
   bool _lensEnabled = false;
   bool _isHovering = false;
   Offset _lensPosition = Offset.zero;
-  
+
   static const double _minScale = 1.0;
   static const double _maxScale = 5.0;
-  static const double _scaleIncrement = 0.2;
+  static const double _scaleIncrement = 0.25;
+
+  void _updateScaleFromController() {
+    final nextScale = _transformationController.value
+        .getMaxScaleOnAxis()
+        .clamp(_minScale, _maxScale)
+        .toDouble();
+
+    if ((_scale - nextScale).abs() > 0.001 && mounted) {
+      setState(() => _scale = nextScale);
+    }
+  }
+
+  void _applyScale(double requestedScale) {
+    final clampedScale = requestedScale.clamp(_minScale, _maxScale).toDouble();
+
+    if (clampedScale == _minScale) {
+      _transformationController.value = Matrix4.identity();
+    } else {
+      final translation = _transformationController.value.getTranslation();
+      _transformationController.value = Matrix4.identity()
+        ..translate(translation.x, translation.y)
+        ..scale(clampedScale);
+    }
+
+    setState(() => _scale = clampedScale);
+  }
+
+  void _zoomIn() => _applyScale(_scale + _scaleIncrement);
+
+  void _zoomOut() => _applyScale(_scale - _scaleIncrement);
+
+  void _resetZoom() => _applyScale(_minScale);
 
   void _handleScroll(PointerScrollEvent event) {
-    setState(() {
-      // Scroll negativo = zoom in, positivo = zoom out
-      if (event.scrollDelta.dy < 0) {
-        _scale = (_scale + _scaleIncrement).clamp(_minScale, _maxScale);
-      } else {
-        _scale = (_scale - _scaleIncrement).clamp(_minScale, _maxScale);
-      }
-
-      // Resetear offset si volvemos a escala 1.0
-      if (_scale == _minScale) {
-        _offset = Offset.zero;
-      }
-    });
+    if (event.scrollDelta.dy < 0) {
+      _zoomIn();
+    } else {
+      _zoomOut();
+    }
   }
 
   void _retryLoad() {
@@ -86,12 +112,10 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
     setState(() {});
   }
 
-  void _handlePanUpdate(DragUpdateDetails details) {
-    if (_scale > 1.0) {
-      setState(() {
-        _offset += details.delta;
-      });
-    }
+  @override
+  void dispose() {
+    _transformationController.dispose();
+    super.dispose();
   }
 
   Widget _buildErrorWidget() {
@@ -200,7 +224,8 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
           padding: const EdgeInsets.all(SaoSpacing.md),
           decoration: BoxDecoration(
             color: SaoColors.surfaceFor(context),
-            border: Border(bottom: BorderSide(color: SaoColors.borderFor(context))),
+            border:
+                Border(bottom: BorderSide(color: SaoColors.borderFor(context))),
           ),
           child: Row(
             children: [
@@ -218,22 +243,47 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
               ),
               const Spacer(),
               IconButton(
+                icon: const Icon(Icons.remove_rounded),
+                onPressed: _scale > _minScale ? _zoomOut : null,
+                tooltip: 'Alejar',
+              ),
+              Text(
+                '${(_scale * 100).round()}%',
+                style: SaoTypography.caption.copyWith(
+                  color: SaoColors.textMutedFor(context),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.add_rounded),
+                onPressed: _scale < _maxScale ? _zoomIn : null,
+                tooltip: 'Acercar',
+              ),
+              IconButton(
+                icon: const Icon(Icons.restart_alt_rounded),
+                onPressed: _scale > _minScale ? _resetZoom : null,
+                tooltip: 'Restablecer zoom',
+              ),
+              IconButton(
                 icon: Icon(
-                  _lensEnabled ? Icons.zoom_out_map_rounded : Icons.zoom_in_rounded,
+                  _lensEnabled
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
                 ),
                 onPressed: () {
                   setState(() => _lensEnabled = !_lensEnabled);
                 },
                 tooltip: _lensEnabled ? 'Desactivar lupa' : 'Activar lupa',
               ),
-              
+
               // Controles de navegación
               if (widget.onPrevious != null)
                 IconButton(
                   icon: const Icon(Icons.chevron_left_rounded),
-                  onPressed: widget.currentIndex != null && widget.currentIndex! > 0
-                      ? widget.onPrevious
-                      : null,
+                  onPressed:
+                      widget.currentIndex != null && widget.currentIndex! > 0
+                          ? widget.onPrevious
+                          : null,
                   tooltip: 'Anterior (←)',
                 ),
               if (widget.onNext != null)
@@ -256,12 +306,10 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
             builder: (context, constraints) {
               const lensSize = 140.0;
               const lensZoom = 2.2;
-                final maxX = math.max(0.0, constraints.maxWidth - lensSize);
-                final maxY = math.max(0.0, constraints.maxHeight - lensSize);
-                final safeX = (_lensPosition.dx - lensSize / 2)
-                  .clamp(0.0, maxX);
-                final safeY = (_lensPosition.dy - lensSize / 2)
-                  .clamp(0.0, maxY);
+              final maxX = math.max(0.0, constraints.maxWidth - lensSize);
+              final maxY = math.max(0.0, constraints.maxHeight - lensSize);
+              final safeX = (_lensPosition.dx - lensSize / 2).clamp(0.0, maxX);
+              final safeY = (_lensPosition.dy - lensSize / 2).clamp(0.0, maxY);
 
               return Stack(
                 fit: StackFit.expand,
@@ -279,26 +327,33 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                         if (!_lensEnabled) return;
                         setState(() => _lensPosition = event.localPosition);
                       },
-                      child: GestureDetector(
-                        onPanUpdate: _handlePanUpdate,
-                        child: ClipRect(
-                          child: Container(
+                      child: ClipRect(
+                        child: Container(
                           color: SaoColors.surfaceRaisedFor(context),
-                          child: Center(
-                            child: Transform.translate(
-                              offset: _offset,
-                              child: Transform.scale(
-                                scale: _scale,
+                          child: InteractiveViewer(
+                            transformationController: _transformationController,
+                            minScale: _minScale,
+                            maxScale: _maxScale,
+                            panEnabled: _scale > _minScale,
+                            scaleEnabled: true,
+                            clipBehavior: Clip.none,
+                            onInteractionUpdate: (_) =>
+                                _updateScaleFromController(),
+                            onInteractionEnd: (_) =>
+                                _updateScaleFromController(),
+                            child: SizedBox(
+                              width: constraints.maxWidth,
+                              height: constraints.maxHeight,
+                              child: Padding(
+                                padding: const EdgeInsets.all(SaoSpacing.sm),
                                 child: _buildImageContent(fit: BoxFit.contain),
                               ),
                             ),
                           ),
                         ),
-                        ),  // ClipRect
                       ),
                     ),
                   ),
-
                   if (_lensEnabled && _isHovering)
                     Positioned(
                       left: safeX,
@@ -326,7 +381,6 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                         ),
                       ),
                     ),
-
                   Positioned(
                     bottom: 16,
                     left: 16,
@@ -348,7 +402,6 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
                                 fontSize: 10,
                               ),
                             ),
-
                         ],
                       ),
                     ),
@@ -367,7 +420,8 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
           ),
           decoration: BoxDecoration(
             color: SaoColors.surfaceFor(context),
-            border: Border(top: BorderSide(color: SaoColors.borderFor(context))),
+            border:
+                Border(top: BorderSide(color: SaoColors.borderFor(context))),
           ),
           child: Row(
             children: [

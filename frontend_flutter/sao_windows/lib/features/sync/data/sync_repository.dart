@@ -1,7 +1,13 @@
 // lib/features/sync/data/sync_repository.dart
+import 'dart:io';
+
 import 'package:drift/drift.dart';
+import 'package:path/path.dart' as p;
+import 'package:path_provider/path_provider.dart';
+import '../../../core/di/service_locator.dart';
 import '../../../data/local/app_db.dart';
 import '../models/sync_models.dart';
+import '../services/sync_service.dart';
 
 /// Repositorio para gestionar sincronización y cola de subida
 class SyncRepository {
@@ -119,8 +125,9 @@ class SyncRepository {
       ));
     }
 
-    // TODO: Disparar el servicio de sincronización background
-    // backgroundSyncService.triggerImmediateSync();
+    if (getIt.isRegistered<SyncService>()) {
+      await getIt<SyncService>().pushPendingChanges();
+    }
   }
 
   /// Actualizar último timestamp de sincronización
@@ -133,15 +140,31 @@ class SyncRepository {
 
   // =================== Storage Management ===================
 
-  /// Obtener uso de almacenamiento (placeholder - implementar con path_provider)
+  /// Obtener uso de almacenamiento de la base local y archivos pendientes.
   Future<(int usedMb, int availableMb)> getStorageUsage() async {
-    // TODO: Calcular tamaño real de la base de datos + evidencias
-    // final dbFile = await _db.getDbFile();
-    // final evidencePath = await getEvidencesDirectory();
-    // ...
+    final docsDir = await getApplicationDocumentsDirectory();
+    final dbFile = File(p.join(docsDir.path, 'sigef_local.sqlite'));
 
-    // Placeholder
-    return (150, 2048);
+    var totalBytes = 0;
+    if (dbFile.existsSync()) {
+      totalBytes += dbFile.lengthSync();
+    }
+
+    final pendingUploads = await _db.select(_db.pendingUploads).get();
+    final visitedPaths = <String>{};
+    for (final upload in pendingUploads) {
+      final path = upload.localPath.trim();
+      if (path.isEmpty || visitedPaths.contains(path)) continue;
+      visitedPaths.add(path);
+      final file = File(path);
+      if (file.existsSync()) {
+        totalBytes += file.lengthSync();
+      }
+    }
+
+    final usedMb = (totalBytes / (1024 * 1024)).ceil();
+    final availableMb = usedMb >= 2048 ? 0 : 2048 - usedMb;
+    return (usedMb, availableMb);
   }
 
   /// Limpiar elementos completados hace más de X días

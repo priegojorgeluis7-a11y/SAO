@@ -184,14 +184,12 @@ class CatalogApiRepository {
   }
 
   /// Get catalog metadata (lightweight version info)
-  /// Returns basic version info without fetching entire catalog
+  /// Returns the newest version entry available for the project.
   Future<CatalogVersionDTO?> getCatalogVersion({
     required String projectId,
   }) async {
-    // TODO: Implement in Phase 4B when we have version listing endpoint
-    // For now, this is a placeholder
-    appLogger.w('getCatalogVersion not yet implemented (Phase 4B)');
-    return null;
+    final versions = await listCatalogVersions(projectId: projectId, limit: 1);
+    return versions.isEmpty ? null : versions.first;
   }
 
   /// List all catalog versions for a project
@@ -201,9 +199,51 @@ class CatalogApiRepository {
     String? status,
     int limit = 20,
   }) async {
-    // TODO: Implement in Phase 4B for admin features
-    // Calls GET /api/v1/catalog/versions
-    appLogger.w('listCatalogVersions not yet implemented (Phase 4B)');
-    return [];
+    try {
+      appLogger.i('📚 Listing catalog versions for project: $projectId');
+
+      final queryParameters = <String, dynamic>{
+        'project_id': projectId.trim().toUpperCase(),
+        'limit': limit.clamp(1, 100),
+      };
+      if (status != null && status.trim().isNotEmpty) {
+        queryParameters['status'] = status.trim().toUpperCase();
+      }
+
+      final response = await _apiClient.get<dynamic>(
+        '/catalog/versions',
+        queryParameters: queryParameters,
+      );
+
+      final payload = response.data;
+      if (payload is! List) {
+        return const <CatalogVersionDTO>[];
+      }
+
+      return payload
+          .whereType<Map<Object?, Object?>>()
+          .map((item) => CatalogVersionDTO.fromJson(
+                Map<String, dynamic>.from(item.cast<String, dynamic>()),
+              ))
+          .toList(growable: false);
+    } on NetworkException catch (e) {
+      appLogger.e('❌ Catalog version list network error: ${e.message}');
+      rethrow;
+    } on ApiTimeoutException catch (e) {
+      appLogger.e('⏱️ Catalog version list timeout: ${e.message}');
+      rethrow;
+    } on ServerException catch (e) {
+      appLogger.e(
+        '🔥 Catalog version list server error: ${e.message} (${e.statusCode})',
+      );
+      rethrow;
+    } catch (e, stackTrace) {
+      appLogger.e(
+        '💥 Catalog version list unknown error',
+        error: e,
+        stackTrace: stackTrace,
+      );
+      rethrow;
+    }
   }
 }

@@ -67,10 +67,11 @@ class _FlagResolutionDialogState extends State<FlagResolutionDialog> {
       ),
       content: SizedBox(
         width: 480,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // Activity reference
             Container(
               padding: const EdgeInsets.all(10),
@@ -159,6 +160,7 @@ class _FlagResolutionDialogState extends State<FlagResolutionDialog> {
             ],
           ],
         ),
+      ),
       ),
       actions: [
         TextButton(

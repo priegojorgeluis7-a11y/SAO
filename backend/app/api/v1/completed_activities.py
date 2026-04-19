@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.api.deps import require_any_role
 from app.core.firestore import get_firestore_client
@@ -15,8 +16,24 @@ logger = logging.getLogger(__name__)
 
 _APPROVED_DECISIONS = {"APPROVE", "APPROVE_EXCEPTION"}
 
-_VIEWER_ROLES = ["ADMIN", "COORD", "SUPERVISOR", "LECTOR"]
-_WRITER_ROLES = ["ADMIN", "COORD", "SUPERVISOR"]
+_VIEWER_ROLES = ["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"]
+_WRITER_ROLES = ["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"]
+
+
+class RelatedActivityLinkItem(BaseModel):
+    activity_id: str
+    relation_type: str = "seguimiento"
+    status: str = "abierta"
+    reason: str = ""
+    next_action: str = ""
+    due_date: str = ""
+    created_at: str = ""
+    created_by: str = ""
+
+
+class RelatedActivityLinksPayload(BaseModel):
+    related_activity_ids: list[str] = Field(default_factory=list)
+    related_links: list[RelatedActivityLinkItem] = Field(default_factory=list)
 
 
 def _pk_label(pk_start: Any, pk_end: Any) -> str:
@@ -44,6 +61,70 @@ def _iso(val: Any) -> str:
 
 def _normalize_action_token(action: Any) -> str:
     return str(action or "").strip().upper()
+
+
+def _normalize_related_activity_ids(raw: Any, current_id: str = "") -> list[str]:
+    if not isinstance(raw, list):
+        return []
+
+    normalized: list[str] = []
+    seen: set[str] = set()
+    current = str(current_id or "").strip()
+    for item in raw:
+        value = str(item or "").strip()
+        if not value or value.lower() == "null" or value == current or value in seen:
+            continue
+        seen.add(value)
+        normalized.append(value)
+    return normalized
+
+
+def _normalize_related_links(raw: Any, current_id: str = "") -> list[dict[str, Any]]:
+    if not isinstance(raw, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    current = str(current_id or "").strip()
+
+    for item in raw:
+        if isinstance(item, dict):
+            activity_id = str(item.get("activity_id") or item.get("activityId") or "").strip()
+            relation_type = str(item.get("relation_type") or item.get("relationType") or "seguimiento").strip() or "seguimiento"
+            status = str(item.get("status") or "abierta").strip() or "abierta"
+            reason = str(item.get("reason") or "").strip()
+            next_action = str(item.get("next_action") or item.get("nextAction") or "").strip()
+            due_date = str(item.get("due_date") or item.get("dueDate") or "").strip()
+            created_at = str(item.get("created_at") or item.get("createdAt") or "").strip()
+            created_by = str(item.get("created_by") or item.get("createdBy") or "").strip()
+        else:
+            activity_id = str(item or "").strip()
+            relation_type = "seguimiento"
+            status = "abierta"
+            reason = ""
+            next_action = ""
+            due_date = ""
+            created_at = ""
+            created_by = ""
+
+        if not activity_id or activity_id.lower() == "null" or activity_id == current or activity_id in seen:
+            continue
+
+        seen.add(activity_id)
+        normalized.append(
+            {
+                "activity_id": activity_id,
+                "relation_type": relation_type,
+                "status": status,
+                "reason": reason,
+                "next_action": next_action,
+                "due_date": due_date,
+                "created_at": created_at,
+                "created_by": created_by,
+            }
+        )
+
+    return normalized
 
 
 def _parse_log_details(log: dict[str, Any]) -> tuple[dict[str, Any], str]:
@@ -374,6 +455,24 @@ def _fetch_evidence_rows(client, activity_ids: set[str]) -> list[dict[str, Any]]
     return rows
 
 
+def _resolve_activity_doc_ref(client, activity_id: str):
+    doc_ref = client.collection("activities").document(activity_id)
+    snap = doc_ref.get()
+    if snap.exists:
+        return doc_ref, snap, snap.to_dict() or {}
+
+    docs = list(
+        client.collection("activities")
+        .where("uuid", "==", activity_id)
+        .limit(1)
+        .stream()
+    )
+    if not docs:
+        raise HTTPException(status_code=404, detail="Actividad no encontrada")
+    snap = docs[0]
+    return snap.reference, snap, snap.to_dict() or {}
+
+
 def _resolve_uploader_name(
     evidence_payload: dict[str, Any],
     users_map: dict[str, str],
@@ -650,20 +749,7 @@ def get_completed_activity_detail(
     client = get_firestore_client()
 
     # ── Locate the activity doc ───────────────────────────────────────────────
-    doc_ref = client.collection("activities").document(activity_id)
-    snap = doc_ref.get()
-    if not snap.exists:
-        docs = list(
-            client.collection("activities")
-            .where("uuid", "==", activity_id)
-            .limit(1)
-            .stream()
-        )
-        if not docs:
-            raise HTTPException(status_code=404, detail="Actividad no encontrada")
-        snap = docs[0]
-
-    doc = snap.to_dict() or {}
+    doc_ref, snap, doc = _resolve_activity_doc_ref(client, activity_id)
     resolved_id = str(doc.get("uuid") or snap.id)
 
     # ── Lookup maps ───────────────────────────────────────────────────────────
@@ -765,6 +851,11 @@ def get_completed_activity_detail(
     activity_type = str(doc.get("activity_type_code") or "")
     title         = str(doc.get("title") or activity_type or "")
 
+    normalized_related_links = _normalize_related_links(
+        doc.get("related_links") or doc.get("related_activity_ids"),
+        resolved_id,
+    )
+
     return {
         # List-compatible fields
         "id":               resolved_id,
@@ -787,10 +878,130 @@ def get_completed_activity_detail(
         "colonia":          str(doc.get("colonia") or ""),
         "review_notes":     str(doc.get("review_notes") or doc.get("rejection_reason") or ""),
         "data_fields":      doc.get("data_fields") or {},
+        "related_activity_ids": [item["activity_id"] for item in normalized_related_links],
+        "related_links":    normalized_related_links,
         "sync_version":     int(doc.get("sync_version") or 0),
         "audit_trail":      audit_trail,
         "evidences":        evidences,
         "documents":        documents,
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# POST /completed-activities/{activity_id}/related-links
+# ─────────────────────────────────────────────────────────────────────────────
+
+@router.post("/{activity_id}/related-links")
+def save_related_links(
+    activity_id: str,
+    payload: RelatedActivityLinksPayload,
+    _current_user: Any = Depends(require_any_role(_WRITER_ROLES)),
+):
+    """Persist manual links between related activities for expediente history."""
+    client = get_firestore_client()
+    now = datetime.now(timezone.utc)
+
+    current_ref, current_snap, current_doc = _resolve_activity_doc_ref(client, activity_id)
+    current_id = str(current_doc.get("uuid") or current_snap.id)
+    current_actor = str(
+        getattr(_current_user, "full_name", "")
+        or getattr(_current_user, "email", "")
+        or ""
+    ).strip()
+    previous_links = _normalize_related_links(
+        current_doc.get("related_links") or current_doc.get("related_activity_ids"),
+        current_id,
+    )
+    previous_ids = {item["activity_id"] for item in previous_links}
+
+    requested_payload = (
+        [item.model_dump() for item in payload.related_links]
+        if payload.related_links
+        else payload.related_activity_ids
+    )
+
+    next_links: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    resolved_refs: dict[str, Any] = {}
+    for requested_link in _normalize_related_links(requested_payload, current_id):
+        candidate_id = str(requested_link.get("activity_id") or "").strip()
+        if not candidate_id or candidate_id == current_id or candidate_id in seen:
+            continue
+        try:
+            target_ref, target_snap, target_doc = _resolve_activity_doc_ref(client, candidate_id)
+        except HTTPException:
+            continue
+        if target_doc.get("deleted_at") is not None:
+            continue
+        resolved_target_id = str(target_doc.get("uuid") or target_snap.id)
+        if not resolved_target_id or resolved_target_id == current_id or resolved_target_id in seen:
+            continue
+
+        seen.add(resolved_target_id)
+        normalized_link = {
+            **requested_link,
+            "activity_id": resolved_target_id,
+            "created_at": requested_link.get("created_at") or now.isoformat(),
+            "created_by": requested_link.get("created_by") or current_actor,
+        }
+        next_links.append(normalized_link)
+        resolved_refs[resolved_target_id] = (target_ref, target_doc, normalized_link)
+
+    next_ids = [item["activity_id"] for item in next_links]
+    current_ref.set(
+        {
+            "related_activity_ids": next_ids,
+            "related_links": next_links,
+            "updated_at": now,
+        },
+        merge=True,
+    )
+
+    removed_ids = previous_ids - set(next_ids)
+    for removed_id in removed_ids:
+        try:
+            removed_ref, _removed_snap, removed_doc = _resolve_activity_doc_ref(client, removed_id)
+        except HTTPException:
+            continue
+        existing_links = _normalize_related_links(
+            removed_doc.get("related_links") or removed_doc.get("related_activity_ids"),
+            removed_id,
+        )
+        remaining_links = [item for item in existing_links if item["activity_id"] != current_id]
+        removed_ref.set(
+            {
+                "related_activity_ids": [item["activity_id"] for item in remaining_links],
+                "related_links": remaining_links,
+                "updated_at": now,
+            },
+            merge=True,
+        )
+
+    for target_id, (target_ref, target_doc, link_payload) in resolved_refs.items():
+        existing_links = _normalize_related_links(
+            target_doc.get("related_links") or target_doc.get("related_activity_ids"),
+            target_id,
+        )
+        mirrored_link = {
+            **link_payload,
+            "activity_id": current_id,
+        }
+        existing_links = [item for item in existing_links if item["activity_id"] != current_id]
+        existing_links.append(mirrored_link)
+        target_ref.set(
+            {
+                "related_activity_ids": [item["activity_id"] for item in existing_links],
+                "related_links": existing_links,
+                "updated_at": now,
+            },
+            merge=True,
+        )
+
+    return {
+        "ok": True,
+        "related_activity_ids": next_ids,
+        "related_links": next_links,
+        "updated_at": now.isoformat(),
     }
 
 
@@ -807,18 +1018,7 @@ def mark_report_generated(
     client = get_firestore_client()
     now = datetime.now(timezone.utc)
 
-    doc_ref = client.collection("activities").document(activity_id)
-    snap = doc_ref.get()
-    if not snap.exists:
-        docs = list(
-            client.collection("activities")
-            .where("uuid", "==", activity_id)
-            .limit(1)
-            .stream()
-        )
-        if not docs:
-            raise HTTPException(status_code=404, detail="Actividad no encontrada")
-        doc_ref = docs[0].reference
+    doc_ref, _snap, _doc = _resolve_activity_doc_ref(client, activity_id)
 
     doc_ref.set({"report_generated_at": now}, merge=True)
     return {"ok": True, "report_generated_at": now.isoformat()}

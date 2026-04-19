@@ -4,6 +4,7 @@ enum ResourceRole {
   administrador,
   coordinador,
   operativo,
+  tecnico,
   supervisor,
   lector,
 }
@@ -57,6 +58,8 @@ class Resource {
         return 'Coordinador';
       case ResourceRole.operativo:
         return 'Operativo';
+      case ResourceRole.tecnico:
+        return 'Técnico';
       case ResourceRole.supervisor:
         return 'Supervisor';
       case ResourceRole.lector:

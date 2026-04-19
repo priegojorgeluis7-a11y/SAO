@@ -1863,7 +1863,7 @@ pw.Widget _buildEvidenceCard(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
         pw.Container(
-          height: compact ? 84 : (fullWidth ? 180 : 130),
+          height: compact ? 96 : (fullWidth ? 196 : 144),
           width: double.infinity,
           color: PdfColors.grey200,
           child: evidence.image == null

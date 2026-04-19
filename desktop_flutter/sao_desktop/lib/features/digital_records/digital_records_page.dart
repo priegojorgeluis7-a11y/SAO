@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -53,6 +54,108 @@ String _sanitizeFolderSegment(String raw, {String fallback = 'SIN_DATO'}) {
       .trim();
   if (sanitized.isEmpty) return fallback;
   return sanitized.length <= 80 ? sanitized : sanitized.substring(0, 80).trim();
+}
+
+Future<File> _manualActivityLinksFile() async {
+  final dir = await getApplicationDocumentsDirectory();
+  return File('${dir.path}/manual_activity_links.json');
+}
+
+Future<Map<String, dynamic>> _readManualActivityLinksRegistry() async {
+  final file = await _manualActivityLinksFile();
+  if (!await file.exists()) {
+    return <String, dynamic>{};
+  }
+
+  try {
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+  } catch (_) {
+    return <String, dynamic>{};
+  }
+  return <String, dynamic>{};
+}
+
+List<String> _normalizeRelatedActivityIds(dynamic raw) {
+  if (raw is! List) return const <String>[];
+
+  final normalized = <String>[];
+  final seen = <String>{};
+  for (final item in raw) {
+    final value = item?.toString().trim() ?? '';
+    if (value.isEmpty || value.toLowerCase() == 'null' || !seen.add(value)) {
+      continue;
+    }
+    normalized.add(value);
+  }
+  return normalized;
+}
+
+Future<List<ManualRelatedLink>> _readManualRelatedLinks(
+    String activityId) async {
+  final registry = await _readManualActivityLinksRegistry();
+  return ManualRelatedLink.normalizeList(
+    registry[activityId],
+    currentId: activityId,
+  );
+}
+
+Future<List<String>> _readManualRelatedActivityIds(String activityId) async {
+  final links = await _readManualRelatedLinks(activityId);
+  return links.map((item) => item.activityId).toList(growable: false);
+}
+
+Future<void> _writeManualRelatedLinks({
+  required String activityId,
+  required List<ManualRelatedLink> relatedLinks,
+}) async {
+  final file = await _manualActivityLinksFile();
+  final registry = await _readManualActivityLinksRegistry();
+
+  final normalized = ManualRelatedLink.normalizeList(
+    relatedLinks.map((item) => item.toJson()).toList(growable: false),
+    currentId: activityId,
+  );
+  final previous = _readableLinkMap(
+    ManualRelatedLink.normalizeList(registry[activityId],
+        currentId: activityId),
+  );
+
+  registry[activityId] =
+      normalized.map((item) => item.toJson()).toList(growable: false);
+
+  final normalizedIds = normalized.map((item) => item.activityId).toSet();
+  for (final removedId
+      in previous.keys.where((id) => !normalizedIds.contains(id))) {
+    final existing = ManualRelatedLink.normalizeList(
+      registry[removedId],
+      currentId: removedId,
+    )
+        .where((item) => item.activityId != activityId)
+        .map((item) => item.toJson())
+        .toList(growable: false);
+    registry[removedId] = existing;
+  }
+
+  for (final link in normalized) {
+    final existing = ManualRelatedLink.normalizeList(
+      registry[link.activityId],
+      currentId: link.activityId,
+    ).where((item) => item.activityId != activityId).toList(growable: true);
+    existing.add(link.copyWith(activityId: activityId));
+    registry[link.activityId] =
+        existing.map((item) => item.toJson()).toList(growable: false);
+  }
+
+  await file.writeAsString(jsonEncode(registry), flush: true);
+}
+
+Map<String, ManualRelatedLink> _readableLinkMap(List<ManualRelatedLink> links) {
+  return {
+    for (final item in links) item.activityId: item,
+  };
 }
 
 Future<bool> _openPath({
@@ -113,12 +216,15 @@ bool _isPdfLikeEvidence(EvidenceItem evidence) {
 }
 
 EvidenceItem? _selectLatestPdfEvidence(List<EvidenceItem> evidences) {
-  final pdfEvidences = evidences.where(_isPdfLikeEvidence).toList(growable: false);
+  final pdfEvidences =
+      evidences.where(_isPdfLikeEvidence).toList(growable: false);
   if (pdfEvidences.isEmpty) return null;
 
   pdfEvidences.sort((left, right) {
-    final leftDate = DateTime.tryParse(left.uploadedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-    final rightDate = DateTime.tryParse(right.uploadedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+    final leftDate = DateTime.tryParse(left.uploadedAt) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    final rightDate = DateTime.tryParse(right.uploadedAt) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
     return rightDate.compareTo(leftDate);
   });
   return pdfEvidences.first;
@@ -146,7 +252,9 @@ List<EvidenceItem> _documentEvidencesFor(CompletedActivityDetail detail) {
 }
 
 List<EvidenceItem> _visualEvidencesFor(CompletedActivityDetail detail) {
-  return detail.evidences.where((evidence) => !_isPdfLikeEvidence(evidence)).toList(growable: false);
+  return detail.evidences
+      .where((evidence) => !_isPdfLikeEvidence(evidence))
+      .toList(growable: false);
 }
 
 int _visualEvidenceCountFor(CompletedActivityDetail detail) {
@@ -172,17 +280,22 @@ String _documentCountLabel(int count) {
   return count == 1 ? '1 documento' : '$count documentos';
 }
 
-String _inferredReportFileName(CompletedActivityDetail detail, EvidenceItem evidence) {
+String _inferredReportFileName(
+    CompletedActivityDetail detail, EvidenceItem evidence) {
   final summary = detail.summary;
   final activityDate = DateTime.tryParse(summary.createdAt) ??
       DateTime.tryParse(summary.reviewedAt) ??
       DateTime.tryParse(evidence.uploadedAt) ??
       DateTime.now();
   final dateToken = DateFormat('yyyyMMdd').format(activityDate);
-  final projectToken = _sanitizeFolderSegment(summary.projectId, fallback: 'GENERAL');
-  final frontToken = _sanitizeFolderSegment(summary.front, fallback: 'SIN_FRENTE');
-  final stateToken = _sanitizeFolderSegment(summary.estado, fallback: 'SIN_ESTADO');
-  final activityToken = _sanitizeFolderSegment(summary.activityType, fallback: 'ACTIVIDAD');
+  final projectToken =
+      _sanitizeFolderSegment(summary.projectId, fallback: 'GENERAL');
+  final frontToken =
+      _sanitizeFolderSegment(summary.front, fallback: 'SIN_FRENTE');
+  final stateToken =
+      _sanitizeFolderSegment(summary.estado, fallback: 'SIN_ESTADO');
+  final activityToken =
+      _sanitizeFolderSegment(summary.activityType, fallback: 'ACTIVIDAD');
   return '${projectToken}_${frontToken}_${stateToken}_${activityToken}_$dateToken.pdf';
 }
 
@@ -190,7 +303,8 @@ Future<File> _downloadReportPdfForDetail(
   CompletedActivityDetail detail,
   EvidenceItem evidence,
 ) async {
-  final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
+  final signedUrl =
+      await EvidenceRepository().getDownloadSignedUrl(evidence.id);
   final uri = Uri.parse(signedUrl);
   final client = HttpClient();
   try {
@@ -209,12 +323,18 @@ Future<File> _downloadReportPdfForDetail(
     }
 
     final docsRootPath = await _resolveUserDocumentsRootPath();
-    final projectFolder = _sanitizeFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
-    final frontFolder = _sanitizeFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
-    final stateFolder = _sanitizeFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
-    final municipalityFolder = _sanitizeFolderSegment(detail.summary.municipio, fallback: 'SIN_MUNICIPIO');
-    final activityFolder = _sanitizeFolderSegment(detail.summary.activityType, fallback: 'ACTIVIDAD');
-    final expedienteFolder = _sanitizeFolderSegment(detail.summary.id, fallback: 'SIN_ID');
+    final projectFolder =
+        _sanitizeFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
+    final frontFolder =
+        _sanitizeFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
+    final stateFolder =
+        _sanitizeFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
+    final municipalityFolder = _sanitizeFolderSegment(detail.summary.municipio,
+        fallback: 'SIN_MUNICIPIO');
+    final activityFolder = _sanitizeFolderSegment(detail.summary.activityType,
+        fallback: 'ACTIVIDAD');
+    final expedienteFolder =
+        _sanitizeFolderSegment(detail.summary.id, fallback: 'SIN_ID');
     final activityDir = Directory(
       '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
     );
@@ -222,7 +342,8 @@ Future<File> _downloadReportPdfForDetail(
       await activityDir.create(recursive: true);
     }
 
-    final file = File('${activityDir.path}/${_inferredReportFileName(detail, evidence)}');
+    final file = File(
+        '${activityDir.path}/${_inferredReportFileName(detail, evidence)}');
     await file.writeAsBytes(bytes, flush: true);
 
     await registerDownloadedReportReference(
@@ -244,7 +365,61 @@ bool _isAdminUser(AppUser? user) {
     user.role.trim().toUpperCase(),
     ...user.roles.map((role) => role.trim().toUpperCase()),
   }..removeWhere((value) => value.isEmpty);
-  return normalizedRoles.any((role) => role == 'ADMIN' || role.contains('ADMIN'));
+  return normalizedRoles
+      .any((role) => role == 'ADMIN' || role.contains('ADMIN'));
+}
+
+bool _canManageActivityLinks(AppUser? user) {
+  if (user == null) return false;
+  final normalizedRoles = <String>{
+    user.role.trim().toUpperCase(),
+    ...user.roles.map((role) => role.trim().toUpperCase()),
+  }..removeWhere((value) => value.isEmpty);
+  return normalizedRoles.any(
+    (role) =>
+        const {'ADMIN', 'COORD', 'SUPERVISOR', 'OPERATIVO'}.contains(role),
+  );
+}
+
+String _relationTypeLabel(String raw) {
+  switch (raw.trim().toLowerCase()) {
+    case 'antecedente':
+      return 'Antecedente';
+    case 'misma_problematica':
+      return 'Misma problemática';
+    case 'escalamiento':
+      return 'Escalamiento';
+    case 'complemento_documental':
+      return 'Complemento documental';
+    default:
+      return 'Seguimiento';
+  }
+}
+
+String _followUpStatusLabel(String raw) {
+  switch (raw.trim().toLowerCase()) {
+    case 'en_seguimiento':
+      return 'En seguimiento';
+    case 'resuelta':
+      return 'Resuelta';
+    case 'bloqueada':
+      return 'Bloqueada';
+    default:
+      return 'Abierta';
+  }
+}
+
+Color _followUpStatusColor(String raw) {
+  switch (raw.trim().toLowerCase()) {
+    case 'resuelta':
+      return SaoColors.success;
+    case 'bloqueada':
+      return SaoColors.error;
+    case 'en_seguimiento':
+      return SaoColors.warning;
+    default:
+      return DigitalRecordColors.accent;
+  }
 }
 
 class DigitalRecordsPage extends ConsumerStatefulWidget {
@@ -281,7 +456,8 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
   }
 
   void _applySearch() {
-    ref.read(completedSearchQueryProvider.notifier).state = _searchController.text.trim();
+    ref.read(completedSearchQueryProvider.notifier).state =
+        _searchController.text.trim();
   }
 
   void _resetFilters() {
@@ -292,7 +468,8 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
     ref.read(completedSearchQueryProvider.notifier).state = '';
   }
 
-  void _ensureSelection(List<CompletedActivity> items, {String? preferredActivityId}) {
+  void _ensureSelection(List<CompletedActivity> items,
+      {String? preferredActivityId}) {
     if (items.isEmpty) {
       if (_selectedActivityId != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -305,7 +482,8 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
 
     final preferredId = preferredActivityId?.trim();
     if (preferredId != null && preferredId.isNotEmpty) {
-      final match = items.where((item) => item.id == preferredId).toList(growable: false);
+      final match =
+          items.where((item) => item.id == preferredId).toList(growable: false);
       if (match.isNotEmpty && _selectedActivityId != preferredId) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (!mounted) return;
@@ -315,8 +493,8 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
       }
     }
 
-    final alreadySelected =
-        _selectedActivityId != null && items.any((item) => item.id == _selectedActivityId);
+    final alreadySelected = _selectedActivityId != null &&
+        items.any((item) => item.id == _selectedActivityId);
     if (alreadySelected) return;
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -330,19 +508,25 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
       case _MetricFilter.all:
         return items;
       case _MetricFilter.withDocument:
-        return items.where((item) => _summaryDocumentCount(item) > 0).toList(growable: false);
+        return items
+            .where((item) => _summaryDocumentCount(item) > 0)
+            .toList(growable: false);
       case _MetricFilter.withEvidence:
-        return items.where((item) => item.evidenceCount > 0).toList(growable: false);
+        return items
+            .where((item) => item.evidenceCount > 0)
+            .toList(growable: false);
       case _MetricFilter.pending:
         return items
-            .where((item) => _summaryDocumentCount(item) == 0 || item.evidenceCount == 0)
+            .where((item) =>
+                _summaryDocumentCount(item) == 0 || item.evidenceCount == 0)
             .toList(growable: false);
     }
   }
 
   void _toggleMetricFilter(_MetricFilter metric) {
     setState(() {
-      _activeMetricFilter = _activeMetricFilter == metric ? _MetricFilter.all : metric;
+      _activeMetricFilter =
+          _activeMetricFilter == metric ? _MetricFilter.all : metric;
     });
   }
 
@@ -395,7 +579,8 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
                   Expanded(
                     flex: 4,
                     child: completedItemsAsync.when(
-                      loading: () => const Center(child: CircularProgressIndicator()),
+                      loading: () =>
+                          const Center(child: CircularProgressIndicator()),
                       error: (error, _) => SaoPanel(
                         title: 'Expedientes',
                         child: SaoEmptyState(
@@ -406,11 +591,13 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
                       ),
                       data: (items) {
                         final filteredItems = _applyMetricFilter(items);
-                        _ensureSelection(filteredItems, preferredActivityId: focusedActivityId);
+                        _ensureSelection(filteredItems,
+                            preferredActivityId: focusedActivityId);
                         return _RecordsList(
                           items: filteredItems,
                           selectedActivityId: _selectedActivityId,
-                          onSelect: (item) => setState(() => _selectedActivityId = item.id),
+                          onSelect: (item) =>
+                              setState(() => _selectedActivityId = item.id),
                         );
                       },
                     ),
@@ -427,6 +614,10 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
                             _selectedActivityId = null;
                           }
                         });
+                      },
+                      onOpenLinkedActivity: (linkedId) {
+                        if (!mounted) return;
+                        setState(() => _selectedActivityId = linkedId);
                       },
                     ),
                   ),
@@ -486,7 +677,8 @@ class _Header extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Expediente digital', style: SaoTypography.pageTitle),
+                    const Text('Expediente digital',
+                        style: SaoTypography.pageTitle),
                     const SizedBox(height: 4),
                     Text(
                       'Consulta y opera expedientes desde una sola vista con filtros, checklist documental, evidencias y trazabilidad.',
@@ -557,9 +749,13 @@ class _HeaderMetrics {
   factory _HeaderMetrics.fromItems(List<CompletedActivity> items) {
     return _HeaderMetrics(
       records: items.length,
-      withDocument: items.where((item) => _summaryDocumentCount(item) > 0).length,
+      withDocument:
+          items.where((item) => _summaryDocumentCount(item) > 0).length,
       withEvidence: items.where((item) => item.evidenceCount > 0).length,
-      pending: items.where((item) => _summaryDocumentCount(item) == 0 || item.evidenceCount == 0).length,
+      pending: items
+          .where((item) =>
+              _summaryDocumentCount(item) == 0 || item.evidenceCount == 0)
+          .length,
     );
   }
 
@@ -613,18 +809,22 @@ class _MetricCard extends StatelessWidget {
               children: [
                 Text(
                   value,
-                  style: SaoTypography.sectionTitle.copyWith(color: DigitalRecordColors.accent),
+                  style: SaoTypography.sectionTitle
+                      .copyWith(color: DigitalRecordColors.accent),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   label,
-                  style: SaoTypography.caption.copyWith(color: SaoColors.textMutedFor(context)),
+                  style: SaoTypography.caption
+                      .copyWith(color: SaoColors.textMutedFor(context)),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   isActive ? 'Filtro activo' : 'Clic para filtrar',
                   style: SaoTypography.caption.copyWith(
-                    color: isActive ? DigitalRecordColors.accent : SaoColors.textMutedFor(context),
+                    color: isActive
+                        ? DigitalRecordColors.accent
+                        : SaoColors.textMutedFor(context),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -705,7 +905,8 @@ class _FiltersPanel extends ConsumerWidget {
               decoration: BoxDecoration(
                 color: DigitalRecordColors.panelSurfaceFor(context),
                 borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: DigitalRecordColors.borderFor(context)),
+                border:
+                    Border.all(color: DigitalRecordColors.borderFor(context)),
               ),
               child: _FolderTreeExplorer(
                 projects: projects,
@@ -772,7 +973,8 @@ class _ExplorerBreadcrumb extends StatelessWidget {
               children: [
                 for (var index = 0; index < segments.length; index++) ...[
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
                       color: index == segments.length - 1
                           ? DigitalRecordColors.accentSurfaceFor(context)
@@ -861,18 +1063,22 @@ class _FolderTreeExplorer extends ConsumerWidget {
           .toList()
         ..sort();
       if (derived.isNotEmpty) return derived;
-      return fronts.where((item) => item.trim().isNotEmpty).toSet().toList()..sort();
+      return fronts.where((item) => item.trim().isNotEmpty).toSet().toList()
+        ..sort();
     }
 
     List<String> statesForFront(String project, String front) {
       final derived = items
-          .where((item) => normalizedProject(item) == project && normalizedFront(item) == front)
+          .where((item) =>
+              normalizedProject(item) == project &&
+              normalizedFront(item) == front)
           .map(normalizedState)
           .toSet()
           .toList()
         ..sort();
       if (derived.isNotEmpty) return derived;
-      return states.where((item) => item.trim().isNotEmpty).toSet().toList()..sort();
+      return states.where((item) => item.trim().isNotEmpty).toSet().toList()
+        ..sort();
     }
 
     int activityCountForProject(String project) {
@@ -881,7 +1087,9 @@ class _FolderTreeExplorer extends ConsumerWidget {
 
     int reportCountForProject(String project) {
       return items
-          .where((item) => normalizedProject(item) == project && _summaryDocumentCount(item) > 0)
+          .where((item) =>
+              normalizedProject(item) == project &&
+              _summaryDocumentCount(item) > 0)
           .length;
     }
 
@@ -969,8 +1177,10 @@ class _FolderTreeExplorer extends ConsumerWidget {
                 isSelected: front == selectedFront,
                 accent: front == selectedFront,
                 onTap: () {
-                  ref.read(completedProjectFilterProvider.notifier).state = project;
-                  ref.read(completedFrenteFilterProvider.notifier).state = front;
+                  ref.read(completedProjectFilterProvider.notifier).state =
+                      project;
+                  ref.read(completedFrenteFilterProvider.notifier).state =
+                      front;
                   ref.read(completedEstadoFilterProvider.notifier).state = '';
                 },
               ),
@@ -986,9 +1196,12 @@ class _FolderTreeExplorer extends ConsumerWidget {
                     isSelected: state == selectedState,
                     accent: state == selectedState,
                     onTap: () {
-                      ref.read(completedProjectFilterProvider.notifier).state = project;
-                      ref.read(completedFrenteFilterProvider.notifier).state = front;
-                      ref.read(completedEstadoFilterProvider.notifier).state = state;
+                      ref.read(completedProjectFilterProvider.notifier).state =
+                          project;
+                      ref.read(completedFrenteFilterProvider.notifier).state =
+                          front;
+                      ref.read(completedEstadoFilterProvider.notifier).state =
+                          state;
                     },
                   ),
             ],
@@ -1044,7 +1257,9 @@ class _ExplorerNode extends StatelessWidget {
                 width: 18,
                 child: level < 2
                     ? Icon(
-                        isExpanded ? Icons.expand_more_rounded : Icons.chevron_right_rounded,
+                        isExpanded
+                            ? Icons.expand_more_rounded
+                            : Icons.chevron_right_rounded,
                         size: 18,
                         color: SaoColors.textMutedFor(context),
                       )
@@ -1075,7 +1290,8 @@ class _ExplorerNode extends StatelessWidget {
                         color: accent
                             ? DigitalRecordColors.accent
                             : SaoColors.textFor(context),
-                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                        fontWeight:
+                            isSelected ? FontWeight.w700 : FontWeight.w600,
                         fontSize: level == 0 ? 15 : 14,
                       ),
                     ),
@@ -1090,7 +1306,8 @@ class _ExplorerNode extends StatelessWidget {
                         color: accent
                             ? DigitalRecordColors.accent
                             : SaoColors.textMutedFor(context),
-                        fontWeight: reportCount > 0 ? FontWeight.w600 : FontWeight.w500,
+                        fontWeight:
+                            reportCount > 0 ? FontWeight.w600 : FontWeight.w500,
                       ),
                     ),
                   ],
@@ -1143,14 +1360,17 @@ class _RecordsList extends StatelessWidget {
   Widget build(BuildContext context) {
     return SaoPanel(
       title: 'Expedientes',
-      subtitle: items.isEmpty ? 'Sin resultados' : '${items.length} expedientes disponibles',
+      subtitle: items.isEmpty
+          ? 'Sin resultados'
+          : '${items.length} expedientes disponibles',
       child: items.isEmpty
           ? const SizedBox(
               height: 420,
               child: SaoEmptyState(
                 icon: Icons.inventory_2_outlined,
                 message: 'No hay expedientes para los filtros seleccionados',
-                subtitle: 'Ajusta la búsqueda o limpia los filtros para consultar más resultados.',
+                subtitle:
+                    'Ajusta la búsqueda o limpia los filtros para consultar más resultados.',
               ),
             )
           : SingleChildScrollView(
@@ -1226,14 +1446,19 @@ class _RecordRow extends StatelessWidget {
               runSpacing: 8,
               children: [
                 if (pkValue.isEmpty)
-                  const _MetaChip(icon: Icons.badge_outlined, label: 'Sin folio')
+                  const _MetaChip(
+                      icon: Icons.badge_outlined, label: 'Sin folio')
                 else
                   _CopyablePkChip(
                     value: pkValue,
                     onTap: () => _copyRecordIdentifier(context, value: pkValue),
                   ),
-                _MetaChip(icon: Icons.folder_open_rounded, label: item.front.isEmpty ? 'Sin frente' : item.front),
-                _MetaChip(icon: Icons.map_outlined, label: item.estado.isEmpty ? 'Sin estado' : item.estado),
+                _MetaChip(
+                    icon: Icons.folder_open_rounded,
+                    label: item.front.isEmpty ? 'Sin frente' : item.front),
+                _MetaChip(
+                    icon: Icons.map_outlined,
+                    label: item.estado.isEmpty ? 'Sin estado' : item.estado),
               ],
             ),
             const SizedBox(height: 10),
@@ -1262,7 +1487,9 @@ class _RecordRow extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: [
-                _StatPill(icon: Icons.image_outlined, label: '${item.evidenceCount} evidencias'),
+                _StatPill(
+                    icon: Icons.image_outlined,
+                    label: '${item.evidenceCount} evidencias'),
                 _StatPill(
                   icon: Icons.description_outlined,
                   label: _summaryDocumentCount(item) <= 0
@@ -1281,10 +1508,15 @@ class _RecordRow extends StatelessWidget {
 }
 
 class _DetailPanel extends ConsumerWidget {
-  const _DetailPanel({required this.activityId, required this.onDeleted});
+  const _DetailPanel({
+    required this.activityId,
+    required this.onDeleted,
+    required this.onOpenLinkedActivity,
+  });
 
   final String? activityId;
   final ValueChanged<String> onDeleted;
+  final ValueChanged<String> onOpenLinkedActivity;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -1296,7 +1528,8 @@ class _DetailPanel extends ConsumerWidget {
           child: SaoEmptyState(
             icon: Icons.fact_check_outlined,
             message: 'Selecciona un expediente',
-            subtitle: 'Aquí verás resumen, checklist, documentos, evidencias y auditoría.',
+            subtitle:
+                'Aquí verás resumen, checklist, documentos, evidencias y auditoría.',
           ),
         ),
       );
@@ -1327,13 +1560,15 @@ class _DetailPanel extends ConsumerWidget {
         Future<void> handleChecklistDocumentOpen() async {
           final messenger = ScaffoldMessenger.maybeOf(context);
           try {
-            final reference = await findGeneratedReportReference(detail.summary.id);
+            final reference =
+                await findGeneratedReportReference(detail.summary.id);
             if (reference != null && await File(reference.filePath).exists()) {
               final opened = await _openPath(path: reference.filePath);
               messenger?.hideCurrentSnackBar();
               if (!opened) {
                 messenger?.showSnackBar(
-                  const SnackBar(content: Text('No se pudo abrir el PDF local.')),
+                  const SnackBar(
+                      content: Text('No se pudo abrir el PDF local.')),
                 );
                 return;
               }
@@ -1349,7 +1584,9 @@ class _DetailPanel extends ConsumerWidget {
             if (!detail.summary.hasReport || remotePdfEvidence == null) {
               messenger?.hideCurrentSnackBar();
               messenger?.showSnackBar(
-                const SnackBar(content: Text('No hay un documento disponible para abrir.')),
+                const SnackBar(
+                    content:
+                        Text('No hay un documento disponible para abrir.')),
               );
               return;
             }
@@ -1377,13 +1614,15 @@ class _DetailPanel extends ConsumerWidget {
             );
             if (shouldDownload != true) return;
 
-            final file = await _downloadReportPdfForDetail(detail, remotePdfEvidence);
+            final file =
+                await _downloadReportPdfForDetail(detail, remotePdfEvidence);
             final opened = await _openPath(path: file.path);
             messenger?.hideCurrentSnackBar();
             if (!opened) {
               messenger?.showSnackBar(
                 const SnackBar(
-                  content: Text('El PDF se descargó, pero no se pudo abrir automáticamente.'),
+                  content: Text(
+                      'El PDF se descargó, pero no se pudo abrir automáticamente.'),
                 ),
               );
               return;
@@ -1404,10 +1643,17 @@ class _DetailPanel extends ConsumerWidget {
           onOpenDocument: handleChecklistDocumentOpen,
         );
         final completion = checklist.where((item) => item.done).length;
-        final completionPercent = checklist.isEmpty ? 0 : ((completion / checklist.length) * 100).round();
+        final completionPercent = checklist.isEmpty
+            ? 0
+            : ((completion / checklist.length) * 100).round();
         final pkValue = detail.summary.pk.trim();
         final currentUser = ref.watch(currentAppUserProvider);
         final canDelete = _isAdminUser(currentUser);
+        final canManageLinks = _canManageActivityLinks(currentUser);
+        final allActivities = ref.watch(completedActivitiesProvider).maybeWhen(
+              data: (items) => items,
+              orElse: () => const <CompletedActivity>[],
+            );
 
         Future<void> handleDelete() async {
           final confirmed = await showDialog<bool>(
@@ -1423,7 +1669,8 @@ class _DetailPanel extends ConsumerWidget {
                   child: const Text('Cancelar'),
                 ),
                 FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: SaoColors.error),
+                  style:
+                      FilledButton.styleFrom(backgroundColor: SaoColors.error),
                   onPressed: () => Navigator.of(dialogContext).pop(true),
                   child: const Text('Eliminar'),
                 ),
@@ -1433,7 +1680,9 @@ class _DetailPanel extends ConsumerWidget {
           if (confirmed != true) return;
 
           try {
-            await ref.read(activityRepositoryProvider).deleteActivity(activityId!);
+            await ref
+                .read(activityRepositoryProvider)
+                .deleteActivity(activityId!);
             onDeleted(activityId!);
             ref.invalidate(completedActivitiesProvider);
             ref.invalidate(completedFilterOptionsProvider);
@@ -1479,7 +1728,8 @@ class _DetailPanel extends ConsumerWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _DetailHero(detail: detail, completionPercent: completionPercent),
+                _DetailHero(
+                    detail: detail, completionPercent: completionPercent),
                 if (canDelete) ...[
                   const SizedBox(height: 12),
                   Align(
@@ -1511,13 +1761,28 @@ class _DetailPanel extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
                 _SectionCard(
-                  title: 'Documentos · ${_documentCountLabel(_documentCountForDetail(detail))}',
+                  title: 'Historial relacionado manualmente',
+                  child: _RelatedHistorySection(
+                    detail: detail,
+                    activities: allActivities,
+                    canManageLinks: canManageLinks,
+                    onOpenActivity: onOpenLinkedActivity,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                _SectionCard(
+                  title:
+                      'Documentos · ${_documentCountLabel(_documentCountForDetail(detail))}',
                   child: _DocumentsSection(detail: detail),
                 ),
                 const SizedBox(height: 16),
-                _SectionCard(title: 'Evidencias', child: _EvidenceSection(detail: detail)),
+                _SectionCard(
+                    title: 'Evidencias',
+                    child: _EvidenceSection(detail: detail)),
                 const SizedBox(height: 16),
-                _SectionCard(title: 'Bitácora y auditoría', child: _AuditSection(detail: detail)),
+                _SectionCard(
+                    title: 'Bitácora y auditoría',
+                    child: _AuditSection(detail: detail)),
               ],
             ),
           ),
@@ -1538,7 +1803,9 @@ class _DetailHero extends StatelessWidget {
     final summary = detail.summary;
     final pkValue = summary.pk.trim();
     final locationLabel = detail.colonia.isEmpty
-        ? (summary.municipio.isEmpty ? 'Ubicación pendiente' : summary.municipio)
+        ? (summary.municipio.isEmpty
+            ? 'Ubicación pendiente'
+            : summary.municipio)
         : '${summary.municipio} · ${detail.colonia}';
 
     return Container(
@@ -1560,7 +1827,9 @@ class _DetailHero extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      summary.title.trim().isEmpty ? summary.activityType : summary.title,
+                      summary.title.trim().isEmpty
+                          ? summary.activityType
+                          : summary.title,
                       style: SaoTypography.sectionTitle,
                     ),
                     const SizedBox(height: 6),
@@ -1584,7 +1853,8 @@ class _DetailHero extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: completionPercent / 100,
                   minHeight: 8,
-                  backgroundColor: DigitalRecordColors.progressTrackFor(context),
+                  backgroundColor:
+                      DigitalRecordColors.progressTrackFor(context),
                   color: DigitalRecordColors.accent,
                   borderRadius: BorderRadius.circular(999),
                 ),
@@ -1607,13 +1877,621 @@ class _DetailHero extends StatelessWidget {
                 ),
               _MetaChip(
                 icon: Icons.person_outline_rounded,
-                label: summary.assignedName.isEmpty ? 'Sin responsable' : summary.assignedName,
+                label: summary.assignedName.isEmpty
+                    ? 'Sin responsable'
+                    : summary.assignedName,
               ),
-              _MetaChip(icon: Icons.location_city_outlined, label: locationLabel),
-              _MetaChip(icon: Icons.schedule_rounded, label: _formatDate(summary.createdAt)),
+              _MetaChip(
+                  icon: Icons.location_city_outlined, label: locationLabel),
+              _MetaChip(
+                  icon: Icons.schedule_rounded,
+                  label: _formatDate(summary.createdAt)),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _RelatedHistorySection extends ConsumerStatefulWidget {
+  const _RelatedHistorySection({
+    required this.detail,
+    required this.activities,
+    required this.canManageLinks,
+    required this.onOpenActivity,
+  });
+
+  final CompletedActivityDetail detail;
+  final List<CompletedActivity> activities;
+  final bool canManageLinks;
+  final ValueChanged<String> onOpenActivity;
+
+  @override
+  ConsumerState<_RelatedHistorySection> createState() =>
+      _RelatedHistorySectionState();
+}
+
+class _RelatedHistorySectionState
+    extends ConsumerState<_RelatedHistorySection> {
+  String? _selectedActivityId;
+  String _selectedRelationType = 'seguimiento';
+  String _selectedStatus = 'abierta';
+  bool _saving = false;
+  DateTime? _dueDate;
+  List<ManualRelatedLink> _localLinks = const <ManualRelatedLink>[];
+  late final TextEditingController _reasonController;
+  late final TextEditingController _nextActionController;
+
+  @override
+  void initState() {
+    super.initState();
+    _reasonController = TextEditingController();
+    _nextActionController = TextEditingController();
+    _loadLocalLinks();
+  }
+
+  @override
+  void dispose() {
+    _reasonController.dispose();
+    _nextActionController.dispose();
+    super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RelatedHistorySection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.detail.summary.id != widget.detail.summary.id) {
+      _resetForm();
+      _loadLocalLinks();
+    }
+  }
+
+  void _resetForm() {
+    _selectedActivityId = null;
+    _selectedRelationType = 'seguimiento';
+    _selectedStatus = 'abierta';
+    _dueDate = null;
+    _reasonController.clear();
+    _nextActionController.clear();
+  }
+
+  Future<void> _pickDueDate() async {
+    final selected = await showDatePicker(
+      context: context,
+      initialDate: _dueDate ?? DateTime.now(),
+      firstDate: DateTime(2024),
+      lastDate: DateTime(2035),
+      locale: const Locale('es', 'MX'),
+    );
+    if (selected != null && mounted) {
+      setState(() => _dueDate = selected);
+    }
+  }
+
+  Future<void> _loadLocalLinks() async {
+    try {
+      final links = await _readManualRelatedLinks(widget.detail.summary.id);
+      if (mounted) {
+        setState(() => _localLinks = links);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _localLinks = const <ManualRelatedLink>[]);
+      }
+    }
+  }
+
+  Future<void> _persistLinks(
+    List<ManualRelatedLink> nextLinks, {
+    required String successMessage,
+  }) async {
+    if (_saving) return;
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    final normalizedNextLinks = ManualRelatedLink.normalizeList(
+      nextLinks.map((item) => item.toJson()).toList(growable: false),
+      currentId: widget.detail.summary.id,
+    );
+
+    setState(() => _saving = true);
+    try {
+      await _writeManualRelatedLinks(
+        activityId: widget.detail.summary.id,
+        relatedLinks: normalizedNextLinks,
+      );
+      try {
+        await saveRelatedActivityLinks(
+          activityId: widget.detail.summary.id,
+          relatedLinks: normalizedNextLinks,
+        );
+      } catch (_) {
+        // El guardado local mantiene el seguimiento operativo incluso si el
+        // backend no está actualizado todavía.
+      }
+      ref.invalidate(
+        completedActivityDetailProvider(widget.detail.summary.id),
+      );
+      ref.invalidate(completedActivitiesProvider);
+      await _loadLocalLinks();
+      if (mounted) {
+        setState(_resetForm);
+      }
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(successMessage)));
+    } catch (error) {
+      messenger
+        ?..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text('No se pudo guardar el vínculo: $error')),
+        );
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final currentUser = ref.watch(currentAppUserProvider);
+    final effectiveLinks = ManualRelatedLink.normalizeList(
+      [
+        ...widget.detail.relatedLinks.map((item) => item.toJson()),
+        ..._localLinks.map((item) => item.toJson()),
+      ],
+      currentId: widget.detail.summary.id,
+    );
+    final effectiveRelatedIds =
+        effectiveLinks.map((item) => item.activityId).toList(growable: false);
+    final linkById = _readableLinkMap(effectiveLinks);
+    final linkedActivities = resolveManualRelatedActivities(
+      current: widget.detail.summary,
+      relatedActivityIds: effectiveRelatedIds,
+      candidates: widget.activities,
+    );
+    final linkedIds = effectiveRelatedIds.toSet();
+    final availableActivities = widget.activities
+        .where(
+          (item) =>
+              item.id != widget.detail.summary.id &&
+              !linkedIds.contains(item.id),
+        )
+        .toList()
+      ..sort((left, right) => right.createdAt.compareTo(left.createdAt));
+    final unresolvedIds = effectiveRelatedIds
+        .where((id) => linkedActivities.every((item) => item.id != id))
+        .toList(growable: false);
+    final canSubmit = _selectedActivityId != null &&
+        !_saving &&
+        _nextActionController.text.trim().isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          widget.canManageLinks
+              ? 'Ahora puedes ligar con seguimiento real: motivo, estado, próxima acción y fecha compromiso.'
+              : 'Estas actividades fueron ligadas manualmente para conservar el historial del mismo asunto.',
+          style: SaoTypography.bodyText.copyWith(
+            color: SaoColors.textMutedFor(context),
+          ),
+        ),
+        if (widget.canManageLinks) ...[
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: DigitalRecordColors.mutedSurfaceFor(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: DigitalRecordColors.borderFor(context)),
+            ),
+            child: Column(
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedActivityId,
+                  decoration: InputDecoration(
+                    labelText: 'Ligar con otra actividad',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    isDense: true,
+                  ),
+                  items: availableActivities
+                      .map(
+                        (item) => DropdownMenuItem<String>(
+                          value: item.id,
+                          child: Text(
+                            '${item.title.trim().isEmpty ? item.activityType : item.title} · ${item.pk.trim().isEmpty ? item.id : item.pk}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
+                  onChanged: availableActivities.isEmpty || _saving
+                      ? null
+                      : (value) => setState(() => _selectedActivityId = value),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _selectedRelationType,
+                        decoration: InputDecoration(
+                          labelText: 'Tipo de relación',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'seguimiento', child: Text('Seguimiento')),
+                          DropdownMenuItem(
+                              value: 'antecedente', child: Text('Antecedente')),
+                          DropdownMenuItem(
+                              value: 'misma_problematica',
+                              child: Text('Misma problemática')),
+                          DropdownMenuItem(
+                              value: 'escalamiento',
+                              child: Text('Escalamiento')),
+                          DropdownMenuItem(
+                              value: 'complemento_documental',
+                              child: Text('Complemento documental')),
+                        ],
+                        onChanged: _saving
+                            ? null
+                            : (value) => setState(() =>
+                                _selectedRelationType = value ?? 'seguimiento'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _selectedStatus,
+                        decoration: InputDecoration(
+                          labelText: 'Estado del seguimiento',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                              value: 'abierta', child: Text('Abierta')),
+                          DropdownMenuItem(
+                              value: 'en_seguimiento',
+                              child: Text('En seguimiento')),
+                          DropdownMenuItem(
+                              value: 'resuelta', child: Text('Resuelta')),
+                          DropdownMenuItem(
+                              value: 'bloqueada', child: Text('Bloqueada')),
+                        ],
+                        onChanged: _saving
+                            ? null
+                            : (value) => setState(
+                                () => _selectedStatus = value ?? 'abierta'),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _reasonController,
+                  enabled: !_saving,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Motivo o contexto',
+                    hintText: 'Ej. continuidad del mismo caso social',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _nextActionController,
+                  enabled: !_saving,
+                  maxLines: 2,
+                  decoration: InputDecoration(
+                    labelText: 'Próxima acción',
+                    hintText: 'Ej. llamada, visita o reunión pendiente',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 10,
+                  runSpacing: 10,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: _saving ? null : _pickDueDate,
+                      icon: const Icon(Icons.event_available_rounded, size: 16),
+                      label: Text(
+                        _dueDate == null
+                            ? 'Fecha compromiso'
+                            : DateFormat('dd/MM/yyyy').format(_dueDate!),
+                      ),
+                    ),
+                    if (_dueDate != null)
+                      TextButton.icon(
+                        onPressed: _saving
+                            ? null
+                            : () => setState(() => _dueDate = null),
+                        icon: const Icon(Icons.close_rounded, size: 16),
+                        label: const Text('Quitar fecha'),
+                      ),
+                    FilledButton.icon(
+                      onPressed: canSubmit
+                          ? () => _persistLinks(
+                                [
+                                  ...effectiveLinks,
+                                  ManualRelatedLink(
+                                    activityId: _selectedActivityId!,
+                                    relationType: _selectedRelationType,
+                                    status: _selectedStatus,
+                                    reason: _reasonController.text.trim(),
+                                    nextAction:
+                                        _nextActionController.text.trim(),
+                                    dueDate: _dueDate?.toIso8601String() ?? '',
+                                    createdAt: DateTime.now().toIso8601String(),
+                                    createdBy: currentUser?.fullName
+                                                .trim()
+                                                .isNotEmpty ==
+                                            true
+                                        ? currentUser!.fullName.trim()
+                                        : (currentUser?.email ?? ''),
+                                  ),
+                                ],
+                                successMessage:
+                                    'Actividad ligada con seguimiento guardado.',
+                              )
+                          : null,
+                      icon: _saving
+                          ? const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.link_rounded, size: 16),
+                      label: Text(_saving ? 'Guardando...' : 'Vincular'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+        const SizedBox(height: 12),
+        if (linkedActivities.isEmpty && unresolvedIds.isEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: DigitalRecordColors.mutedSurfaceFor(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: DigitalRecordColors.borderFor(context)),
+            ),
+            child: Text(
+              'Sin actividades ligadas manualmente todavía.',
+              style: SaoTypography.bodyText.copyWith(
+                color: SaoColors.textMutedFor(context),
+              ),
+            ),
+          )
+        else ...[
+          for (var index = 0; index < linkedActivities.length; index++) ...[
+            _ManualRelatedHistoryCard(
+              item: linkedActivities[index],
+              link: linkById[linkedActivities[index].id],
+              canRemove: widget.canManageLinks,
+              onOpen: () => widget.onOpenActivity(linkedActivities[index].id),
+              onRemove: () => _persistLinks(
+                effectiveLinks
+                    .where(
+                        (item) => item.activityId != linkedActivities[index].id)
+                    .toList(growable: false),
+                successMessage: 'Vínculo eliminado del historial.',
+              ),
+            ),
+            if (index < linkedActivities.length - 1 || unresolvedIds.isNotEmpty)
+              const SizedBox(height: 10),
+          ],
+          for (var index = 0; index < unresolvedIds.length; index++) ...[
+            _ManualRelatedHistoryCard(
+              item: null,
+              unresolvedId: unresolvedIds[index],
+              link: linkById[unresolvedIds[index]],
+              canRemove: widget.canManageLinks,
+              onOpen: () => widget.onOpenActivity(unresolvedIds[index]),
+              onRemove: () => _persistLinks(
+                effectiveLinks
+                    .where((item) => item.activityId != unresolvedIds[index])
+                    .toList(growable: false),
+                successMessage: 'Vínculo eliminado del historial.',
+              ),
+            ),
+            if (index < unresolvedIds.length - 1) const SizedBox(height: 10),
+          ],
+        ],
+      ],
+    );
+  }
+}
+
+class _ManualRelatedHistoryCard extends StatelessWidget {
+  const _ManualRelatedHistoryCard({
+    this.item,
+    this.unresolvedId,
+    this.link,
+    required this.canRemove,
+    required this.onOpen,
+    required this.onRemove,
+  });
+
+  final CompletedActivity? item;
+  final String? unresolvedId;
+  final ManualRelatedLink? link;
+  final bool canRemove;
+  final VoidCallback onOpen;
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = item == null
+        ? 'Actividad ligada'
+        : (item!.title.trim().isEmpty ? item!.activityType : item!.title);
+    final subtitle = item == null
+        ? (unresolvedId ?? 'Sin referencia')
+        : '${item!.projectId} · ${item!.front.isEmpty ? 'Sin frente' : item!.front} · ${_formatDate(item!.createdAt)}';
+    final chipLabel = item?.pk.trim().isNotEmpty == true
+        ? item!.pk.trim()
+        : (unresolvedId ?? 'Vínculo manual');
+    final statusColor = _followUpStatusColor(link?.status ?? 'abierta');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: DigitalRecordColors.mutedSurfaceFor(context),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: DigitalRecordColors.borderFor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: SaoTypography.bodyTextBold,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      subtitle,
+                      style: SaoTypography.caption.copyWith(
+                        color: SaoColors.textMutedFor(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  FilledButton.tonalIcon(
+                    onPressed: onOpen,
+                    icon: const Icon(Icons.open_in_new_rounded, size: 16),
+                    label: const Text('Abrir'),
+                  ),
+                  if (canRemove)
+                    OutlinedButton.icon(
+                      onPressed: onRemove,
+                      icon: const Icon(Icons.link_off_rounded, size: 16),
+                      label: const Text('Quitar'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _HistoryReasonChip(label: chipLabel),
+              _HistoryReasonChip(
+                label: _relationTypeLabel(link?.relationType ?? 'seguimiento'),
+              ),
+              _HistoryReasonChip(
+                label: _followUpStatusLabel(link?.status ?? 'abierta'),
+                backgroundColor: statusColor.withValues(alpha: 0.14),
+                textColor: statusColor,
+              ),
+            ],
+          ),
+          if (link != null &&
+              (link!.reason.isNotEmpty ||
+                  link!.nextAction.isNotEmpty ||
+                  link!.dueDate.isNotEmpty ||
+                  link!.createdBy.isNotEmpty)) ...[
+            const SizedBox(height: 10),
+            if (link!.reason.isNotEmpty)
+              Text(
+                'Motivo: ${link!.reason}',
+                style: SaoTypography.caption,
+              ),
+            if (link!.nextAction.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Próxima acción: ${link!.nextAction}',
+                  style: SaoTypography.caption,
+                ),
+              ),
+            if (link!.dueDate.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Fecha compromiso: ${_formatDate(link!.dueDate)}',
+                  style: SaoTypography.caption,
+                ),
+              ),
+            if (link!.createdBy.isNotEmpty || link!.createdAt.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Ligó: ${link!.createdBy.isEmpty ? 'Equipo operativo' : link!.createdBy}${link!.createdAt.isEmpty ? '' : ' · ${_formatDate(link!.createdAt)}'}',
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.textMutedFor(context),
+                  ),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _HistoryReasonChip extends StatelessWidget {
+  const _HistoryReasonChip({
+    required this.label,
+    this.backgroundColor,
+    this.textColor,
+  });
+
+  final String label;
+  final Color? backgroundColor;
+  final Color? textColor;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: backgroundColor ?? DigitalRecordColors.accentSurfaceFor(context),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: SaoTypography.caption.copyWith(
+          color: textColor ?? DigitalRecordColors.accent,
+          fontWeight: FontWeight.w700,
+        ),
       ),
     );
   }
@@ -1640,28 +2518,36 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
   }
 
   EvidenceItem? _selectPdfEvidence(List<EvidenceItem> evidences) {
-    final pdfEvidences = evidences.where(_isLikelyPdfEvidence).toList(growable: false);
+    final pdfEvidences =
+        evidences.where(_isLikelyPdfEvidence).toList(growable: false);
     if (pdfEvidences.isEmpty) return null;
 
     pdfEvidences.sort((left, right) {
-      final leftDate = DateTime.tryParse(left.uploadedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final rightDate = DateTime.tryParse(right.uploadedAt) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final leftDate = DateTime.tryParse(left.uploadedAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
+      final rightDate = DateTime.tryParse(right.uploadedAt) ??
+          DateTime.fromMillisecondsSinceEpoch(0);
       return rightDate.compareTo(leftDate);
     });
     return pdfEvidences.first;
   }
 
-  String _inferredFileName(CompletedActivityDetail detail, EvidenceItem evidence) {
+  String _inferredFileName(
+      CompletedActivityDetail detail, EvidenceItem evidence) {
     final summary = detail.summary;
     final activityDate = DateTime.tryParse(summary.createdAt) ??
         DateTime.tryParse(summary.reviewedAt) ??
         DateTime.tryParse(evidence.uploadedAt) ??
         DateTime.now();
     final dateToken = DateFormat('yyyyMMdd').format(activityDate);
-    final projectToken = _sanitizeFolderSegment(summary.projectId, fallback: 'GENERAL');
-    final frontToken = _sanitizeFolderSegment(summary.front, fallback: 'SIN_FRENTE');
-    final stateToken = _sanitizeFolderSegment(summary.estado, fallback: 'SIN_ESTADO');
-    final activityToken = _sanitizeFolderSegment(summary.activityType, fallback: 'ACTIVIDAD');
+    final projectToken =
+        _sanitizeFolderSegment(summary.projectId, fallback: 'GENERAL');
+    final frontToken =
+        _sanitizeFolderSegment(summary.front, fallback: 'SIN_FRENTE');
+    final stateToken =
+        _sanitizeFolderSegment(summary.estado, fallback: 'SIN_ESTADO');
+    final activityToken =
+        _sanitizeFolderSegment(summary.activityType, fallback: 'ACTIVIDAD');
     return '${projectToken}_${frontToken}_${stateToken}_${activityToken}_$dateToken.pdf';
   }
 
@@ -1669,14 +2555,16 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
     CompletedActivityDetail detail,
     EvidenceItem evidence,
   ) async {
-    final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
+    final signedUrl =
+        await EvidenceRepository().getDownloadSignedUrl(evidence.id);
     final uri = Uri.parse(signedUrl);
     final client = HttpClient();
     try {
       final request = await client.getUrl(uri);
       final response = await request.close();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('No se pudo descargar PDF (${response.statusCode})');
+        throw HttpException(
+            'No se pudo descargar PDF (${response.statusCode})');
       }
 
       final bytes = <int>[];
@@ -1688,12 +2576,19 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
       }
 
       final docsRootPath = await _resolveUserDocumentsRootPath();
-      final projectFolder = _sanitizeFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
-      final frontFolder = _sanitizeFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
-      final stateFolder = _sanitizeFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
-      final municipalityFolder = _sanitizeFolderSegment(detail.summary.municipio, fallback: 'SIN_MUNICIPIO');
-      final activityFolder = _sanitizeFolderSegment(detail.summary.activityType, fallback: 'ACTIVIDAD');
-      final expedienteFolder = _sanitizeFolderSegment(detail.summary.id, fallback: 'SIN_ID');
+      final projectFolder =
+          _sanitizeFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
+      final frontFolder =
+          _sanitizeFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
+      final stateFolder =
+          _sanitizeFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
+      final municipalityFolder = _sanitizeFolderSegment(
+          detail.summary.municipio,
+          fallback: 'SIN_MUNICIPIO');
+      final activityFolder = _sanitizeFolderSegment(detail.summary.activityType,
+          fallback: 'ACTIVIDAD');
+      final expedienteFolder =
+          _sanitizeFolderSegment(detail.summary.id, fallback: 'SIN_ID');
       final activityDir = Directory(
         '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
       );
@@ -1701,7 +2596,8 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
         await activityDir.create(recursive: true);
       }
 
-      final file = File('${activityDir.path}/${_inferredFileName(detail, evidence)}');
+      final file =
+          File('${activityDir.path}/${_inferredFileName(detail, evidence)}');
       await file.writeAsBytes(bytes, flush: true);
 
       await registerDownloadedReportReference(
@@ -1774,10 +2670,12 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
       ),
       builder: (context, snapshot) {
         final localPdfPath = snapshot.data;
-        final hasLocalPdf = localPdfPath != null && localPdfPath.trim().isNotEmpty;
+        final hasLocalPdf =
+            localPdfPath != null && localPdfPath.trim().isNotEmpty;
         final documentEvidences = _documentEvidencesFor(widget.detail);
         final remotePdfEvidence = _selectPdfEvidence(documentEvidences);
-        final bool canDownloadFromCloud = !hasLocalPdf && remotePdfEvidence != null;
+        final bool canDownloadFromCloud =
+            !hasLocalPdf && remotePdfEvidence != null;
 
         final generatedReference = hasLocalPdf
             ? GeneratedReportReference(
@@ -1791,28 +2689,37 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
         final uploadedByLabel = remotePdfEvidence?.uploaderName.trim() ?? '';
         final likelyCurrentUserReport = currentUser != null &&
             uploadedByLabel.isNotEmpty &&
-            (uploadedByLabel.toLowerCase() == currentUser.fullName.trim().toLowerCase() ||
-                uploadedByLabel.toLowerCase() == currentUser.email.trim().toLowerCase());
+            (uploadedByLabel.toLowerCase() ==
+                    currentUser.fullName.trim().toLowerCase() ||
+                uploadedByLabel.toLowerCase() ==
+                    currentUser.email.trim().toLowerCase());
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _InfoRow(label: 'Documento', value: 'Reporte operativo generado'),
+            const _InfoRow(
+                label: 'Documento', value: 'Reporte operativo generado'),
             _InfoRow(
               label: 'Estado',
               value: reference == null
                   ? 'Generado, sin PDF local vinculado'
                   : 'Disponible para abrir desde expediente',
             ),
-            _InfoRow(label: 'Fecha de revisión', value: _formatDate(summary.reviewedAt)),
+            _InfoRow(
+                label: 'Fecha de revisión',
+                value: _formatDate(summary.reviewedAt)),
             _InfoRow(
               label: 'Revisó',
-              value: summary.reviewedByName.isEmpty ? 'No disponible' : summary.reviewedByName,
+              value: summary.reviewedByName.isEmpty
+                  ? 'No disponible'
+                  : summary.reviewedByName,
             ),
             if (reference != null) ...[
               _InfoRow(label: 'Archivo', value: reference.fileName),
               if (reference.generatedAt.isNotEmpty)
-                _InfoRow(label: 'Generado', value: _formatDate(reference.generatedAt)),
+                _InfoRow(
+                    label: 'Generado',
+                    value: _formatDate(reference.generatedAt)),
               const SizedBox(height: 14),
               Wrap(
                 spacing: 10,
@@ -1826,7 +2733,8 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
                         messenger
                           ?..hideCurrentSnackBar()
                           ..showSnackBar(
-                            const SnackBar(content: Text('No se pudo abrir el PDF')),
+                            const SnackBar(
+                                content: Text('No se pudo abrir el PDF')),
                           );
                       }
                     },
@@ -1844,7 +2752,8 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
                         messenger
                           ?..hideCurrentSnackBar()
                           ..showSnackBar(
-                            const SnackBar(content: Text('No se pudo abrir la carpeta')),
+                            const SnackBar(
+                                content: Text('No se pudo abrir la carpeta')),
                           );
                       }
                     },
@@ -1872,7 +2781,8 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
                     FilledButton.icon(
                       onPressed: _downloading
                           ? null
-                            : () => _downloadAndOpen(widget.detail, remotePdfEvidence),
+                          : () => _downloadAndOpen(
+                              widget.detail, remotePdfEvidence),
                       icon: _downloading
                           ? const SizedBox(
                               width: 16,
@@ -1880,7 +2790,8 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.download_rounded, size: 18),
-                      label: Text(_downloading ? 'Descargando...' : 'Descargar PDF'),
+                      label: Text(
+                          _downloading ? 'Descargando...' : 'Descargar PDF'),
                     ),
                     if (likelyCurrentUserReport)
                       const Text(
@@ -1918,8 +2829,7 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
   bool _isPreviewableImage(EvidenceItem evidence) {
     final typeToken = evidence.type.trim().toUpperCase();
     final gcsToken = evidence.gcsPath.trim().toLowerCase();
-    final looksLikeVideo =
-        typeToken.contains('VIDEO') ||
+    final looksLikeVideo = typeToken.contains('VIDEO') ||
         gcsToken.endsWith('.mp4') ||
         gcsToken.endsWith('.mov');
     return !looksLikeVideo && !_isLikelyPdfEvidence(evidence);
@@ -1927,7 +2837,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
 
   bool _isRemoteSource(String source) {
     final normalized = source.trim().toLowerCase();
-    return normalized.startsWith('http://') || normalized.startsWith('https://');
+    return normalized.startsWith('http://') ||
+        normalized.startsWith('https://');
   }
 
   Directory _buildTargetDirectory(EvidenceItem evidence) {
@@ -1938,12 +2849,18 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
     final baseRoot = docsRootPath != null && docsRootPath.trim().isNotEmpty
         ? '$docsRootPath/Documents'
         : '';
-    final projectFolder = _sanitizeFolderSegment(summary.projectId, fallback: 'GENERAL');
-    final frontFolder = _sanitizeFolderSegment(summary.front, fallback: 'SIN_FRENTE');
-    final stateFolder = _sanitizeFolderSegment(summary.estado, fallback: 'SIN_ESTADO');
-    final municipalityFolder = _sanitizeFolderSegment(summary.municipio, fallback: 'SIN_MUNICIPIO');
-    final activityFolder = _sanitizeFolderSegment(summary.activityType, fallback: 'ACTIVIDAD');
-    final expedienteFolder = _sanitizeFolderSegment(summary.id, fallback: 'SIN_ID');
+    final projectFolder =
+        _sanitizeFolderSegment(summary.projectId, fallback: 'GENERAL');
+    final frontFolder =
+        _sanitizeFolderSegment(summary.front, fallback: 'SIN_FRENTE');
+    final stateFolder =
+        _sanitizeFolderSegment(summary.estado, fallback: 'SIN_ESTADO');
+    final municipalityFolder =
+        _sanitizeFolderSegment(summary.municipio, fallback: 'SIN_MUNICIPIO');
+    final activityFolder =
+        _sanitizeFolderSegment(summary.activityType, fallback: 'ACTIVIDAD');
+    final expedienteFolder =
+        _sanitizeFolderSegment(summary.id, fallback: 'SIN_ID');
     final folderName = _isLikelyPdfEvidence(evidence) ? 'pdfs' : 'evidencias';
     return Directory(
       '$baseRoot/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/$folderName',
@@ -1952,11 +2869,13 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
 
   String _buildEvidenceFilePrefix(EvidenceItem evidence) {
     final summary = widget.detail.summary;
-    final pkToken = _safeSegment(summary.pk.isEmpty ? summary.id : summary.pk, fallback: 'actividad');
+    final pkToken = _safeSegment(summary.pk.isEmpty ? summary.id : summary.pk,
+        fallback: 'actividad');
     final descToken = _safeSegment(
       evidence.description.isEmpty ? evidence.type : evidence.description,
     );
-    final shortId = evidence.id.substring(0, evidence.id.length > 8 ? 8 : evidence.id.length);
+    final shortId = evidence.id
+        .substring(0, evidence.id.length > 8 ? 8 : evidence.id.length);
     return '${pkToken}_${descToken}_$shortId';
   }
 
@@ -2041,7 +2960,9 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (snapshot.hasError || !snapshot.hasData || snapshot.data!.trim().isEmpty) {
+                if (snapshot.hasError ||
+                    !snapshot.hasData ||
+                    snapshot.data!.trim().isEmpty) {
                   return Padding(
                     padding: const EdgeInsets.all(24),
                     child: Column(
@@ -2100,7 +3021,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Vista previa', style: SaoTypography.sectionTitle),
+                                const Text('Vista previa',
+                                    style: SaoTypography.sectionTitle),
                                 const SizedBox(height: 4),
                                 Text(
                                   _captionFor(evidence),
@@ -2147,7 +3069,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
 
   String _extractExtension(String raw) {
     final sanitized = raw.trim().toLowerCase();
-    final match = RegExp(r'\.(jpg|jpeg|png|pdf|mp4|mov|heic|webp)(?:\?|$)').firstMatch(sanitized);
+    final match = RegExp(r'\.(jpg|jpeg|png|pdf|mp4|mov|heic|webp)(?:\?|$)')
+        .firstMatch(sanitized);
     return match != null ? '.${match.group(1)!}' : '';
   }
 
@@ -2186,7 +3109,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
       return cached;
     }
 
-    final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
+    final signedUrl =
+        await EvidenceRepository().getDownloadSignedUrl(evidence.id);
     final uri = Uri.parse(signedUrl);
     final client = HttpClient();
 
@@ -2194,7 +3118,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
       final request = await client.getUrl(uri);
       final response = await request.close();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('No se pudo descargar la evidencia (${response.statusCode})');
+        throw HttpException(
+            'No se pudo descargar la evidencia (${response.statusCode})');
       }
 
       final bytes = <int>[];
@@ -2211,7 +3136,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
       }
 
       final ext = _guessExtension(evidence, signedUrl);
-      final file = File('${targetDir.path}/${_buildEvidenceFilePrefix(evidence)}$ext');
+      final file =
+          File('${targetDir.path}/${_buildEvidenceFilePrefix(evidence)}$ext');
       await file.writeAsBytes(bytes, flush: true);
       _previewSourceCache[evidence.id] = Future<String>.value(file.path);
       return file;
@@ -2231,7 +3157,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
         messenger
           ?..hideCurrentSnackBar()
           ..showSnackBar(
-            const SnackBar(content: Text('No se pudo abrir la evidencia descargada')),
+            const SnackBar(
+                content: Text('No se pudo abrir la evidencia descargada')),
           );
         return;
       }
@@ -2261,7 +3188,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
       return const SaoEmptyState(
         icon: Icons.perm_media_outlined,
         message: 'No hay evidencias fotográficas cargadas',
-        subtitle: 'Aquí solo se muestran fotos o evidencias reales capturadas en campo.',
+        subtitle:
+            'Aquí solo se muestran fotos o evidencias reales capturadas en campo.',
       );
     }
 
@@ -2275,7 +3203,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
               decoration: BoxDecoration(
                 color: DigitalRecordColors.mutedSurfaceFor(context),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: DigitalRecordColors.borderFor(context)),
+                border:
+                    Border.all(color: DigitalRecordColors.borderFor(context)),
               ),
               child: Row(
                 children: [
@@ -2287,22 +3216,27 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                             child: Container(
                               width: 88,
                               height: 88,
-                              color: DigitalRecordColors.evidenceIconBgFor(context),
+                              color: DigitalRecordColors.evidenceIconBgFor(
+                                  context),
                               child: Stack(
                                 fit: StackFit.expand,
                                 children: [
                                   FutureBuilder<String>(
                                     future: _previewSourceFor(evidence),
                                     builder: (context, snapshot) {
-                                      if (snapshot.hasData && snapshot.data!.trim().isNotEmpty) {
-                                        return _buildPreviewThumbnail(snapshot.data!);
+                                      if (snapshot.hasData &&
+                                          snapshot.data!.trim().isNotEmpty) {
+                                        return _buildPreviewThumbnail(
+                                            snapshot.data!);
                                       }
-                                      if (snapshot.connectionState == ConnectionState.waiting) {
+                                      if (snapshot.connectionState ==
+                                          ConnectionState.waiting) {
                                         return const Center(
                                           child: SizedBox(
                                             width: 20,
                                             height: 20,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                            child: CircularProgressIndicator(
+                                                strokeWidth: 2),
                                           ),
                                         );
                                       }
@@ -2320,8 +3254,10 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                                     child: Container(
                                       padding: const EdgeInsets.all(4),
                                       decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.65),
-                                        borderRadius: BorderRadius.circular(999),
+                                        color: Colors.black
+                                            .withValues(alpha: 0.65),
+                                        borderRadius:
+                                            BorderRadius.circular(999),
                                       ),
                                       child: const Icon(
                                         Icons.visibility_rounded,
@@ -2338,7 +3274,8 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                       : Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: DigitalRecordColors.evidenceIconBgFor(context),
+                            color:
+                                DigitalRecordColors.evidenceIconBgFor(context),
                             borderRadius: BorderRadius.circular(10),
                           ),
                           child: Icon(
@@ -2354,7 +3291,9 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          evidence.type.trim().isEmpty ? 'Evidencia' : evidence.type,
+                          evidence.type.trim().isEmpty
+                              ? 'Evidencia'
+                              : evidence.type,
                           style: SaoTypography.bodyTextBold,
                         ),
                         const SizedBox(height: 4),
@@ -2368,7 +3307,9 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          evidence.gcsPath.isEmpty ? 'Sin ruta de almacenamiento' : evidence.gcsPath,
+                          evidence.gcsPath.isEmpty
+                              ? 'Sin ruta de almacenamiento'
+                              : evidence.gcsPath,
                           style: SaoTypography.caption.copyWith(
                             color: SaoColors.textMutedFor(context),
                           ),
@@ -2383,7 +3324,9 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Text(
-                        evidence.uploaderName.isEmpty ? 'Sin usuario' : evidence.uploaderName,
+                        evidence.uploaderName.isEmpty
+                            ? 'Sin usuario'
+                            : evidence.uploaderName,
                         style: SaoTypography.caption,
                       ),
                       const SizedBox(height: 4),
@@ -2402,15 +3345,19 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                           if (_isPreviewableImage(evidence))
                             OutlinedButton.icon(
                               onPressed: () => _showPreview(evidence),
-                              icon: const Icon(Icons.visibility_rounded, size: 16),
+                              icon: const Icon(Icons.visibility_rounded,
+                                  size: 16),
                               label: const Text('Vista previa'),
                             ),
                           FilledButton.icon(
                             style: FilledButton.styleFrom(
                               backgroundColor: DigitalRecordColors.accentStrong,
                               foregroundColor: Colors.white,
-                              disabledBackgroundColor: DigitalRecordColors.accentStrong.withValues(alpha: 0.45),
-                              disabledForegroundColor: Colors.white.withValues(alpha: 0.82),
+                              disabledBackgroundColor: DigitalRecordColors
+                                  .accentStrong
+                                  .withValues(alpha: 0.45),
+                              disabledForegroundColor:
+                                  Colors.white.withValues(alpha: 0.82),
                             ),
                             onPressed: _downloadingEvidenceId == null
                                 ? () => _downloadAndOpen(evidence)
@@ -2421,10 +3368,12 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
                                     height: 14,
                                     child: CircularProgressIndicator(
                                       strokeWidth: 2,
-                                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
                                     ),
                                   )
-                                : const Icon(Icons.download_rounded, size: 16, color: Colors.white),
+                                : const Icon(Icons.download_rounded,
+                                    size: 16, color: Colors.white),
                             label: Text(
                               _downloadingEvidenceId == evidence.id
                                   ? 'Descargando...'
@@ -2473,7 +3422,9 @@ class _AuditSection extends StatelessWidget {
       case 'REPORT_GENERATE':
         return 'Reporte generado';
       default:
-        return action.trim().isEmpty ? 'Evento registrado' : action.replaceAll('_', ' ');
+        return action.trim().isEmpty
+            ? 'Evento registrado'
+            : action.replaceAll('_', ' ');
     }
   }
 
@@ -2483,7 +3434,8 @@ class _AuditSection extends StatelessWidget {
       return const SaoEmptyState(
         icon: Icons.timeline_outlined,
         message: 'No hay eventos de auditoría',
-        subtitle: 'La actividad aún no expone eventos en el rastro de auditoría.',
+        subtitle:
+            'La actividad aún no expone eventos en el rastro de auditoría.',
       );
     }
 
@@ -2497,14 +3449,17 @@ class _AuditSection extends StatelessWidget {
               decoration: BoxDecoration(
                 color: DigitalRecordColors.mutedSurfaceFor(context),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: DigitalRecordColors.borderFor(context)),
+                border:
+                    Border.all(color: DigitalRecordColors.borderFor(context)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      Expanded(child: Text(_actionLabel(entry.action), style: SaoTypography.bodyTextBold)),
+                      Expanded(
+                          child: Text(_actionLabel(entry.action),
+                              style: SaoTypography.bodyTextBold)),
                       Text(
                         _formatDate(entry.timestamp),
                         style: SaoTypography.caption.copyWith(
@@ -2516,7 +3471,9 @@ class _AuditSection extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     entry.actorName.isEmpty
-                        ? (entry.actorEmail.isEmpty ? 'Sistema' : entry.actorEmail)
+                        ? (entry.actorEmail.isEmpty
+                            ? 'Sistema'
+                            : entry.actorEmail)
                         : entry.actorName,
                     style: SaoTypography.caption,
                   ),
@@ -2586,8 +3543,8 @@ class _ChecklistRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final color = item.done ? SaoColors.success : SaoColors.warning;
     final background = item.done
-      ? DigitalRecordColors.checklistDoneBgFor(context)
-      : DigitalRecordColors.checklistPendingBgFor(context);
+        ? DigitalRecordColors.checklistDoneBgFor(context)
+        : DigitalRecordColors.checklistPendingBgFor(context);
 
     final child = Container(
       width: double.infinity,
@@ -2599,7 +3556,9 @@ class _ChecklistRow extends StatelessWidget {
       child: Row(
         children: [
           Icon(
-            item.done ? Icons.check_circle_rounded : Icons.pending_actions_rounded,
+            item.done
+                ? Icons.check_circle_rounded
+                : Icons.pending_actions_rounded,
             color: color,
             size: 18,
           ),
@@ -2709,7 +3668,8 @@ class _CopyablePkChip extends StatelessWidget {
           size: 15,
           color: DigitalRecordColors.accent,
         ),
-        side: BorderSide(color: DigitalRecordColors.accent.withValues(alpha: 0.35)),
+        side: BorderSide(
+            color: DigitalRecordColors.accent.withValues(alpha: 0.35)),
         backgroundColor: DigitalRecordColors.chipSurfaceFor(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
         label: Text(
@@ -2809,21 +3769,27 @@ List<_ChecklistItemData> _buildChecklist(
   Future<void> Function()? onOpenDocument,
 }) {
   final summary = detail.summary;
-  final hasIdentity = summary.pk.trim().isNotEmpty || summary.id.trim().isNotEmpty;
+  final hasIdentity =
+      summary.pk.trim().isNotEmpty || summary.id.trim().isNotEmpty;
   final evidenceCount = _visualEvidenceCountFor(detail);
   final hasEvidence = evidenceCount > 0;
   final hasDocument = summary.hasReport;
-  final reviewed = summary.reviewedAt.trim().isNotEmpty || summary.reviewDecision.trim().isNotEmpty;
+  final reviewed = summary.reviewedAt.trim().isNotEmpty ||
+      summary.reviewDecision.trim().isNotEmpty;
   final reviewResult = _reviewOutcomeLabel(
     summary.reviewDecision,
     hasReport: summary.hasReport,
   );
-  final reviewDate = summary.reviewedAt.trim().isNotEmpty ? _formatDate(summary.reviewedAt) : '';
+  final reviewDate = summary.reviewedAt.trim().isNotEmpty
+      ? _formatDate(summary.reviewedAt)
+      : '';
 
   return [
     _ChecklistItemData(
       label: 'Identificación del expediente',
-      help: hasIdentity ? 'El expediente cuenta con folio o identificador.' : 'Falta folio o identificador visible.',
+      help: hasIdentity
+          ? 'El expediente cuenta con folio o identificador.'
+          : 'Falta folio o identificador visible.',
       done: hasIdentity,
     ),
     _ChecklistItemData(
@@ -2856,10 +3822,14 @@ List<_ChecklistItemData> _buildChecklist(
 
 String _reviewOutcomeLabel(String raw, {required bool hasReport}) {
   final decision = raw.trim().toUpperCase();
-  if (decision == 'APPROVE' || decision == 'APPROVED' || decision == 'APROBADO') {
+  if (decision == 'APPROVE' ||
+      decision == 'APPROVED' ||
+      decision == 'APROBADO') {
     return 'Aprobado';
   }
-  if (decision == 'REJECT' || decision == 'REJECTED' || decision == 'RECHAZADO') {
+  if (decision == 'REJECT' ||
+      decision == 'REJECTED' ||
+      decision == 'RECHAZADO') {
     return 'Rechazado';
   }
   if (decision == 'CHANGES_REQUIRED' || decision == 'CAMBIOS_REQUERIDOS') {
@@ -2873,10 +3843,14 @@ String _reviewOutcomeLabel(String raw, {required bool hasReport}) {
 
 String _visualStatusFor(CompletedActivity item) {
   final decision = item.reviewDecision.trim().toUpperCase();
-  if (decision == 'APPROVE' || decision == 'APPROVED' || decision == 'APROBADO') {
+  if (decision == 'APPROVE' ||
+      decision == 'APPROVED' ||
+      decision == 'APROBADO') {
     return 'aprobado';
   }
-  if (decision == 'REJECT' || decision == 'REJECTED' || decision == 'RECHAZADO') {
+  if (decision == 'REJECT' ||
+      decision == 'REJECTED' ||
+      decision == 'RECHAZADO') {
     return 'rechazado';
   }
   if (item.hasReport) {
@@ -2909,7 +3883,20 @@ String _formatDate(String raw) {
   if (raw.trim().isEmpty) return 'Sin fecha';
   try {
     final date = DateTime.parse(raw).toLocal();
-    const months = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    const months = [
+      'ene',
+      'feb',
+      'mar',
+      'abr',
+      'may',
+      'jun',
+      'jul',
+      'ago',
+      'sep',
+      'oct',
+      'nov',
+      'dic'
+    ];
     final month = months[date.month - 1];
     final hour = date.hour.toString().padLeft(2, '0');
     final minute = date.minute.toString().padLeft(2, '0');
