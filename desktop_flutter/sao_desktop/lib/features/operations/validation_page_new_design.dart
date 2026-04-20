@@ -1519,16 +1519,41 @@ class _ValidationPageNewDesignState
       try {
         switch (field) {
           case 'subcategoria':
-            await repo.updateActivityFields(activity.activity.id,
-                title: value);
+            // Actualizar wizard_payload.subcategory para que el panel lo refleje.
+            await repo.resolveWizardPayloadFields(
+              activity.activity.id,
+              {'subcategory': {'id': _buildCatalogEntityId('subcat', value), 'name': value}},
+            );
+            await repo.updateActivityFields(activity.activity.id, title: value);
             break;
           case 'tema':
-            await repo.updateActivityFields(activity.activity.id,
-                activityTypeCode: value);
+            // Actualizar wizard_payload.topics para que el panel lo refleje.
+            final wizardTopics = activity.wizardPayload?['topics'];
+            if (wizardTopics is List && wizardTopics.isNotEmpty) {
+              final firstTopic = wizardTopics.first;
+              if (firstTopic is Map) {
+                final oldTopicId = (firstTopic['id'] ?? '').toString();
+                if (oldTopicId.isNotEmpty) {
+                  await repo.resolveWizardPayloadFields(
+                    activity.activity.id,
+                    {
+                      'topics': [
+                        {'old_id': oldTopicId, 'id': _buildCatalogEntityId('topic', value), 'name': value},
+                      ],
+                    },
+                  );
+                }
+              }
+            }
+            await repo.updateActivityFields(activity.activity.id, activityTypeCode: value);
             break;
           case 'proposito':
-            await repo.updateActivityFields(activity.activity.id,
-                description: value);
+            // Actualizar wizard_payload.purpose para que el panel lo refleje.
+            await repo.resolveWizardPayloadFields(
+              activity.activity.id,
+              {'purpose': {'id': _buildCatalogEntityId('purpose', value), 'name': value}},
+            );
+            await repo.updateActivityFields(activity.activity.id, description: value);
             break;
           default:
             break;
@@ -1707,39 +1732,40 @@ class _ValidationPageNewDesignState
       CatalogRepository catalogRepo, String projectId) async {
     final selected = _selectedActivity;
 
-    // Preferir el ID real del tipo de actividad, que es el mismo que usa el
-    // panel de detalle en _catalogLookupKeys para buscar subcategorías/propósitos.
-    // Si no existe como actividad en catálogo, crearlo con ese mismo ID.
     final actTypeId = selected?.activityType?.id?.trim() ?? '';
     final actTypeCode = selected?.activityType?.code?.trim() ?? '';
     final candidateName =
         (selected?.activityType?.name ?? selected?.activity.title ?? 'General')
             .trim();
+    final normalizedName = candidateName.toLowerCase();
 
-    // 1. Primero buscar por ID exacto en catálogo.
-    if (actTypeId.isNotEmpty) {
-      for (final item in catalogRepo.data.activities) {
-        if (item.id.trim() == actTypeId) return actTypeId;
+    final activities = catalogRepo.data.activities;
+
+    // 1. Buscar por actTypeCode exacto — el catálogo real usa IDs como "CAM", "CALIB", etc.
+    if (actTypeCode.isNotEmpty) {
+      for (final item in activities) {
+        if (item.id.trim().toUpperCase() == actTypeCode.toUpperCase()) {
+          return item.id;
+        }
       }
-      // No existe: crear con el actTypeId para que el panel lo encuentre.
-      await catalogRepo.createActivity(
-        id: actTypeId,
-        name: candidateName.isNotEmpty ? candidateName : actTypeId,
-        description: 'Generada desde validación de operaciones',
-        projectId: projectId,
-      );
-      return actTypeId;
     }
 
-    // 2. Si no hay ID, buscar por nombre.
-    final normalizedName = candidateName.toLowerCase();
-    for (final item in catalogRepo.data.activities) {
+    // 2. Buscar por nombre.
+    for (final item in activities) {
       if (item.name.trim().toLowerCase() == normalizedName) {
         return item.id;
       }
     }
 
-    // 3. Crear con código si está disponible, o generar ID.
+    // 3. Buscar por el ID sintético (act-type-*) por compatibilidad.
+    if (actTypeId.isNotEmpty) {
+      for (final item in activities) {
+        if (item.id.trim() == actTypeId) return item.id;
+      }
+    }
+
+    // 4. No existe en catálogo: crear con actTypeCode como ID para que sea
+    //    consistente con la codificación del catálogo.
     final baseId = actTypeCode.isNotEmpty
         ? actTypeCode
         : _buildCatalogEntityId('act', candidateName);
