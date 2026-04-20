@@ -1785,7 +1785,13 @@ class _ActivityDetailsPanelProState
                               child: Text(option),
                             ))
                         .toList(growable: false),
-                    onChanged: onLinkChanged,
+                    onChanged: (value) {
+                      onLinkChanged(value);
+                      if (value != null) {
+                        // Auto-guardar al seleccionar del dropdown
+                        onLinkToExisting(value);
+                      }
+                    },
                   ),
                 ),
               ],
@@ -1801,15 +1807,6 @@ class _ActivityDetailsPanelProState
                   },
                   icon: const Icon(Icons.add_box_rounded, size: 16),
                   label: const Text('Agregar al catálogo'),
-                ),
-                FilledButton.icon(
-                  onPressed: effectiveLinkedValue == null
-                      ? null
-                      : () async {
-                          await onLinkToExisting(effectiveLinkedValue);
-                        },
-                  icon: const Icon(Icons.link_rounded, size: 16),
-                  label: const Text('Vincular existente'),
                 ),
                 OutlinedButton.icon(
                   onPressed: () => _showFieldCatalogModal(
