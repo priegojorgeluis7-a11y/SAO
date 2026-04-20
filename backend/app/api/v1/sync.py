@@ -341,6 +341,23 @@ def _should_reset_review_metadata(existing: dict, item: "SyncPushActivityItem") 
     return incoming_state in {"REVISION_PENDIENTE", "COMPLETADA"}
 
 
+def _wizard_payload_has_custom_ids(wizard_payload: dict[str, object] | None) -> bool:
+    """Return True if the wizard payload contains any CUSTOM_* catalog IDs."""
+    if not wizard_payload:
+        return False
+    for key in ("activity", "subcategory", "purpose", "result"):
+        entry = wizard_payload.get(key)
+        if isinstance(entry, dict) and str(entry.get("id") or "").startswith("CUSTOM_"):
+            return True
+    for key in ("topics", "attendees"):
+        entries = wizard_payload.get(key)
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and str(entry.get("id") or "").startswith("CUSTOM_"):
+                    return True
+    return False
+
+
 def _firestore_push_item(
     client,
     batch,
@@ -390,31 +407,38 @@ def _firestore_push_item(
         )
         return None, 0
     if item.activity_type_code not in valid_codes:
-        results.append(
-            _result_item(
-                item_uuid=item.uuid,
-                result_status="INVALID",
-                server_id=None,
-                sync_version=item.sync_version or 0,
-                error_code="ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION",
-                message=(
-                    f"activity_type_code {item.activity_type_code} is not part of "
-                    f"catalog_version_id {item.catalog_version_id}"
-                ),
+        # Allow CUSTOM_* codes from field-created catalog entries; mark for admin review.
+        if str(item.activity_type_code or "").startswith("CUSTOM_"):
+            is_custom_activity = True
+        else:
+            results.append(
+                _result_item(
+                    item_uuid=item.uuid,
+                    result_status="INVALID",
+                    server_id=None,
+                    sync_version=item.sync_version or 0,
+                    error_code="ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION",
+                    message=(
+                        f"activity_type_code {item.activity_type_code} is not part of "
+                        f"catalog_version_id {item.catalog_version_id}"
+                    ),
+                )
             )
-        )
-        return None, 0
+            return None, 0
+    else:
+        is_custom_activity = False
 
     doc_ref = client.collection("activities").document(str(item.uuid))
     snap = doc_ref.get()
 
     if not snap.exists:
+        has_custom_values = is_custom_activity or _wizard_payload_has_custom_ids(item.wizard_payload)
         payload = {
             "uuid": str(item.uuid),
             "server_id": None,
             "created_by_user_id": str(item.created_by_user_id),
             "gps_mismatch": False,
-            "catalog_changed": False,
+            "catalog_changed": has_custom_values,
             "created_at": now,
             "deleted_at": item.deleted_at,
             **_mutable_activity_fields(item, now, 1, wizard_payload=item.wizard_payload),

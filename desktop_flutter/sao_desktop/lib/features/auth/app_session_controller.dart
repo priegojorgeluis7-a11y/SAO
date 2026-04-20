@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/token_store.dart';
 import '../../core/config/data_mode.dart';
+import '../../data/repositories/backend_api_client.dart';
 
 // ---------------------------------------------------------------------------
 // Models
@@ -344,7 +345,7 @@ class AuthApiException implements Exception {
 
 class _AuthHttp implements AuthHttp {
   final String baseUrl;
-  static const Duration _requestTimeout = Duration(seconds: 8);
+  static const Duration _requestTimeout = Duration(seconds: 15);
 
   _AuthHttp(this.baseUrl);
 
@@ -422,6 +423,19 @@ class AppSessionController extends StateNotifier<AppSessionState> {
   static const Duration _initializeTimeout = Duration(seconds: 12);
 
   AppSessionController(this._http) : super(const AppSessionState.initializing()) {
+    BackendApiClient.onSessionExpired = () {
+      // Invocado por BackendApiClient cuando un 401 persiste tras intentar refresh.
+      // Limpia el estado local para que AuthGate redirija al login.
+      if (state.isAuthenticated) {
+        state = const AppSessionState(
+          initializing: false,
+          loading: false,
+          error: 'Sesión expirada. Por favor inicia sesión nuevamente.',
+          accessToken: null,
+          user: null,
+        );
+      }
+    };
     _initialize();
   }
 
@@ -455,6 +469,7 @@ class AppSessionController extends StateNotifier<AppSessionState> {
       try {
         final decoded = jsonDecode(error.message);
         if (decoded is Map<String, dynamic>) {
+          // FastAPI format: {"detail": "..."}
           final rawDetail = decoded['detail'];
           if (rawDetail is String) {
             detail = rawDetail.trim();
@@ -466,11 +481,26 @@ class AppSessionController extends StateNotifier<AppSessionState> {
               detail = first.toString().trim();
             }
           }
+          // GCP infrastructure format: {"error": {"code": 404, "message": "..."}}
+          if ((detail == null || detail.isEmpty) && decoded['error'] is Map) {
+            final gcpError = decoded['error'] as Map<String, dynamic>;
+            final gcpMessage = (gcpError['message'] ?? '').toString().trim();
+            if (gcpMessage.isNotEmpty) {
+              detail = gcpMessage;
+            }
+          }
         }
       } catch (_) {}
 
       if (detail != null && detail.isNotEmpty) {
         return 'No se pudo iniciar sesión: $detail';
+      }
+
+      // Para errores de infraestructura (404 que no son del API) o errores de
+      // servidor (5xx), guiar al usuario a reintentar.
+      if (error.statusCode == 404 || error.statusCode >= 500) {
+        return 'El servidor no está disponible (${error.statusCode}). '
+            'Por favor intenta de nuevo en unos segundos.';
       }
 
       return 'No se pudo iniciar sesión (${error.statusCode}).';

@@ -2235,14 +2235,19 @@ class _RelatedHistorySectionState
         relatedLinks: normalizedNextLinks,
       );
       ref.invalidate(manualActivityLinksRegistryProvider);
+      var backendSaved = false;
       try {
         await saveRelatedActivityLinks(
           activityId: widget.detail.summary.id,
           relatedLinks: normalizedNextLinks,
         );
-      } catch (_) {
+        backendSaved = true;
+      } catch (backendError) {
         // El guardado local mantiene el seguimiento operativo incluso si el
         // backend no está actualizado todavía.
+        debugPrint(
+          '[RelatedLinks] Error al guardar en backend: $backendError',
+        );
       }
       ref.invalidate(
         completedActivityDetailProvider(widget.detail.summary.id),
@@ -2253,9 +2258,23 @@ class _RelatedHistorySectionState
       if (mounted) {
         setState(_resetForm);
       }
-      messenger
-        ?..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(successMessage)));
+      if (backendSaved) {
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(content: Text(successMessage)));
+      } else {
+        messenger
+          ?..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Vínculo guardado localmente, pero no se pudo sincronizar '
+                'con el servidor. Intente de nuevo más tarde.',
+              ),
+              duration: Duration(seconds: 5),
+            ),
+          );
+      }
     } catch (error) {
       messenger
         ?..hideCurrentSnackBar()

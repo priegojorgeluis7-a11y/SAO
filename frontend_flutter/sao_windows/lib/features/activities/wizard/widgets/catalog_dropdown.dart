@@ -2,7 +2,11 @@
 import 'package:flutter/material.dart';
 import '../../../../ui/theme/sao_typography.dart';
 
-/// Dropdown genérico para catálogos con modelo CatalogItem
+/// Dropdown genérico para catálogos con modelo CatalogItem.
+///
+/// Usa un [DropdownButtonFormField<T>] tipado para los items del catálogo.
+/// El botón "Agregar nuevo..." se muestra como un widget separado debajo
+/// del dropdown para evitar mezclar tipos y problemas de estado interno.
 class CatalogDropdown<T> extends StatelessWidget {
   final String label;
   final T? value;
@@ -37,60 +41,67 @@ class CatalogDropdown<T> extends StatelessWidget {
       );
     }
 
-    // Crear lista de items del menú
-    final menuItems = <DropdownMenuItem<dynamic>>[
-      // Items normales del catálogo
-      ...items.map((x) => DropdownMenuItem<T>(
-        value: x,
-        child: Text(
-          itemLabel(x),
-          overflow: TextOverflow.ellipsis,
-          maxLines: 2,
-          style: SaoTypography.bodyText,
+    // Asegurar que el valor actual existe en la lista de items
+    final effectiveValue =
+        (value != null && items.contains(value)) ? value : null;
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        DropdownButtonFormField<T>(
+          // Key basada en número de items + valor seleccionado para forzar
+          // reconstrucción cuando se agregan items custom al catálogo.
+          key: ValueKey('${label}_${items.length}_${effectiveValue.hashCode}'),
+          value: effectiveValue,
+          isExpanded: true,
+          menuMaxHeight: MediaQuery.of(context).size.height * 0.5,
+          decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+            suffixIcon: const Icon(Icons.arrow_drop_down, size: 24),
+          ),
+          dropdownColor: Theme.of(context).colorScheme.surface,
+          items: items
+              .map(
+                (x) => DropdownMenuItem<T>(
+                  value: x,
+                  child: Text(
+                    itemLabel(x),
+                    overflow: TextOverflow.ellipsis,
+                    maxLines: 2,
+                    style: SaoTypography.bodyText,
+                  ),
+                ),
+              )
+              .toList(growable: false),
+          onChanged: onChanged,
         ),
-      )),
-      
-      // Agregar opción "Agregar nuevo" al final si está habilitada
-      if (onAddNew != null)
-        DropdownMenuItem<dynamic>(
-          value: '__add_new__',
-          child: Row(
-            children: [
-              Icon(Icons.add_circle_outline, size: 20, color: Theme.of(context).primaryColor),
-              const SizedBox(width: 8),
-              Text(
+        if (onAddNew != null)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: onAddNew,
+              icon: Icon(Icons.add_circle_outline,
+                  size: 18, color: Theme.of(context).primaryColor),
+              label: Text(
                 'Agregar nuevo...',
-                style: SaoTypography.bodyTextBold.copyWith(
+                style: SaoTypography.caption.copyWith(
                   fontWeight: FontWeight.w600,
                   color: Theme.of(context).primaryColor,
                 ),
               ),
-            ],
+              style: TextButton.styleFrom(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+            ),
           ),
-        ),
-    ];
-
-    return DropdownButtonFormField<dynamic>(
-      initialValue: value,
-      isExpanded: true,
-      menuMaxHeight: MediaQuery.of(context).size.height * 0.5,
-      decoration: InputDecoration(
-        labelText: label,
-        border: const OutlineInputBorder(),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
-        suffixIcon: const Icon(Icons.arrow_drop_down, size: 24),
-      ),
-      dropdownColor: Theme.of(context).colorScheme.surface,
-      items: menuItems,
-      onChanged: (dynamic newValue) {
-        if (newValue == '__add_new__') {
-          // Usuario seleccionó "Agregar nuevo"
-          onAddNew?.call();
-        } else {
-          // Usuario seleccionó un item normal
-          onChanged(newValue as T?);
-        }
-      },
+      ],
     );
   }
 }

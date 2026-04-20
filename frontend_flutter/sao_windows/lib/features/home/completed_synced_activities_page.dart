@@ -29,6 +29,7 @@ class _HistoryFilterValues {
   final String front;
   final String state;
   final DateTime? date;
+  final String user;
   final bool clearAll;
 
   const _HistoryFilterValues({
@@ -36,6 +37,7 @@ class _HistoryFilterValues {
     required this.front,
     required this.state,
     required this.date,
+    this.user = 'TODOS',
     this.clearAll = false,
   });
 }
@@ -53,9 +55,11 @@ class _CompletedSyncedActivitiesPageState
   String _projectFilter = kAllProjects;
   String _frontFilter = 'TODOS';
   String _stateFilter = 'TODOS';
+  String _userFilter = 'TODOS';
   String _query = '';
   DateTime? _dateFilter;
   _HistorySummaryFilter _summaryFilter = _HistorySummaryFilter.all;
+  bool _isAdminViewer = false;
 
   String get _defaultProjectFilter {
     final value = widget.selectedProject.trim().toUpperCase();
@@ -66,6 +70,7 @@ class _CompletedSyncedActivitiesPageState
     return _projectFilter != _defaultProjectFilter ||
         _frontFilter != 'TODOS' ||
         _stateFilter != 'TODOS' ||
+        _userFilter != 'TODOS' ||
         _dateFilter != null ||
         _summaryFilter != _HistorySummaryFilter.all;
   }
@@ -79,13 +84,43 @@ class _CompletedSyncedActivitiesPageState
     _db = GetIt.I<AppDb>();
     _dao = ActivityDao(_db);
     _projectFilter = _defaultProjectFilter;
-    _load();
+    _resolveViewerRole().then((_) => _load());
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _resolveViewerRole() async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) return;
+
+    final localUser = await (_db.select(
+      _db.users,
+    )..where((t) => t.id.equals(user.id))).getSingleOrNull();
+    final role = localUser == null
+        ? null
+        : await (_db.select(
+            _db.roles,
+          )..where((t) => t.id.equals(localUser.roleId))).getSingleOrNull();
+    final normalizedRoleName = role?.name.trim().toUpperCase();
+    final isAdminByRole = localUser?.roleId == 1;
+    final isPrivilegedManagerByRole =
+        localUser?.roleId == 2 ||
+        localUser?.roleId == 3 ||
+        normalizedRoleName == 'COORD' ||
+        normalizedRoleName == 'COORDINATOR' ||
+        normalizedRoleName == 'SUPERVISOR';
+    final email = user.email.trim().toLowerCase();
+    final isAdminByEmail =
+        email == 'admin@sao.mx' || email.startsWith('admin.');
+
+    if (!mounted) return;
+    setState(() {
+      _isAdminViewer = isAdminByRole || isAdminByEmail || isPrivilegedManagerByRole;
+    });
   }
 
   Future<void> _load() async {
@@ -107,6 +142,9 @@ class _CompletedSyncedActivitiesPageState
 
       final rows = await _dao.listHomeActivitiesByProject(kAllProjects);
       final candidateRows = rows.where((row) {
+        if (_isAdminViewer) {
+          return _isHistoryVisible(row);
+        }
         final assigned = row.assignedToUserId?.trim().toLowerCase();
         final isAssignedToCurrentUser =
             assigned != null &&
@@ -161,6 +199,14 @@ class _CompletedSyncedActivitiesPageState
       final projectCode = row.activity.projectId.trim().toUpperCase();
       if (_projectFilter != kAllProjects && projectCode != _projectFilter) {
         return false;
+      }
+
+      if (_userFilter != 'TODOS') {
+        final assignedName = row.assignedToName?.trim() ?? '';
+        final assignedId = row.assignedToUserId?.trim() ?? '';
+        if (assignedId != _userFilter && assignedName != _userFilter) {
+          return false;
+        }
       }
 
       final front = (row.frontName?.trim().isNotEmpty ?? false)
@@ -234,6 +280,20 @@ class _CompletedSyncedActivitiesPageState
             .toList()
           ..sort();
     return <String>['TODOS', ...set];
+  }
+
+  List<MapEntry<String, String>> get _userOptions {
+    final map = <String, String>{};
+    for (final item in _allItems) {
+      final id = item.assignedToUserId?.trim() ?? '';
+      final name = item.assignedToName?.trim() ?? '';
+      if (id.isNotEmpty && !map.containsKey(id)) {
+        map[id] = name.isNotEmpty ? name : id;
+      }
+    }
+    final entries = map.entries.toList()
+      ..sort((a, b) => a.value.toLowerCase().compareTo(b.value.toLowerCase()));
+    return entries;
   }
 
   String _fmtDate(DateTime dt) {
@@ -482,6 +542,7 @@ class _CompletedSyncedActivitiesPageState
       _projectFilter = _defaultProjectFilter;
       _frontFilter = 'TODOS';
       _stateFilter = 'TODOS';
+      _userFilter = 'TODOS';
       _dateFilter = null;
       _query = '';
       _summaryFilter = _HistorySummaryFilter.all;
@@ -693,6 +754,7 @@ class _CompletedSyncedActivitiesPageState
         var tempState = _stateOptions.contains(_stateFilter)
             ? _stateFilter
             : 'TODOS';
+        var tempUser = _userFilter;
         DateTime? tempDate = _dateFilter;
 
         InputDecoration decoration(String label) {
@@ -827,6 +889,33 @@ class _CompletedSyncedActivitiesPageState
                           setModalState(() => tempState = value);
                         },
                       ),
+                      if (_isAdminViewer) ...[
+                        const SizedBox(height: 12),
+                        DropdownButtonFormField<String>(
+                          initialValue: tempUser,
+                          isExpanded: true,
+                          decoration: decoration('Usuario'),
+                          items: [
+                            const DropdownMenuItem(
+                              value: 'TODOS',
+                              child: Text('Todos los usuarios'),
+                            ),
+                            ..._userOptions.map(
+                              (entry) => DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(
+                                  entry.value,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ),
+                          ],
+                          onChanged: (value) {
+                            if (value == null) return;
+                            setModalState(() => tempUser = value);
+                          },
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       InkWell(
                         borderRadius: BorderRadius.circular(14),
@@ -896,6 +985,7 @@ class _CompletedSyncedActivitiesPageState
                                     front: 'TODOS',
                                     state: 'TODOS',
                                     date: null,
+                                    user: 'TODOS',
                                     clearAll: true,
                                   ),
                                 );
@@ -922,6 +1012,7 @@ class _CompletedSyncedActivitiesPageState
                                     front: tempFront,
                                     state: tempState,
                                     date: tempDate,
+                                    user: tempUser,
                                   ),
                                 );
                               },
@@ -958,6 +1049,7 @@ class _CompletedSyncedActivitiesPageState
       _projectFilter = result.project;
       _frontFilter = result.front;
       _stateFilter = result.state;
+      _userFilter = result.user;
       _dateFilter = result.date;
     });
   }
@@ -1558,6 +1650,17 @@ class _CompletedSyncedActivitiesPageState
                                   ),
                                 if (_stateFilter != 'TODOS')
                                   const SizedBox(width: 8),
+                                if (_userFilter != 'TODOS')
+                                  _filterChip(
+                                    icon: Icons.person_rounded,
+                                    label: 'Usuario',
+                                    value: _userOptions
+                                        .where((e) => e.key == _userFilter)
+                                        .map((e) => e.value)
+                                        .firstOrNull ?? _userFilter,
+                                  ),
+                                if (_userFilter != 'TODOS')
+                                  const SizedBox(width: 8),
                                 if (_dateFilter != null)
                                   _filterChip(
                                     icon: Icons.calendar_month_rounded,
@@ -1629,6 +1732,7 @@ class _CompletedSyncedActivitiesPageState
                                                   _defaultProjectFilter &&
                                               _frontFilter == 'TODOS' &&
                                               _stateFilter == 'TODOS' &&
+                                              _userFilter == 'TODOS' &&
                                               _dateFilter == null
                                           ? 'Todavia no tienes actividades sincronizadas o rechazadas para mostrar.'
                                           : 'Prueba limpiar filtros o cambiar la busqueda para encontrar otras actividades.',
@@ -1927,6 +2031,12 @@ class _CompletedSyncedActivitiesPageState
                                               label: 'Frente',
                                               value: _displayFront(front),
                                             ),
+                                            if (_isAdminViewer && (row.assignedToName?.trim().isNotEmpty ?? false))
+                                              _metaChip(
+                                                icon: Icons.person_rounded,
+                                                label: 'Asignado',
+                                                value: row.assignedToName!.trim(),
+                                              ),
                                           ],
                                         ),
                                         const SizedBox(height: 8),

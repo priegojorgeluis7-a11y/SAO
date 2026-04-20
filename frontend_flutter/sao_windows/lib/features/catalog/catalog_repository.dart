@@ -1192,12 +1192,12 @@ class CustomCatalogData {
 
   factory CustomCatalogData.empty() {
     return CustomCatalogData(
-      customActivities: const <CatItem>[],
-      customSubcategories: const <String, List<CatItem>>{},
-      customPurposes: const <String, List<CatItem>>{},
-      customTopics: const <CatItem>[],
-      customAttendeesInstitutional: const <CatItem>[],
-      customAttendeesLocal: const <CatItem>[],
+      customActivities: <CatItem>[],
+      customSubcategories: <String, List<CatItem>>{},
+      customPurposes: <String, List<CatItem>>{},
+      customTopics: <CatItem>[],
+      customAttendeesInstitutional: <CatItem>[],
+      customAttendeesLocal: <CatItem>[],
     );
   }
 
@@ -1310,6 +1310,14 @@ class CatItem {
   
   /// Alias para label (compatibilidad)
   String get name => label;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is CatItem && runtimeType == other.runtimeType && id == other.id;
+
+  @override
+  int get hashCode => id.hashCode;
 }
 
 /// Estado de un candidato pendiente de aprobación

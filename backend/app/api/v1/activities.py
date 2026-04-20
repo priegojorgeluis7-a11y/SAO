@@ -493,6 +493,111 @@ async def patch_activity_flags(
     return _firestore_activity_dto(doc_ref, uuid)
 
 
+@router.patch("/{uuid}/resolve-catalog")
+async def resolve_catalog_values(
+    uuid: str,
+    payload: dict[str, Any],
+    current_user: Any = Depends(get_current_user),
+):
+    """Replace CUSTOM_* catalog IDs in wizard_payload with official catalog values.
+
+    Payload format:
+    {
+        "replacements": {
+            "activity": {"id": "CAM", "name": "Caminamiento"},       // optional
+            "subcategory": {"id": "CAM_DDV", "name": "Verif DDV"},   // optional
+            "purpose": {"id": "AFEC_VER", "name": "Verificación"},   // optional
+            "topics": [{"old_id": "CUSTOM_TOP_xxx", "id": "TOP_GAL", "name": "Gálibos"}],
+            "attendees": [{"old_id": "CUSTOM_ATT_xxx", "id": "AST_ARTF", "name": "ARTF"}],
+            "result": {"id": "RES_OK", "name": "Ejecución exitosa"}, // optional
+        },
+        "clear_catalog_flag": true  // optional, clears catalog_changed flag
+    }
+    """
+    client = get_firestore_client()
+    doc_ref = client.collection("activities").document(str(uuid))
+    snap = doc_ref.get()
+    if not snap.exists:
+        raise api_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="ACTIVITY_NOT_FOUND",
+            message=f"Activity {uuid} not found",
+        )
+    existing = snap.to_dict() or {}
+    project_id = str(existing.get("project_id") or "").strip().upper()
+    _enforce_activity_permission(current_user, "activity.edit", project_id)
+
+    wizard_payload = dict(existing.get("wizard_payload") or {})
+    replacements = payload.get("replacements") or {}
+    now = datetime.now(timezone.utc)
+    next_sync = int(existing.get("sync_version") or 0) + 1
+
+    # Replace simple fields (activity, subcategory, purpose, result)
+    for field in ("activity", "subcategory", "purpose", "result"):
+        replacement = replacements.get(field)
+        if replacement and isinstance(replacement, dict):
+            current_entry = wizard_payload.get(field)
+            if isinstance(current_entry, dict):
+                wizard_payload[field] = {**current_entry, **replacement}
+            else:
+                wizard_payload[field] = replacement
+
+    # Replace list fields (topics, attendees) by matching old_id
+    for field in ("topics", "attendees"):
+        field_replacements = replacements.get(field)
+        if not field_replacements or not isinstance(field_replacements, list):
+            continue
+        current_list = wizard_payload.get(field)
+        if not isinstance(current_list, list):
+            continue
+        replacement_map = {
+            str(r.get("old_id") or ""): r
+            for r in field_replacements
+            if isinstance(r, dict) and r.get("old_id")
+        }
+        updated_list = []
+        for entry in current_list:
+            if not isinstance(entry, dict):
+                updated_list.append(entry)
+                continue
+            entry_id = str(entry.get("id") or "")
+            if entry_id in replacement_map:
+                repl = replacement_map[entry_id]
+                updated_entry = {**entry, "id": repl["id"], "name": repl.get("name", entry.get("name"))}
+                updated_list.append(updated_entry)
+            else:
+                updated_list.append(entry)
+        wizard_payload[field] = updated_list
+
+    # Update activity_type_code if activity was replaced
+    updates: dict[str, Any] = {
+        "wizard_payload": wizard_payload,
+        "updated_at": now,
+        "sync_version": next_sync,
+    }
+    activity_replacement = replacements.get("activity")
+    if activity_replacement and isinstance(activity_replacement, dict) and activity_replacement.get("id"):
+        updates["activity_type_code"] = activity_replacement["id"]
+
+    if payload.get("clear_catalog_flag"):
+        updates["catalog_changed"] = False
+
+    doc_ref.update(updates)
+
+    write_firestore_audit_log(
+        action="CATALOG_VALUES_RESOLVED",
+        entity="activity",
+        entity_id=str(uuid),
+        actor=current_user,
+        details=sanitize_audit_details({
+            "replacements": replacements,
+            "clear_catalog_flag": payload.get("clear_catalog_flag"),
+        }),
+    )
+
+    return {"ok": True, "uuid": uuid, "updated_at": now.isoformat()}
+
+
 @router.get("/{uuid}/timeline", response_model=list[ActivityTimelineItem])
 async def get_activity_timeline(
     uuid: str,
