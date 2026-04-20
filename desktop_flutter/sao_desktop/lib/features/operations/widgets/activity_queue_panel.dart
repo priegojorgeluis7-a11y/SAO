@@ -805,21 +805,24 @@ class _CompactQueueItemState extends State<_CompactQueueItem> {
                         ),
                         const SizedBox(width: SaoSpacing.xs),
                         // PK badge
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: hasConflict
-                                ? SaoColors.warning.withValues(alpha: 0.12)
-                                : SaoColors.surfaceRaisedFor(context),
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                          child: Text(
-                            widget.pkLabel,
-                            style: SaoTypography.monoSmall.copyWith(
+                        Flexible(
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 2),
+                            decoration: BoxDecoration(
                               color: hasConflict
-                                  ? SaoColors.warning
-                                  : SaoColors.textMutedFor(context),
+                                  ? SaoColors.warning.withValues(alpha: 0.12)
+                                  : SaoColors.surfaceRaisedFor(context),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              widget.pkLabel,
+                              style: SaoTypography.monoSmall.copyWith(
+                                color: hasConflict
+                                    ? SaoColors.warning
+                                    : SaoColors.textMutedFor(context),
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ),

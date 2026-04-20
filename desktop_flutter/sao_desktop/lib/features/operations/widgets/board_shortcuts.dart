@@ -35,21 +35,13 @@ class BoardShortcuts extends StatelessWidget {
       autofocus: true,
       child: Shortcuts(
         shortcuts: <ShortcutActivator, Intent>{
-          const SingleActivator(LogicalKeyboardKey.enter): const ActivateIntent(),
           const SingleActivator(LogicalKeyboardKey.keyV): const _ValidateIntent(),
-          const SingleActivator(LogicalKeyboardKey.keyR): const _RejectIntent(),
           const SingleActivator(LogicalKeyboardKey.escape): const _SkipIntent(),
         },
         child: Actions(
           actions: <Type, Action<Intent>>{
-            ActivateIntent: CallbackAction<ActivateIntent>(
-              onInvoke: (_) { onApprove(); return null; },
-            ),
             _ValidateIntent: CallbackAction<_ValidateIntent>(
               onInvoke: (_) { onApprove(); return null; },
-            ),
-            _RejectIntent: CallbackAction<_RejectIntent>(
-              onInvoke: (_) { onReject(); return null; },
             ),
             _SkipIntent: CallbackAction<_SkipIntent>(
               onInvoke: (_) { onSkip(); return null; },
