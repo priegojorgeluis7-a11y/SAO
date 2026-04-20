@@ -3,7 +3,7 @@
 # - Grouped by responsibility and sorted alphabetically within each group.
 
 # Web Framework (runtime)
-fastapi==0.135.1
+fastapi==0.115.8
 python-multipart==0.0.22
 uvicorn[standard]==0.30.0
 
@@ -40,4 +40,4 @@ pytest-cov==4.1.0
 httpx==0.28.1
 
 # ASGI toolkit (runtime, explicit pin for FastAPI compatibility)
-starlette==0.52.1
+starlette==0.41.3
