@@ -2478,7 +2478,7 @@ class _PlanningMonthCalendar extends StatelessWidget {
                         width: selected ? 2 : (isToday ? 1.2 : 1),
                       ),
                     ),
-                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       crossAxisAlignment: CrossAxisAlignment.center,
