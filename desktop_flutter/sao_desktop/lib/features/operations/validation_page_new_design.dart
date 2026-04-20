@@ -70,20 +70,16 @@ class _ValidationPageNewDesignState
   int _secondsUntilRefresh = _autoRefreshInterval.inSeconds;
   Timer? _countdownTimer;
 
-  bool _isAdminUser(AppUser? user) {
+  bool _canDeleteActivities(AppUser? user, {String? projectId}) {
     if (user == null) return false;
-    final normalizedRoles = <String>{
-      user.role.trim().toUpperCase(),
-      ...user.roles.map((role) => role.trim().toUpperCase()),
-    }..removeWhere((value) => value.isEmpty);
-    return normalizedRoles.any((role) => role == 'ADMIN' || role.contains('ADMIN'));
+    return user.hasPermission('activity.delete', projectId: projectId);
   }
 
   void _showDeleteNotAllowedMessage() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Solo administradores pueden eliminar actividades'),
+        content: Text('Tu usuario no tiene permiso para eliminar actividades'),
         backgroundColor: SaoColors.warning,
       ),
     );
@@ -241,7 +237,10 @@ class _ValidationPageNewDesignState
     );
 
     final currentUser = ref.watch(currentAppUserProvider);
-    final canDeleteActivities = _isAdminUser(currentUser);
+    final canDeleteActivities = _canDeleteActivities(
+      currentUser,
+      projectId: selectedProjectFilter.isEmpty ? null : selectedProjectFilter,
+    );
 
     return BoardShortcuts(
       onApprove: () {
@@ -1513,10 +1512,43 @@ class _ValidationPageNewDesignState
           return;
       }
 
+      // Vincular el campo de la actividad al valor recién creado en catálogo,
+      // para que el campo quede marcado como resuelto en la vista.
+      try {
+        switch (field) {
+          case 'subcategoria':
+            await repo.updateActivityFields(activity.activity.id,
+                title: value);
+            break;
+          case 'tema':
+            await repo.updateActivityFields(activity.activity.id,
+                activityTypeCode: value);
+            break;
+          case 'proposito':
+            await repo.updateActivityFields(activity.activity.id,
+                description: value);
+            break;
+          default:
+            break;
+        }
+
+        // Refrescar _selectedActivity para que la UI muestre el campo como resuelto.
+        final refreshed = await repo.getActivityById(activity.activity.id);
+        if (mounted &&
+            refreshed != null &&
+            _selectedActivity?.activity.id == activity.activity.id) {
+          setState(() {
+            _selectedActivity = refreshed;
+          });
+        }
+      } catch (_) {
+        // Si el vínculo falla, el catálogo ya fue creado; no bloquear al usuario.
+      }
+
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('"$value" agregado en flujo de catálogo ($field)'),
+          content: Text('"$value" agregado al catálogo y campo actualizado'),
           backgroundColor: SaoColors.success,
         ),
       );
@@ -1645,25 +1677,50 @@ class _ValidationPageNewDesignState
   Future<String> _ensureCatalogActivity(
       CatalogRepository catalogRepo, String projectId) async {
     final selected = _selectedActivity;
+
+    // Preferir el ID real del tipo de actividad, que es el mismo que usa el
+    // panel de detalle en _catalogLookupKeys para buscar subcategorías/propósitos.
+    // Si no existe como actividad en catálogo, crearlo con ese mismo ID.
+    final actTypeId = selected?.activityType?.id?.trim() ?? '';
+    final actTypeCode = selected?.activityType?.code?.trim() ?? '';
     final candidateName =
         (selected?.activityType?.name ?? selected?.activity.title ?? 'General')
             .trim();
-    final normalizedName = candidateName.toLowerCase();
 
+    // 1. Primero buscar por ID exacto en catálogo.
+    if (actTypeId.isNotEmpty) {
+      for (final item in catalogRepo.data.activities) {
+        if (item.id.trim() == actTypeId) return actTypeId;
+      }
+      // No existe: crear con el actTypeId para que el panel lo encuentre.
+      await catalogRepo.createActivity(
+        id: actTypeId,
+        name: candidateName.isNotEmpty ? candidateName : actTypeId,
+        description: 'Generada desde validación de operaciones',
+        projectId: projectId,
+      );
+      return actTypeId;
+    }
+
+    // 2. Si no hay ID, buscar por nombre.
+    final normalizedName = candidateName.toLowerCase();
     for (final item in catalogRepo.data.activities) {
       if (item.name.trim().toLowerCase() == normalizedName) {
         return item.id;
       }
     }
 
-    final generatedId = _buildCatalogEntityId('act', candidateName);
+    // 3. Crear con código si está disponible, o generar ID.
+    final baseId = actTypeCode.isNotEmpty
+        ? actTypeCode
+        : _buildCatalogEntityId('act', candidateName);
     await catalogRepo.createActivity(
-      id: generatedId,
-      name: candidateName,
+      id: baseId,
+      name: candidateName.isNotEmpty ? candidateName : baseId,
       description: 'Generada desde validación de operaciones',
       projectId: projectId,
     );
-    return generatedId;
+    return baseId;
   }
 
   String _buildCatalogEntityId(String prefix, String value) {
@@ -1871,7 +1928,11 @@ class _ValidationPageNewDesignState
   }
 
   Future<void> _deleteSelectedActivity() async {
-    if (!_isAdminUser(ref.read(currentAppUserProvider))) {
+    final currentProjectId = ref.read(operationsProjectFilterProvider).trim();
+    if (!_canDeleteActivities(
+      ref.read(currentAppUserProvider),
+      projectId: currentProjectId.isEmpty ? null : currentProjectId,
+    )) {
       _showDeleteNotAllowedMessage();
       return;
     }
@@ -1909,7 +1970,11 @@ class _ValidationPageNewDesignState
   }
 
   Future<void> _bulkDeleteSelected() async {
-    if (!_isAdminUser(ref.read(currentAppUserProvider))) {
+    final currentProjectId = ref.read(operationsProjectFilterProvider).trim();
+    if (!_canDeleteActivities(
+      ref.read(currentAppUserProvider),
+      projectId: currentProjectId.isEmpty ? null : currentProjectId,
+    )) {
       _showDeleteNotAllowedMessage();
       return;
     }

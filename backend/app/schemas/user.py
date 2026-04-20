@@ -22,7 +22,9 @@ class UserResponse(UserBase):
     last_login_at: datetime | None
     created_at: datetime
     roles: list[str] = Field(default_factory=list)
-    
+    permission_codes: list[str] = Field(default_factory=list)
+    permission_scopes: list[dict[str, str | None]] = Field(default_factory=list)
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -88,6 +90,10 @@ class AdminUserUpdate(BaseModel):
     scopes: list[AdminUserScopeInput] | None = None
     permission_codes: list[str] | None = None
     permission_scopes: list[AdminUserPermissionInput] | None = None
+
+
+class AdminUserPasswordResetRequest(BaseModel):
+    new_password: str = Field(..., min_length=8, max_length=256)
 
 
 class AdminUserListItem(BaseModel):

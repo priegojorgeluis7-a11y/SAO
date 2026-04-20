@@ -161,11 +161,9 @@ class SaoActivityCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(14),
                   border: compact
                       ? Border.all(color: compactStatus.color, width: 1.5)
-                      : Border(
-                          left: BorderSide(
-                            color: (risk?.color ?? accentColor),
-                            width: 8,
-                          ),
+                      : Border.all(
+                          color: (risk?.color ?? accentColor).withValues(alpha: 0.26),
+                          width: 1.2,
                         ),
                   boxShadow: compact
                       ? [
@@ -189,7 +187,7 @@ class SaoActivityCard extends StatelessWidget {
                       : isHover && !isSelected
                             ? SaoColors.surfaceMutedFor(context)
                           : isSelected
-                              ? SaoColors.primary.withOpacity(0.06)
+                              ? SaoColors.primary.withValues(alpha: 0.06)
                               : SaoColors.surfaceFor(context),
                 ),
                 child: compact

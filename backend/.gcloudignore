@@ -1,0 +1,16 @@
+.gcloudignore
+.git
+.gitignore
+.vscode/
+.idea/
+.venv/
+.venv311/
+__pycache__/
+.pytest_cache/
+*.pyc
+*.pyo
+*.pyd
+*.log
+.DS_Store
+_tmp_test_results.txt
+pytest_catalog_output.txt

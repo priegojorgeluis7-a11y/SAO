@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sao_desktop/features/completed_activities/completed_activities_provider.dart';
+import 'package:sao_desktop/features/digital_records/digital_records_page.dart';
 
 void main() {
   test('CompletedActivity parses document_count from backend payload', () {
@@ -56,6 +57,52 @@ void main() {
     expect(detail.relatedLinks.single.relationType, 'seguimiento');
     expect(detail.relatedLinks.single.status, 'en_seguimiento');
     expect(detail.relatedLinks.single.nextAction, 'Llamar al comisariado');
+  });
+
+  test(
+      'resolveDigitalRecordTreeItems preserves all project folders and counts when one project is selected',
+      () {
+    final items = [
+      CompletedActivity.fromJson({
+        'id': 'act-1',
+        'project_id': 'TMQ',
+        'title': 'Actividad GTO',
+        'activity_type': 'Reunión',
+        'pk': 'PK 1+000',
+        'front': 'Frente Norte',
+        'estado': 'Guanajuato',
+        'municipio': 'Doctor Mora',
+      }),
+      CompletedActivity.fromJson({
+        'id': 'act-2',
+        'project_id': 'TMQ',
+        'title': 'Actividad QRO',
+        'activity_type': 'Reunión',
+        'pk': 'PK 2+000',
+        'front': 'Frente Norte',
+        'estado': 'Querétaro',
+        'municipio': 'Cadereyta',
+      }),
+      CompletedActivity.fromJson({
+        'id': 'act-3',
+        'project_id': 'ABC',
+        'title': 'Otro proyecto',
+        'activity_type': 'Asamblea',
+        'pk': 'PK 3+000',
+        'front': 'Frente Sur',
+        'estado': 'Hidalgo',
+        'municipio': 'Pachuca',
+      }),
+    ];
+
+    final treeItems = resolveDigitalRecordTreeItems(
+      items,
+      selectedProject: 'TMQ',
+    );
+
+    expect(treeItems.map((item) => item.estado),
+        containsAll(['Guanajuato', 'Querétaro']));
+    expect(treeItems.any((item) => item.projectId == 'ABC'), isTrue);
   });
 
   test(

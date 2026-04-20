@@ -119,6 +119,59 @@ async def get_current_user(
     return user
 
 
+def _normalize_project_id(project_id: str | None) -> str | None:
+    if project_id is None:
+        return None
+    normalized = project_id.strip().upper()
+    return normalized or None
+
+
+def resolve_user_project_access(user: Any) -> tuple[bool, set[str]]:
+    """Return whether the user has global access and the explicit project ids they can access."""
+    role_names = {
+        str(role).strip().upper()
+        for role in (getattr(user, "roles", []) or [])
+        if str(role).strip()
+    }
+    explicit_project_ids = {
+        normalized
+        for normalized in (
+            _normalize_project_id(str(project_id or ""))
+            for project_id in (getattr(user, "project_ids", []) or [])
+        )
+        if normalized
+    }
+
+    has_global_scope = "*" in explicit_project_ids or "ADMIN" in role_names
+    if not has_global_scope and not explicit_project_ids and "SUPERVISOR" in role_names:
+        has_global_scope = True
+
+    allowed_project_ids = {
+        project_id
+        for project_id in explicit_project_ids
+        if project_id != "*"
+    }
+    denied_project_ids: set[str] = set()
+
+    for scope in (getattr(user, "permission_scopes", []) or []):
+        if not isinstance(scope, dict):
+            continue
+        scope_project_id = _normalize_project_id(scope.get("project_id"))
+        if scope_project_id is None:
+            continue
+        if scope_project_id == "*":
+            if str(scope.get("effect") or "allow").strip().lower() != "deny":
+                has_global_scope = True
+            continue
+        if str(scope.get("effect") or "allow").strip().lower() == "deny":
+            denied_project_ids.add(scope_project_id)
+        else:
+            allowed_project_ids.add(scope_project_id)
+
+    allowed_project_ids.difference_update(denied_project_ids)
+    return has_global_scope, allowed_project_ids
+
+
 def verify_project_access(user: Any, project_id: str, db: Any) -> None:
     """Verify that the user can access the requested project id."""
     _ = db
@@ -129,22 +182,25 @@ def verify_project_access(user: Any, project_id: str, db: Any) -> None:
             detail="Only firestore backend mode is supported",
         )
 
-    project_ids = getattr(user, "project_ids", []) or []
-    if not project_ids or "*" in project_ids or project_id in project_ids:
+    normalized_project_id = _normalize_project_id(project_id)
+    if normalized_project_id is None:
+        return
+
+    has_global_scope, allowed_project_ids = resolve_user_project_access(user)
+    if has_global_scope or normalized_project_id in allowed_project_ids:
         return
 
     logger.warning(
         "PROJECT_ACCESS_DENIED user_id=%s project_id=%s",
         getattr(user, "id", "?"),
-        project_id,
+        normalized_project_id,
     )
     raise HTTPException(
         status_code=status.HTTP_403_FORBIDDEN,
-        detail=f"User does not have access to project {project_id}",
+        detail=f"User does not have access to project {normalized_project_id}",
     )
 
 
-def _normalize_project_id(project_id: str | None) -> str | None:
     if project_id is None:
         return None
     normalized = project_id.strip().upper()

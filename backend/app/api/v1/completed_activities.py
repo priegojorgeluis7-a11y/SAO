@@ -8,7 +8,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from app.api.deps import require_any_role
+from app.api.deps import require_any_role, user_has_permission, verify_project_access
 from app.core.firestore import get_firestore_client
 
 router = APIRouter(prefix="/completed-activities", tags=["completed-activities"])
@@ -61,6 +61,35 @@ def _iso(val: Any) -> str:
 
 def _normalize_action_token(action: Any) -> str:
     return str(action or "").strip().upper()
+
+
+def _normalized_project_id(project_id: Any) -> str:
+    return str(project_id or "").strip().upper()
+
+
+def _user_can_access_completed_project(user: Any, project_id: Any) -> bool:
+    normalized_project_id = _normalized_project_id(project_id)
+    if not normalized_project_id:
+        return False
+    try:
+        verify_project_access(user, normalized_project_id, None)
+    except HTTPException:
+        return False
+    return user_has_permission(user, "activity.view", None, project_id=normalized_project_id)
+
+
+def _require_completed_project_access(user: Any, project_id: Any, *, permission_code: str = "activity.view") -> str:
+    normalized_project_id = _normalized_project_id(project_id)
+    if not normalized_project_id:
+        raise HTTPException(status_code=400, detail="project_id is required")
+
+    verify_project_access(user, normalized_project_id, None)
+    if not user_has_permission(user, permission_code, None, project_id=normalized_project_id):
+        raise HTTPException(
+            status_code=403,
+            detail=f"Missing permission: {permission_code} for project: {normalized_project_id}",
+        )
+    return normalized_project_id
 
 
 def _normalize_related_activity_ids(raw: Any, current_id: str = "") -> list[str]:
@@ -533,6 +562,8 @@ def list_completed_activities(
 
     # ── Normalise filters ─────────────────────────────────────────────────────
     project_filter  = project_id.strip().upper() if project_id and project_id.strip() else None
+    if project_filter:
+        project_filter = _require_completed_project_access(_current_user, project_filter)
     frente_filter   = frente.strip().lower()   if frente and frente.strip()   else None
     tema_filter     = tema.strip().upper()     if tema and tema.strip()       else None
     estado_filter   = estado.strip().lower()   if estado and estado.strip()   else None
@@ -552,6 +583,8 @@ def list_completed_activities(
     user_ids: set[str] = set()
     for doc in raw_docs:
         if doc.get("deleted_at") is not None:
+            continue
+        if not _user_can_access_completed_project(_current_user, doc.get("project_id")):
             continue
         decision = str(doc.get("review_decision") or "").upper()
         if decision not in _APPROVED_DECISIONS:
@@ -668,6 +701,8 @@ def get_filter_options(
     client = get_firestore_client()
 
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
+    if project_filter:
+        project_filter = _require_completed_project_access(_current_user, project_filter)
 
     query = client.collection("activities")
     if project_filter:
@@ -687,6 +722,8 @@ def get_filter_options(
     for doc_snap in query.stream():
         doc = doc_snap.to_dict() or {}
         if doc.get("deleted_at") is not None:
+            continue
+        if not _user_can_access_completed_project(_current_user, doc.get("project_id")):
             continue
         decision = str(doc.get("review_decision") or "").upper()
         if decision not in _APPROVED_DECISIONS:
@@ -762,7 +799,7 @@ def get_completed_activity_detail(
             front_name = str(f.get("name") or "").strip()
             if front_name:
                 front_lookup[front_id] = front_name
-    project_id = str(doc.get("project_id") or "").strip()
+    project_id = _require_completed_project_access(_current_user, doc.get("project_id"))
     project_front_scope_map = _load_project_front_scope_map(client, {project_id} if project_id else set())
     front_name = _resolve_activity_front_name(doc, front_lookup, project_front_scope_map) or ""
 
@@ -902,6 +939,11 @@ def save_related_links(
     now = datetime.now(timezone.utc)
 
     current_ref, current_snap, current_doc = _resolve_activity_doc_ref(client, activity_id)
+    current_project_id = _require_completed_project_access(
+        _current_user,
+        current_doc.get("project_id"),
+        permission_code="activity.edit",
+    )
     current_id = str(current_doc.get("uuid") or current_snap.id)
     current_actor = str(
         getattr(_current_user, "full_name", "")
@@ -932,6 +974,10 @@ def save_related_links(
         except HTTPException:
             continue
         if target_doc.get("deleted_at") is not None:
+            continue
+        if _normalized_project_id(target_doc.get("project_id")) != current_project_id:
+            continue
+        if not _user_can_access_completed_project(_current_user, target_doc.get("project_id")):
             continue
         resolved_target_id = str(target_doc.get("uuid") or target_snap.id)
         if not resolved_target_id or resolved_target_id == current_id or resolved_target_id in seen:
@@ -1019,6 +1065,11 @@ def mark_report_generated(
     now = datetime.now(timezone.utc)
 
     doc_ref, _snap, _doc = _resolve_activity_doc_ref(client, activity_id)
+    _require_completed_project_access(
+        _current_user,
+        _doc.get("project_id"),
+        permission_code="activity.edit",
+    )
 
     doc_ref.set({"report_generated_at": now}, merge=True)
     return {"ok": True, "report_generated_at": now.isoformat()}

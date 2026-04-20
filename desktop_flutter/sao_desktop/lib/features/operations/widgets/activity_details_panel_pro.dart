@@ -11,6 +11,7 @@ import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../activity_queue_projection.dart';
+import 'catalog_resolution_dialog.dart';
 import 'catalog_substitution_modal.dart';
 import 'flag_resolution_dialog.dart';
 
@@ -79,9 +80,16 @@ class _ActivityDetailsPanelProState
   void didUpdateWidget(covariant ActivityDetailsPanelPro oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.activity?.activity.id != widget.activity?.activity.id) {
+      // Actividad distinta: reiniciar todo.
       _syncEditorsWithActivity(widget.activity);
       _ensureCatalogLoaded(widget.activity);
       _ensureProjectCoverageLoaded(widget.activity);
+    } else if (!identical(oldWidget.activity, widget.activity)) {
+      // Misma actividad pero objeto nuevo (datos actualizados, e.g. tras
+      // agregar al catálogo). Forzar rebuild para que el panel re-lea el
+      // catálogo ya actualizado en memoria y recalcule pendingFields.
+      _syncEditorsWithActivity(widget.activity);
+      if (mounted) setState(() {});
     }
   }
 
@@ -1557,6 +1565,42 @@ class _ActivityDetailsPanelProState
                   ?.call('municipio', capturedMunicipio);
             },
           ),
+          if (_hasCustomWizardIds(activity)) ...[
+            const SizedBox(height: SaoSpacing.md),
+            Container(
+              padding: const EdgeInsets.all(SaoSpacing.sm),
+              decoration: BoxDecoration(
+                color: SaoColors.warning.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(SaoRadii.sm),
+                border: Border.all(color: SaoColors.warning.withValues(alpha: 0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.new_releases_rounded, color: SaoColors.warning, size: 18),
+                  const SizedBox(width: SaoSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'Esta actividad tiene valores de catálogo creados en campo (CUSTOM). '
+                      'Apruébalos o reemplázalos con valores oficiales.',
+                      style: SaoTypography.caption.copyWith(color: SaoColors.gray700),
+                    ),
+                  ),
+                  const SizedBox(width: SaoSpacing.sm),
+                  FilledButton.icon(
+                    onPressed: () => _openCatalogResolution(activity),
+                    icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                    label: const Text('Resolver custom'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: SaoColors.warning,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      textStyle: SaoTypography.buttonText,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (pendingFields.isNotEmpty) ...[
             const SizedBox(height: SaoSpacing.sm),
             const Wrap(
@@ -2140,6 +2184,70 @@ class _ActivityDetailsPanelProState
         description.contains('no existe en catalogo') ||
         activity.flags.catalogChanged ||
         _hasUnresolvedCatalogDecision(activity);
+  }
+
+  bool _hasCustomWizardIds(ActivityWithDetails activity) {
+    final payload = activity.wizardPayload;
+    if (payload == null) return false;
+    // Check simple fields
+    for (final key in ['activity', 'subcategory', 'purpose', 'result']) {
+      final val = payload[key];
+      if (val is Map && (val['id'] ?? '').toString().startsWith('CUSTOM_')) {
+        return true;
+      }
+    }
+    // Check list fields
+    for (final key in ['topics', 'attendees']) {
+      final list = payload[key];
+      if (list is List) {
+        for (final item in list) {
+          if (item is Map && (item['id'] ?? '').toString().startsWith('CUSTOM_')) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _openCatalogResolution(ActivityWithDetails activity) async {
+    final catalogRepo = ref.read(catalogRepositoryProvider);
+    final actCode = activity.activityType?.code ?? activity.activityType?.id ?? '';
+    final actTypes = catalogRepo.getActivityTypes();
+    final subcats = catalogRepo.subcategoriesFor(actCode);
+    final purposes = catalogRepo.purposesFor(activityId: actCode);
+    final topics = catalogRepo.temasSugeridosFor(actCode);
+    final results = catalogRepo.getResults();
+    final attendees = catalogRepo.getAssistants();
+
+    // Convert CatItem lists to List<Map<String,dynamic>> for the dialog
+    List<Map<String, dynamic>> toMapList(List<CatItem> items) {
+      return items
+          .map<Map<String, dynamic>>((e) => {'id': e.id, 'name': e.name})
+          .toList();
+    }
+
+    if (!mounted) return;
+    final changed = await showCatalogResolutionDialog(
+      context,
+      activity: activity,
+      catalogActivities: toMapList(actTypes),
+      catalogSubcategories: toMapList(subcats),
+      catalogPurposes: toMapList(purposes),
+      catalogTopics: toMapList(topics),
+      catalogResults: toMapList(results),
+      catalogAttendees: toMapList(attendees),
+    );
+    if (changed && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Valores de catálogo actualizados correctamente.'),
+          backgroundColor: SaoColors.success,
+        ),
+      );
+      // Trigger refresh
+      widget.onFieldChanged?.call('_catalog_resolved', 'true');
+    }
   }
 
   bool _hasUnresolvedCatalogDecision(ActivityWithDetails activity) {

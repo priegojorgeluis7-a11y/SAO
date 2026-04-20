@@ -11,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
+import '../../data/repositories/assignments_repository.dart';
 import '../../data/repositories/evidence_repository.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../completed_activities/completed_activities_provider.dart';
@@ -109,6 +110,462 @@ Future<bool> _openDashboardLocalPath(String path) async {
   }
 }
 
+String _dashboardCanonicalToken(String raw) {
+  final replacements = <String, String>{
+    'á': 'a',
+    'à': 'a',
+    'ä': 'a',
+    'â': 'a',
+    'é': 'e',
+    'è': 'e',
+    'ë': 'e',
+    'ê': 'e',
+    'í': 'i',
+    'ì': 'i',
+    'ï': 'i',
+    'î': 'i',
+    'ó': 'o',
+    'ò': 'o',
+    'ö': 'o',
+    'ô': 'o',
+    'ú': 'u',
+    'ù': 'u',
+    'ü': 'u',
+    'û': 'u',
+    'ñ': 'n',
+  };
+
+  final folded = raw
+      .trim()
+      .toLowerCase()
+      .split('')
+      .map((char) => replacements[char] ?? char)
+      .join();
+
+  return folded
+      .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
+}
+
+String normalizeDashboardRiskToken(String raw) {
+  switch (_dashboardCanonicalToken(raw)) {
+    case 'low':
+    case 'bajo':
+      return 'bajo';
+    case 'medium':
+    case 'medio':
+      return 'medio';
+    case 'high':
+    case 'alto':
+      return 'alto';
+    case 'critical':
+    case 'critico':
+    case 'prioridad_alta':
+    case 'priority':
+    case 'prioritario':
+      return 'prioritario';
+    default:
+      return _dashboardCanonicalToken(raw);
+  }
+}
+
+String normalizeDashboardReviewStatus(String raw) {
+  switch (_dashboardCanonicalToken(raw)) {
+    case 'aprobada':
+    case 'aprobado':
+    case 'approved':
+    case 'approve':
+      return 'APROBADO';
+    case 'rechazada':
+    case 'rechazado':
+    case 'rejected':
+    case 'reject':
+      return 'RECHAZADO';
+    case 'pendiente':
+    case 'pending':
+    case 'en_revision':
+    case 'pendiente_revision':
+    case 'revision_pendiente':
+    case 'pending_review':
+    case 'pending_approval':
+      return 'PENDIENTE_REVISION';
+    case '':
+      return '';
+    default:
+      return _dashboardCanonicalToken(raw).toUpperCase();
+  }
+}
+
+String normalizeDashboardExecutionStatus(String raw) {
+  switch (_dashboardCanonicalToken(raw)) {
+    case 'aprobada':
+    case 'aprobado':
+    case 'approved':
+    case 'completed':
+    case 'completada':
+      return 'COMPLETADA';
+    case 'rechazada':
+    case 'rechazado':
+    case 'rejected':
+      return 'RECHAZADO';
+    case 'en_curso':
+    case 'in_progress':
+    case 'needs_fix':
+    case 'necesita_correccion':
+      return 'EN_CURSO';
+    case 'en_revision':
+    case 'pendiente_revision':
+    case 'revision_pendiente':
+    case 'pending_review':
+    case 'pending_approval':
+      return 'REVISION_PENDIENTE';
+    case 'programada':
+    case 'pendiente':
+    case 'pending':
+      return 'PENDIENTE';
+    case '':
+      return '';
+    default:
+      return _dashboardCanonicalToken(raw).toUpperCase();
+  }
+}
+
+String dashboardNormalizeSearchToken(String raw) {
+  return _dashboardCanonicalToken(raw).replaceAll('_', ' ');
+}
+
+List<String> dashboardSearchTermsFromQuery(String raw) {
+  return raw
+      .split('|')
+      .map(dashboardNormalizeSearchToken)
+      .where((value) => value.trim().isNotEmpty)
+      .toList(growable: false);
+}
+
+bool dashboardMatchesSearchQuery(String searchable, String rawQuery) {
+  final terms = dashboardSearchTermsFromQuery(rawQuery);
+  if (terms.isEmpty) return true;
+  return terms.every(searchable.contains);
+}
+
+String cleanDashboardFilterValue(String raw) {
+  final trimmed = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (trimmed.isEmpty) return '';
+  return trimmed;
+}
+
+String cleanDashboardUserName(String raw) {
+  return cleanDashboardFilterValue(raw);
+}
+
+bool dashboardMatchesValueFilter(String? candidateValue, String? selectedValue) {
+  final selected = cleanDashboardFilterValue(selectedValue ?? '');
+  final normalizedSelected = _dashboardCanonicalToken(selected);
+  if (selected.isEmpty ||
+      normalizedSelected.isEmpty ||
+      normalizedSelected == 'todo' ||
+      normalizedSelected == 'todos' ||
+      normalizedSelected == 'todas') {
+    return true;
+  }
+  final candidate = cleanDashboardFilterValue(candidateValue ?? '');
+  if (candidate.isEmpty) return false;
+  return _dashboardCanonicalToken(candidate) == normalizedSelected;
+}
+
+bool dashboardMatchesUserFilter(String? candidateName, String? selectedUser) {
+  return dashboardMatchesValueFilter(candidateName, selectedUser);
+}
+
+List<String> resolveDashboardFilterOptions({
+  List<String> preferredValues = const [],
+  Iterable<String> candidateValues = const [],
+}) {
+  final seen = <String>{};
+  final values = <String>[];
+
+  void addValue(String raw) {
+    final clean = cleanDashboardFilterValue(raw);
+    if (clean.isEmpty) return;
+    final token = _dashboardCanonicalToken(clean);
+    if (token.isEmpty || !seen.add(token)) return;
+    values.add(clean);
+  }
+
+  for (final value in preferredValues) {
+    addValue(value);
+  }
+  for (final value in candidateValues) {
+    addValue(value);
+  }
+
+  values.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return <String>['Todo', ...values];
+}
+
+List<String> resolveDashboardUserOptions({
+  List<String> projectUsers = const [],
+  required List<ValidationQueueItem> queueItems,
+  required List<DashboardGeoPoint> geoPoints,
+}) {
+  return resolveDashboardFilterOptions(
+    preferredValues: projectUsers,
+    candidateValues: [
+      ...queueItems.map((item) => item.userName),
+      ...geoPoints.map((point) => point.assignedName ?? ''),
+    ],
+  );
+}
+
+final dashboardProjectUsersProvider = FutureProvider.autoDispose<List<String>>((ref) async {
+  final repo = ref.watch(assignmentsRepositoryProvider);
+  final selectedProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
+  final availableProjects = ref.watch(availableProjectsProvider).valueOrNull ?? const <String>[];
+
+  final projects = <String>{
+    if (selectedProjectId.isNotEmpty)
+      selectedProjectId
+    else
+      ...availableProjects
+          .map((projectId) => projectId.trim().toUpperCase())
+          .where((projectId) => projectId.isNotEmpty),
+  }.toList(growable: false);
+
+  if (projects.isEmpty) return const [];
+
+  final users = <String>{};
+  for (final projectId in projects) {
+    try {
+      final members = await repo.getTransferCandidates(projectId);
+      for (final member in members) {
+        final displayName = cleanDashboardUserName(member.fullName);
+        if (displayName.isNotEmpty) {
+          users.add(displayName);
+          continue;
+        }
+        final email = cleanDashboardUserName(member.email);
+        if (email.isNotEmpty) {
+          users.add(email);
+        }
+      }
+    } catch (_) {
+      // Graceful fallback handled by current dashboard data.
+    }
+  }
+
+  final result = users.toList(growable: false)
+    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return result;
+});
+
+final dashboardProjectFrontsProvider = FutureProvider.autoDispose<List<String>>((ref) async {
+  final repo = ref.watch(assignmentsRepositoryProvider);
+  final selectedProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
+  final availableProjects = ref.watch(availableProjectsProvider).valueOrNull ?? const <String>[];
+
+  final projects = <String>{
+    if (selectedProjectId.isNotEmpty)
+      selectedProjectId
+    else
+      ...availableProjects
+          .map((projectId) => projectId.trim().toUpperCase())
+          .where((projectId) => projectId.isNotEmpty),
+  }.toList(growable: false);
+
+  if (projects.isEmpty) return const [];
+
+  final fronts = <String>{};
+  for (final projectId in projects) {
+    try {
+      final values = await repo.getFronts(projectId);
+      for (final front in values) {
+        final displayName = cleanDashboardFilterValue(
+          front.name.isNotEmpty ? front.name : front.code,
+        );
+        if (displayName.isNotEmpty) {
+          fronts.add(displayName);
+        }
+      }
+    } catch (_) {
+      // Graceful fallback handled by current dashboard data.
+    }
+  }
+
+  final result = fronts.toList(growable: false)
+    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  return result;
+});
+
+class _DashboardProjectCoverageOptions {
+  final List<String> states;
+  final List<String> municipalities;
+  final Map<String, List<String>> municipalitiesByState;
+
+  const _DashboardProjectCoverageOptions({
+    required this.states,
+    required this.municipalities,
+    required this.municipalitiesByState,
+  });
+
+  List<String> municipalitiesForState(String state) {
+    if (dashboardMatchesValueFilter('', state)) {
+      return municipalities;
+    }
+    final result = <String>{};
+    for (final entry in municipalitiesByState.entries) {
+      if (dashboardMatchesValueFilter(entry.key, state)) {
+        result.addAll(entry.value);
+      }
+    }
+    final values = result.toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return values;
+  }
+}
+
+final dashboardProjectCoverageOptionsProvider = FutureProvider.autoDispose<_DashboardProjectCoverageOptions>((ref) async {
+  final repo = ref.watch(assignmentsRepositoryProvider);
+  final selectedProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
+  final availableProjects = ref.watch(availableProjectsProvider).valueOrNull ?? const <String>[];
+
+  final projects = <String>{
+    if (selectedProjectId.isNotEmpty)
+      selectedProjectId
+    else
+      ...availableProjects
+          .map((projectId) => projectId.trim().toUpperCase())
+          .where((projectId) => projectId.isNotEmpty),
+  }.toList(growable: false);
+
+  if (projects.isEmpty) {
+    return const _DashboardProjectCoverageOptions(
+      states: [],
+      municipalities: [],
+      municipalitiesByState: {},
+    );
+  }
+
+  final states = <String>{};
+  final municipalities = <String>{};
+  final municipalitiesByState = <String, Set<String>>{};
+
+  for (final projectId in projects) {
+    try {
+      final coverageByFront = await repo.getFrontCoverageByFront(projectId);
+      for (final options in coverageByFront.values) {
+        for (final option in options) {
+          final state = cleanDashboardFilterValue(option.estado);
+          final municipality = cleanDashboardFilterValue(option.municipio);
+          if (state.isNotEmpty) {
+            states.add(state);
+          }
+          if (municipality.isNotEmpty) {
+            municipalities.add(municipality);
+            if (state.isNotEmpty) {
+              municipalitiesByState.putIfAbsent(state, () => <String>{}).add(municipality);
+            }
+          }
+        }
+      }
+    } catch (_) {
+      // Graceful fallback handled by current dashboard data.
+    }
+  }
+
+  final sortedStates = states.toList(growable: false)
+    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+  final sortedMunicipalities = municipalities.toList(growable: false)
+    ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+
+  return _DashboardProjectCoverageOptions(
+    states: sortedStates,
+    municipalities: sortedMunicipalities,
+    municipalitiesByState: {
+      for (final entry in municipalitiesByState.entries)
+        entry.key: (entry.value.toList(growable: false)..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()))),
+    },
+  );
+});
+
+bool dashboardMatchesKpiFilter(ValidationQueueItem item, DashboardKpiFilter filter) {
+  final normalizedStatus = normalizeDashboardExecutionStatus(item.status);
+  return switch (filter) {
+    DashboardKpiFilter.all => true,
+    DashboardKpiFilter.pending =>
+      normalizedStatus == 'PENDIENTE' || normalizedStatus == 'REVISION_PENDIENTE',
+    DashboardKpiFilter.approved => normalizedStatus == 'COMPLETADA',
+    DashboardKpiFilter.rejected => normalizedStatus == 'RECHAZADO',
+    DashboardKpiFilter.needsFix => normalizedStatus == 'EN_CURSO',
+  };
+}
+
+bool isCriticalDashboardQueueItem(ValidationQueueItem item) {
+  final normalizedRisk = normalizeDashboardRiskToken(item.risk);
+  return normalizedRisk == 'alto' ||
+      normalizedRisk == 'prioritario' ||
+      item.hasConflicts;
+}
+
+String dashboardEffectiveMapStatus(DashboardGeoPoint point) {
+  final reviewStatus = normalizeDashboardReviewStatus(point.reviewStatus);
+  final reviewDecision = normalizeDashboardReviewStatus(point.reviewDecision ?? '');
+  if (reviewStatus == 'APROBADO' || reviewDecision == 'APROBADO') {
+    return 'COMPLETADA';
+  }
+  if (reviewStatus == 'RECHAZADO' || reviewDecision == 'RECHAZADO') {
+    return 'RECHAZADO';
+  }
+  return normalizeDashboardExecutionStatus(point.status);
+}
+
+bool dashboardPointMatchesPlanningFilters(
+  DashboardGeoPoint item, {
+  required String statusFilter,
+  required String riskFilter,
+  required String reviewFilter,
+  required String userFilter,
+  required String frontFilter,
+  required String stateFilter,
+  required String municipalityFilter,
+  required String searchQuery,
+}) {
+  final normalizedStatusFilter = statusFilter == 'todos'
+      ? 'todos'
+      : normalizeDashboardExecutionStatus(statusFilter);
+  final normalizedRiskFilter = riskFilter == 'todos'
+      ? 'todos'
+      : normalizeDashboardRiskToken(riskFilter);
+  final normalizedReviewFilter = reviewFilter == 'todos'
+      ? 'todos'
+      : normalizeDashboardReviewStatus(reviewFilter);
+
+  final byStatus = normalizedStatusFilter == 'todos' ||
+      dashboardEffectiveMapStatus(item) == normalizedStatusFilter;
+  final byRisk = normalizedRiskFilter == 'todos' ||
+      normalizeDashboardRiskToken(item.risk) == normalizedRiskFilter;
+  final byReview = normalizedReviewFilter == 'todos' ||
+      normalizeDashboardReviewStatus(item.reviewStatus) == normalizedReviewFilter ||
+      normalizeDashboardReviewStatus(item.reviewDecision ?? '') == normalizedReviewFilter;
+
+  final searchable = dashboardNormalizeSearchToken(
+    [
+      item.label,
+      item.front,
+      item.municipality,
+      item.state,
+      item.assignedName ?? '',
+    ].join(' '),
+  );
+  final bySearch = dashboardMatchesSearchQuery(searchable, searchQuery);
+  final byUser = dashboardMatchesUserFilter(item.assignedName, userFilter);
+  final byFront = dashboardMatchesValueFilter(item.front, frontFilter);
+  final byState = dashboardMatchesValueFilter(item.state, stateFilter);
+  final byMunicipality = dashboardMatchesValueFilter(item.municipality, municipalityFilter);
+
+  return byStatus && byRisk && byReview && bySearch && byUser && byFront && byState && byMunicipality;
+}
+
 class DashboardPage extends ConsumerStatefulWidget {
   const DashboardPage({super.key});
 
@@ -119,16 +576,21 @@ class DashboardPage extends ConsumerStatefulWidget {
 class _DashboardPageState extends ConsumerState<DashboardPage> {
   DashboardKpiFilter _kpiFilter = DashboardKpiFilter.all;
   String _planningStatusFilter = 'todos';
-  String _planningRiskFilter = 'todos';
-  String _planningReviewFilter = 'todos';
-  String _mapSearchQuery = '';
+  final String _planningRiskFilter = 'todos';
+  final String _planningReviewFilter = 'todos';
+  String _planningUserFilter = 'Todo';
+  final String _planningFrontFilter = 'Todo';
+  final String _planningStateFilter = 'Todo';
+  final String _planningMunicipalityFilter = 'Todo';
+  final List<String> _searchFilterTags = [];
+  final TextEditingController _searchFilterController = TextEditingController();
   String? _selectedMapPointId;
-  bool _mapFiltersExpanded = false;
   final ScrollController _frontProgressScrollController = ScrollController();
   final ScrollController _mapLocationsScrollController = ScrollController();
 
   @override
   void dispose() {
+    _searchFilterController.dispose();
     _frontProgressScrollController.dispose();
     _mapLocationsScrollController.dispose();
     super.dispose();
@@ -167,6 +629,13 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ),
         ),
         data: (data) {
+          final projectUsers = ref.watch(dashboardProjectUsersProvider).valueOrNull ?? const <String>[];
+          final userOptions = resolveDashboardUserOptions(
+            projectUsers: projectUsers,
+            queueItems: data.queueItems,
+            geoPoints: data.geoPoints,
+          );
+          final dashboardView = _buildFilteredDashboardData(data);
           final filteredQueue = _applyFilters(data.queueItems);
           return SingleChildScrollView(
             child: Padding(
@@ -174,9 +643,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildHeader(data, range, selectedProjectId, projectOptions),
+                  _buildHeader(dashboardView, range, selectedProjectId, projectOptions, userOptions),
                   const SizedBox(height: 16),
-                  _buildKpis(context, data),
+                  _buildKpis(context, dashboardView),
+                  const SizedBox(height: 16),
+                  _buildDashboardFiltersCard(data),
                   const SizedBox(height: 16),
                   LayoutBuilder(
                     builder: (context, constraints) {
@@ -184,11 +655,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                       if (isCompact) {
                         return Column(
                           children: [
-                            _buildStatusOverviewCard(data),
+                            _buildStatusOverviewCard(dashboardView),
                             const SizedBox(height: 16),
-                            _buildProgressCard(data),
+                            _buildProgressCard(dashboardView),
                             const SizedBox(height: 16),
-                            _buildMapsPanel(data),
+                            _buildMapsPanel(dashboardView),
                           ],
                         );
                       }
@@ -201,19 +672,19 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                               children: [
                                 Expanded(
                                   flex: 4,
-                                  child: _buildStatusOverviewCard(data),
+                                  child: _buildStatusOverviewCard(dashboardView),
                                 ),
                                 const SizedBox(width: 16),
                                 Expanded(
                                   flex: 6,
-                                  child: _buildProgressCard(data),
+                                  child: _buildProgressCard(dashboardView),
                                 ),
                               ],
                             ),
                           ),
                           const SizedBox(height: 16),
                           _buildMapsPanel(
-                            data,
+                            dashboardView,
                             mapHeight: 360,
                           ),
                         ],
@@ -236,6 +707,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     DashboardRange range,
     String selectedProjectId,
     List<String> projectOptions,
+    List<String> userOptions,
   ) {
     final activeFronts = data.frontProgress
         .where((item) => item.front.trim().isNotEmpty)
@@ -291,6 +763,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               ),
               _buildProjectSelector(selectedProjectId, projectOptions),
               const SizedBox(width: 12),
+              _buildUserSelector(userOptions),
+              const SizedBox(width: 12),
               _buildRangeSelector(range),
               const SizedBox(width: 8),
               IconButton(
@@ -317,7 +791,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   Widget _buildProjectSelector(String selectedProjectId, List<String> projectOptions) {
-    final selectedValue = selectedProjectId;
+    final selectedValue = projectOptions.contains(selectedProjectId) ? selectedProjectId : '';
     return DropdownButtonHideUnderline(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10),
@@ -340,6 +814,32 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               (projectId) => DropdownMenuItem(value: projectId, child: Text(projectId)),
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUserSelector(List<String> userOptions) {
+    final selectedValue = userOptions.contains(_planningUserFilter) ? _planningUserFilter : 'Todo';
+    return DropdownButtonHideUnderline(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: DropdownButton<String>(
+          value: selectedValue,
+          dropdownColor: SaoColors.gray800,
+          iconEnabledColor: Colors.white,
+          style: const TextStyle(color: Colors.white),
+          onChanged: (value) {
+            if (value == null) return;
+            setState(() => _planningUserFilter = value);
+          },
+          items: userOptions
+              .map((value) => DropdownMenuItem(value: value, child: Text(value, overflow: TextOverflow.ellipsis)))
+              .toList(growable: false),
         ),
       ),
     );
@@ -389,6 +889,34 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             DropdownMenuItem(value: DashboardRange.all, child: Text('Todo')),
           ],
         ),
+      ),
+    );
+  }
+
+  Widget _buildDashboardFiltersCard(DashboardData data) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: SaoColors.surfaceFor(context),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: SaoColors.borderFor(context)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Búsqueda y filtros',
+            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Escribe un frente, estado o municipio y presiona Enter para agregar una etiqueta de filtro.',
+            style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context)),
+          ),
+          const SizedBox(height: 12),
+          _buildCompactMapFilters(data),
+        ],
       ),
     );
   }
@@ -726,7 +1254,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           points: planningPoints,
           summary: 'Planeacion · ${planningPoints.length} puntos',
           emptyMessage: 'Sin actividades visibles para esos filtros, incluso sin reporte',
-          filtersSection: _buildCompactMapFilters(),
+          filtersSection: const SizedBox.shrink(),
           mapHeight: mapHeight,
           minCardHeight: minCardHeight,
         ),
@@ -1072,18 +1600,55 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  Widget _buildCompactMapFilters() {
-    final activeCount = [_planningStatusFilter, _planningRiskFilter, _planningReviewFilter]
-        .where((value) => value != 'todos')
-        .length;
+  Widget _buildCompactMapFilters(DashboardData data) {
+    final activeCount = _searchFilterTags.length;
+
+    void addTag(String raw) {
+      final clean = cleanDashboardFilterValue(raw);
+      if (clean.isEmpty) return;
+      final exists = _searchFilterTags.any(
+        (tag) => _dashboardCanonicalToken(tag) == _dashboardCanonicalToken(clean),
+      );
+      if (exists) {
+        _searchFilterController.clear();
+        return;
+      }
+      setState(() {
+        _searchFilterTags.add(clean);
+        _searchFilterController.clear();
+      });
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextField(
-          onChanged: (value) => setState(() => _mapSearchQuery = value.trim().toLowerCase()),
+          controller: _searchFilterController,
+          onSubmitted: addTag,
           decoration: InputDecoration(
-            hintText: 'Buscar por actividad, frente, municipio o estado',
+            hintText: 'Escribe y presiona Enter para filtrar por frente, estado o municipio',
             prefixIcon: const Icon(Icons.search_rounded),
+            suffixIcon: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  tooltip: 'Agregar filtro',
+                  onPressed: () => addTag(_searchFilterController.text),
+                  icon: const Icon(Icons.add_rounded),
+                ),
+                if (activeCount > 0)
+                  IconButton(
+                    tooltip: 'Limpiar filtros',
+                    onPressed: () {
+                      setState(() {
+                        _searchFilterTags.clear();
+                        _searchFilterController.clear();
+                      });
+                    },
+                    icon: const Icon(Icons.clear_rounded),
+                  ),
+              ],
+            ),
             isDense: true,
             filled: true,
             fillColor: SaoColors.surfaceMutedFor(context),
@@ -1094,98 +1659,31 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          children: [
-            OutlinedButton.icon(
-              onPressed: () => setState(() => _mapFiltersExpanded = !_mapFiltersExpanded),
-              icon: Icon(
-                _mapFiltersExpanded ? Icons.filter_alt_off_rounded : Icons.filter_alt_rounded,
-                size: 16,
-              ),
-              label: Text('Filtros del mapa ($activeCount activos)'),
-            ),
-            if (activeCount > 0 || _mapSearchQuery.isNotEmpty) ...[
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {
-                  setState(() {
-                    _planningStatusFilter = 'todos';
-                    _planningRiskFilter = 'todos';
-                    _planningReviewFilter = 'todos';
-                    _mapSearchQuery = '';
-                  });
-                },
-                child: const Text('Limpiar'),
-              ),
-            ],
-          ],
-        ),
-        if (_mapFiltersExpanded) ...[
-          const SizedBox(height: 8),
-          SizedBox(
-            height: 116,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
-              children: [
-                _buildInlineFilterGroup(
-                  title: 'Estado',
-                  chips: [
-                    _mapFilterChip('Todos', _planningStatusFilter == 'todos', () => setState(() => _planningStatusFilter = 'todos'), SaoColors.gray600),
-                    _mapFilterChip('Pendiente', _planningStatusFilter == 'PENDIENTE', () => setState(() => _planningStatusFilter = 'PENDIENTE'), SaoColors.statusPendiente),
-                    _mapFilterChip('En curso', _planningStatusFilter == 'EN_CURSO', () => setState(() => _planningStatusFilter = 'EN_CURSO'), SaoColors.statusEnCampo),
-                    _mapFilterChip('En revision', _planningStatusFilter == 'REVISION_PENDIENTE', () => setState(() => _planningStatusFilter = 'REVISION_PENDIENTE'), SaoColors.statusEnValidacion),
-                    _mapFilterChip('Completada', _planningStatusFilter == 'COMPLETADA', () => setState(() => _planningStatusFilter = 'COMPLETADA'), SaoColors.statusAprobado),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                _buildInlineFilterGroup(
-                  title: 'Riesgo',
-                  chips: [
-                    _mapFilterChip('Todos', _planningRiskFilter == 'todos', () => setState(() => _planningRiskFilter = 'todos'), SaoColors.gray600),
-                    _mapFilterChip('Bajo', _planningRiskFilter == 'bajo', () => setState(() => _planningRiskFilter = 'bajo'), SaoColors.riskLow),
-                    _mapFilterChip('Medio', _planningRiskFilter == 'medio', () => setState(() => _planningRiskFilter = 'medio'), SaoColors.riskMedium),
-                    _mapFilterChip('Alto', _planningRiskFilter == 'alto', () => setState(() => _planningRiskFilter = 'alto'), SaoColors.riskHigh),
-                    _mapFilterChip('Prioritario', _planningRiskFilter == 'prioritario', () => setState(() => _planningRiskFilter = 'prioritario'), SaoColors.riskPriority),
-                  ],
-                ),
-                const SizedBox(width: 12),
-                _buildInlineFilterGroup(
-                  title: 'Revision',
-                  chips: [
-                    _mapFilterChip('Todas', _planningReviewFilter == 'todos', () => setState(() => _planningReviewFilter = 'todos'), SaoColors.gray600),
-                    _mapFilterChip('Aprobada', _planningReviewFilter == 'APROBADO', () => setState(() => _planningReviewFilter = 'APROBADO'), SaoColors.statusAprobado),
-                    _mapFilterChip('Pendiente', _planningReviewFilter == 'PENDIENTE_REVISION', () => setState(() => _planningReviewFilter = 'PENDIENTE_REVISION'), SaoColors.statusEnValidacion),
-                    _mapFilterChip('Rechazada', _planningReviewFilter == 'RECHAZADO', () => setState(() => _planningReviewFilter = 'RECHAZADO'), SaoColors.statusRechazado),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ],
-    );
-  }
-
-  Widget _buildInlineFilterGroup({required String title, required List<Widget> chips}) {
-    return Container(
-      width: 280,
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: SaoColors.surfaceMutedFor(context),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: SaoColors.borderFor(context)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+        if (_searchFilterTags.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _searchFilterTags
+                .map(
+                  (tag) => InputChip(
+                    label: Text(tag),
+                    onDeleted: () {
+                      setState(() {
+                        _searchFilterTags.removeWhere(
+                          (value) => _dashboardCanonicalToken(value) == _dashboardCanonicalToken(tag),
+                        );
+                      });
+                    },
+                  ),
+                )
+                .toList(growable: false),
+          )
+        else
           Text(
-            title,
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: SaoColors.textMutedFor(context)),
+            'Sin etiquetas activas. Ejemplos: TMQ, Guanajuato, Doctor Mora, Frente Norte.',
+            style: TextStyle(fontSize: 12, color: SaoColors.textMutedFor(context)),
           ),
-          const SizedBox(height: 6),
-          Wrap(spacing: 8, runSpacing: 8, children: chips),
-        ],
-      ),
+      ],
     );
   }
 
@@ -1279,36 +1777,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     return result;
   }
 
-  Widget _mapFilterChip(String label, bool active, VoidCallback onTap, Color color) {
-    final inactiveBorder = color == SaoColors.gray600 ? SaoColors.gray300 : color.withValues(alpha: 0.55);
-    final inactiveText = color == SaoColors.gray600 ? SaoColors.gray600 : color.withValues(alpha: 0.95);
-    final inactiveBg = color == SaoColors.gray600 ? SaoColors.surfaceRaisedFor(context) : color.withValues(alpha: 0.06);
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(999),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: active ? color.withValues(alpha: 0.16) : inactiveBg,
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(
-            color: active ? color : (color == SaoColors.gray600 ? SaoColors.borderFor(context) : inactiveBorder),
-          ),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: active ? color : inactiveText,
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCriticalQueueTable(List<ValidationQueueItem> items) {
-    final sorted = [...items]
+    final sorted = items.where(isCriticalDashboardQueueItem).toList()
       ..sort((a, b) {
         if (a.isOver24h == b.isOver24h) {
           return b.createdAt.compareTo(a.createdAt);
@@ -1329,7 +1799,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           const Text('Pendientes críticos por revisar', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
           const SizedBox(height: 4),
           const Text(
-            'Actividades con mayor rezago operativo o necesidad de atención inmediata.',
+            'Solo se muestran actividades con riesgo alto, prioritario o con conflictos de validación.',
             style: TextStyle(color: SaoColors.gray600),
           ),
           const SizedBox(height: 12),
@@ -1337,7 +1807,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             const _EmptyState(
               icon: Icons.local_cafe_rounded,
               iconColor: SaoColors.success,
-              message: 'Todo al dia. No hay validaciones criticas pendientes con rezago mayor a 24h',
+              message: 'No hay actividades de riesgo alto, prioritario o con conflictos en esta vista',
             )
           else
             SingleChildScrollView(
@@ -1401,34 +1871,207 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
-  List<ValidationQueueItem> _applyFilters(List<ValidationQueueItem> items) {
+  String _encodedDashboardSearchQuery() {
+    return _searchFilterTags.join('|');
+  }
+
+  bool _matchesDashboardQueueFilters(ValidationQueueItem item) {
+    final encodedSearch = _encodedDashboardSearchQuery();
+    final normalizedStatus = normalizeDashboardExecutionStatus(item.status);
+    final normalizedRisk = normalizeDashboardRiskToken(item.risk);
+    final normalizedReview = normalizeDashboardReviewStatus(item.status);
+
+    if (_planningStatusFilter != 'todos' &&
+        normalizedStatus != normalizeDashboardExecutionStatus(_planningStatusFilter)) {
+      return false;
+    }
+    if (_planningRiskFilter != 'todos' &&
+        normalizedRisk != normalizeDashboardRiskToken(_planningRiskFilter)) {
+      return false;
+    }
+    if (_planningReviewFilter != 'todos') {
+      final selectedReview = normalizeDashboardReviewStatus(_planningReviewFilter);
+      if (normalizedReview != selectedReview && normalizedStatus != normalizeDashboardExecutionStatus(_planningReviewFilter)) {
+        return false;
+      }
+    }
+    if (!dashboardMatchesUserFilter(item.userName, _planningUserFilter)) return false;
+    if (!dashboardMatchesValueFilter(item.front, _planningFrontFilter)) return false;
+    if (!dashboardMatchesValueFilter(item.state, _planningStateFilter)) return false;
+    if (!dashboardMatchesValueFilter(item.municipality, _planningMunicipalityFilter)) return false;
+
+    final searchable = dashboardNormalizeSearchToken(
+      [
+        item.userName,
+        item.activityType,
+        item.pk,
+        item.front,
+        item.municipality,
+        item.state,
+      ].join(' '),
+    );
+    return dashboardMatchesSearchQuery(searchable, encodedSearch);
+  }
+
+  bool _hasDashboardFiltersActive() {
+    return _searchFilterTags.isNotEmpty ||
+        !dashboardMatchesValueFilter('', _planningStatusFilter) ||
+        !dashboardMatchesValueFilter('', _planningRiskFilter) ||
+        !dashboardMatchesValueFilter('', _planningReviewFilter) ||
+        !dashboardMatchesValueFilter('', _planningUserFilter) ||
+        !dashboardMatchesValueFilter('', _planningFrontFilter) ||
+        !dashboardMatchesValueFilter('', _planningStateFilter) ||
+        !dashboardMatchesValueFilter('', _planningMunicipalityFilter);
+  }
+
+  DashboardData _buildFilteredDashboardData(DashboardData data) {
+    if (!_hasDashboardFiltersActive()) {
+      return data;
+    }
+
+    final filteredGeoPoints = _filterPlanningMapPoints(data.geoPoints);
+    final filteredQueue = _applyFilters(data.queueItems, includeKpiFilter: false);
+    final riskCounts = <String, int>{'bajo': 0, 'medio': 0, 'alto': 0, 'prioritario': 0};
+    final frontStats = <String, List<int>>{};
+    var total = 0;
+    var approved = 0;
+    var pending = 0;
+    var rejected = 0;
+    var needsFix = 0;
+
+    void registerFront(String rawFront, bool executed) {
+      final front = cleanDashboardFilterValue(rawFront);
+      if (front.isEmpty) return;
+      final current = frontStats.putIfAbsent(front, () => [0, 0]);
+      current[0] += 1;
+      if (executed) {
+        current[1] += 1;
+      }
+    }
+
+    if (filteredGeoPoints.isNotEmpty) {
+      for (final item in filteredGeoPoints) {
+        total += 1;
+        final status = _effectiveMapStatus(item);
+        switch (status) {
+          case 'COMPLETADA':
+            approved += 1;
+            break;
+          case 'RECHAZADO':
+            rejected += 1;
+            break;
+          case 'EN_CURSO':
+            needsFix += 1;
+            break;
+          case 'REVISION_PENDIENTE':
+          case 'PENDIENTE':
+          default:
+            pending += 1;
+            break;
+        }
+        final normalizedRisk = normalizeDashboardRiskToken(item.risk);
+        if (riskCounts.containsKey(normalizedRisk)) {
+          riskCounts[normalizedRisk] = (riskCounts[normalizedRisk] ?? 0) + 1;
+        }
+        registerFront(item.front, status == 'COMPLETADA');
+      }
+    } else {
+      for (final item in filteredQueue) {
+        total += 1;
+        final status = normalizeDashboardExecutionStatus(item.status);
+        switch (status) {
+          case 'COMPLETADA':
+            approved += 1;
+            break;
+          case 'RECHAZADO':
+            rejected += 1;
+            break;
+          case 'EN_CURSO':
+            needsFix += 1;
+            break;
+          case 'REVISION_PENDIENTE':
+          case 'PENDIENTE':
+          default:
+            pending += 1;
+            break;
+        }
+        final normalizedRisk = normalizeDashboardRiskToken(item.risk);
+        if (riskCounts.containsKey(normalizedRisk)) {
+          riskCounts[normalizedRisk] = (riskCounts[normalizedRisk] ?? 0) + 1;
+        }
+        registerFront(item.front, status == 'COMPLETADA');
+      }
+    }
+
+    final frontProgress = frontStats.entries
+        .map((entry) => FrontProgressItem(front: entry.key, planned: entry.value[0], executed: entry.value[1]))
+        .toList(growable: false)
+      ..sort((a, b) => a.front.toLowerCase().compareTo(b.front.toLowerCase()));
+
+    final locationCounts = filteredGeoPoints.isNotEmpty
+        ? _locationCountsFor(filteredGeoPoints)
+        : _locationCountsForQueue(filteredQueue);
+
+    return DashboardData(
+      pendingCount: pending,
+      approvedCount: approved,
+      rejectedCount: rejected,
+      needsFixCount: needsFix,
+      totalInQueue: total,
+      projectId: data.projectId,
+      range: data.range,
+      approvedTrend: DashboardTrend(current: approved, previous: approved),
+      rejectedTrend: DashboardTrend(current: rejected, previous: rejected),
+      needsFixTrend: DashboardTrend(current: needsFix, previous: needsFix),
+      pendingTrend: DashboardTrend(current: pending, previous: pending),
+      queueItems: filteredQueue,
+      geoPoints: filteredGeoPoints,
+      topErrors: data.topErrors,
+      locationCounts: locationCounts,
+      riskCounts: riskCounts,
+      frontProgress: frontProgress,
+      avgValidationHours: total == 0 ? 0 : data.avgValidationHours,
+    );
+  }
+
+  List<LocationCountItem> _locationCountsForQueue(List<ValidationQueueItem> items) {
+    final counts = <String, int>{};
+    for (final item in items) {
+      final label = item.municipality.isNotEmpty
+          ? '${item.municipality}${item.state.isNotEmpty ? ' / ${item.state}' : ''}'
+          : (item.front.isNotEmpty ? item.front : 'Sin ubicacion');
+      counts[label] = (counts[label] ?? 0) + 1;
+    }
+    final result = counts.entries
+        .map((entry) => LocationCountItem(label: entry.key, count: entry.value))
+        .toList(growable: false);
+    result.sort((a, b) => b.count.compareTo(a.count));
+    return result;
+  }
+
+  List<ValidationQueueItem> _applyFilters(List<ValidationQueueItem> items, {bool includeKpiFilter = true}) {
     return items.where((item) {
-      final byKpi = switch (_kpiFilter) {
-        DashboardKpiFilter.all => true,
-        DashboardKpiFilter.pending => item.status == 'PENDIENTE_REVISION',
-        DashboardKpiFilter.approved => item.status == 'APROBADO',
-        DashboardKpiFilter.rejected => item.status == 'RECHAZADO',
-        DashboardKpiFilter.needsFix => item.status == 'NECESITA_CORRECCION' || item.status == 'EN_CURSO',
-      };
-      return byKpi;
+      if (includeKpiFilter && !dashboardMatchesKpiFilter(item, _kpiFilter)) return false;
+      return _matchesDashboardQueueFilters(item);
     }).toList(growable: false);
   }
 
   List<DashboardGeoPoint> _filterPlanningMapPoints(List<DashboardGeoPoint> items) {
-    return items.where((item) {
-      final byStatus = _planningStatusFilter == 'todos' || _effectiveMapStatus(item) == _planningStatusFilter;
-      final byRisk = _planningRiskFilter == 'todos' || item.risk == _planningRiskFilter;
-      final byReview = _planningReviewFilter == 'todos' || _normalizeReviewStatus(item.reviewStatus) == _planningReviewFilter;
-      final searchable = [
-        item.label,
-        item.front,
-        item.municipality,
-        item.state,
-        item.assignedName ?? '',
-      ].join(' ').toLowerCase();
-      final bySearch = _mapSearchQuery.isEmpty || searchable.contains(_mapSearchQuery);
-      return byStatus && byRisk && byReview && bySearch;
-    }).toList(growable: false);
+    return items
+        .where(
+          (item) => dashboardPointMatchesPlanningFilters(
+            item,
+            statusFilter: _planningStatusFilter,
+            riskFilter: _planningRiskFilter,
+            reviewFilter: _planningReviewFilter,
+            userFilter: _planningUserFilter,
+            frontFilter: _planningFrontFilter,
+            stateFilter: _planningStateFilter,
+            municipalityFilter: _planningMunicipalityFilter,
+            searchQuery: _encodedDashboardSearchQuery(),
+          ),
+        )
+        .toList(growable: false);
   }
 
   List<LocationCountItem> _locationCountsFor(List<DashboardGeoPoint> points) {
@@ -1447,38 +2090,15 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   String _normalizeExecutionStatus(String raw) {
-    final normalized = raw.trim().toUpperCase().replaceAll(' ', '_');
-    if (normalized == 'PENDIENTE_REVISION') return 'REVISION_PENDIENTE';
-    if (normalized == 'EN_REVISION') return 'REVISION_PENDIENTE';
-    if (normalized == 'PROGRAMADA') return 'PENDIENTE';
-    if (normalized == 'APROBADA' || normalized == 'APROBADO' || normalized == 'APPROVED') return 'COMPLETADA';
-    return normalized;
+    return normalizeDashboardExecutionStatus(raw);
   }
 
   String _effectiveMapStatus(DashboardGeoPoint point) {
-    final reviewStatus = _normalizeReviewStatus(point.reviewStatus);
-    final reviewDecision = _normalizeReviewStatus(point.reviewDecision ?? '');
-    if (reviewStatus == 'APROBADO' || reviewDecision == 'APROBADO') {
-      return 'COMPLETADA';
-    }
-    if (reviewStatus == 'RECHAZADO' || reviewDecision == 'RECHAZADO') {
-      return 'RECHAZADO';
-    }
-    return _normalizeExecutionStatus(point.status);
+    return dashboardEffectiveMapStatus(point);
   }
 
   String _normalizeReviewStatus(String raw) {
-    final normalized = raw.trim().toUpperCase().replaceAll(' ', '_');
-    if (normalized == 'APROBADA' || normalized == 'APROBADO' || normalized == 'APPROVED' || normalized == 'APPROVE') {
-      return 'APROBADO';
-    }
-    if (normalized == 'RECHAZADA' || normalized == 'RECHAZADO' || normalized == 'REJECTED' || normalized == 'REJECT') {
-      return 'RECHAZADO';
-    }
-    if (normalized == 'PENDIENTE' || normalized == 'EN_REVISION' || normalized == 'PENDING') {
-      return 'PENDIENTE_REVISION';
-    }
-    return normalized;
+    return normalizeDashboardReviewStatus(raw);
   }
 
   String _trendSubtitle(DashboardTrend trend) {

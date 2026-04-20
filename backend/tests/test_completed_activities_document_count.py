@@ -29,6 +29,9 @@ class _FakeCollection:
     def where(self, *_args, **_kwargs):
         return _FakeQuery(self._rows)
 
+    def stream(self):
+        return [_FakeSnapshot(row) for row in self._rows]
+
 
 class _FakeClient:
     def __init__(self, rows):
@@ -96,6 +99,81 @@ def test_normalize_related_links_preserves_tracking_metadata():
     assert normalized[0]['reason'] == 'Mismo tema social'
     assert normalized[0]['next_action'] == 'Llamada con ejidatarios'
     assert normalized[1]['relation_type'] == 'seguimiento'
+
+
+def test_list_completed_activities_keeps_all_project_users_but_excludes_other_projects(monkeypatch):
+    rows = [
+        {
+            'uuid': 'act-own',
+            'project_id': 'TMQ',
+            'assigned_to_user_id': 'operativo-1',
+            'review_decision': 'APPROVE',
+            'activity_type_code': 'SOCIAL',
+            'title': 'Actividad propia',
+            'created_at': datetime(2026, 4, 18, tzinfo=timezone.utc),
+        },
+        {
+            'uuid': 'act-other-user',
+            'project_id': 'TMQ',
+            'assigned_to_user_id': 'operativo-2',
+            'review_decision': 'APPROVE',
+            'activity_type_code': 'AMBIENTAL',
+            'title': 'Actividad compañera',
+            'created_at': datetime(2026, 4, 19, tzinfo=timezone.utc),
+        },
+        {
+            'uuid': 'act-other-project',
+            'project_id': 'TAP',
+            'assigned_to_user_id': 'operativo-3',
+            'review_decision': 'APPROVE',
+            'activity_type_code': 'SEGURIDAD',
+            'title': 'Proyecto ajeno',
+            'created_at': datetime(2026, 4, 17, tzinfo=timezone.utc),
+        },
+    ]
+    current_user = type(
+        'Principal',
+        (),
+        {
+            'id': 'operativo-1',
+            'roles': ['OPERATIVO'],
+            'project_ids': ['TMQ'],
+            'permission_scopes': [],
+        },
+    )()
+
+    monkeypatch.setattr(completed_api, 'get_firestore_client', lambda: _FakeClient(rows))
+    monkeypatch.setattr(completed_api, '_build_fronts_map', lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(completed_api, '_load_project_front_scope_map', lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(
+        completed_api,
+        '_build_users_map',
+        lambda *_args, **_kwargs: {
+            'operativo-1': 'Operativo Uno',
+            'operativo-2': 'Operativo Dos',
+            'operativo-3': 'Operativo Tres',
+        },
+    )
+    monkeypatch.setattr(completed_api, '_evidence_count_map', lambda *_args, **_kwargs: {})
+    monkeypatch.setattr(completed_api, '_document_count_map', lambda *_args, **_kwargs: {})
+
+    payload = completed_api.list_completed_activities(
+        project_id=None,
+        frente=None,
+        tema=None,
+        estado=None,
+        municipio=None,
+        usuario=None,
+        q=None,
+        page=1,
+        page_size=50,
+        _current_user=current_user,
+    )
+    ids = [item['id'] for item in payload['items']]
+
+    assert 'act-own' in ids
+    assert 'act-other-user' in ids
+    assert 'act-other-project' not in ids
 
 
 def test_supplemental_audit_trail_infers_review_and_report_events():

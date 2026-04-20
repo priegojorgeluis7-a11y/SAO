@@ -111,9 +111,11 @@ class ValidationQueueItem {
   final String pk;
   final String front;
   final String municipality;
+  final String state;
   final String risk;
   final String severity;
   final String status;
+  final bool? _hasConflicts;
   final DateTime createdAt;
   final double? lat;
   final double? lon;
@@ -126,13 +128,17 @@ class ValidationQueueItem {
     required this.pk,
     required this.front,
     required this.municipality,
+    this.state = '',
     required this.risk,
     required this.severity,
     required this.status,
+    bool? hasConflicts,
     required this.createdAt,
     this.lat,
     this.lon,
-  });
+  }) : _hasConflicts = hasConflicts;
+
+  bool get hasConflicts => _hasConflicts ?? false;
 
   bool get isOver24h => DateTime.now().toUtc().difference(createdAt.toUtc()) > const Duration(hours: 24);
 }
@@ -181,90 +187,133 @@ class DashboardActivityMetrics {
 
 final selectedDashboardRangeProvider = StateProvider<DashboardRange>((_) => DashboardRange.today);
 
+String resolveDashboardProjectSelection(
+  String activeProjectId,
+  List<String> availableProjects,
+) {
+  final normalizedActive = activeProjectId.trim().toUpperCase();
+  if (normalizedActive.isEmpty) return '';
+  final normalizedAvailable = availableProjects
+      .map((projectId) => projectId.trim().toUpperCase())
+      .where((projectId) => projectId.isNotEmpty)
+      .toSet();
+  if (normalizedAvailable.isEmpty || normalizedAvailable.contains(normalizedActive)) {
+    return normalizedActive;
+  }
+  return '';
+}
+
 final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
-  const client = BackendApiClient();
+  final client = ref.watch(backendApiClientProvider);
   final user = ref.watch(currentAppUserProvider);
   final activeProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
   final availableProjects = await ref.watch(availableProjectsProvider.future);
+  final effectiveProjectId = resolveDashboardProjectSelection(activeProjectId, availableProjects);
   final range = ref.watch(selectedDashboardRangeProvider);
 
-  final now = DateTime.now().toUtc();
+  final now = DateTime.now();
   final currentStart = _rangeStart(now, range);
-  final projectQuery = activeProjectId.isEmpty
+  final currentEnd = _rangeEnd(now, range);
+  final projectQuery = effectiveProjectId.isEmpty
       ? ''
-      : '?project_id=${Uri.encodeQueryComponent(activeProjectId)}';
+      : '?project_id=${Uri.encodeQueryComponent(effectiveProjectId)}';
 
   try {
     final decoded = await _tryGetJsonMap(client, '/api/v1/dashboard/kpis$projectQuery');
-    if (decoded == null) return _empty(user, range);
 
     final queueDecoded = await _tryGetJsonMap(client, '/api/v1/review/queue$projectQuery');
     final reportsCurrent = await _tryGetJsonMap(
       client,
-      '/api/v1/reports/activities${_reportsQuery(projectId: activeProjectId, from: currentStart, to: now)}',
+      '/api/v1/reports/activities${_reportsQuery(projectId: effectiveProjectId, from: currentStart, to: currentEnd)}',
     );
     final activitiesDecoded = await _loadActivitiesDataset(
       client,
-      activeProjectId: activeProjectId,
+      activeProjectId: effectiveProjectId,
       availableProjects: availableProjects,
     );
 
-    final counters = decoded['kpis'] as Map<String, dynamic>? ?? decoded;
+    final counters = ((decoded?['kpis'] as Map<String, dynamic>?) ?? decoded ?? const <String, dynamic>{});
     final backlogByState = _asStringIntMap(counters['backlog_by_state']);
     final queueItemsRaw = queueDecoded?['items'] as List<dynamic>? ?? const [];
+    final queueSourceItems = queueItemsRaw
+        .whereType<Map<String, dynamic>>()
+        .toList(growable: false);
     final reportCurrentItems = (reportsCurrent?['items'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList(growable: false);
     final activityItems = (activitiesDecoded?['items'] as List<dynamic>? ?? const [])
         .whereType<Map<String, dynamic>>()
         .toList(growable: false);
-
-    final mergedSourceItems = mergeDashboardMapSourceItems(activityItems, reportCurrentItems);
-    final allActivityItems = activityItems.isNotEmpty ? activityItems : mergedSourceItems;
-    final activityScopeItems = filterDashboardItemsByRange(allActivityItems, range, now);
-    final mapSourceItems = filterDashboardItemsByRange(mergedSourceItems, range, now);
-    final visualItems = filterDashboardItemsByRange(
-      reportCurrentItems.isNotEmpty ? reportCurrentItems : allActivityItems,
-      range,
-      now,
+    final assignmentItems = await _loadAssignmentsDataset(
+      client,
+      activeProjectId: effectiveProjectId,
+      availableProjects: availableProjects,
+      from: currentStart,
+      to: currentEnd,
     );
+
+    final mergedActivityItems = mergeDashboardMapSourceItems(activityItems, assignmentItems);
+    final mergedSourceItems = mergeDashboardMapSourceItems(mergedActivityItems, reportCurrentItems);
+    final scopedSourceItems = scopeDashboardItemsToAssignments(mergedSourceItems, assignmentItems);
+    final hydratedQueueSourceItems = hydrateDashboardSubsetItems(
+      queueSourceItems,
+      mergedSourceItems,
+    );
+    final scopedQueueSourceItems = scopeDashboardItemsToAssignments(
+      hydratedQueueSourceItems,
+      assignmentItems,
+    );
+    final allActivityItems = scopedSourceItems.isNotEmpty ? scopedSourceItems : mergedSourceItems;
+    final activityScopeItems = filterDashboardItemsByRange(allActivityItems, range, now);
+    final mapSourceItems = filterDashboardItemsByRange(allActivityItems, range, now);
+    final filteredQueueSourceItems = filterDashboardItemsByRange(scopedQueueSourceItems, range, now);
+    final visualItems = filterDashboardItemsByRange(allActivityItems, range, now);
     final activityMetrics = summarizeDashboardActivityMetrics(activityScopeItems);
     final trendMetrics = buildDashboardTrends(allActivityItems, range, now);
+    final scopedPendingCount = activityMetrics.pending;
+    final scopedTotalCount = activityMetrics.total > 0
+        ? activityMetrics.total
+        : activityScopeItems.length;
+    final shouldUseScopedCounts = range != DashboardRange.all ||
+        activityItems.isNotEmpty ||
+        reportCurrentItems.isNotEmpty ||
+        assignmentItems.isNotEmpty;
 
-    final pendingCount = activityMetrics.total > 0
-        ? activityMetrics.pending
+    final pendingCount = shouldUseScopedCounts
+        ? scopedPendingCount
         : (counters['review_queue_count'] as num?)?.toInt() ??
             (counters['pending_review'] as num?)?.toInt() ??
             backlogByState['REVISION_PENDIENTE'] ??
             0;
-    final approvedCount = activityMetrics.total > 0
+    final approvedCount = shouldUseScopedCounts
         ? activityMetrics.approved
         : (counters['completed'] as num?)?.toInt() ??
             (counters['completed_today'] as num?)?.toInt() ??
             (counters['approved'] as num?)?.toInt() ??
             backlogByState['COMPLETADA'] ??
             0;
-    final rejectedCount = activityMetrics.total > 0
+    final rejectedCount = shouldUseScopedCounts
         ? activityMetrics.rejected
         : (counters['overdue_review_count'] as num?)?.toInt() ??
             (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ??
             0;
-    final needsFixCount = activityMetrics.total > 0
+    final needsFixCount = shouldUseScopedCounts
         ? activityMetrics.needsFix
         : (counters['in_progress'] as num?)?.toInt() ??
             (counters['pending_today'] as num?)?.toInt() ??
             backlogByState['EN_CURSO'] ??
             0;
 
-    final projectId = (decoded['project_id'] ?? 'N/A').toString();
+    final projectId = ((decoded ?? const <String, dynamic>{})['project_id'] ??
+            (effectiveProjectId.isEmpty ? 'ALL' : effectiveProjectId))
+        .toString();
 
-    final queueItems = queueItemsRaw
-        .whereType<Map<String, dynamic>>()
+    final queueItems = filteredQueueSourceItems
         .map<ValidationQueueItem>(_mapQueueItem)
         .toList(growable: false);
     final geoPoints = _buildGeoPoints(mapSourceItems);
 
-    final topErrors = _buildTopErrors(queueItemsRaw);
+    final topErrors = _buildTopErrors(filteredQueueSourceItems);
     final locationCounts = _buildLocationCounts(geoPoints).take(8).toList(growable: false);
     final riskCounts = _buildRiskCounts(geoPoints);
     final frontProgress = _buildFrontProgress(activityScopeItems);
@@ -275,18 +324,22 @@ final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async 
     final rejectedTrend = trendMetrics['rejected']!;
 
     final avgValidationHours = _computeAvgValidationHours(visualItems, now);
-    final totalInScope = activityMetrics.total > 0 ? activityMetrics.total : activityScopeItems.length;
+    final totalInScope = shouldUseScopedCounts
+        ? scopedTotalCount
+        : (activityMetrics.total > 0 ? activityMetrics.total : activityScopeItems.length);
 
     return DashboardData(
       pendingCount: pendingCount,
       approvedCount: approvedCount,
       rejectedCount: rejectedCount,
       needsFixCount: needsFixCount,
-        totalInQueue: totalInScope > 0
-            ? totalInScope
-            : (counters['total_activities'] as num?)?.toInt() ??
-                (counters['total'] as num?)?.toInt() ??
-                (pendingCount + approvedCount + rejectedCount + needsFixCount),
+      totalInQueue: shouldUseScopedCounts
+          ? totalInScope
+          : (totalInScope > 0
+              ? totalInScope
+              : (counters['total_activities'] as num?)?.toInt() ??
+                  (counters['total'] as num?)?.toInt() ??
+                  (pendingCount + approvedCount + rejectedCount + needsFixCount)),
       projectId: projectId,
       range: range,
       approvedTrend: approvedTrend,
@@ -421,6 +474,101 @@ List<Map<String, dynamic>> mergeDashboardMapSourceItems(
   ];
 }
 
+List<Map<String, dynamic>> hydrateDashboardSubsetItems(
+  List<Map<String, dynamic>> baseItems,
+  List<Map<String, dynamic>> overlayItems,
+) {
+  if (baseItems.isEmpty || overlayItems.isEmpty) {
+    return List<Map<String, dynamic>>.from(baseItems);
+  }
+
+  final overlaysById = <String, Map<String, dynamic>>{};
+  for (final raw in overlayItems) {
+    final id = _resolveDashboardPointId(raw);
+    if (id.isEmpty) continue;
+    overlaysById[id] = Map<String, dynamic>.from(raw);
+  }
+
+  void mergeInto(Map<String, dynamic> target, Map<String, dynamic> source) {
+    for (final entry in source.entries) {
+      if (_isMeaningfulValue(entry.value)) {
+        target[entry.key] = entry.value;
+      }
+    }
+  }
+
+  return baseItems.map((raw) {
+    final item = Map<String, dynamic>.from(raw);
+    final id = _resolveDashboardPointId(item);
+    final overlay = overlaysById[id];
+    if (overlay != null) {
+      mergeInto(item, overlay);
+    }
+    return item;
+  }).toList(growable: false);
+}
+
+List<Map<String, dynamic>> scopeDashboardItemsToAssignments(
+  List<Map<String, dynamic>> items,
+  List<Map<String, dynamic>> assignmentItems,
+) {
+  if (assignmentItems.isEmpty) {
+    return List<Map<String, dynamic>>.from(items);
+  }
+
+  final merged = <String, Map<String, dynamic>>{};
+  final anonymous = <Map<String, dynamic>>[];
+  final assignmentIds = <String>{};
+
+  void mergeInto(Map<String, dynamic> target, Map<String, dynamic> source) {
+    for (final entry in source.entries) {
+      if (_isMeaningfulValue(entry.value)) {
+        target[entry.key] = entry.value;
+      }
+    }
+  }
+
+  for (final raw in assignmentItems) {
+    final item = Map<String, dynamic>.from(raw);
+    final id = _resolveDashboardPointId(item);
+    if (id.isEmpty) {
+      anonymous.add(item);
+      continue;
+    }
+    assignmentIds.add(id);
+    merged[id] = item;
+  }
+
+  for (final raw in items) {
+    final item = Map<String, dynamic>.from(raw);
+    final id = _resolveDashboardPointId(item);
+    final hasExplicitOwner = _dashboardItemCarriesOwnerIdentity(item);
+
+    if (id.isEmpty) {
+      if (hasExplicitOwner) {
+        anonymous.add(item);
+      }
+      continue;
+    }
+
+    if (!assignmentIds.contains(id) && !hasExplicitOwner) {
+      continue;
+    }
+
+    final existing = merged[id];
+    if (existing == null) {
+      merged[id] = item;
+      continue;
+    }
+    mergeInto(existing, item);
+  }
+
+  return [
+    ...merged.values,
+    ...anonymous,
+  ];
+}
+
 DashboardData _empty(dynamic user, DashboardRange range) => DashboardData(
       pendingCount: 0,
       approvedCount: 0,
@@ -467,6 +615,68 @@ String _activitiesQuery({
     'page_size': '$normalizedPageSize',
   };
   return '?${params.entries.map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}').join('&')}';
+}
+
+String _assignmentsQuery({
+  required String projectId,
+  required DateTime from,
+  required DateTime to,
+}) {
+  final params = <String, String>{
+    'project_id': projectId,
+    'include_all': 'true',
+    'from': from.toUtc().toIso8601String(),
+    'to': to.toUtc().toIso8601String(),
+  };
+  return '?${params.entries.map((entry) => '${entry.key}=${Uri.encodeQueryComponent(entry.value)}').join('&')}';
+}
+
+Future<List<Map<String, dynamic>>> _loadAssignmentsDataset(
+  BackendApiClient client, {
+  required String activeProjectId,
+  required List<String> availableProjects,
+  required DateTime? from,
+  required DateTime? to,
+}) async {
+  if (from == null || to == null) return const [];
+
+  Future<List<Map<String, dynamic>>> loadProjectAssignments(String projectId) async {
+    final normalizedProjectId = projectId.trim().toUpperCase();
+    if (normalizedProjectId.isEmpty) return const [];
+
+    try {
+      final decoded = await client.getJson(
+        '/api/v1/assignments${_assignmentsQuery(projectId: normalizedProjectId, from: from, to: to)}',
+      );
+      if (decoded is! List) return const [];
+      return decoded.whereType<Map<String, dynamic>>().toList(growable: false);
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  if (activeProjectId.isNotEmpty) {
+    return loadProjectAssignments(activeProjectId);
+  }
+
+  final normalizedProjects = availableProjects
+      .map((projectId) => projectId.trim().toUpperCase())
+      .where((projectId) => projectId.isNotEmpty)
+      .toSet()
+      .toList(growable: false);
+
+  final mergedItems = <Map<String, dynamic>>[];
+  final seenIds = <String>{};
+  for (final projectId in normalizedProjects) {
+    final projectItems = await loadProjectAssignments(projectId);
+    for (final raw in projectItems) {
+      final id = _resolveDashboardPointId(raw);
+      if (id.isNotEmpty && !seenIds.add(id)) continue;
+      mergedItems.add(raw);
+    }
+  }
+
+  return mergedItems;
 }
 
 Map<String, int> _asStringIntMap(dynamic raw) {
@@ -565,16 +775,19 @@ String _normalizeDashboardReviewState(dynamic value) {
   final normalized = (value ?? '').toString().trim().toUpperCase().replaceAll(' ', '_');
   switch (normalized) {
     case 'APPROVED':
+    case 'APPROVE':
     case 'APROBADO':
     case 'APROBADA':
       return 'APPROVED';
     case 'REJECTED':
+    case 'REJECT':
     case 'RECHAZADO':
     case 'RECHAZADA':
       return 'REJECTED';
     case 'CHANGES_REQUIRED':
     case 'NECESITA_CORRECCION':
     case 'NEEDS_FIX':
+    case 'CAMBIOS_REQUERIDOS':
       return 'CHANGES_REQUIRED';
     case 'PENDING':
     case 'PENDIENTE':
@@ -592,8 +805,8 @@ List<Map<String, dynamic>> filterDashboardItemsByRange(
   DateTime now,
 ) {
   final start = _rangeStart(now, range);
-  if (start == null) return List<Map<String, dynamic>>.from(items);
-  final end = now.toUtc();
+  final end = _rangeEnd(now, range);
+  if (start == null || end == null) return List<Map<String, dynamic>>.from(items);
   return _filterDashboardItemsByWindow(items, start, end);
 }
 
@@ -628,8 +841,8 @@ List<Map<String, dynamic>> _filterDashboardItemsByWindow(
   return items.where((item) {
     final date = _resolveDashboardItemDate(item);
     if (date == null) return false;
-    final normalized = date.toUtc();
-    return !normalized.isBefore(start) && normalized.isBefore(end.add(const Duration(milliseconds: 1)));
+    final normalized = date.toLocal();
+    return !normalized.isBefore(start) && normalized.isBefore(end);
   }).toList(growable: false);
 }
 
@@ -650,19 +863,42 @@ DateTime? _previousRangeStart(DateTime now, DashboardRange range) {
 }
 
 DateTime? _resolveDashboardItemDate(Map<String, dynamic> item) {
-  final candidates = <dynamic>[
-    item['last_reviewed_at'],
-    item['reviewed_at'],
-    item['updated_at'],
-    item['created_at'],
-    _nested(item, ['summary', 'updated_at']),
-    _nested(item, ['summary', 'created_at']),
+  final exactCandidates = <dynamic>[
+    item['executed_at'],
+    item['occurred_at'],
+    item['completed_at'],
+    item['assignment_start_at'],
+    item['start_at'],
+    item['scheduled_at'],
+    item['planned_at'],
+    _nested(item, ['summary', 'executed_at']),
+    _nested(item, ['summary', 'completed_at']),
+    _nested(item, ['summary', 'start_at']),
+    _nested(item, ['summary', 'scheduled_at']),
+    _nested(item, ['summary', 'planned_at']),
   ];
-
-  for (final candidate in candidates) {
+  for (final candidate in exactCandidates) {
     final parsed = _parseDateTimeValue(candidate);
     if (parsed != null) return parsed;
   }
+
+  final calendarCandidates = <dynamic>[
+    item['scheduled_for'],
+    item['planned_for'],
+    item['activity_date'],
+    item['date'],
+    _nested(item, ['summary', 'scheduled_for']),
+    _nested(item, ['summary', 'planned_for']),
+    _nested(item, ['summary', 'activity_date']),
+    _nested(item, ['summary', 'date']),
+  ];
+  for (final candidate in calendarCandidates) {
+    final parsed = _parseDateTimeValue(candidate);
+    if (parsed != null) {
+      return DateTime(parsed.year, parsed.month, parsed.day);
+    }
+  }
+
   return null;
 }
 
@@ -680,15 +916,32 @@ DateTime? _parseDateTimeValue(dynamic value) {
 }
 
 DateTime? _rangeStart(DateTime now, DashboardRange range) {
+  final localNow = now.toLocal();
   switch (range) {
     case DashboardRange.today:
-      return DateTime.utc(now.year, now.month, now.day);
+      return DateTime(localNow.year, localNow.month, localNow.day);
     case DashboardRange.week:
-      final weekday = now.weekday;
-      final start = now.subtract(Duration(days: weekday - 1));
-      return DateTime.utc(start.year, start.month, start.day);
+      final weekday = localNow.weekday;
+      final start = localNow.subtract(Duration(days: weekday - 1));
+      return DateTime(start.year, start.month, start.day);
     case DashboardRange.month:
-      return DateTime.utc(now.year, now.month, 1);
+      return DateTime(localNow.year, localNow.month, 1);
+    case DashboardRange.all:
+      return null;
+  }
+}
+
+DateTime? _rangeEnd(DateTime now, DashboardRange range) {
+  final start = _rangeStart(now, range);
+  if (start == null) return null;
+
+  switch (range) {
+    case DashboardRange.today:
+      return start.add(const Duration(days: 1));
+    case DashboardRange.week:
+      return start.add(const Duration(days: 7));
+    case DashboardRange.month:
+      return DateTime(start.year, start.month + 1, 1);
     case DashboardRange.all:
       return null;
   }
@@ -702,14 +955,23 @@ ValidationQueueItem _mapQueueItem(Map<String, dynamic> raw) {
   return ValidationQueueItem(
     id: (raw['id'] ?? '').toString(),
     projectId: (raw['project_id'] ?? 'N/A').toString(),
-    userName: (raw['assigned_to_user_name'] ?? 'Sin asignar').toString(),
+    userName: _firstMeaningfulString([
+          raw['assigned_to_user_name'],
+          raw['assigned_to_name'],
+          raw['assigned_name'],
+          raw['assignee_name'],
+          raw['user_name'],
+        ]) ??
+        'Sin asignar',
     activityType: (raw['activity_type'] ?? 'Actividad').toString(),
     pk: (raw['pk'] ?? '—').toString(),
     front: (raw['front'] ?? '').toString(),
-    municipality: (raw['municipality'] ?? '').toString(),
+    municipality: (raw['municipality'] ?? raw['municipio'] ?? '').toString(),
+    state: (raw['state'] ?? raw['estado'] ?? '').toString(),
     risk: severity == 'HIGH' ? 'prioritario' : risk,
     severity: severity,
     status: (raw['status'] ?? 'PENDIENTE_REVISION').toString(),
+    hasConflicts: raw['has_conflicts'] == true || raw['hasConflicts'] == true,
     createdAt: createdAt,
     lat: _parseDouble(raw['lat'] ?? raw['latitude']),
     lon: _parseDouble(raw['lon'] ?? raw['longitude']),
@@ -767,6 +1029,18 @@ String _resolveDashboardPointId(Map<String, dynamic> item) {
   return '';
 }
 
+String? _firstMeaningfulString(Iterable<dynamic> values) {
+  for (final value in values) {
+    final text = (value ?? '').toString().trim();
+    final normalized = text.toLowerCase();
+    if (text.isEmpty || normalized == 'null' || normalized == 'sin responsable' || normalized == 'sin asignar') {
+      continue;
+    }
+    return text;
+  }
+  return null;
+}
+
 DashboardGeoPoint dashboardGeoPointFromJson(
   Map<String, dynamic> item, {
   required double lat,
@@ -797,6 +1071,29 @@ DashboardGeoPoint dashboardGeoPointFromJson(
       (item['report_path'] ?? '').toString().trim().isNotEmpty ||
       (item['report_url'] ?? '').toString().trim().isNotEmpty ||
       (item['document_url'] ?? '').toString().trim().isNotEmpty;
+  final assignedToUserId = _firstMeaningfulString([
+    item['assigned_to_user_id'],
+    item['assigned_to_id'],
+    item['assignee_user_id'],
+    _nested(item, ['summary', 'assigned_to_user_id']),
+    _nested(item, ['summary', 'assigned_to_id']),
+    _nested(item, ['summary', 'assignee_user_id']),
+  ]);
+  final assignedName = _firstMeaningfulString([
+    item['assigned_name'],
+    item['assigned_to_user_name'],
+    item['assigned_to_name'],
+    item['assignee_name'],
+    item['responsable'],
+    item['responsible'],
+    item['responsible_name'],
+    item['assignedName'],
+    item['assignedToName'],
+    _nested(item, ['summary', 'assigned_name']),
+    _nested(item, ['summary', 'assigned_to_user_name']),
+    _nested(item, ['summary', 'assigned_to_name']),
+    _nested(item, ['summary', 'assignee_name']),
+  ]);
 
   return DashboardGeoPoint(
     id: _resolveDashboardPointId(item),
@@ -809,8 +1106,8 @@ DashboardGeoPoint dashboardGeoPointFromJson(
     municipality: municipality,
     state: state,
     label: title.isEmpty ? 'Actividad' : title,
-    assignedToUserId: (item['assigned_to_user_id'])?.toString(),
-    assignedName: (item['assigned_name'] ?? item['assigned_to_user_name'])?.toString(),
+    assignedToUserId: assignedToUserId,
+    assignedName: assignedName,
     lat: lat,
     lon: lon,
     hasReport: hasReport,
@@ -957,6 +1254,27 @@ bool _isMeaningfulValue(dynamic value) {
   if (value is Iterable) return value.isNotEmpty;
   if (value is Map) return value.isNotEmpty;
   return true;
+}
+
+bool _dashboardItemCarriesOwnerIdentity(Map<String, dynamic> item) {
+  final identityFields = <dynamic>[
+    item['assigned_to_user_id'],
+    item['assigned_to_id'],
+    item['assigned_name'],
+    item['assigned_to_user_name'],
+    item['assigned_to_name'],
+    item['assignee_user_id'],
+    item['assignee_name'],
+    item['created_by_user_id'],
+    item['created_by'],
+    item['user_id'],
+    item['generated_by_user_id'],
+    _nested(item, ['summary', 'assigned_to_user_id']),
+    _nested(item, ['summary', 'assigned_to_name']),
+    _nested(item, ['summary', 'assignee_name']),
+    _nested(item, ['summary', 'created_by_user_id']),
+  ];
+  return identityFields.any(_isMeaningfulValue);
 }
 
 double? _resolveCoordinateField(

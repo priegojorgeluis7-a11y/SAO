@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -6,6 +7,10 @@ import '../../core/config/data_mode.dart';
 
 class BackendApiClient {
   const BackendApiClient();
+
+  /// Callback invocado cuando se detecta un 401 irrecuperable (sesión expirada).
+  /// Regístralo desde AppSessionController para redirigir al login.
+  static void Function()? onSessionExpired;
 
   /// Returns the backend base URL from dart-define SAO_BACKEND_URL.
   /// Throws if not configured to fail fast with a clear message.
@@ -77,6 +82,13 @@ class BackendApiClient {
         token = _resolveAccessToken();
         result = await _sendRaw(method, path, payload: payload, token: token);
       }
+    }
+
+    // Si persiste el 401 después del intento de refresh, la sesión expiró o fue
+    // invalidada en el servidor. Se limpia el TokenStore para forzar re-login.
+    if (result.statusCode == HttpStatus.unauthorized) {
+      unawaited(TokenStore.clear());
+      onSessionExpired?.call();
     }
 
     if (result.statusCode < 200 || result.statusCode >= 300) {

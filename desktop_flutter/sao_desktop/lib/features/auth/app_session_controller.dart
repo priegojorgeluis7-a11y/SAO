@@ -6,10 +6,110 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/auth/token_store.dart';
 import '../../core/config/data_mode.dart';
+import '../../data/repositories/backend_api_client.dart';
 
 // ---------------------------------------------------------------------------
 // Models
 // ---------------------------------------------------------------------------
+
+const Map<String, Set<String>> _permissionAliases = <String, Set<String>>{
+  'activity.view': <String>{'activity.view', 'ver actividades'},
+  'activity.create': <String>{'activity.create', 'crear actividades'},
+  'activity.edit': <String>{'activity.edit', 'editar actividades'},
+  'activity.delete': <String>{'activity.delete', 'eliminar actividades'},
+  'activity.approve': <String>{'activity.approve', 'aprobar actividades'},
+  'activity.reject': <String>{'activity.reject', 'rechazar actividades'},
+  'event.view': <String>{'event.view', 'ver eventos'},
+  'event.create': <String>{'event.create', 'crear eventos'},
+  'event.edit': <String>{'event.edit', 'editar eventos'},
+  'catalog.view': <String>{'catalog.view', 'ver catálogo', 'ver catalogo'},
+  'catalog.edit': <String>{'catalog.edit', 'editar catálogo', 'editar catalogo'},
+  'catalog.publish': <String>{'catalog.publish', 'publicar catálogo', 'publicar catalogo'},
+  'user.view': <String>{'user.view', 'ver usuarios'},
+  'user.create': <String>{'user.create', 'crear usuarios'},
+  'user.edit': <String>{'user.edit', 'editar usuarios'},
+  'report.view': <String>{'report.view', 'ver reportes'},
+  'report.export': <String>{'report.export', 'exportar reportes'},
+  'assignment.manage': <String>{'assignment.manage', 'administrar asignaciones'},
+  'project.manage': <String>{'project.manage', 'administrar proyectos'},
+  'flow.approve_exception': <String>{
+    'flow.approve_exception',
+    'aprobar excepciones de flujo',
+  },
+};
+
+String _normalizePermissionCode(String? value) {
+  return (value ?? '').trim().toLowerCase();
+}
+
+String _canonicalizeRoleName(String? value) {
+  final normalized = (value ?? '')
+      .trim()
+      .toUpperCase()
+      .replaceAll('Á', 'A')
+      .replaceAll('É', 'E')
+      .replaceAll('Í', 'I')
+      .replaceAll('Ó', 'O')
+      .replaceAll('Ú', 'U');
+
+  if (normalized == 'ADMINISTRADOR') return 'ADMIN';
+  if (normalized == 'COORDINADOR' || normalized == 'COORDINATOR') {
+    return 'COORD';
+  }
+  if (normalized == 'LECTURA' || normalized == 'VIEWER' || normalized == 'CONSULTA') {
+    return 'LECTOR';
+  }
+  if (normalized == 'OPERARIO' ||
+      normalized == 'OPERADOR' ||
+      normalized == 'TECNICO' ||
+      normalized == 'INGENIERO' ||
+      normalized == 'ING' ||
+      normalized == 'TOPOGRAFO') {
+    return 'OPERATIVO';
+  }
+  return normalized;
+}
+
+String? _normalizeProjectId(String? value) {
+  final normalized = (value ?? '').trim().toUpperCase();
+  return normalized.isEmpty ? null : normalized;
+}
+
+bool _permissionMatches(String? candidate, String requested) {
+  final candidateNorm = _normalizePermissionCode(candidate);
+  final requestedNorm = _normalizePermissionCode(requested);
+  if (candidateNorm.isEmpty || requestedNorm.isEmpty) return false;
+
+  final aliases = _permissionAliases[requestedNorm];
+  if (aliases != null) return aliases.contains(candidateNorm);
+
+  final reverseAliases = _permissionAliases[candidateNorm];
+  if (reverseAliases != null) return reverseAliases.contains(requestedNorm);
+
+  return candidateNorm == requestedNorm;
+}
+
+class AppUserPermissionScope {
+  final String permissionCode;
+  final String? projectId;
+  final String effect;
+
+  const AppUserPermissionScope({
+    required this.permissionCode,
+    required this.projectId,
+    required this.effect,
+  });
+
+  factory AppUserPermissionScope.fromJson(Map<String, dynamic> json) {
+    return AppUserPermissionScope(
+      permissionCode: (json['permission_code'] ?? '').toString().trim(),
+      projectId: _normalizeProjectId(json['project_id']?.toString()),
+      effect: (json['effect'] ?? 'allow').toString().trim().toLowerCase() == 'deny'
+          ? 'deny'
+          : 'allow',
+    );
+  }
+}
 
 class AppUser {
   final String id;
@@ -17,6 +117,8 @@ class AppUser {
   final String fullName;
   final String role;
   final List<String> roles;
+  final List<String> permissionCodes;
+  final List<AppUserPermissionScope> permissionScopes;
 
   const AppUser({
     required this.id,
@@ -24,13 +126,36 @@ class AppUser {
     required this.fullName,
     required this.role,
     required this.roles,
+    this.permissionCodes = const [],
+    this.permissionScopes = const [],
   });
 
   static List<String> _normalizedRoleList(dynamic raw) {
     if (raw is! List) return const [];
-    return raw
-        .map((e) => e.toString().trim())
+    final normalized = raw
+        .map((e) => _canonicalizeRoleName(e?.toString()))
         .where((e) => e.isNotEmpty)
+        .toList();
+    return normalized.toSet().toList();
+  }
+
+  static List<String> _normalizedPermissionCodeList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .map((item) => item.toString().trim())
+        .where((item) => item.isNotEmpty)
+        .toList();
+  }
+
+  static List<AppUserPermissionScope> _normalizedPermissionScopeList(dynamic raw) {
+    if (raw is! List) return const [];
+    return raw
+        .whereType<Map>()
+        .map((item) => item.map(
+              (key, value) => MapEntry(key.toString(), value),
+            ))
+        .map(AppUserPermissionScope.fromJson)
+        .where((item) => item.permissionCode.isNotEmpty)
         .toList();
   }
 
@@ -49,12 +174,75 @@ class AppUser {
     return const {};
   }
 
+  bool hasRole(String roleName) {
+    final target = _canonicalizeRoleName(roleName);
+    if (target.isEmpty) return false;
+    final normalizedRoles = <String>{
+      _canonicalizeRoleName(role),
+      ...roles.map(_canonicalizeRoleName),
+    }..removeWhere((item) => item.isEmpty);
+    return normalizedRoles.contains(target);
+  }
+
+  bool get isAdmin => hasRole('ADMIN');
+
+  bool hasPermission(String permissionCode, {String? projectId}) {
+    final normalizedProjectId = _normalizeProjectId(projectId);
+
+    bool scopeApplies(String? scopeProjectId) {
+      if (normalizedProjectId == null) return scopeProjectId == null;
+      return scopeProjectId == null || scopeProjectId == normalizedProjectId;
+    }
+
+    for (final scope in permissionScopes) {
+      if (_permissionMatches(scope.permissionCode, permissionCode) &&
+          scope.effect == 'deny' &&
+          scopeApplies(scope.projectId)) {
+        return false;
+      }
+    }
+
+    if (isAdmin) {
+      return true;
+    }
+
+    if (permissionCodes.any((code) => _permissionMatches(code, permissionCode))) {
+      return true;
+    }
+
+    for (final scope in permissionScopes) {
+      if (_permissionMatches(scope.permissionCode, permissionCode) &&
+          scope.effect == 'allow' &&
+          scopeApplies(scope.projectId)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool hasAnyPermission(Iterable<String> requestedCodes, {String? projectId}) {
+    for (final code in requestedCodes) {
+      if (hasPermission(code, projectId: projectId)) return true;
+    }
+    return false;
+  }
+
   factory AppUser.fromJson(Map<String, dynamic> json, {String? accessToken}) {
     final claims = _tryDecodeJwtClaims(accessToken);
 
     final List<String> rolesList = [
       ..._normalizedRoleList(json['roles']),
       ..._normalizedRoleList(claims['roles']),
+    ];
+
+    final permissionCodes = <String>{
+      ..._normalizedPermissionCodeList(json['permission_codes']),
+      ..._normalizedPermissionCodeList(claims['permission_codes']),
+    }.toList();
+
+    final permissionScopes = [
+      ..._normalizedPermissionScopeList(json['permission_scopes']),
+      ..._normalizedPermissionScopeList(claims['permission_scopes']),
     ];
 
     final roleCandidates = <String>[
@@ -64,7 +252,9 @@ class AppUser {
       (claims['role'] as String? ?? '').trim(),
     ].where((value) => value.isNotEmpty).toList();
 
-    final primaryRole = roleCandidates.isNotEmpty ? roleCandidates.first : '';
+    final primaryRole = roleCandidates.isNotEmpty
+        ? _canonicalizeRoleName(roleCandidates.first)
+        : '';
 
     return AppUser(
       id: json['id'].toString(),
@@ -72,6 +262,8 @@ class AppUser {
       fullName: (json['full_name'] as String?) ?? '',
       role: primaryRole,
       roles: rolesList,
+      permissionCodes: permissionCodes,
+      permissionScopes: permissionScopes,
     );
   }
 }
@@ -153,7 +345,7 @@ class AuthApiException implements Exception {
 
 class _AuthHttp implements AuthHttp {
   final String baseUrl;
-  static const Duration _requestTimeout = Duration(seconds: 8);
+  static const Duration _requestTimeout = Duration(seconds: 15);
 
   _AuthHttp(this.baseUrl);
 
@@ -231,6 +423,19 @@ class AppSessionController extends StateNotifier<AppSessionState> {
   static const Duration _initializeTimeout = Duration(seconds: 12);
 
   AppSessionController(this._http) : super(const AppSessionState.initializing()) {
+    BackendApiClient.onSessionExpired = () {
+      // Invocado por BackendApiClient cuando un 401 persiste tras intentar refresh.
+      // Limpia el estado local para que AuthGate redirija al login.
+      if (state.isAuthenticated) {
+        state = const AppSessionState(
+          initializing: false,
+          loading: false,
+          error: 'Sesión expirada. Por favor inicia sesión nuevamente.',
+          accessToken: null,
+          user: null,
+        );
+      }
+    };
     _initialize();
   }
 
@@ -264,6 +469,7 @@ class AppSessionController extends StateNotifier<AppSessionState> {
       try {
         final decoded = jsonDecode(error.message);
         if (decoded is Map<String, dynamic>) {
+          // FastAPI format: {"detail": "..."}
           final rawDetail = decoded['detail'];
           if (rawDetail is String) {
             detail = rawDetail.trim();
@@ -275,11 +481,26 @@ class AppSessionController extends StateNotifier<AppSessionState> {
               detail = first.toString().trim();
             }
           }
+          // GCP infrastructure format: {"error": {"code": 404, "message": "..."}}
+          if ((detail == null || detail.isEmpty) && decoded['error'] is Map) {
+            final gcpError = decoded['error'] as Map<String, dynamic>;
+            final gcpMessage = (gcpError['message'] ?? '').toString().trim();
+            if (gcpMessage.isNotEmpty) {
+              detail = gcpMessage;
+            }
+          }
         }
       } catch (_) {}
 
       if (detail != null && detail.isNotEmpty) {
         return 'No se pudo iniciar sesión: $detail';
+      }
+
+      // Para errores de infraestructura (404 que no son del API) o errores de
+      // servidor (5xx), guiar al usuario a reintentar.
+      if (error.statusCode == 404 || error.statusCode >= 500) {
+        return 'El servidor no está disponible (${error.statusCode}). '
+            'Por favor intenta de nuevo en unos segundos.';
       }
 
       return 'No se pudo iniciar sesión (${error.statusCode}).';

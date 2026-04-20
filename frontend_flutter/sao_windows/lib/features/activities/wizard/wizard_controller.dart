@@ -898,6 +898,9 @@ class WizardController extends ChangeNotifier {
     }
   }
 
+  /// Notifica a los listeners que los datos del catálogo cambiaron (ej. después de agregar custom items).
+  void refresh() => notifyListeners();
+
   void setAttendeeRepresentative(String attendeeId, String representativeName) {
     final normalizedId = attendeeId.trim();
     final normalizedName = representativeName.trim();

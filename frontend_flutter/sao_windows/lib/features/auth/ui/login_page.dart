@@ -99,7 +99,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
 
     // Listen for authentication success/failure
     ref.listen(authControllerProvider, (previous, next) {
+      debugPrint('[LOGIN] state change: loading=${next.isLoading} '
+          'auth=${next.isAuthenticated} error=${next.error} '
+          'pinSetup=${next.needsPinSetup}');
       if (next.error != null && next.error!.isNotEmpty) {
+        debugPrint('[LOGIN] showing error snackbar: ${next.error}');
         showTransientSnackBar(
           context,
           appSnackBar(

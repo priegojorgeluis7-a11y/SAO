@@ -620,7 +620,12 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
     );
 
     if (result != null && result.isNotEmpty && c.selectedActivity != null) {
-      // Registrar como candidato pendiente de aprobación
+      // Agregar al catálogo custom local para que aparezca en el dropdown
+      debugPrint('[WIZARD] Agregando subcategoría "$result" para activityId="${c.selectedActivity!.id}"');
+      await c.catalogRepo.addCustomSubcategory(c.selectedActivity!.id, result);
+      c.refresh(); // notificar al controller para que re-lea el catálogo
+
+      // Registrar como candidato pendiente de aprobación por el admin
       await c.catalogRepo.addCandidate(
         type: 'subcategory',
         name: result,
@@ -628,19 +633,22 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
         reportId: c.activity.id,
         userId: c.currentUserId,
       );
-      
-      final otroSubcat = c.availableSubcategories.firstWhere(
-        (item) => item.id == 'OTRO_SUB',
-        orElse: () => c.availableSubcategories.first,
+
+      // Seleccionar el nuevo item directamente
+      final updatedList = c.availableSubcategories;
+      debugPrint('[WIZARD] availableSubcategories count=${updatedList.length}, ids=${updatedList.map((e) => e.id).toList()}');
+      final newItem = updatedList.lastWhere(
+        (item) => item.label == result,
+        orElse: () => updatedList.last,
       );
-      c.setSubcategory(otroSubcat);
-      c.setOtherSubcategoryText(result);
-      
+      debugPrint('[WIZARD] newItem.id="${newItem.id}" newItem.label="${newItem.label}"');
+      c.setSubcategory(newItem);
+
       if (mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(
-            message: 'Subcategoría "$result" enviada para aprobación',
+            message: 'Subcategoría "$result" agregada',
             backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 3),
           ),
@@ -699,24 +707,33 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
     );
 
     if (result != null && result.isNotEmpty) {
-      // Registrar como candidato pendiente de aprobación
+      // Agregar al catálogo custom local para que aparezca en los chips
+      await c.catalogRepo.addCustomTopic(result);
+      c.refresh(); // notificar al controller para que re-lea el catálogo
+
+      // Registrar como candidato pendiente de aprobación por el admin
       await c.catalogRepo.addCandidate(
         type: 'topic',
         name: result,
         reportId: c.activity.id,
         userId: c.currentUserId,
       );
-      
-      if (!c.selectedTopicIds.contains('OTRO_TEMA')) {
-        c.toggleTopic('OTRO_TEMA');
+
+      // Seleccionar el nuevo tema directamente
+      final allTopics = c.topics;
+      final newTopic = allTopics.lastWhere(
+        (item) => item.label == result,
+        orElse: () => allTopics.last,
+      );
+      if (!c.selectedTopicIds.contains(newTopic.id)) {
+        c.toggleTopic(newTopic.id);
       }
-      c.setOtherTopicText(result);
-      
+
       if (mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(
-            message: 'Tema "$result" enviado para aprobación',
+            message: 'Tema "$result" agregado',
             backgroundColor: SaoColors.success,
             duration: const Duration(seconds: 3),
           ),
@@ -766,14 +783,18 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
 
     if (result != null && result.isNotEmpty) {
       // Agregar al catálogo persistente
+      debugPrint('[WIZARD] Agregando actividad "$result"');
       await c.catalogRepo.addCustomActivity(result);
+      c.refresh(); // notificar al controller para que re-lea el catálogo
       
       // Recargar para obtener el nuevo item
       final newActivities = c.catalogRepo.activities;
+      debugPrint('[WIZARD] activities count=${newActivities.length}, ids=${newActivities.map((e) => e.id).toList()}');
       final newItem = newActivities.lastWhere(
         (item) => item.label == result,
         orElse: () => newActivities.last,
       );
+      debugPrint('[WIZARD] activity newItem.id="${newItem.id}" newItem.label="${newItem.label}"');
       
       // Seleccionar la nueva actividad
       c.setActivity(newItem);
@@ -848,6 +869,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
     if (result != null && result.isNotEmpty && c.selectedSubcategory != null) {
       // Agregar al catálogo persistente
       await c.catalogRepo.addCustomPurpose(c.selectedSubcategory!.id, result);
+      c.refresh(); // notificar al controller para que re-lea el catálogo
       
       // Recargar para obtener el nuevo item
       final newPurposes = c.catalogRepo.purposesFor(
@@ -922,6 +944,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       } else {
         await c.catalogRepo.addCustomAttendeeLocal(result);
       }
+      c.refresh(); // notificar al controller para que re-lea el catálogo
       
       // Recargar para obtener el nuevo item
       final newAttendees = isInstitutional 
