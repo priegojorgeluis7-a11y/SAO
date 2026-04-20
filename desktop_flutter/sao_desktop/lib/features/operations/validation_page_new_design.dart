@@ -229,7 +229,9 @@ class _ValidationPageNewDesignState
     );
 
     final activitiesAsync = ref.watch(pendingActivitiesProvider).whenData(
-          (activities) => activities.toList(growable: false),
+          (activities) => activities
+              .where((a) => !_dismissedActivityIds.contains(a.activity.id))
+              .toList(growable: false),
         );
     final opsSummaryItems = activitiesAsync.maybeWhen(
       data: (items) => items,
