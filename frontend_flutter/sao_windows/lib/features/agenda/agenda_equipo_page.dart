@@ -537,15 +537,19 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
         resources: state.resources,
         existingItems: state.items,
         onCreate: (newItem) {
-          controller.createAssignmentFromDispatcher(newItem);
-          showTransientSnackBar(
-            context,
-            appSnackBar(
-              message:
-                  'Actividad asignada a ${_getResourceName(newItem.resourceId, state.resources)}',
-              backgroundColor: SaoColors.success,
-            ),
-          );
+          controller.createAssignmentFromDispatcher(newItem).then((synced) {
+            if (!context.mounted) return;
+            showTransientSnackBar(
+              context,
+              appSnackBar(
+                message: synced
+                    ? 'Actividad asignada a ${_getResourceName(newItem.resourceId, state.resources)}'
+                    : 'Asignación guardada localmente — se sincronizará al restaurar conexión',
+                backgroundColor:
+                    synced ? SaoColors.success : SaoColors.warning,
+              ),
+            );
+          });
         },
       ),
     );

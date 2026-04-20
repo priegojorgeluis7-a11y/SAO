@@ -823,11 +823,12 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         TextField(
           controller: _pkController,
           onChanged: (v) => setState(() => _pk = v),
-          keyboardType: TextInputType.number,
+          keyboardType: const TextInputType.numberWithOptions(),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d+]'))],
           decoration: const InputDecoration(
             labelText: 'PK',
             border: OutlineInputBorder(),
-            hintText: 'Ej: 142000',
+            hintText: 'Ej: 0+142',
           ),
         ),
         const SizedBox(height: 16),
@@ -1167,7 +1168,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       frente: frontName,
       start: _startTime!,
       end: _endTime!,
-      pk: _pk.isNotEmpty ? int.tryParse(_pk) : null,
+      pk: _pk.isNotEmpty ? _parsePk(_pk) : null,
       risk: _selectedRisk!,
       effectiveVersionId: effectiveVersionId,
       municipio: _selectedMunicipio,
@@ -1182,6 +1183,20 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     widget.onCreate(item);
     if (!mounted) return;
     Navigator.pop(context);
+  }
+
+  /// Parsea PK en formato "0+000" (km+metros) o entero plano.
+  /// "142+500" → 142500, "142000" → 142000, "0+142" → 142
+  int? _parsePk(String raw) {
+    final s = raw.trim();
+    if (s.isEmpty) return null;
+    final plusIdx = s.indexOf('+');
+    if (plusIdx >= 0) {
+      final km = int.tryParse(s.substring(0, plusIdx)) ?? 0;
+      final m = int.tryParse(s.substring(plusIdx + 1)) ?? 0;
+      return km * 1000 + m;
+    }
+    return int.tryParse(s);
   }
 
   RiskLevel? _riskFromCatalogText(String label) {

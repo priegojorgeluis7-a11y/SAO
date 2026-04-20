@@ -203,15 +203,17 @@ class AgendaController extends StateNotifier<AgendaState> {
     state = state.copyWith(items: [...state.items, item]);
   }
 
-  Future<void> createAssignmentFromDispatcher(AgendaItem item) async {
+  Future<bool> createAssignmentFromDispatcher(AgendaItem item) async {
     addAssignmentOptimistic(item);
     await _assignmentsRepository.saveLocal(item);
 
+    var synced = false;
     if (!_isOffline) {
-      await _assignmentsRepository.pushOne(item);
+      synced = await _assignmentsRepository.pushOne(item);
     }
 
     await _loadCurrentWeekAssignments();
+    return synced;
   }
 
   /// Vuelve a la semana actual y selecciona hoy.
