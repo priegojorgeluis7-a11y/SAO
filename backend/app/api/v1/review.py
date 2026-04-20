@@ -380,6 +380,10 @@ def review_queue(
     activity_ids: set[str] = set()
     project_ids: set[str] = set()
     for activity in activities_docs:
+        # Exclude soft-deleted activities from the review queue.
+        if activity.get("deleted_at") is not None:
+            continue
+
         if front_id and str(activity.get("front_id") or "") != front_id:
             continue
 
