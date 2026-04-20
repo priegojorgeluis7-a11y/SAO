@@ -534,7 +534,17 @@ def review_activity_detail(
     client = get_firestore_client()
     activity_snap = client.collection("activities").document(str(activity_uuid)).get()
     if not activity_snap.exists:
-        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="REVIEW_ACTIVITY_NOT_FOUND", message="Activity not found")
+        # Fallback: mobile uploads may store a different document ID than the uuid field.
+        docs = (
+            client.collection("activities")
+            .where("uuid", "==", str(activity_uuid))
+            .limit(1)
+            .stream()
+        )
+        activity_doc = next(iter(docs), None)
+        if activity_doc is None:
+            raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="REVIEW_ACTIVITY_NOT_FOUND", message="Activity not found")
+        activity_snap = activity_doc
     activity = activity_snap.to_dict() or {}
     wizard_payload_raw = activity.get("wizard_payload")
     wizard_payload = wizard_payload_raw if isinstance(wizard_payload_raw, dict) else None
