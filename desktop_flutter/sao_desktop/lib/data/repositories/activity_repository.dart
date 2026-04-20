@@ -629,6 +629,21 @@ class ActivityRepository {
     await _apiClient.deleteJson('/api/v1/activities/$activityId');
   }
 
+  /// Actualiza campos del wizard_payload vía PATCH /activities/{id}/resolve-catalog.
+  /// Usar para persistir selecciones de catálogo (subcategory, purpose, topics, etc.)
+  /// en lugar de sobreescribir solo title/description.
+  Future<void> resolveWizardPayloadFields(
+    String activityId,
+    Map<String, dynamic> replacements, {
+    bool clearCatalogFlag = false,
+  }) async {
+    _requireBackend();
+    await _apiClient.patchJson('/api/v1/activities/$activityId/resolve-catalog', {
+      'replacements': replacements,
+      'clear_catalog_flag': clearCatalogFlag,
+    });
+  }
+
   Future<void> updateActivityFields(
     String activityId, {
     String? title,

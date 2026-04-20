@@ -1581,18 +1581,45 @@ class _ValidationPageNewDesignState
     try {
       switch (field) {
         case 'subcategoria':
-          await repo.updateActivityFields(activity.activity.id,
-              title: selectedValue);
+          // Actualiza wizard_payload.subcategory para que el panel lo refleje correctamente
+          await repo.resolveWizardPayloadFields(
+            activity.activity.id,
+            {'subcategory': {'id': selectedValue, 'name': selectedValue}},
+          );
+          // También actualiza el título para consistencia con la lista de cola
+          await repo.updateActivityFields(activity.activity.id, title: selectedValue);
           break;
         case 'tema':
+          // Para temas (lista), intentar reemplazar el primer tema usando el ID capturado
+          final wizardTopics = activity.wizardPayload?['topics'];
+          if (wizardTopics is List && wizardTopics.isNotEmpty) {
+            final firstTopic = wizardTopics.first;
+            if (firstTopic is Map) {
+              final oldTopicId = (firstTopic['id'] ?? '').toString();
+              if (oldTopicId.isNotEmpty) {
+                await repo.resolveWizardPayloadFields(
+                  activity.activity.id,
+                  {
+                    'topics': [
+                      {'old_id': oldTopicId, 'id': selectedValue, 'name': selectedValue},
+                    ],
+                  },
+                );
+              }
+            }
+          }
+          // También actualiza activityTypeCode para consistencia
           await repo.updateActivityFields(
             activity.activity.id,
             activityTypeCode: selectedValue,
           );
           break;
         case 'proposito':
-          await repo.updateActivityFields(activity.activity.id,
-              description: selectedValue);
+          // Actualiza wizard_payload.purpose para que el panel lo refleje correctamente
+          await repo.resolveWizardPayloadFields(
+            activity.activity.id,
+            {'purpose': {'id': selectedValue, 'name': selectedValue}},
+          );
           break;
         case 'municipio':
           final currentDescription = activity.activity.description ?? '';

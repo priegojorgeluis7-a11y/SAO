@@ -151,7 +151,17 @@ def _get_activity_by_uuid_firestore(uuid: str) -> ActivityDTO | None:
         client = get_firestore_client()
         snap = client.collection("activities").document(str(parsed_uuid)).get()
         if not snap.exists:
-            return None
+            # Fallback: mobile uploads may store the doc with a different ID but keep uuid as a field
+            docs = (
+                client.collection("activities")
+                .where("uuid", "==", str(parsed_uuid))
+                .limit(1)
+                .stream()
+            )
+            doc = next(iter(docs), None)
+            if doc is None:
+                return None
+            snap = doc
         payload = snap.to_dict() or {}
         if payload.get("deleted_at") is not None:
             return None
@@ -159,6 +169,28 @@ def _get_activity_by_uuid_firestore(uuid: str) -> ActivityDTO | None:
     except Exception:
         logger.exception("Firestore read failed for activity uuid=%s", uuid)
         return None
+
+
+def _resolve_activity_doc_ref_and_snap(client, uuid_str: str):
+    """Return (doc_ref, snap, payload) resolving by document ID first, then by uuid field.
+
+    Returns (None, None, None) if not found.
+    """
+    doc_ref = client.collection("activities").document(uuid_str)
+    snap = doc_ref.get()
+    if snap.exists:
+        return doc_ref, snap, snap.to_dict() or {}
+    # Fallback: search by uuid field (mobile uploads may use a different doc ID)
+    docs = (
+        client.collection("activities")
+        .where("uuid", "==", uuid_str)
+        .limit(1)
+        .stream()
+    )
+    doc = next(iter(docs), None)
+    if doc is None:
+        return None, None, None
+    return doc.reference, doc, doc.to_dict() or {}
 
 
 @router.post("", response_model=ActivityDTO)
@@ -410,11 +442,9 @@ async def update_activity(
 ):
     """Update activity by uuid. Increments sync_version on update."""
     client = get_firestore_client()
-    doc_ref = client.collection("activities").document(str(uuid))
-    snap = doc_ref.get()
-    if not snap.exists:
+    doc_ref, snap, existing = _resolve_activity_doc_ref_and_snap(client, str(uuid))
+    if doc_ref is None:
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="ACTIVITY_NOT_FOUND", message=f"Activity {uuid} not found")
-    existing = snap.to_dict() or {}
     project_id = str(existing.get("project_id") or "").strip().upper()
     _enforce_activity_permission(current_user, "activity.edit", project_id)
     now = datetime.now(timezone.utc)
@@ -440,11 +470,9 @@ async def delete_activity(
 ):
     """Soft-delete activity by uuid. Sets deleted_at and increments sync_version."""
     client = get_firestore_client()
-    doc_ref = client.collection("activities").document(str(uuid))
-    snap = doc_ref.get()
-    if not snap.exists:
+    doc_ref, snap, existing = _resolve_activity_doc_ref_and_snap(client, str(uuid))
+    if doc_ref is None:
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="ACTIVITY_NOT_FOUND", message=f"Activity {uuid} not found")
-    existing = snap.to_dict() or {}
     project_id = str(existing.get("project_id") or "").strip().upper()
     _enforce_admin_delete_activity(current_user, project_id)
     now = datetime.now(timezone.utc)
@@ -475,11 +503,9 @@ async def patch_activity_flags(
 ):
     """Patch review flags (gps_mismatch, catalog_changed). Increments sync_version."""
     client = get_firestore_client()
-    doc_ref = client.collection("activities").document(str(uuid))
-    snap = doc_ref.get()
-    if not snap.exists:
+    doc_ref, snap, existing = _resolve_activity_doc_ref_and_snap(client, str(uuid))
+    if doc_ref is None:
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="ACTIVITY_NOT_FOUND", message=f"Activity {uuid} not found")
-    existing = snap.to_dict() or {}
     project_id = str(existing.get("project_id") or "").strip().upper()
     _enforce_activity_permission(current_user, "activity.edit", project_id)
     now = datetime.now(timezone.utc)
@@ -515,15 +541,13 @@ async def resolve_catalog_values(
     }
     """
     client = get_firestore_client()
-    doc_ref = client.collection("activities").document(str(uuid))
-    snap = doc_ref.get()
-    if not snap.exists:
+    doc_ref, snap, existing = _resolve_activity_doc_ref_and_snap(client, str(uuid))
+    if doc_ref is None:
         raise api_error(
             status_code=status.HTTP_404_NOT_FOUND,
             code="ACTIVITY_NOT_FOUND",
             message=f"Activity {uuid} not found",
         )
-    existing = snap.to_dict() or {}
     project_id = str(existing.get("project_id") or "").strip().upper()
     _enforce_activity_permission(current_user, "activity.edit", project_id)
 
