@@ -43,6 +43,7 @@ from app.services.invitation_service import (
     mark_invitation_used,
     validate_user_invitation,
 )
+from app.services.role_permission_service import merge_role_permission_codes
 
 logger = logging.getLogger(__name__)
 
@@ -265,6 +266,26 @@ async def refresh(
 async def get_me(current_user: Any = Depends(get_current_user)) -> UserResponse:
     """Obtener informaciÃ³n del usuario autenticado"""
     now = datetime.now(timezone.utc)
+    roles = [
+        canonicalize_role_name(role) or str(role).strip().upper()
+        for role in (getattr(current_user, "roles", []) or [])
+        if str(role).strip()
+    ]
+    permission_scopes = [
+        {
+            "permission_code": str(item.get("permission_code") or "").strip(),
+            "project_id": (
+                str(item.get("project_id") or "").strip().upper() or None
+            ),
+            "effect": (
+                "deny"
+                if str(item.get("effect") or "allow").strip().lower() == "deny"
+                else "allow"
+            ),
+        }
+        for item in (getattr(current_user, "permission_scopes", []) or [])
+        if str(item.get("permission_code") or "").strip()
+    ]
     payload = {
         "id": getattr(current_user, "id"),
         "email": getattr(current_user, "email"),
@@ -272,11 +293,9 @@ async def get_me(current_user: Any = Depends(get_current_user)) -> UserResponse:
         "status": getattr(current_user, "status", UserStatus.ACTIVE),
         "last_login_at": getattr(current_user, "last_login_at", None),
         "created_at": getattr(current_user, "created_at", now),
-        "roles": [
-            canonicalize_role_name(role) or str(role).strip().upper()
-            for role in (getattr(current_user, "roles", []) or [])
-            if str(role).strip()
-        ],
+        "roles": roles,
+        "permission_codes": merge_role_permission_codes(roles, permission_scopes),
+        "permission_scopes": permission_scopes,
     }
     return UserResponse.model_validate(payload)
 

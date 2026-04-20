@@ -148,6 +148,22 @@ def _principal_role_name(principal: Any | None) -> str | None:
     return None
 
 
+def _assignment_assignee_projection(
+    assignee_user_id: str | None,
+    assignee_principal: Any | None,
+) -> dict[str, Any]:
+    normalized_assignee_user_id = _safe_uuid_str(assignee_user_id)
+    full_name = getattr(assignee_principal, "full_name", None) if assignee_principal else None
+    email = getattr(assignee_principal, "email", None) if assignee_principal else None
+    return {
+        "assigned_to_user_id": normalized_assignee_user_id or None,
+        "assigned_to_user_name": full_name,
+        "assigned_to_user_email": email,
+        "assigned_to_name": full_name,
+        "assigned_to_role": _principal_role_name(assignee_principal),
+    }
+
+
 def _validate_transfer_target(
     *,
     project_id: str,
@@ -396,6 +412,7 @@ def create_assignment(
     activity_uuid = uuid4()
     type_code = payload.activity_type_code.strip().upper()
     title = payload.title.strip() if payload.title and payload.title.strip() else type_code
+    assignee_principal = get_firestore_user_by_id(payload.assignee_user_id)
     doc_payload = {
         "uuid": str(activity_uuid),
         "server_id": None,
@@ -408,7 +425,7 @@ def create_assignment(
         "pk_start": payload.pk,
         "pk_end": None,
         "execution_state": "PENDIENTE",
-        "assigned_to_user_id": str(payload.assignee_user_id),
+        **_assignment_assignee_projection(str(payload.assignee_user_id), assignee_principal),
         "created_by_user_id": str(current_user.id),
         "catalog_version_id": None,
         "activity_type_code": type_code,
@@ -426,7 +443,6 @@ def create_assignment(
         "sync_version": _next_project_sync_version(client, project_id),
     }
     client.collection("activities").document(str(activity_uuid)).set(doc_payload)
-    assignee_principal = get_firestore_user_by_id(payload.assignee_user_id)
 
     write_firestore_audit_log(
         action="ASSIGNMENT_CREATED",
@@ -500,7 +516,7 @@ def cancel_assignment(
     canceled_at = datetime.now(timezone.utc)
     ref.set(
         {
-            "assigned_to_user_id": None,
+            **_assignment_assignee_projection(None, None),
             "execution_state": "PENDIENTE",
             "deleted_at": canceled_at.isoformat(),
             "updated_at": canceled_at.isoformat(),
@@ -590,7 +606,7 @@ def transfer_assignment(
     next_sync_version = _next_project_sync_version(client, project_id)
     ref.set(
         {
-            "assigned_to_user_id": next_assignee_user_id,
+            **_assignment_assignee_projection(next_assignee_user_id, next_assignee_principal),
             "updated_at": transfer_at.isoformat(),
             "sync_version": next_sync_version,
         },
@@ -598,7 +614,9 @@ def transfer_assignment(
     )
 
     updated_payload = dict(doc)
-    updated_payload["assigned_to_user_id"] = next_assignee_user_id
+    updated_payload.update(
+        _assignment_assignee_projection(next_assignee_user_id, next_assignee_principal)
+    )
     updated_payload["updated_at"] = transfer_at.isoformat()
     updated_payload["sync_version"] = next_sync_version
 

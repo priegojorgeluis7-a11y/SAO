@@ -99,23 +99,9 @@ class GpsValidationBanner extends StatelessWidget {
       padding: const EdgeInsets.all(SaoSpacing.md),
       decoration: BoxDecoration(
         color: _backgroundColor,
-        border: Border(
-          left: BorderSide(
-            color: _bannerColor,
-            width: 4,
-          ),
-          top: BorderSide(
-            color: _bannerColor.withValues(alpha: 0.3),
-            width: 1,
-          ),
-          bottom: BorderSide(
-            color: _bannerColor.withValues(alpha: 0.3),
-            width: 1,
-          ),
-          right: BorderSide(
-            color: _bannerColor.withValues(alpha: 0.3),
-            width: 1,
-          ),
+        border: Border.all(
+          color: _bannerColor.withValues(alpha: 0.3),
+          width: 1.2,
         ),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),

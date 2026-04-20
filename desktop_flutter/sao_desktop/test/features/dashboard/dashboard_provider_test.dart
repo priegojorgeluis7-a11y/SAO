@@ -1,6 +1,29 @@
 // desktop_flutter/sao_desktop/test/features/dashboard/dashboard_provider_test.dart
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sao_desktop/core/providers/project_providers.dart';
+import 'package:sao_desktop/data/repositories/backend_api_client.dart';
+import 'package:sao_desktop/features/auth/app_session_controller.dart';
+import 'package:sao_desktop/features/dashboard/dashboard_page.dart';
 import 'package:sao_desktop/features/dashboard/dashboard_provider.dart';
+
+class _DashboardFakeBackendApiClient extends BackendApiClient {
+  const _DashboardFakeBackendApiClient(this.responses);
+
+  final Map<String, Object> responses;
+
+  @override
+  Future<dynamic> getJson(String path) async {
+    for (final entry in responses.entries) {
+      if (path == entry.key || path.startsWith(entry.key)) {
+        final value = entry.value;
+        if (value is Exception) throw value;
+        return value;
+      }
+    }
+    throw Exception('Unexpected GET $path');
+  }
+}
 
 void main() {
   group('DashboardData - KPI Calculations', () {
@@ -203,6 +226,8 @@ void main() {
           'municipio': 'Doctor Mora',
           'estado': 'Guanajuato',
           'activity_type': 'Asamblea',
+          'assignee_name': 'Operativo Demo',
+          'assignee_user_id': 'user-42',
           'document_url': 'https://example.com/report.pdf',
         },
         lat: 21.142,
@@ -213,10 +238,270 @@ void main() {
       expect(geoPoint.projectId, 'TMQ');
       expect(geoPoint.hasReport, isTrue);
       expect(geoPoint.label, 'Asamblea');
+      expect(geoPoint.assignedName, 'Operativo Demo');
+      expect(geoPoint.assignedToUserId, 'user-42');
+    });
+  });
+
+  group('Dashboard filtering helpers', () {
+    test('matches KPI filters even when backend status uses alternate tokens', () {
+      final pendingItem = ValidationQueueItem(
+        id: 'item-1',
+        projectId: 'TMQ',
+        userName: 'Juan',
+        activityType: 'Inspección',
+        pk: '142+000',
+        front: 'Frente A',
+        municipality: 'Toluca',
+        risk: 'alto',
+        severity: 'critical',
+        status: 'pending_approval',
+        createdAt: DateTime.utc(2026, 4, 19, 10),
+      );
+
+      final approvedItem = ValidationQueueItem(
+        id: 'item-2',
+        projectId: 'TMQ',
+        userName: 'Ana',
+        activityType: 'Asamblea',
+        pk: '143+000',
+        front: 'Frente B',
+        municipality: 'Toluca',
+        risk: 'medio',
+        severity: 'info',
+        status: 'approved',
+        createdAt: DateTime.utc(2026, 4, 19, 11),
+      );
+
+      expect(dashboardMatchesKpiFilter(pendingItem, DashboardKpiFilter.pending), isTrue);
+      expect(dashboardMatchesKpiFilter(approvedItem, DashboardKpiFilter.approved), isTrue);
+      expect(dashboardMatchesKpiFilter(approvedItem, DashboardKpiFilter.rejected), isFalse);
+    });
+
+    test('normalizes planning map filters for uppercase risk and review aliases', () {
+      const point = DashboardGeoPoint(
+        id: 'geo-3',
+        projectId: 'TMQ',
+        risk: 'ALTO',
+        status: 'approved',
+        reviewStatus: 'pending',
+        reviewDecision: 'approve',
+        front: 'Frente C',
+        municipality: 'Celaya',
+        state: 'Guanajuato',
+        label: 'Actividad crítica',
+        assignedName: 'Marta',
+        lat: 20.5,
+        lon: -100.8,
+        hasReport: true,
+      );
+
+      expect(
+        dashboardPointMatchesPlanningFilters(
+          point,
+          statusFilter: 'COMPLETADA',
+          riskFilter: 'alto',
+          reviewFilter: 'APROBADO',
+          userFilter: 'Todo',
+          frontFilter: 'Todo',
+          stateFilter: 'Todo',
+          municipalityFilter: 'Todo',
+          searchQuery: 'critica',
+        ),
+        isTrue,
+      );
+    });
+
+    test('builds dashboard user options with Todo and deduped names', () {
+      final options = resolveDashboardUserOptions(
+        projectUsers: const ['Operativo TMQ', 'Jorge Priego Cruz'],
+        queueItems: [
+          ValidationQueueItem(
+            id: '1',
+            projectId: 'TMQ',
+            userName: 'Jorge Priego Cruz',
+            activityType: 'Inspección',
+            pk: '10+000',
+            front: 'A',
+            municipality: 'Doctor Mora',
+            risk: 'medio',
+            severity: 'info',
+            status: 'COMPLETADA',
+            createdAt: DateTime.utc(2026, 4, 19, 10),
+          ),
+        ],
+        geoPoints: const [
+          DashboardGeoPoint(
+            id: 'g1',
+            projectId: 'TMQ',
+            risk: 'medio',
+            status: 'COMPLETADA',
+            reviewStatus: 'APPROVED',
+            front: 'Frente A',
+            municipality: 'Doctor Mora',
+            state: 'Guanajuato',
+            label: 'Actividad',
+            assignedName: 'jesus gaspar rios',
+            lat: 21.1,
+            lon: -100.3,
+            hasReport: true,
+          ),
+        ],
+      );
+
+      expect(options.first, 'Todo');
+      expect(options, contains('Operativo TMQ'));
+      expect(options, contains('Jorge Priego Cruz'));
+      expect(options, contains('jesus gaspar rios'));
+    });
+
+    test('keeps project users available even when dashboard data is empty', () {
+      final options = resolveDashboardUserOptions(
+        projectUsers: const ['Operativo TMQ', 'Supervisor TMQ'],
+        queueItems: const [],
+        geoPoints: const [],
+      );
+
+      expect(options, equals(const ['Todo', 'Operativo TMQ', 'Supervisor TMQ']));
+    });
+
+    test('matches dashboard user filter by responsible name', () {
+      expect(dashboardMatchesUserFilter('Jorge Priego Cruz', 'Todo'), isTrue);
+      expect(dashboardMatchesUserFilter('Jorge Priego Cruz', 'Jorge Priego Cruz'), isTrue);
+      expect(dashboardMatchesUserFilter('Jesus Gaspar Rios', 'Jorge Priego Cruz'), isFalse);
+    });
+
+    test('critical queue keeps only alto prioritario or conflicts', () {
+      final highRiskItem = ValidationQueueItem(
+        id: 'high-risk',
+        projectId: 'TMQ',
+        userName: 'Jorge',
+        activityType: 'Inspección',
+        pk: '10+000',
+        front: 'Norte',
+        municipality: 'Doctor Mora',
+        risk: 'alto',
+        severity: 'info',
+        status: 'PENDIENTE',
+        createdAt: DateTime.utc(2026, 4, 19, 10),
+      );
+      final conflictItem = ValidationQueueItem(
+        id: 'conflict',
+        projectId: 'TMQ',
+        userName: 'Ana',
+        activityType: 'Asamblea',
+        pk: '11+000',
+        front: 'Sur',
+        municipality: 'San Luis',
+        risk: 'medio',
+        severity: 'info',
+        status: 'PENDIENTE',
+        hasConflicts: true,
+        createdAt: DateTime.utc(2026, 4, 19, 11),
+      );
+      final lowRiskItem = ValidationQueueItem(
+        id: 'low-risk',
+        projectId: 'TMQ',
+        userName: 'Luis',
+        activityType: 'Recorrido',
+        pk: '12+000',
+        front: 'Centro',
+        municipality: 'Celaya',
+        risk: 'bajo',
+        severity: 'info',
+        status: 'PENDIENTE',
+        createdAt: DateTime.utc(2026, 4, 19, 12),
+      );
+
+      expect(isCriticalDashboardQueueItem(highRiskItem), isTrue);
+      expect(isCriticalDashboardQueueItem(conflictItem), isTrue);
+      expect(isCriticalDashboardQueueItem(lowRiskItem), isFalse);
+    });
+
+    test('filters map points by front state and municipality', () {
+      const point = DashboardGeoPoint(
+        id: 'geo-4',
+        projectId: 'TMQ',
+        risk: 'medio',
+        status: 'COMPLETADA',
+        reviewStatus: 'APPROVED',
+        front: 'Frente Norte',
+        municipality: 'Doctor Mora',
+        state: 'Guanajuato',
+        label: 'Actividad territorial',
+        assignedName: 'Operativo TMQ',
+        lat: 21.14,
+        lon: -100.31,
+        hasReport: true,
+      );
+
+      expect(
+        dashboardPointMatchesPlanningFilters(
+          point,
+          statusFilter: 'todos',
+          riskFilter: 'todos',
+          reviewFilter: 'todos',
+          userFilter: 'Todo',
+          frontFilter: 'Frente Norte',
+          stateFilter: 'Guanajuato',
+          municipalityFilter: 'Doctor Mora',
+          searchQuery: '',
+        ),
+        isTrue,
+      );
+
+      expect(
+        dashboardPointMatchesPlanningFilters(
+          point,
+          statusFilter: 'todos',
+          riskFilter: 'todos',
+          reviewFilter: 'todos',
+          userFilter: 'Todo',
+          frontFilter: 'Frente Sur',
+          stateFilter: 'Todo',
+          municipalityFilter: 'Todo',
+          searchQuery: '',
+        ),
+        isFalse,
+      );
     });
   });
 
   group('Dashboard map data hydration', () {
+    test('keeps project activities visible even when assignments only contain one user', () {
+      final scoped = scopeDashboardItemsToAssignments(
+        const [
+          {
+            'id': 'activity-1',
+            'project_id': 'TMQ',
+            'title': 'Actividad de Jorge',
+            'assigned_name': 'Jorge',
+            'latitude': 20.1,
+            'longitude': -100.2,
+          },
+          {
+            'id': 'activity-2',
+            'project_id': 'TMQ',
+            'title': 'Actividad de Fernanda',
+            'assigned_name': 'Fernanda',
+            'latitude': 20.2,
+            'longitude': -100.3,
+          },
+        ],
+        const [
+          {
+            'id': 'activity-1',
+            'project_id': 'TMQ',
+            'assigned_to_user_id': 'user-1',
+            'assigned_name': 'Jorge',
+          },
+        ],
+      );
+
+      expect(scoped, hasLength(2));
+      expect(scoped.map((item) => item['id']), containsAll(<String>['activity-1', 'activity-2']));
+    });
+
     test('merges activities with reports so existing activities stay visible', () {
       final merged = mergeDashboardMapSourceItems(
         const [
@@ -322,6 +607,25 @@ void main() {
       expect(metrics.rejected, 0);
     });
 
+    test('treats review_decision approve as approved instead of pending', () {
+      final metrics = summarizeDashboardActivityMetrics([
+        {
+          'id': 'activity-approve-token',
+          'project_id': 'TMQ',
+          'execution_state': 'REVISION_PENDIENTE',
+          'review_decision': 'APPROVE',
+        },
+      ]);
+
+      expect(metrics.approved, 1);
+      expect(metrics.pending, 0);
+    });
+
+    test('invalid persisted project falls back to all allowed projects', () {
+      final resolved = resolveDashboardProjectSelection('ABC', const ['TMQ']);
+      expect(resolved, '');
+    });
+
     test('caps progress at 100 percent when counts drift', () {
       const dashData = DashboardData(
         pendingCount: 0,
@@ -349,24 +653,24 @@ void main() {
   });
 
   group('Dashboard range filters', () {
-    test('filters activities for today week month and all correctly', () {
+    test('filters activities for today week month and all using assignment or execution dates', () {
       final now = DateTime.utc(2026, 4, 15, 12);
       final items = [
         {
           'id': 'today-1',
-          'created_at': DateTime.utc(2026, 4, 15, 9).toIso8601String(),
+          'executed_at': DateTime.utc(2026, 4, 15, 9).toIso8601String(),
         },
         {
           'id': 'week-1',
-          'created_at': DateTime.utc(2026, 4, 14, 10).toIso8601String(),
+          'assignment_start_at': DateTime.utc(2026, 4, 14, 10).toIso8601String(),
         },
         {
           'id': 'month-1',
-          'created_at': DateTime.utc(2026, 4, 2, 8).toIso8601String(),
+          'scheduled_for': DateTime.utc(2026, 4, 2, 8).toIso8601String(),
         },
         {
           'id': 'old-1',
-          'created_at': DateTime.utc(2026, 3, 20, 8).toIso8601String(),
+          'scheduled_for': DateTime.utc(2026, 3, 20, 8).toIso8601String(),
         },
       ];
 
@@ -374,6 +678,124 @@ void main() {
       expect(filterDashboardItemsByRange(items, DashboardRange.week, now), hasLength(2));
       expect(filterDashboardItemsByRange(items, DashboardRange.month, now), hasLength(3));
       expect(filterDashboardItemsByRange(items, DashboardRange.all, now), hasLength(4));
+    });
+
+    test('today does not include older activities updated or reviewed later', () {
+      final now = DateTime.utc(2026, 4, 15, 12);
+      final items = [
+        {
+          'id': 'old-reviewed-today',
+          'completed_at': DateTime.utc(2026, 4, 12, 9).toIso8601String(),
+          'updated_at': DateTime.utc(2026, 4, 15, 10).toIso8601String(),
+          'reviewed_at': DateTime.utc(2026, 4, 15, 11).toIso8601String(),
+        },
+        {
+          'id': 'today-real',
+          'assignment_start_at': DateTime.utc(2026, 4, 15, 8).toIso8601String(),
+        },
+      ];
+
+      final filtered = filterDashboardItemsByRange(items, DashboardRange.today, now);
+
+      expect(filtered, hasLength(1));
+      expect(filtered.single['id'], 'today-real');
+    });
+
+    test('today excludes activities created today but not assigned or executed today', () {
+      final now = DateTime.utc(2026, 4, 15, 12);
+      final items = [
+        {
+          'id': 'created-only-today',
+          'created_at': DateTime.utc(2026, 4, 15, 7).toIso8601String(),
+        },
+        {
+          'id': 'assigned-today',
+          'scheduled_for': DateTime.utc(2026, 4, 15, 10).toIso8601String(),
+          'created_at': DateTime.utc(2026, 4, 10, 7).toIso8601String(),
+        },
+      ];
+
+      final filtered = filterDashboardItemsByRange(items, DashboardRange.today, now);
+
+      expect(filtered, hasLength(1));
+      expect(filtered.single['id'], 'assigned-today');
+    });
+
+    test('today prioritizes scheduled activity date over report creation date', () {
+      final now = DateTime.utc(2026, 4, 15, 12);
+      final items = [
+        {
+          'id': 'future-scheduled-created-today',
+          'created_at': DateTime.utc(2026, 4, 15, 8).toIso8601String(),
+          'scheduled_for': DateTime.utc(2026, 4, 17, 9).toIso8601String(),
+        },
+        {
+          'id': 'today-scheduled',
+          'created_at': DateTime.utc(2026, 4, 14, 18).toIso8601String(),
+          'scheduled_for': DateTime.utc(2026, 4, 15, 10).toIso8601String(),
+        },
+      ];
+
+      final filtered = filterDashboardItemsByRange(items, DashboardRange.today, now);
+
+      expect(filtered, hasLength(1));
+      expect(filtered.single['id'], 'today-scheduled');
+    });
+
+    test('week uses monday through sunday boundaries', () {
+      final now = DateTime.utc(2026, 4, 15, 12); // Wednesday
+      final items = [
+        {
+          'id': 'previous-sunday',
+          'scheduled_for': DateTime.utc(2026, 4, 12, 23, 59).toIso8601String(),
+        },
+        {
+          'id': 'monday-start',
+          'scheduled_for': DateTime.utc(2026, 4, 13, 0, 0).toIso8601String(),
+        },
+        {
+          'id': 'sunday-end',
+          'scheduled_for': DateTime.utc(2026, 4, 19, 23, 59).toIso8601String(),
+        },
+        {
+          'id': 'next-monday',
+          'scheduled_for': DateTime.utc(2026, 4, 20, 0, 0).toIso8601String(),
+        },
+      ];
+
+      final filtered = filterDashboardItemsByRange(items, DashboardRange.week, now);
+      final ids = filtered.map((item) => item['id']).toList();
+
+      expect(ids, containsAll(['monday-start', 'sunday-end']));
+      expect(ids, isNot(contains('previous-sunday')));
+      expect(ids, isNot(contains('next-monday')));
+    });
+
+    test('today scope follows scheduled assignments instead of all activity records', () {
+      final scoped = scopeDashboardItemsToAssignments(
+        [
+          {
+            'id': 'activity-today',
+            'created_at': DateTime.utc(2026, 4, 15, 8).toIso8601String(),
+            'title': 'Actividad de hoy',
+          },
+          {
+            'id': 'activity-other-day',
+            'created_at': DateTime.utc(2026, 4, 15, 9).toIso8601String(),
+            'title': 'Actividad fuera de hoy',
+          },
+        ],
+        [
+          {
+            'activity_id': 'activity-today',
+            'start_at': DateTime.utc(2026, 4, 15, 10).toIso8601String(),
+          },
+        ],
+      );
+
+      expect(scoped, hasLength(1));
+      expect(scoped.single['id'], 'activity-today');
+      expect(scoped.single['start_at'], DateTime.utc(2026, 4, 15, 10).toIso8601String());
     });
   });
 
@@ -416,6 +838,70 @@ void main() {
   });
 
   group('Dashboard Integration Tests', () {
+    test('dashboard provider falls back to scoped activity data when kpis endpoint is forbidden', () async {
+      final now = DateTime.now().toUtc();
+      final createdAt = now.subtract(const Duration(hours: 1)).toIso8601String();
+      final scheduledFor = now.subtract(const Duration(hours: 2)).toIso8601String();
+
+      final container = ProviderContainer(
+        overrides: [
+          backendApiClientProvider.overrideWithValue(
+            _DashboardFakeBackendApiClient({
+              '/api/v1/me/projects': [
+                {'project_id': 'TMQ', 'project_name': 'TMQ'},
+              ],
+              '/api/v1/dashboard/kpis': Exception('403 Forbidden'),
+              '/api/v1/review/queue': {
+                'items': [],
+              },
+              '/api/v1/reports/activities': {
+                'items': [],
+              },
+              '/api/v1/activities?project_id=TMQ&page=1&page_size=100': {
+                'items': [
+                  {
+                    'id': 'approved-1',
+                    'project_id': 'TMQ',
+                    'execution_state': 'COMPLETADA',
+                    'review_status': 'APPROVED',
+                    'front': 'Frente Norte',
+                    'municipality': 'Doctor Mora',
+                    'created_at': createdAt,
+                    'scheduled_for': scheduledFor,
+                  },
+                ],
+                'has_next': false,
+              },
+              '/api/v1/assignments?project_id=TMQ': [],
+            }),
+          ),
+          currentAppUserProvider.overrideWithValue(
+            const AppUser(
+              id: 'oper-1',
+              email: 'operativo@sao.mx',
+              fullName: 'Operativo TMQ',
+              role: 'OPERATIVO',
+              roles: ['OPERATIVO'],
+              permissionScopes: [
+                AppUserPermissionScope(
+                  permissionCode: 'activity.view',
+                  projectId: 'TMQ',
+                  effect: 'allow',
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+      addTearDown(container.dispose);
+
+      final data = await container.read(dashboardProvider.future);
+
+      expect(data.totalInQueue, 1);
+      expect(data.approvedCount, 1);
+      expect(data.pendingCount, 0);
+    });
+
     test('dashboard data comprehensively models review queue state', () {
       // GIVEN: Complex multi-front, multi-status scenario
       final List<DashboardGeoPoint> geoPoints = [

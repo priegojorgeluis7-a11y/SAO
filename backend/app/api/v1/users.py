@@ -13,6 +13,7 @@ from app.schemas.user import (
     AdminUserCreate,
     AdminUserCreateResponse,
     AdminUserListItem,
+    AdminUserPasswordResetRequest,
     AdminUserPermissionInput,
     AdminUserPermissionItem,
     AdminUserScopeInput,
@@ -27,11 +28,30 @@ from app.services.firestore_identity_service import (
     get_firestore_user_by_id,
     get_firestore_user_by_email,
     delete_firestore_user,
+    reset_firestore_user_password,
     update_firestore_user,
 )
-from app.services.role_permission_service import get_role_permission_map, save_role_permission_map
+from app.services.role_permission_service import (
+    get_role_permission_map,
+    merge_role_permission_codes,
+    save_role_permission_map,
+)
 
 router = APIRouter(prefix="/users", tags=["users"])
+
+_PROTECTED_ADMIN_EMAIL = "admin@sao.mx"
+
+
+def _normalized_email(value: Any) -> str:
+    return str(value or "").strip().lower()
+
+
+def _is_protected_admin_user(user: Any) -> bool:
+    return _normalized_email(getattr(user, "email", None)) == _PROTECTED_ADMIN_EMAIL
+
+
+def _is_root_admin_actor(user: Any) -> bool:
+    return _normalized_email(getattr(user, "email", None)) == _PROTECTED_ADMIN_EMAIL
 
 
 def _unique_keep_order(values: list[str]) -> list[str]:
@@ -127,25 +147,11 @@ def _firestore_merge_permission_codes(
     permission_scopes: list[dict[str, str | None]],
     role_permissions_map: dict[str, list[str]] | None = None,
 ) -> list[str]:
-    resolved_role_permissions = role_permissions_map or get_role_permission_map()
-    role_permission_codes: list[str] = []
-    for role_name in roles:
-        role_permission_codes.extend(
-            resolved_role_permissions.get(role_name.strip().upper(), [])
-        )
-
-    allow_codes = {
-        str(item.get("permission_code") or "")
-        for item in permission_scopes
-        if str(item.get("effect") or "allow").lower() == "allow" and item.get("project_id") is None
-    }
-    deny_codes = {
-        str(item.get("permission_code") or "")
-        for item in permission_scopes
-        if str(item.get("effect") or "allow").lower() == "deny" and item.get("project_id") is None
-    }
-    merged = _unique_keep_order(role_permission_codes + list(allow_codes))
-    return [code for code in merged if code and code not in deny_codes]
+    return merge_role_permission_codes(
+        roles,
+        permission_scopes,
+        role_permissions_map=role_permissions_map,
+    )
 
 
 @router.get("/admin/permissions", response_model=list[str])
@@ -368,6 +374,10 @@ def update_admin_user(
     except ValueError:
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="USER_INVALID_ID", message="Invalid user id")
 
+    existing = get_firestore_user_by_id(user_uuid)
+    if existing is None:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+
     scopes_payload = _normalize_scope_payload(payload)
     new_roles = None
     new_project_ids = None
@@ -410,6 +420,20 @@ def update_admin_user(
         ]
 
     status_value = payload.status.value if payload.status is not None else None
+    if _is_protected_admin_user(existing):
+        if status_value is not None and status_value != UserStatus.ACTIVE.value:
+            raise api_error(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="USER_PROTECTED",
+                message="El usuario admin@sao.mx no se puede desactivar ni borrar",
+            )
+        if new_roles is not None and "ADMIN" not in new_roles:
+            raise api_error(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="USER_PROTECTED",
+                message="El usuario admin@sao.mx debe conservar el rol ADMIN",
+            )
+
     updated = update_firestore_user(
         user_id=user_uuid,
         full_name=payload.full_name,
@@ -448,19 +472,68 @@ def update_admin_user(
     )
 
 
-@router.delete("/admin/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_admin_user(
+@router.put("/admin/{user_id}/reset-password", status_code=status.HTTP_200_OK)
+def reset_admin_user_password_route(
     user_id: str,
-    _current_user: Any = Depends(require_any_role(["ADMIN"])),
+    payload: AdminUserPasswordResetRequest,
+    current_user: Any = Depends(require_any_role(["ADMIN"])),
 ):
     try:
         user_uuid = UUID(user_id)
     except ValueError:
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="USER_INVALID_ID", message="Invalid user id")
 
+    if not _is_root_admin_actor(current_user):
+        raise api_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="PASSWORD_RESET_FORBIDDEN",
+            message="Solo admin@sao.mx puede reiniciar contraseñas de usuarios",
+        )
+
     existing = get_firestore_user_by_id(user_uuid)
     if existing is None:
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+
+    updated = reset_firestore_user_password(user_uuid, get_password_hash(payload.new_password))
+    if updated is None:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+
+    write_firestore_audit_log(
+        action="USER_PASSWORD_RESET",
+        entity="user",
+        entity_id=str(updated.id),
+        actor=current_user,
+        details={"email": updated.email},
+    )
+    return {"ok": True}
+
+
+@router.delete("/admin/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_admin_user(
+    user_id: str,
+    current_user: Any = Depends(require_any_role(["ADMIN"])),
+):
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="USER_INVALID_ID", message="Invalid user id")
+
+    if not _is_root_admin_actor(current_user):
+        raise api_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="USER_DELETE_FORBIDDEN",
+            message="Solo admin@sao.mx puede eliminar usuarios",
+        )
+
+    existing = get_firestore_user_by_id(user_uuid)
+    if existing is None:
+        raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+    if _is_protected_admin_user(existing):
+        raise api_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="USER_PROTECTED",
+            message="El usuario admin@sao.mx no se puede borrar",
+        )
     if existing.status != UserStatus.INACTIVE:
         raise api_error(
             status_code=status.HTTP_409_CONFLICT,
@@ -476,7 +549,7 @@ def delete_admin_user(
         action="USER_DELETED",
         entity="user",
         entity_id=str(existing.id),
-        actor=_current_user,
+        actor=current_user,
         details={"email": existing.email, "roles": existing.roles},
     )
     return None

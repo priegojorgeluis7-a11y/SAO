@@ -1804,25 +1804,21 @@ class _AdminProjectsPageState extends ConsumerState<AdminProjectsPage> {
 
                   return Padding(
                     padding: const EdgeInsets.all(10),
-                    child: Column(
-                      children: [
-                        SingleChildScrollView(
-                          controller: _tableHorizontalCtrl,
-                          scrollDirection: Axis.horizontal,
-                          child: SizedBox(
-                            width: tableLayout.contentWidth,
-                            child: _ProjectsHeaderRow(columnWidths: tableLayout.columnWidths),
-                          ),
-                        ),
-                        const Divider(height: 1),
-                        Expanded(
-                          child: Scrollbar(
-                            thumbVisibility: true,
-                            child: SingleChildScrollView(
-                              controller: _tableHorizontalCtrl,
-                              scrollDirection: Axis.horizontal,
-                              child: SizedBox(
-                                width: tableLayout.contentWidth,
+                    child: Scrollbar(
+                      controller: _tableHorizontalCtrl,
+                      thumbVisibility: true,
+                      child: SingleChildScrollView(
+                        controller: _tableHorizontalCtrl,
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: tableLayout.contentWidth,
+                          child: Column(
+                            children: [
+                              _ProjectsHeaderRow(
+                                columnWidths: tableLayout.columnWidths,
+                              ),
+                              const Divider(height: 1),
+                              Expanded(
                                 child: ListView.builder(
                                   itemCount: _filteredProjects.length,
                                   itemBuilder: (context, index) {
@@ -1830,7 +1826,7 @@ class _AdminProjectsPageState extends ConsumerState<AdminProjectsPage> {
                                     final selected = _selectedProjectIds.contains(project.id);
                                     final cs = Theme.of(context).colorScheme;
                                     final rowColor = selected
-                                        ? cs.primary.withOpacity(0.12)
+                                        ? cs.primary.withValues(alpha: 0.12)
                                         : cs.surface;
                                     return _ProjectTableRow(
                                       columnWidths: tableLayout.columnWidths,
@@ -1869,10 +1865,10 @@ class _AdminProjectsPageState extends ConsumerState<AdminProjectsPage> {
                                   },
                                 ),
                               ),
-                            ),
+                            ],
                           ),
                         ),
-                      ],
+                      ),
                     ),
                   );
                 },

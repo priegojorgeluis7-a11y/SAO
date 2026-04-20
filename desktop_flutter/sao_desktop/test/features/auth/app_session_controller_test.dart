@@ -117,6 +117,49 @@ void main() {
     expect(TokenStore.currentRefreshToken, 'new-refresh');
   });
 
+  test('AppUser preserves effective permissions and deny overrides', () {
+    final user = AppUser.fromJson({
+      'id': 'u-10',
+      'email': 'perm@sao.dev',
+      'full_name': 'Perm User',
+      'role': 'COORD',
+      'roles': ['COORD'],
+      'permission_codes': ['Ver actividades', 'Eliminar actividades'],
+      'permission_scopes': [
+        {
+          'permission_code': 'Eliminar actividades',
+          'project_id': 'TMQ',
+          'effect': 'deny',
+        },
+        {
+          'permission_code': 'Editar catálogo',
+          'project_id': 'QRO',
+          'effect': 'allow',
+        },
+      ],
+    });
+
+    expect(user.permissionCodes, contains('Ver actividades'));
+    expect(user.hasPermission('activity.view'), isTrue);
+    expect(user.hasPermission('activity.delete', projectId: 'TMQ'), isFalse);
+    expect(user.hasPermission('catalog.edit', projectId: 'QRO'), isTrue);
+  });
+
+  test('admin role keeps navigation access even without explicit permission payload', () {
+    final user = AppUser.fromJson({
+      'id': 'u-admin',
+      'email': 'admin@sao.mx',
+      'full_name': 'Admin SAO',
+      'role': 'Administrador',
+      'roles': ['Administrador'],
+    });
+
+    expect(user.isAdmin, isTrue);
+    expect(user.hasPermission('activity.view'), isTrue);
+    expect(user.hasPermission('catalog.edit'), isTrue);
+    expect(user.hasPermission('report.view'), isTrue);
+  });
+
   test('startup clears session when access token is invalid and refresh fails', () async {
     final nowEpoch = DateTime.now().millisecondsSinceEpoch ~/ 1000;
 

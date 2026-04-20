@@ -610,6 +610,35 @@ final completedFilterOptionsProvider =
 
 // ── Data providers ─────────────────────────────────────────────────────────────
 
+Future<List<CompletedActivity>> _fetchCompletedActivities(
+  Map<String, String> params,
+) async {
+  final qs = params.entries
+      .map((e) =>
+          '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
+      .join('&');
+  final queryString = params.isEmpty ? '' : '?$qs';
+
+  const client = BackendApiClient();
+  final decoded =
+      await client.getJson('/api/v1/completed-activities$queryString');
+
+  if (decoded is! Map<String, dynamic>) return const [];
+  final items = decoded['items'];
+  if (items is! List) return const [];
+
+  return items
+      .whereType<Map<String, dynamic>>()
+      .map(CompletedActivity.fromJson)
+      .toList(growable: false);
+}
+
+final completedExplorerActivitiesProvider =
+    FutureProvider.autoDispose<List<CompletedActivity>>((ref) async {
+  AppDataMode.requireRealBackendUrl();
+  return _fetchCompletedActivities(const <String, String>{});
+});
+
 final completedActivitiesProvider =
     FutureProvider.autoDispose<List<CompletedActivity>>((ref) async {
   AppDataMode.requireRealBackendUrl();
@@ -631,24 +660,7 @@ final completedActivitiesProvider =
   if (usuario.isNotEmpty) params['usuario'] = usuario;
   if (q.isNotEmpty) params['q'] = q;
 
-  final qs = params.entries
-      .map((e) =>
-          '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
-      .join('&');
-  final queryString = params.isEmpty ? '' : '?$qs';
-
-  const client = BackendApiClient();
-  final decoded =
-      await client.getJson('/api/v1/completed-activities$queryString');
-
-  if (decoded is! Map<String, dynamic>) return const [];
-  final items = decoded['items'];
-  if (items is! List) return const [];
-
-  return items
-      .whereType<Map<String, dynamic>>()
-      .map(CompletedActivity.fromJson)
-      .toList(growable: false);
+  return _fetchCompletedActivities(params);
 });
 
 final completedActivityDetailProvider = FutureProvider.autoDispose

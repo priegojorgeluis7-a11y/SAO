@@ -180,10 +180,17 @@ def test_transfer_assignment_writes_actor_and_role_details(monkeypatch):
         ),
     )
 
+    stored = fake_client.collection('activities').document(assignment_id).get().to_dict()
+
     assert len(audit_calls) == 1
     assert audit_calls[0]['action'] == 'ASSIGNMENT_TRANSFERRED'
     assert audit_calls[0]['entity'] == 'activity'
     assert audit_calls[0]['details']['to_assignee_role'] == 'SUPERVISOR'
+    assert stored['assigned_to_user_id'] == next_assignee_id
+    assert stored['assigned_to_user_name'] == 'Supervisor Dos'
+    assert stored['assigned_to_user_email'] == 'dos@example.com'
+    assert stored['assigned_to_name'] == 'Supervisor Dos'
+    assert stored['assigned_to_role'] == 'SUPERVISOR'
 
 
 def test_next_project_sync_version_falls_back_when_index_query_fails(monkeypatch):

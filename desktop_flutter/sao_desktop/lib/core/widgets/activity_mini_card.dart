@@ -42,13 +42,15 @@ class ActivityMiniCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border(
-              left: BorderSide(
-                color: riskColor ?? statusColor,
-                width: 6,
+            border: Border.all(
+              color: (riskColor ?? statusColor).withValues(
+                alpha: isSelected ? 0.35 : 0.18,
               ),
+              width: isSelected ? 1.4 : 1,
             ),
-            color: isSelected ? SaoColors.primary.withOpacity(0.06) : SaoColors.surface,
+            color: isSelected
+                ? SaoColors.primary.withValues(alpha: 0.06)
+                : SaoColors.surface,
           ),
           padding: const EdgeInsets.fromLTRB(
             AppSpacing.cardPadding,

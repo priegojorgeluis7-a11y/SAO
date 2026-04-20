@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:google_sign_in/google_sign_in.dart';
 
 import '../../core/theme/app_colors.dart';
 import 'app_session_controller.dart';
@@ -18,14 +17,6 @@ class AppLoginPage extends ConsumerStatefulWidget {
 }
 
 class _AppLoginPageState extends ConsumerState<AppLoginPage> {
-  static const _googleServerClientId =
-      String.fromEnvironment('SAO_GOOGLE_SERVER_CLIENT_ID', defaultValue: '');
-
-  late final GoogleSignIn _googleSignIn = GoogleSignIn(
-    scopes: const <String>['email'],
-    serverClientId: _googleServerClientId.isEmpty ? null : _googleServerClientId,
-  );
-
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _obscurePassword = true;
@@ -167,18 +158,6 @@ class _AppLoginPageState extends ConsumerState<AppLoginPage> {
                               )
                             : const Text('Iniciar sesión'),
                       ),
-                      const SizedBox(height: 10),
-                      OutlinedButton.icon(
-                        onPressed: isLoading ? null : _doGoogleLogin,
-                        icon: const Icon(Icons.account_circle_outlined),
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                        label: const Text('Continuar con Google'),
-                      ),
                       const SizedBox(height: 12),
                       OutlinedButton.icon(
                         onPressed: isLoading ? null : widget.onGoToSignup,
@@ -232,83 +211,4 @@ class _AppLoginPageState extends ConsumerState<AppLoginPage> {
     ref.read(appSessionControllerProvider.notifier).login(email, password);
   }
 
-  Future<void> _doGoogleLogin() async {
-    try {
-      final account = await _googleSignIn.signIn();
-      if (account == null) return;
-
-      final auth = await account.authentication;
-      final idToken = auth.idToken;
-
-      if (idToken == null || idToken.isEmpty) {
-        ref.read(appSessionControllerProvider.notifier).setLoginError(
-          'No se pudo obtener token de Google.',
-        );
-        return;
-      }
-
-      // Try login without invite code first (existing users)
-      final needsInviteCode = await ref
-          .read(appSessionControllerProvider.notifier)
-          .loginWithGoogle(idToken);
-
-      // If user doesn't exist, ask for invite code
-      if (needsInviteCode) {
-        if (!mounted) return;
-        final inviteCode = await _showInviteCodeDialog();
-        if (inviteCode == null) return; // User cancelled
-        await ref
-            .read(appSessionControllerProvider.notifier)
-            .loginWithGoogle(idToken, inviteCode);
-      }
-    } catch (e) {
-      if (!mounted) return;
-      ref.read(appSessionControllerProvider.notifier).setLoginError(
-        'Error al iniciar con Google: $e',
-      );
-    }
-  }
-
-  Future<String?> _showInviteCodeDialog() async {
-    final controller = TextEditingController();
-
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: const Text('Cuenta nueva'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('No existe una cuenta SAO para este correo. Ingresa el código de invitación para crear una.'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: controller,
-              decoration: InputDecoration(
-                labelText: 'Código de invitación',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                prefixIcon: const Icon(Icons.card_giftcard_outlined),
-              ),
-              autofocus: true,
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final code = controller.text.trim();
-              if (code.isEmpty) return;
-              Navigator.pop(context, code);
-            },
-            child: const Text('Crear cuenta'),
-          ),
-        ],
-      ),
-    );
-  }
 }

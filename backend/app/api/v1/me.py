@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, resolve_user_project_access
 from app.core.firestore import get_firestore_client
 from typing import Any
 from app.schemas.user import MyProjectItem
@@ -30,21 +30,11 @@ async def list_my_projects(
         for role in (getattr(current_user, "roles", []) or [])
         if str(role).strip()
     ]
-    user_project_ids = [
-        _normalize_project_id(project_id)
-        for project_id in (getattr(current_user, "project_ids", []) or [])
-        if _normalize_project_id(project_id)
-    ]
-
-    has_global_scope = "*" in user_project_ids
-    if not has_global_scope and not user_project_ids and any(
-        role in {"ADMIN", "SUPERVISOR"} for role in role_names
-    ):
-        has_global_scope = True
+    has_global_scope, resolved_project_ids = resolve_user_project_access(current_user)
     allowed_project_ids = {
         project_id
-        for project_id in user_project_ids
-        if project_id != "*" and not _is_hidden_template_project(project_id)
+        for project_id in resolved_project_ids
+        if not _is_hidden_template_project(project_id)
     }
 
     client = get_firestore_client()
@@ -54,7 +44,7 @@ async def list_my_projects(
         project_id = _normalize_project_id(str(payload.get("id") or doc.id))
         if not project_id or _is_hidden_template_project(project_id):
             continue
-        if not has_global_scope and allowed_project_ids and project_id not in allowed_project_ids:
+        if not has_global_scope and project_id not in allowed_project_ids:
             continue
         project_name = str(payload.get("name") or project_id).strip() or project_id
         firestore_projects.append((project_id, project_name))

@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../../core/config/data_mode.dart';
+import '../../core/navigation/role_view_access.dart';
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/settings/report_export_settings.dart';
 import '../../data/repositories/backend_api_client.dart';
@@ -211,12 +212,11 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   bool _isAdminUser(AppUser? user) {
-    if (user == null) return false;
-    final roles = <String>{
-      user.role.trim().toUpperCase(),
-      ...user.roles.map((role) => role.trim().toUpperCase()),
-    };
-    return roles.contains('ADMIN');
+    return user?.isAdmin ?? false;
+  }
+
+  bool _isRootAdminUser(AppUser? user) {
+    return isRootAdminUser(user);
   }
 
   Future<void> _openRolePermissionManager() async {
@@ -226,11 +226,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     );
   }
 
+  Future<void> _openRoleViewAccessManager() async {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => const _RoleViewAccessDialog(),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final currentUser = ref.watch(currentAppUserProvider);
     final canManageRolePermissions = _isAdminUser(currentUser);
+    final canManageViewAccess = _isRootAdminUser(currentUser);
     const backendUrl = AppDataMode.backendBaseUrl;
     final reportsRootLabel =
       _defaultReportsRootPath ?? 'Documentos del usuario (predeterminado)';
@@ -500,10 +508,53 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                         ],
                       ),
                     ),
+                    if (canManageViewAccess) const _Divider(),
+                    if (canManageViewAccess)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Acceso a vistas del programa',
+                                    style: TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: cs.onSurface,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'Administra qué módulos puede ver cada rol en el escritorio.',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: cs.onSurface.withValues(alpha: 0.5),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 16),
+                            OutlinedButton.icon(
+                              onPressed: _openRoleViewAccessManager,
+                              icon: const Icon(Icons.view_sidebar_rounded, size: 16),
+                              label: const Text('Administrar'),
+                            ),
+                          ],
+                        ),
+                      ),
                     const _Divider(),
-                    const _InfoRow(
+                    _InfoRow(
                       label: 'Acceso',
-                      value: 'Solo administradores',
+                      value: canManageViewAccess
+                          ? 'Solo admin@sao.mx para vistas; administradores para permisos'
+                          : 'Solo administradores',
                       hint: 'Aplica cambios globales a los permisos base por rol.',
                     ),
                   ],
@@ -785,6 +836,275 @@ class _CopyRowState extends State<_CopyRow> {
   }
 }
 
+
+class _RoleViewAccessDialog extends StatefulWidget {
+  const _RoleViewAccessDialog();
+
+  @override
+  State<_RoleViewAccessDialog> createState() => _RoleViewAccessDialogState();
+}
+
+class _RoleViewAccessDialogState extends State<_RoleViewAccessDialog> {
+  bool _loading = true;
+  bool _saving = false;
+  String? _errorMessage;
+  List<String> _permissionCatalog = const <String>[];
+  Map<String, Set<String>> _rolePermissions = <String, Set<String>>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRolePermissions();
+  }
+
+  Future<void> _loadRolePermissions() async {
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final catalogResponse =
+          await const BackendApiClient().getJson('/api/v1/users/admin/permissions');
+      final roleResponse = await const BackendApiClient()
+          .getJson('/api/v1/users/admin/role-permissions');
+
+      final permissionCatalog = catalogResponse is List
+          ? catalogResponse
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toList()
+          : <String>[];
+
+      final rolePermissions = <String, Set<String>>{
+        for (final role in _rolePermissionEditorRoles) role: <String>{},
+      };
+
+      if (roleResponse is Map<String, dynamic>) {
+        roleResponse.forEach((key, value) {
+          final role = key.trim().toUpperCase();
+          if (!rolePermissions.containsKey(role) || value is! List) return;
+          rolePermissions[role] = value
+              .map((item) => item.toString().trim())
+              .where((item) => item.isNotEmpty)
+              .toSet();
+        });
+      }
+
+      final resolvedCatalog = permissionCatalog.isNotEmpty
+          ? permissionCatalog
+          : rolePermissions.values.expand((items) => items).toSet().toList();
+      rolePermissions['ADMIN'] = resolvedCatalog.toSet();
+
+      if (!mounted) return;
+      setState(() {
+        _permissionCatalog = resolvedCatalog;
+        _rolePermissions = rolePermissions;
+        _loading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'No se pudo cargar la configuración de vistas: $error';
+        _loading = false;
+      });
+    }
+  }
+
+  void _toggleViewAccess(String role, String moduleLabel, bool enabled) {
+    if (role == 'ADMIN') return;
+    setState(() {
+      _rolePermissions[role] = updateRoleShellViewAccess(
+        _rolePermissions[role] ?? <String>{},
+        moduleLabel,
+        enabled,
+      );
+    });
+  }
+
+  Future<void> _saveViewAccess() async {
+    setState(() => _saving = true);
+    try {
+      final payload = <String, List<String>>{
+        for (final role in _rolePermissionEditorRoles)
+          role: role == 'ADMIN'
+              ? List<String>.from(_permissionCatalog)
+              : ((_rolePermissions[role] ?? const <String>{}).toList()..sort()),
+      };
+
+      await const BackendApiClient().putJson(
+        '/api/v1/users/admin/role-permissions',
+        {'role_permissions': payload},
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Acceso a vistas actualizado. Si el usuario ya estaba dentro, debe volver a iniciar sesión.',
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _errorMessage = 'No se pudieron guardar los accesos: $error';
+      });
+    } finally {
+      if (mounted) {
+        setState(() => _saving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.view_sidebar_rounded),
+          SizedBox(width: 8),
+          Expanded(child: Text('Acceso a vistas del programa')),
+        ],
+      ),
+      content: SizedBox(
+        width: 760,
+        child: _loading
+            ? const Padding(
+                padding: EdgeInsets.symmetric(vertical: 32),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            : _errorMessage != null
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _errorMessage!,
+                        style: TextStyle(color: cs.error),
+                      ),
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: _loadRolePermissions,
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('Reintentar'),
+                      ),
+                    ],
+                  )
+                : SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Este panel ajusta los permisos base asociados a cada módulo del escritorio.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: cs.onSurface.withValues(alpha: 0.7),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        for (final role in _rolePermissionEditorRoles)
+                          _RoleViewAccessGroup(
+                            role: role,
+                            selectedPermissions:
+                                _rolePermissions[role] ?? const <String>{},
+                            locked: role == 'ADMIN',
+                            onChanged: (moduleLabel, enabled) =>
+                                _toggleViewAccess(role, moduleLabel, enabled),
+                          ),
+                      ],
+                    ),
+                  ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _saving ? null : () => Navigator.of(context).pop(),
+          child: const Text('Cerrar'),
+        ),
+        FilledButton.icon(
+          onPressed: _loading || _saving ? null : _saveViewAccess,
+          icon: _saving
+              ? const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.save_rounded, size: 16),
+          label: Text(_saving ? 'Guardando...' : 'Guardar cambios'),
+        ),
+      ],
+    );
+  }
+}
+
+class _RoleViewAccessGroup extends StatelessWidget {
+  final String role;
+  final Set<String> selectedPermissions;
+  final bool locked;
+  final void Function(String moduleLabel, bool enabled) onChanged;
+
+  const _RoleViewAccessGroup({
+    required this.role,
+    required this.selectedPermissions,
+    required this.locked,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border.all(color: Theme.of(context).dividerColor),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: ExpansionTile(
+        initiallyExpanded: role != 'LECTOR',
+        title: Text(role),
+        subtitle: Text(
+          locked
+              ? 'Acceso total protegido'
+              : 'Selecciona qué módulos puede ver este rol',
+        ),
+        children: [
+          if (locked)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'ADMIN conserva acceso total para evitar bloqueos del sistema.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurface.withValues(alpha: 0.6),
+                  ),
+                ),
+              ),
+            ),
+          for (final moduleLabel in shellModuleOrder)
+            CheckboxListTile(
+              dense: true,
+              value: roleHasShellViewAccess(role, selectedPermissions, moduleLabel),
+              onChanged: locked || !configurableShellModuleLabels.contains(moduleLabel)
+                  ? null
+                  : (value) => onChanged(moduleLabel, value ?? false),
+              title: Text(moduleLabel, style: const TextStyle(fontSize: 13)),
+              subtitle: !configurableShellModuleLabels.contains(moduleLabel)
+                  ? const Text('Vista protegida y siempre disponible')
+                  : null,
+              controlAffinity: ListTileControlAffinity.leading,
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _RolePermissionSettingsDialog extends StatefulWidget {
   const _RolePermissionSettingsDialog();

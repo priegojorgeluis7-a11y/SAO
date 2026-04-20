@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../features/auth/app_session_controller.dart';
 import '../features/dashboard/dashboard_page.dart';
 import '../features/digital_records/digital_records_page.dart';
 import '../features/operations/operations_hub_page.dart';
 import '../features/planning/planning_page.dart';
 import '../features/profile/profile_settings_page.dart';
 import '../features/structure/structure_page.dart';
+import '../core/navigation/role_view_access.dart';
 import '../core/providers/app_refresh_provider.dart';
 import '../core/theme/app_colors.dart';
 
@@ -21,7 +23,8 @@ class AppShell extends ConsumerStatefulWidget {
 class _AppShellState extends ConsumerState<AppShell> {
   int _refreshToken = 0;
 
-  List<_NavItem> get _navItems {
+  List<_NavItem> _buildNavItems(AppUser? currentUser) {
+    final visibleLabels = visibleShellModuleLabelsForUser(currentUser).toSet();
     final items = [
       _NavItem(
         icon: Icons.grid_view_rounded,
@@ -54,15 +57,16 @@ class _AppShellState extends ConsumerState<AppShell> {
         page: const ProfileSettingsPage(),
       ),
     ];
-    return items;
+    return items.where((item) => visibleLabels.contains(item.label)).toList();
   }
 
   @override
   Widget build(BuildContext context) {
     final appRefreshToken = ref.watch(appRefreshTokenProvider);
     final selectedIndex = ref.watch(appShellIndexProvider);
-    final navItems = _navItems;
-    final safeIndex = selectedIndex.clamp(0, navItems.length - 1);
+    final currentUser = ref.watch(currentAppUserProvider);
+    final navItems = _buildNavItems(currentUser);
+    final safeIndex = navItems.isEmpty ? 0 : selectedIndex.clamp(0, navItems.length - 1);
 
     return CallbackShortcuts(
       bindings: {
@@ -87,11 +91,15 @@ class _AppShellState extends ConsumerState<AppShell> {
 
               // ── Contenido principal ────────────────────────────────────
               Expanded(
-                child: KeyedSubtree(
-                  key: ValueKey(
-                      'page-$safeIndex-$_refreshToken-$appRefreshToken'),
-                  child: navItems[safeIndex].page,
-                ),
+                child: navItems.isEmpty
+                    ? const Center(
+                        child: Text('No hay módulos disponibles para este usuario.'),
+                      )
+                    : KeyedSubtree(
+                        key: ValueKey(
+                            'page-$safeIndex-$_refreshToken-$appRefreshToken'),
+                        child: navItems[safeIndex].page,
+                      ),
               ),
             ],
           ),

@@ -53,6 +53,39 @@ def _normalize_role_permissions(raw: object) -> dict[str, list[str]]:
     return normalized
 
 
+def _unique_keep_order(values: list[str]) -> list[str]:
+    return list(dict.fromkeys([value for value in values if value]))
+
+
+def merge_role_permission_codes(
+    roles: list[str] | None,
+    permission_scopes: list[dict[str, str | None]] | None,
+    role_permissions_map: dict[str, list[str]] | None = None,
+) -> list[str]:
+    resolved_role_permissions = role_permissions_map or get_role_permission_map()
+    role_permission_codes: list[str] = []
+    for role_name in roles or []:
+        role_permission_codes.extend(
+            resolved_role_permissions.get(str(role_name).strip().upper(), [])
+        )
+
+    direct_scopes = permission_scopes or []
+    allow_codes = {
+        str(item.get("permission_code") or "").strip()
+        for item in direct_scopes
+        if str(item.get("effect") or "allow").strip().lower() == "allow"
+        and item.get("project_id") is None
+    }
+    deny_codes = {
+        str(item.get("permission_code") or "").strip()
+        for item in direct_scopes
+        if str(item.get("effect") or "allow").strip().lower() == "deny"
+        and item.get("project_id") is None
+    }
+    merged = _unique_keep_order(role_permission_codes + list(allow_codes))
+    return [code for code in merged if code and code not in deny_codes]
+
+
 @lru_cache(maxsize=1)
 def _cached_role_permission_pairs() -> tuple[tuple[str, tuple[str, ...]], ...]:
     defaults = _default_role_permission_map()

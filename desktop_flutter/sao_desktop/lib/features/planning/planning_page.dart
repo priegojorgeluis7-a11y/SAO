@@ -9,6 +9,7 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 
+import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../data/repositories/assignments_repository.dart';
@@ -23,6 +24,17 @@ class _ToggleCalendarIntent extends Intent {
   const _ToggleCalendarIntent();
 }
 
+void _invalidateAssignmentDerivedProviders(ProviderContainer container) {
+  container.invalidate(planningAssignmentsProvider);
+  container.invalidate(planningMonthlyAssignmentsProvider);
+  container.invalidate(completedActivitiesProvider);
+  container.invalidate(completedExplorerActivitiesProvider);
+  container.invalidate(completedFilterOptionsProvider);
+  container.invalidate(reportActivitiesProvider);
+  container.invalidate(dashboardProvider);
+  container.read(appRefreshTokenProvider.notifier).state++;
+}
+
 class PlanningPage extends ConsumerStatefulWidget {
   const PlanningPage({super.key});
 
@@ -35,8 +47,9 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
   bool _calendarCollapsed = false;
 
   void _refreshPlanning() {
-    ref.invalidate(planningAssignmentsProvider);
-    ref.invalidate(planningMonthlyAssignmentsProvider);
+    _invalidateAssignmentDerivedProviders(
+      ProviderScope.containerOf(context, listen: false),
+    );
   }
 
   Future<void> _pickDate(DateTime selectedDate) async {
@@ -1986,6 +1999,9 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
         reason: selection.reason,
       );
       if (!mounted) return;
+      _invalidateAssignmentDerivedProviders(
+        ProviderScope.containerOf(context, listen: false),
+      );
       widget.onDeleted(widget.item.id);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -3903,12 +3919,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
       );
       if (!mounted) return;
       final container = ProviderScope.containerOf(context, listen: false);
-      container.invalidate(planningAssignmentsProvider);
-      container.invalidate(planningMonthlyAssignmentsProvider);
-      container.invalidate(completedActivitiesProvider);
-      container.invalidate(completedFilterOptionsProvider);
-      container.invalidate(reportActivitiesProvider);
-      container.invalidate(dashboardProvider);
+      _invalidateAssignmentDerivedProviders(container);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Actividad transferida a ${selection.assignee.fullName}.'),
@@ -3959,12 +3970,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
       }
       if (!mounted) return;
       final container = ProviderScope.containerOf(context, listen: false);
-      container.invalidate(planningAssignmentsProvider);
-      container.invalidate(planningMonthlyAssignmentsProvider);
-      container.invalidate(completedActivitiesProvider);
-      container.invalidate(completedFilterOptionsProvider);
-      container.invalidate(reportActivitiesProvider);
-      container.invalidate(dashboardProvider);
+      _invalidateAssignmentDerivedProviders(container);
       _handleAssignmentDeleted(item.id);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Actividad eliminada correctamente.')),
@@ -4694,11 +4700,19 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                 ),
                                 border: Border(
                                   bottom: BorderSide(color: SaoColors.gray200),
-                                  left: BorderSide(color: SaoColors.primary, width: 3),
                                 ),
                               ),
                               child: Row(
                                 children: [
+                                  Container(
+                                    width: 4,
+                                    height: 18,
+                                    decoration: BoxDecoration(
+                                      color: SaoColors.primary,
+                                      borderRadius: BorderRadius.circular(999),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
                                   Text(
                                     '${hour.toString().padLeft(2, '0')}:00',
                                     style: const TextStyle(

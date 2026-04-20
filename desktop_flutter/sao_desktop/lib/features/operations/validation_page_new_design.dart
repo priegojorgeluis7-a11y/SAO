@@ -70,20 +70,16 @@ class _ValidationPageNewDesignState
   int _secondsUntilRefresh = _autoRefreshInterval.inSeconds;
   Timer? _countdownTimer;
 
-  bool _isAdminUser(AppUser? user) {
+  bool _canDeleteActivities(AppUser? user, {String? projectId}) {
     if (user == null) return false;
-    final normalizedRoles = <String>{
-      user.role.trim().toUpperCase(),
-      ...user.roles.map((role) => role.trim().toUpperCase()),
-    }..removeWhere((value) => value.isEmpty);
-    return normalizedRoles.any((role) => role == 'ADMIN' || role.contains('ADMIN'));
+    return user.hasPermission('activity.delete', projectId: projectId);
   }
 
   void _showDeleteNotAllowedMessage() {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text('Solo administradores pueden eliminar actividades'),
+        content: Text('Tu usuario no tiene permiso para eliminar actividades'),
         backgroundColor: SaoColors.warning,
       ),
     );
@@ -241,7 +237,10 @@ class _ValidationPageNewDesignState
     );
 
     final currentUser = ref.watch(currentAppUserProvider);
-    final canDeleteActivities = _isAdminUser(currentUser);
+    final canDeleteActivities = _canDeleteActivities(
+      currentUser,
+      projectId: selectedProjectFilter.isEmpty ? null : selectedProjectFilter,
+    );
 
     return BoardShortcuts(
       onApprove: () {
@@ -1871,7 +1870,11 @@ class _ValidationPageNewDesignState
   }
 
   Future<void> _deleteSelectedActivity() async {
-    if (!_isAdminUser(ref.read(currentAppUserProvider))) {
+    final currentProjectId = ref.read(operationsProjectFilterProvider).trim();
+    if (!_canDeleteActivities(
+      ref.read(currentAppUserProvider),
+      projectId: currentProjectId.isEmpty ? null : currentProjectId,
+    )) {
       _showDeleteNotAllowedMessage();
       return;
     }
@@ -1909,7 +1912,11 @@ class _ValidationPageNewDesignState
   }
 
   Future<void> _bulkDeleteSelected() async {
-    if (!_isAdminUser(ref.read(currentAppUserProvider))) {
+    final currentProjectId = ref.read(operationsProjectFilterProvider).trim();
+    if (!_canDeleteActivities(
+      ref.read(currentAppUserProvider),
+      projectId: currentProjectId.isEmpty ? null : currentProjectId,
+    )) {
       _showDeleteNotAllowedMessage();
       return;
     }

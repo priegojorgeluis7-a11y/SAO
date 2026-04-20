@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 
 from app.api.v1 import dashboard as dashboard_api
 from app.api.v1 import dashboard_kpis as dashboard_kpis_api
+from app.api.v1 import me as me_api
 from app.api.v1 import reports as reports_api
 from app.api.v1 import review as review_api
 from tests.test_firestore_e2e_flow import _FakeFirestoreClient
@@ -55,11 +57,70 @@ def test_dashboard_kpis_excludes_soft_deleted_from_total(monkeypatch):
 
     payload = dashboard_api.get_dashboard_kpis(
         project_id="TMQ",
-        _current_user=SimpleNamespace(id=str(uuid4()), project_ids=["TMQ"]),
+        _current_user=SimpleNamespace(
+            id=str(uuid4()),
+            project_ids=["TMQ"],
+            roles=["OPERATIVO"],
+            permission_scopes=[],
+        ),
     )
 
     assert payload["kpis"]["total"] == 1
     assert payload["kpis"]["completed"] == 1
+
+
+def test_list_my_projects_respects_permission_scopes_when_project_ids_are_empty(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    fake_client.collection("projects").document("TMQ").set({"id": "TMQ", "name": "Tramo TMQ"})
+    fake_client.collection("projects").document("ABC").set({"id": "ABC", "name": "Proyecto Ajeno"})
+
+    monkeypatch.setattr(me_api, "get_firestore_client", lambda: fake_client)
+
+    payload = asyncio.run(
+        me_api.list_my_projects(
+            current_user=SimpleNamespace(
+                roles=["OPERATIVO"],
+                project_ids=[],
+                permission_scopes=[
+                    {"permission_code": "activity.view", "project_id": "TMQ", "effect": "allow"},
+                ],
+            ),
+        )
+    )
+
+    assert [item.project_id for item in payload] == ["TMQ"]
+
+
+def test_dashboard_kpis_treats_approve_review_as_completed(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    now = datetime.now(timezone.utc)
+
+    fake_client.collection("activities").document("approved-via-review").set(
+        {
+            "uuid": "approved-via-review",
+            "project_id": "TMQ",
+            "execution_state": "REVISION_PENDIENTE",
+            "review_decision": "APPROVE",
+            "created_at": now,
+            "updated_at": now,
+            "deleted_at": None,
+        }
+    )
+
+    monkeypatch.setattr(dashboard_api, "get_firestore_client", lambda: fake_client)
+
+    payload = dashboard_api.get_dashboard_kpis(
+        project_id="TMQ",
+        _current_user=SimpleNamespace(
+            id=str(uuid4()),
+            project_ids=["TMQ"],
+            roles=["OPERATIVO"],
+            permission_scopes=[],
+        ),
+    )
+
+    assert payload["kpis"]["completed"] == 1
+    assert payload["kpis"]["pending_review"] == 0
 
 
 def test_reports_activities_paginates_and_preserves_meta(monkeypatch):

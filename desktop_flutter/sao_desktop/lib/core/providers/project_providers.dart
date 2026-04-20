@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../data/repositories/backend_api_client.dart';
+import '../../features/auth/app_session_controller.dart';
 
 // ---------------------------------------------------------------------------
 // Projects list
@@ -41,20 +42,61 @@ List<String> parseAvailableProjectIds(dynamic decoded) {
   return projectIds;
 }
 
+List<String> _scopedProjectIdsForUser(AppUser? user) {
+  if (user == null || user.isAdmin) return const <String>[];
+  final ids = <String>{
+    for (final scope in user.permissionScopes)
+      if (scope.effect != 'deny' && (scope.projectId ?? '').trim().isNotEmpty)
+        scope.projectId!.trim().toUpperCase(),
+  }.toList()
+    ..sort();
+  return ids;
+}
+
+List<String> _restrictProjectsToUser(
+  List<String> projectIds,
+  AppUser? user,
+) {
+  if (user == null || user.isAdmin) {
+    return projectIds;
+  }
+  final scopedProjectIds = _scopedProjectIdsForUser(user);
+  if (scopedProjectIds.isEmpty) {
+    return projectIds;
+  }
+  final allowed = projectIds
+      .where((projectId) => scopedProjectIds.contains(projectId))
+      .toList();
+  return allowed.isNotEmpty ? allowed : scopedProjectIds;
+}
+
 /// Loads project IDs from the user-scoped endpoint and falls back to the
-/// admin listing endpoint when needed. Returns an empty list on error.
+/// admin listing endpoint only for administrators. Returns an empty list on error.
 final availableProjectsProvider =
     FutureProvider.autoDispose<List<String>>((ref) async {
   final client = ref.read(backendApiClientProvider);
+  final currentUser = ref.watch(currentAppUserProvider);
 
   try {
     final decoded = await client.getJson('/api/v1/me/projects');
-    final scopedProjects = parseAvailableProjectIds(decoded);
+    final scopedProjects = _restrictProjectsToUser(
+      parseAvailableProjectIds(decoded),
+      currentUser,
+    );
     if (scopedProjects.isNotEmpty) {
       return scopedProjects;
     }
   } catch (_) {
-    // Fallback for admin-only screens or legacy backend contracts.
+    // For non-admin users, prefer session-scoped project IDs over broad fallbacks.
+  }
+
+  final sessionScopedProjects = _scopedProjectIdsForUser(currentUser);
+  if (sessionScopedProjects.isNotEmpty) {
+    return sessionScopedProjects;
+  }
+
+  if (currentUser != null && !currentUser.isAdmin) {
+    return const <String>[];
   }
 
   try {

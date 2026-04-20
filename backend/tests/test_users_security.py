@@ -116,7 +116,7 @@ def test_delete_admin_user_rejects_supervisor_role(client, monkeypatch):
 
 def test_delete_admin_user_requires_inactive_status(client, monkeypatch):
     monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
-    current_user = _principal(email="admin@example.com", roles=["ADMIN"])
+    current_user = _principal(email="admin@sao.mx", roles=["ADMIN"])
     target_user = _principal(email="target@example.com", roles=["OPERATIVO"], status=UserStatus.ACTIVE)
     monkeypatch.setattr(users_api, "get_firestore_user_by_id", lambda user_id: target_user)
 
@@ -131,9 +131,24 @@ def test_delete_admin_user_requires_inactive_status(client, monkeypatch):
     assert "inactive" in response.json()["detail"].lower()
 
 
+def test_delete_admin_user_requires_admin_sao_mx(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="other-admin@example.com", roles=["ADMIN"])
+    target_user = _principal(email="target@example.com", roles=["OPERATIVO"], status=UserStatus.INACTIVE)
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.delete(f"/api/v1/users/admin/{target_user.id}")
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 403
+    assert response.headers.get("X-Error-Code") == "USER_DELETE_FORBIDDEN"
+
+
 def test_delete_admin_user_allows_inactive_user(client, monkeypatch):
     monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
-    current_user = _principal(email="admin@example.com", roles=["ADMIN"])
+    current_user = _principal(email="admin@sao.mx", roles=["ADMIN"])
     target_user = _principal(email="target@example.com", roles=["OPERATIVO"], status=UserStatus.INACTIVE)
     monkeypatch.setattr(users_api, "get_firestore_user_by_id", lambda user_id: target_user)
     monkeypatch.setattr(users_api, "delete_firestore_user", lambda user_id: True)
@@ -146,6 +161,92 @@ def test_delete_admin_user_allows_inactive_user(client, monkeypatch):
         app.dependency_overrides.pop(deps_module.get_current_user, None)
 
     assert response.status_code == 204
+
+
+def test_delete_admin_user_protects_admin_sao_mx(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="admin@sao.mx", roles=["ADMIN"])
+    target_user = _principal(email="admin@sao.mx", roles=["ADMIN"], status=UserStatus.INACTIVE)
+    monkeypatch.setattr(users_api, "get_firestore_user_by_id", lambda user_id: target_user)
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.delete(f"/api/v1/users/admin/{target_user.id}")
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 403
+    assert response.headers.get("X-Error-Code") == "USER_PROTECTED"
+
+
+def test_update_admin_user_cannot_deactivate_admin_sao_mx(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="other-admin@example.com", roles=["ADMIN"])
+    target_user = _principal(email="admin@sao.mx", roles=["ADMIN"], status=UserStatus.ACTIVE)
+    monkeypatch.setattr(users_api, "get_firestore_user_by_id", lambda user_id: target_user)
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.patch(
+            f"/api/v1/users/admin/{target_user.id}",
+            json={"status": "inactive"},
+        )
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 403
+    assert response.headers.get("X-Error-Code") == "USER_PROTECTED"
+
+
+def test_reset_user_password_requires_admin_sao_mx(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="other-admin@example.com", roles=["ADMIN"])
+    target_user = _principal(email="target@example.com", roles=["OPERATIVO"], status=UserStatus.ACTIVE)
+    monkeypatch.setattr(users_api, "get_firestore_user_by_id", lambda user_id: target_user)
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.put(
+            f"/api/v1/users/admin/{target_user.id}/reset-password",
+            json={"new_password": "Nueva1234"},
+        )
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 403
+    assert response.headers.get("X-Error-Code") == "PASSWORD_RESET_FORBIDDEN"
+
+
+def test_reset_user_password_allows_admin_sao_mx(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="admin@sao.mx", roles=["ADMIN"])
+    target_user = _principal(email="target@example.com", roles=["OPERATIVO"], status=UserStatus.ACTIVE)
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(users_api, "get_firestore_user_by_id", lambda user_id: target_user)
+
+    def _reset_password(user_id, password_hash):
+        captured["user_id"] = str(user_id)
+        captured["password_hash"] = password_hash
+        return target_user
+
+    monkeypatch.setattr(users_api, "reset_firestore_user_password", _reset_password)
+    monkeypatch.setattr(users_api, "write_firestore_audit_log", lambda **kwargs: captured.update({"audit": kwargs["action"]}))
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.put(
+            f"/api/v1/users/admin/{target_user.id}/reset-password",
+            json={"new_password": "Nueva1234"},
+        )
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert captured["user_id"] == str(target_user.id)
+    assert captured["password_hash"] != "Nueva1234"
+    assert captured["audit"] == "USER_PASSWORD_RESET"
 
 
 def test_update_role_permissions_requires_admin(client, monkeypatch):

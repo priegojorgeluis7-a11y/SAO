@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.core.firestore import get_firestore_client
-from app.api.deps import get_current_user, require_any_role
+from app.api.deps import get_current_user, resolve_user_project_access, user_has_permission, verify_project_access
 from typing import Any
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard-kpis"])
@@ -49,14 +49,27 @@ def get_operational_kpis(
         # If project_id provided, query that project
         # Otherwise, accessible projects for user
         if project_id:
-            project_ids = [project_id.strip().upper()]
+            normalized_project_id = project_id.strip().upper()
+            verify_project_access(current_user, normalized_project_id, None)
+            if not user_has_permission(current_user, "activity.view", None, project_id=normalized_project_id):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Missing permission: activity.view for project: {normalized_project_id}",
+                )
+            project_ids = [normalized_project_id]
         else:
-            # In real app: resolve from user.project_ids or RBAC
-            project_ids = getattr(current_user, "project_ids", [])
-            if isinstance(project_ids, str):
-                project_ids = [project_ids.strip().upper()] if project_ids.strip() else []
+            has_global_scope, allowed_project_ids = resolve_user_project_access(current_user)
+            if has_global_scope:
+                project_ids = [
+                    str((doc.to_dict() or {}).get("id") or doc.id).strip().upper()
+                    for doc in client.collection("projects").stream()
+                    if str((doc.to_dict() or {}).get("id") or doc.id).strip()
+                ]
             else:
-                project_ids = [str(pid).strip().upper() for pid in project_ids if str(pid).strip()]
+                project_ids = [
+                    pid for pid in sorted(allowed_project_ids)
+                    if user_has_permission(current_user, "activity.view", None, project_id=pid)
+                ]
 
         if not project_ids:
             raise HTTPException(

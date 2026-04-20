@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../auth/app_session_controller.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../ui/helpers/sao_contrast.dart';
@@ -87,6 +88,157 @@ const Map<String, List<String>> _localRolePermissions = <String, List<String>>{
   ],
 };
 
+const String _protectedAdminEmail = 'admin@sao.mx';
+
+bool _isProtectedAdminEmail(String email) {
+  return email.trim().toLowerCase() == _protectedAdminEmail;
+}
+
+class UserActivityOwnership {
+  final bool assigned;
+  final bool created;
+
+  const UserActivityOwnership({
+    required this.assigned,
+    required this.created,
+  });
+
+  bool get isRelated => assigned || created;
+}
+
+String _normalizeActivityIdentity(dynamic value) {
+  if (value == null) return '';
+  final normalized = value.toString().trim().toLowerCase();
+  if (normalized.isEmpty || normalized == 'null') return '';
+  return normalized;
+}
+
+String _normalizeActivityName(dynamic value) {
+  if (value == null) return '';
+  var normalized = value.toString().trim().toLowerCase();
+  if (normalized.isEmpty || normalized == 'null') return '';
+  const replacements = <String, String>{
+    'á': 'a',
+    'à': 'a',
+    'ä': 'a',
+    'â': 'a',
+    'ã': 'a',
+    'é': 'e',
+    'è': 'e',
+    'ë': 'e',
+    'ê': 'e',
+    'í': 'i',
+    'ì': 'i',
+    'ï': 'i',
+    'î': 'i',
+    'ó': 'o',
+    'ò': 'o',
+    'ö': 'o',
+    'ô': 'o',
+    'õ': 'o',
+    'ú': 'u',
+    'ù': 'u',
+    'ü': 'u',
+    'û': 'u',
+    'ñ': 'n',
+  };
+  replacements.forEach((source, target) {
+    normalized = normalized.replaceAll(source, target);
+  });
+  normalized = normalized.replaceAll(RegExp(r'[^a-z0-9\s]'), ' ');
+  return normalized.replaceAll(RegExp(r'\s+'), ' ').trim();
+}
+
+bool _matchesIdentityCandidate(String expected, List<dynamic> candidates) {
+  if (expected.isEmpty) return false;
+  for (final candidate in candidates) {
+    if (_normalizeActivityIdentity(candidate) == expected) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool _matchesNameCandidate(String expected, List<dynamic> candidates) {
+  if (expected.isEmpty) return false;
+  for (final candidate in candidates) {
+    if (_normalizeActivityName(candidate) == expected) {
+      return true;
+    }
+  }
+  return false;
+}
+
+UserActivityOwnership resolveUserActivityOwnership(
+  Map<String, dynamic> raw, {
+  required String userId,
+  String? userEmail,
+  String? fullName,
+  String? authoritativeAssigneeUserId,
+  String? authoritativeAssigneeEmail,
+  String? authoritativeAssigneeName,
+  bool forceAssigned = false,
+  bool includeCreated = true,
+}) {
+  final normalizedUserId = _normalizeActivityIdentity(userId);
+  final normalizedEmail = _normalizeActivityIdentity(userEmail ?? '');
+  final normalizedName = _normalizeActivityName(fullName ?? '');
+
+  final assigneeIdCandidates = <dynamic>[
+    raw['assigned_to_user_id'],
+    raw['assignee_user_id'],
+    raw['assigned_user_id'],
+    raw['assigned_to_id'],
+    authoritativeAssigneeUserId,
+  ];
+  final assigneeEmailCandidates = <dynamic>[
+    raw['assigned_to_user_email'],
+    raw['assigned_to_email'],
+    raw['assignee_email'],
+    raw['assigned_email'],
+    authoritativeAssigneeEmail,
+  ];
+  final assigneeNameCandidates = <dynamic>[
+    raw['assigned_to_user_name'],
+    raw['assigned_to_name'],
+    raw['assigned_name'],
+    raw['assignee_name'],
+    authoritativeAssigneeName,
+  ];
+
+  final hasExplicitAssignee =
+      assigneeIdCandidates.any((value) => _normalizeActivityIdentity(value).isNotEmpty) ||
+      assigneeEmailCandidates.any((value) => _normalizeActivityIdentity(value).isNotEmpty) ||
+      assigneeNameCandidates.any((value) => _normalizeActivityName(value).isNotEmpty);
+
+  final isAssigned = forceAssigned ||
+      _matchesIdentityCandidate(normalizedUserId, assigneeIdCandidates) ||
+      _matchesIdentityCandidate(normalizedEmail, assigneeEmailCandidates) ||
+      _matchesNameCandidate(normalizedName, assigneeNameCandidates);
+
+  final creatorMatches = _matchesIdentityCandidate(normalizedUserId, [
+        raw['created_by_user_id'],
+        raw['created_by_id'],
+        raw['user_id'],
+      ]) ||
+      _matchesIdentityCandidate(normalizedEmail, [
+        raw['created_by_email'],
+        raw['user_email'],
+        raw['created_email'],
+      ]) ||
+      _matchesNameCandidate(normalizedName, [
+        raw['created_by_name'],
+        raw['creator_name'],
+        raw['user_name'],
+        raw['created_by'],
+        raw['usuario'],
+      ]);
+
+  final isCreated = includeCreated && creatorMatches && (!hasExplicitAssignee || isAssigned);
+
+  return UserActivityOwnership(assigned: isAssigned, created: isCreated);
+}
+
 // ---------------------------------------------------------------------------
 // Model
 // ---------------------------------------------------------------------------
@@ -115,6 +267,7 @@ class _AdminUser {
   });
 
   bool get isActive => status.toLowerCase() == 'active';
+  bool get isProtectedAdmin => _isProtectedAdminEmail(email);
   String get primaryRole => roles.isNotEmpty ? roles.first : '';
   String? get primaryProjectId =>
       projectIds.isNotEmpty ? projectIds.first : null;
@@ -391,7 +544,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   bool _sortAscending = true;
   _AdminUser? _selectedUser;
   String? _selectedUserId;
-  String _activityViewFilter = 'Todas';
+  String _activityViewFilter = 'Asignadas';
   int _activityRangeDays = 0;
   final Map<String, Future<_UserActivitySummary>> _activitySummaryCache =
       <String, Future<_UserActivitySummary>>{};
@@ -493,6 +646,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final permissionsAsync = ref.watch(_adminPermissionsProvider);
     final rolePermissionsAsync = ref.watch(_adminRolePermissionsProvider);
     final projectsAsync = ref.watch(availableProjectsProvider);
+    final currentUser = ref.watch(currentAppUserProvider);
     final allUsers = usersAsync.valueOrNull ?? const <_AdminUser>[];
     final availablePermissions = _resolveAvailablePermissions(
       permissionsAsync.valueOrNull ?? const <String>[],
@@ -502,6 +656,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     );
     final availableProjects = projectsAsync.valueOrNull ?? const <String>[];
     final resolvedSelectedUser = _resolveSelectedUser(allUsers);
+    final canResetUserPasswords =
+        _isProtectedAdminEmail(currentUser?.email ?? '');
+    final canDeleteUsers =
+        _isProtectedAdminEmail(currentUser?.email ?? '');
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
@@ -565,13 +723,18 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                             rolePermissions,
                             availableProjects,
                           ),
+                          canResetPasswords: canResetUserPasswords,
+                          canDeleteUsers: canDeleteUsers,
+                          onResetPassword: (u) => _resetUserPassword(context, u),
                           onToggleStatus: (u) => _toggleStatus(context, u),
                           onDelete: (u) => _deleteUser(context, u),
                         ),
                       ),
                     ),
                     AnimatedContainer(
-                      duration: const Duration(milliseconds: 220),
+                      duration: resolvedSelectedUser == null
+                          ? const Duration(milliseconds: 220)
+                          : Duration.zero,
                       curve: Curves.easeOutCubic,
                       width: resolvedSelectedUser == null ? 0 : 390,
                       decoration: BoxDecoration(
@@ -1076,6 +1239,17 @@ class _UsersPageState extends ConsumerState<UsersPage> {
 
   Future<void> _toggleStatus(BuildContext context, _AdminUser user) async {
     if (_processingStatusIds.contains(user.id)) return;
+    if (user.isProtectedAdmin) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('El usuario admin@sao.mx está protegido y no se puede desactivar.'),
+            backgroundColor: SaoColors.warning,
+          ),
+        );
+      }
+      return;
+    }
     final newStatus = user.isActive ? 'inactive' : 'active';
     final action = user.isActive ? 'desactivar' : 'activar';
     final confirm = await showDialog<bool>(
@@ -1132,17 +1306,50 @@ class _UsersPageState extends ConsumerState<UsersPage> {
   }
 
   Future<void> _deleteUser(BuildContext context, _AdminUser user) async {
+    final currentUser = ref.read(currentAppUserProvider);
+    if (!_isProtectedAdminEmail(currentUser?.email ?? '')) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Solo admin@sao.mx puede eliminar usuarios.'),
+            backgroundColor: SaoColors.error,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (user.isProtectedAdmin) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('El usuario admin@sao.mx está protegido y no se puede borrar.'),
+            backgroundColor: SaoColors.warning,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (user.isActive) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Primero desactiva al usuario antes de eliminarlo.'),
+            backgroundColor: SaoColors.warning,
+          ),
+        );
+      }
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title:
-            Text(user.isActive ? '¿Desactivar usuario?' : '¿Eliminar usuario?'),
+        title: const Text('¿Eliminar usuario?'),
         content: Text(
-          user.isActive
-              ? '${user.fullName} (${user.email}) se marcará como inactivo.\n\n'
-                  'No se eliminará permanentemente para mantener trazabilidad y auditoría.'
-              : '${user.fullName} (${user.email}) se eliminará permanentemente.\n\n'
-                  'Esta acción no se puede deshacer.',
+          '${user.fullName} (${user.email}) se eliminará permanentemente.\n\n'
+          'Esta acción no se puede deshacer.',
         ),
         actions: [
           TextButton(
@@ -1152,7 +1359,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: FilledButton.styleFrom(backgroundColor: SaoColors.error),
-            child: Text(user.isActive ? 'Desactivar' : 'Eliminar'),
+            child: const Text('Eliminar'),
           ),
         ],
       ),
@@ -1162,17 +1369,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     setState(() => _processingStatusIds.add(user.id));
 
     try {
-      if (user.isActive) {
-        await const BackendApiClient().patchJson(
-          '/api/v1/users/admin/${user.id}',
-          {'status': 'inactive'},
-        );
-      } else {
-        await const BackendApiClient()
-            .deleteJson('/api/v1/users/admin/${user.id}');
-      }
+      await const BackendApiClient()
+          .deleteJson('/api/v1/users/admin/${user.id}');
       ref.invalidate(_adminUsersProvider);
-      if (!user.isActive && mounted && _selectedUserId == user.id) {
+      if (mounted && _selectedUserId == user.id) {
         setState(() {
           _selectedUser = null;
           _selectedUserId = null;
@@ -1180,12 +1380,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       }
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              user.isActive
-                  ? 'Usuario desactivado exitosamente'
-                  : 'Usuario eliminado exitosamente',
-            ),
+          const SnackBar(
+            content: Text('Usuario eliminado exitosamente'),
           ),
         );
       }
@@ -1199,6 +1395,168 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     } finally {
       if (mounted) {
         setState(() => _processingStatusIds.remove(user.id));
+      }
+    }
+  }
+
+  Future<void> _resetUserPassword(BuildContext context, _AdminUser user) async {
+    final currentUser = ref.read(currentAppUserProvider);
+    if (!_isProtectedAdminEmail(currentUser?.email ?? '')) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Solo admin@sao.mx puede reiniciar contraseñas.'),
+            backgroundColor: SaoColors.error,
+          ),
+        );
+      }
+      return;
+    }
+
+    final passwordController = TextEditingController();
+    final confirmController = TextEditingController();
+    final confirmed = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        var obscurePassword = true;
+        var obscureConfirm = true;
+        String? validationMessage;
+
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) => AlertDialog(
+            title: const Text('Reiniciar contraseña'),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Define una contraseña temporal para ${user.email}.'),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: passwordController,
+                  autofocus: true,
+                  obscureText: obscurePassword,
+                  decoration: InputDecoration(
+                    labelText: 'Nueva contraseña temporal',
+                    hintText: 'Mínimo 8 caracteres',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      tooltip: obscurePassword
+                          ? 'Mostrar contraseña'
+                          : 'Ocultar contraseña',
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () => setDialogState(
+                        () => obscurePassword = !obscurePassword,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: confirmController,
+                  obscureText: obscureConfirm,
+                  decoration: InputDecoration(
+                    labelText: 'Confirmar contraseña',
+                    hintText: 'Vuelve a escribirla',
+                    border: const OutlineInputBorder(),
+                    suffixIcon: IconButton(
+                      tooltip: obscureConfirm
+                          ? 'Mostrar confirmación'
+                          : 'Ocultar confirmación',
+                      icon: Icon(
+                        obscureConfirm
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                      onPressed: () => setDialogState(
+                        () => obscureConfirm = !obscureConfirm,
+                      ),
+                    ),
+                  ),
+                ),
+                if (validationMessage != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    validationMessage!,
+                    style: const TextStyle(
+                      color: SaoColors.error,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: () {
+                  final password = passwordController.text.trim();
+                  final confirmation = confirmController.text.trim();
+
+                  if (password.isEmpty) {
+                    setDialogState(
+                      () => validationMessage = 'Escribe una contraseña temporal.',
+                    );
+                    return;
+                  }
+                  if (password.length < 8) {
+                    setDialogState(
+                      () => validationMessage =
+                          'La nueva contraseña debe tener al menos 8 caracteres.',
+                    );
+                    return;
+                  }
+                  if (password != confirmation) {
+                    setDialogState(
+                      () => validationMessage = 'Las contraseñas no coinciden.',
+                    );
+                    return;
+                  }
+
+                  Navigator.pop(ctx, password);
+                },
+                icon: const Icon(Icons.lock_reset_rounded),
+                label: const Text('Reiniciar'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+    passwordController.dispose();
+    confirmController.dispose();
+
+    final newPassword = (confirmed ?? '').trim();
+    if (newPassword.isEmpty) return;
+
+    try {
+      await const BackendApiClient().putJson(
+        '/api/v1/users/admin/${user.id}/reset-password',
+        {'new_password': newPassword},
+      );
+      await Clipboard.setData(ClipboardData(text: newPassword));
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Contraseña reiniciada para ${user.email}. Se copió al portapapeles.'),
+          ),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al reiniciar contraseña: $e'),
+            backgroundColor: SaoColors.error,
+          ),
+        );
       }
     }
   }
@@ -1221,8 +1579,13 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final collected = <_UserActivityItem>[];
     final stateCounters = <String, int>{};
     final partialErrors = <String>{};
+    final authoritativeAssignees = <String, Map<String, String>>{};
+    final lowerEmail = user.email.trim().toLowerCase();
+    final lowerName = user.fullName.trim().toLowerCase();
 
-    final projects = <String>{
+    final availableProjects =
+        ref.read(availableProjectsProvider).valueOrNull ?? const <String>[];
+    final projectSet = <String>{
       ...user.projectIds
           .map((p) => p.trim().toUpperCase())
           .where((p) => p.isNotEmpty),
@@ -1232,8 +1595,15 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       ...user.permissionScopes
           .map((s) => (s.projectId ?? '').trim().toUpperCase())
           .where((p) => p.isNotEmpty),
-    }.toList()
-      ..sort();
+    };
+    if (projectSet.isEmpty) {
+      projectSet.addAll(
+        availableProjects
+            .map((p) => p.trim().toUpperCase())
+            .where((p) => p.isNotEmpty),
+      );
+    }
+    final projects = projectSet.toList()..sort();
 
     Future<void> collectFromActivitiesEndpoint(
       Map<String, String> roleFilter, {
@@ -1271,6 +1641,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             createdIds: createdIds,
             stateCounters: stateCounters,
             collected: collected,
+            lowerEmail: lowerEmail,
+            lowerName: lowerName,
+            authoritativeAssignees: authoritativeAssignees,
           );
         }
 
@@ -1287,28 +1660,6 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       }
     }
 
-    final roleFilters = <Map<String, String>>[
-      {'assigned_to_user_id': user.id},
-      {'created_by_user_id': user.id},
-    ];
-
-    for (final roleFilter in roleFilters) {
-      if (projects.isEmpty) {
-        await collectSafely(() => collectFromActivitiesEndpoint(roleFilter));
-        continue;
-      }
-      for (final projectId in projects) {
-        await collectSafely(
-          () => collectFromActivitiesEndpoint(roleFilter, projectId: projectId),
-        );
-      }
-    }
-
-    final lowerEmail = user.email.trim().toLowerCase();
-    final lowerName = user.fullName.trim().toLowerCase();
-
-    // Complement with assignments data because some historical activities rely on
-    // effective assignee semantics (assigned_to_user_id can be null in legacy rows).
     if (projects.isNotEmpty) {
       await collectSafely(
         () => _collectUserActivitiesFromAssignments(
@@ -1321,9 +1672,30 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           createdIds: createdIds,
           stateCounters: stateCounters,
           collected: collected,
+          authoritativeAssignees: authoritativeAssignees,
         ),
       );
     }
+
+    final roleFilters = <Map<String, String>>[
+      {'assigned_to_user_id': user.id},
+      {'created_by_user_id': user.id},
+    ];
+
+    for (final roleFilter in roleFilters) {
+      if (projects.isEmpty) {
+        await collectSafely(() => collectFromActivitiesEndpoint(roleFilter, maxPages: 5));
+        continue;
+      }
+      for (final projectId in projects) {
+        await collectSafely(
+          () => collectFromActivitiesEndpoint(roleFilter, projectId: projectId),
+        );
+      }
+    }
+
+    // Assignments were loaded first so their assignee projection becomes the
+    // authoritative source of truth for the user summary.
 
     // Fallback for mixed identity sources where IDs don't match exactly.
     if (collected.isEmpty && projects.isNotEmpty) {
@@ -1341,15 +1713,20 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             if (rawItems is! List) break;
 
             for (final raw in rawItems.whereType<Map<String, dynamic>>()) {
-              final assignedName = (raw['assigned_to_user_name'] ?? '')
-                  .toString()
-                  .trim()
-                  .toLowerCase();
-              final assignedEmail = (raw['assigned_to_user_email'] ?? '')
-                  .toString()
-                  .trim()
-                  .toLowerCase();
-              if (assignedName != lowerName && assignedEmail != lowerEmail) {
+              final ownership = resolveUserActivityOwnership(
+                raw,
+                userId: userId,
+                userEmail: lowerEmail,
+                fullName: lowerName,
+                authoritativeAssigneeUserId:
+                    authoritativeAssignees[(raw['uuid'] ?? raw['id'] ?? '').toString().trim()]?['userId'],
+                authoritativeAssigneeEmail:
+                    authoritativeAssignees[(raw['uuid'] ?? raw['id'] ?? '').toString().trim()]?['email'],
+                authoritativeAssigneeName:
+                    authoritativeAssignees[(raw['uuid'] ?? raw['id'] ?? '').toString().trim()]?['name'],
+                includeCreated: false,
+              );
+              if (!ownership.isRelated) {
                 continue;
               }
 
@@ -1361,7 +1738,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                 createdIds: createdIds,
                 stateCounters: stateCounters,
                 collected: collected,
-                forceAssigned: true,
+                lowerEmail: lowerEmail,
+                lowerName: lowerName,
+                authoritativeAssignees: authoritativeAssignees,
+                includeCreated: false,
               );
             }
 
@@ -1386,7 +1766,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       createdCount: createdIds.length,
       byState: stateCounters,
       recentItems: List<_UserActivityItem>.unmodifiable(collected),
-      error: partialErrors.isEmpty ? null : partialErrors.first,
+      error: collected.isEmpty && partialErrors.isNotEmpty
+          ? partialErrors.first
+          : null,
     );
   }
 
@@ -1400,6 +1782,7 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     required Set<String> createdIds,
     required Map<String, int> stateCounters,
     required List<_UserActivityItem> collected,
+    required Map<String, Map<String, String>> authoritativeAssignees,
   }) async {
     final nowUtc = DateTime.now().toUtc();
     final fromUtc = nowUtc.subtract(const Duration(days: 3650));
@@ -1418,14 +1801,28 @@ class _UsersPageState extends ConsumerState<UsersPage> {
       for (final raw in decoded.whereType<Map<String, dynamic>>()) {
         final assigneeUserId =
             (raw['assignee_user_id'] ?? '').toString().trim().toLowerCase();
-        final assigneeName =
-            (raw['assignee_name'] ?? '').toString().trim().toLowerCase();
+        final assigneeName = _normalizeActivityName(raw['assignee_name'] ?? '');
         final assigneeEmail =
             (raw['assignee_email'] ?? '').toString().trim().toLowerCase();
+        final activityId =
+            (raw['activity_id'] ?? raw['id'] ?? '').toString().trim();
+        if (activityId.isNotEmpty) {
+          authoritativeAssignees[activityId] = {
+            'userId': assigneeUserId,
+            'email': assigneeEmail,
+            'name': (raw['assignee_name'] ?? '').toString().trim(),
+          };
+        }
 
-        final matchesUser = assigneeUserId == userId ||
-            (assigneeName.isNotEmpty && assigneeName == lowerName) ||
-            (assigneeEmail.isNotEmpty && assigneeEmail == lowerEmail);
+        final matchesById = assigneeUserId.isNotEmpty && assigneeUserId == userId;
+        final matchesByEmail =
+            assigneeEmail.isNotEmpty && assigneeEmail == lowerEmail;
+        final matchesByNameOnly =
+            assigneeUserId.isEmpty &&
+            assigneeEmail.isEmpty &&
+            assigneeName.isNotEmpty &&
+            assigneeName == _normalizeActivityName(lowerName);
+        final matchesUser = matchesById || matchesByEmail || matchesByNameOnly;
         if (!matchesUser) continue;
 
         _collectUserActivityFromRaw(
@@ -1438,6 +1835,8 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             'created_at': raw['start_at'],
             'updated_at': raw['end_at'],
             'assigned_to_user_id': raw['assignee_user_id'],
+            'assigned_to_name': raw['assignee_name'],
+            'assigned_to_user_email': raw['assignee_email'],
           },
           userId: userId,
           seenIds: seenIds,
@@ -1445,6 +1844,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           createdIds: createdIds,
           stateCounters: stateCounters,
           collected: collected,
+          lowerEmail: lowerEmail,
+          lowerName: lowerName,
+          authoritativeAssignees: authoritativeAssignees,
           forceAssigned: true,
         );
       }
@@ -1459,17 +1861,29 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     required Set<String> createdIds,
     required Map<String, int> stateCounters,
     required List<_UserActivityItem> collected,
+    required String lowerEmail,
+    required String lowerName,
+    required Map<String, Map<String, String>> authoritativeAssignees,
     bool forceAssigned = false,
+    bool includeCreated = true,
   }) {
-    final assignedTo =
-        (raw['assigned_to_user_id'] ?? '').toString().trim().toLowerCase();
-    final createdBy =
-        (raw['created_by_user_id'] ?? '').toString().trim().toLowerCase();
-    final isAssigned = forceAssigned || assignedTo == userId;
-    final isCreated = createdBy == userId;
-    if (!isAssigned && !isCreated) return;
-
     final id = (raw['uuid'] ?? raw['id'] ?? '').toString().trim();
+    final authoritative = authoritativeAssignees[id] ?? const <String, String>{};
+    final ownership = resolveUserActivityOwnership(
+      raw,
+      userId: userId,
+      userEmail: lowerEmail,
+      fullName: lowerName,
+      authoritativeAssigneeUserId: authoritative['userId'],
+      authoritativeAssigneeEmail: authoritative['email'],
+      authoritativeAssigneeName: authoritative['name'],
+      forceAssigned: forceAssigned,
+      includeCreated: includeCreated,
+    );
+    final isAssigned = ownership.assigned;
+    final isCreated = ownership.created;
+    if (!ownership.isRelated) return;
+
     if (id.isEmpty) return;
     if (isAssigned) assignedIds.add(id);
     if (isCreated) createdIds.add(id);
@@ -1596,7 +2010,33 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     if (summary.totalCount == 0) {
       return 'Sin actividades relacionadas con este usuario.';
     }
+    if (_activityViewFilter == 'Asignadas') {
+      return 'No hay actividades asignadas actualmente a este usuario.';
+    }
+    if (_activityViewFilter == 'Creadas') {
+      return 'No hay actividades creadas por este usuario para el periodo seleccionado.';
+    }
     return 'No hay actividades para los filtros seleccionados.';
+  }
+
+  String _activityRelationLabel(_UserActivityItem item) {
+    if (item.assigned && item.created) {
+      return 'Asignada y creada';
+    }
+    if (item.assigned) {
+      return 'Asignada';
+    }
+    return 'Creada';
+  }
+
+  Color _activityRelationColor(_UserActivityItem item) {
+    if (item.assigned && item.created) {
+      return SaoColors.primary;
+    }
+    if (item.assigned) {
+      return SaoColors.success;
+    }
+    return SaoColors.warning;
   }
 
   String _formatExecutionStateLabel(String state) {
@@ -1780,11 +2220,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                       _ExecutionStateBadge(state: item.executionState)),
                   _quickDetailCell(
                     'Rol en actividad',
-                    item.assigned && item.created
-                        ? 'Asignada y creada por este usuario'
-                        : item.assigned
-                            ? 'Asignada a este usuario'
-                            : 'Creada por este usuario',
+                    item.assigned
+                        ? '${_activityRelationLabel(item)} a este usuario'
+                        : '${_activityRelationLabel(item)} por este usuario',
                   ),
                   _quickDetailCell(
                       'Fecha', _formatActivityDate(item.createdAt)),
@@ -1827,55 +2265,77 @@ class _UsersPageState extends ConsumerState<UsersPage> {
           height: 420,
           child: filtered.isEmpty
               ? Text(_activityEmptyMessage(summary))
-              : Scrollbar(
-                  child: ListView.separated(
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const Divider(height: 16),
-                    itemBuilder: (context, index) {
-                      final item = filtered[index];
-                      final dateText = _formatActivityDate(item.createdAt);
-                      return InkWell(
-                        onTap: () => _showActivityQuickDetail(
-                          context,
-                          item,
-                          onOpenActivity: () =>
-                              _showUserActivitiesDialog(context, user, summary),
+              : ListView.separated(
+                  itemCount: filtered.length,
+                  separatorBuilder: (_, __) => const Divider(height: 16),
+                  itemBuilder: (context, index) {
+                    final item = filtered[index];
+                    final dateText = _formatActivityDate(item.createdAt);
+                    return InkWell(
+                      onTap: () => _showActivityQuickDetail(
+                        context,
+                        item,
+                        onOpenActivity: () =>
+                            _showUserActivitiesDialog(context, user, summary),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              _activityDisplayTitle(item),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w600,
+                                color: SaoColors.gray900,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '[${item.projectId.isEmpty ? 'N/A' : item.projectId}] '
+                              '${_formatExecutionStateLabel(item.executionState)}',
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: SaoColors.gray700,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _activityRelationColor(item)
+                                    .withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(999),
+                                border: Border.all(
+                                  color: _activityRelationColor(item)
+                                      .withValues(alpha: 0.28),
+                                ),
+                              ),
+                              child: Text(
+                                _activityRelationLabel(item),
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: _activityRelationColor(item),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              dateText,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: SaoColors.gray600,
+                              ),
+                            ),
+                          ],
                         ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 4),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _activityDisplayTitle(item),
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w600,
-                                  color: SaoColors.gray900,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '[${item.projectId.isEmpty ? 'N/A' : item.projectId}] '
-                                '${_formatExecutionStateLabel(item.executionState)}',
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: SaoColors.gray700,
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                dateText,
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  color: SaoColors.gray600,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
+                      ),
+                    );
+                  },
                 ),
         ),
         actions: [
@@ -1951,6 +2411,10 @@ class _UsersPageState extends ConsumerState<UsersPage> {
     final resolvedProjectIds = _resolvedProjectIdsForView(user, resolvedScopes);
     final resolvedPermissionLabels =
         _resolvedPermissionLabelsForView(user, rolePermissions);
+    final canResetUserPasswords =
+        _isProtectedAdminEmail(ref.watch(currentAppUserProvider)?.email ?? '');
+    final canDeleteUsers =
+        _isProtectedAdminEmail(ref.watch(currentAppUserProvider)?.email ?? '');
     // Build initials avatar color from name hash
     final avatarColor =
         user.isActive ? _avatarColor(user.fullName) : SaoColors.gray400;
@@ -1968,51 +2432,97 @@ class _UsersPageState extends ConsumerState<UsersPage> {
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
             color: SaoColors.surfaceMutedFor(context),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 26,
-                  backgroundColor: avatarColor,
-                  child: Text(
-                    initials,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 15,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        user.fullName,
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w700,
-                          color: SaoColors.textFor(context),
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        user.email,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: SaoColors.textMutedFor(context),
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 6),
-                      _StatusBadge(isActive: user.isActive),
-                    ],
-                  ),
-                ),
-              ],
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final compact = constraints.maxWidth < 260;
+                return compact
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          CircleAvatar(
+                            radius: 26,
+                            backgroundColor: avatarColor,
+                            child: Text(
+                              initials,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            user.fullName,
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: SaoColors.textFor(context),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            user.email,
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: SaoColors.textMutedFor(context),
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          const SizedBox(height: 6),
+                          _StatusBadge(isActive: user.isActive),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 26,
+                            backgroundColor: avatarColor,
+                            child: Text(
+                              initials,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 15,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  user.fullName,
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w700,
+                                    color: SaoColors.textFor(context),
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  user.email,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: SaoColors.textMutedFor(context),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 6),
+                                _StatusBadge(isActive: user.isActive),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+              },
             ),
           ),
 
@@ -2025,7 +2535,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                 bottom: BorderSide(color: SaoColors.borderFor(context)),
               ),
             ),
-            child: Row(
+            child: Wrap(
+              spacing: 8,
+              runSpacing: 8,
               children: [
                 _ActionIconBtn(
                   icon: Icons.edit_rounded,
@@ -2038,13 +2550,6 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     availableProjects,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  width: 1,
-                  height: 24,
-                  color: SaoColors.borderFor(context),
-                ),
-                const SizedBox(width: 8),
                 _ActionIconBtn(
                   icon: Icons.security_rounded,
                   label: 'Permisos',
@@ -2056,31 +2561,41 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                     availableProjects,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Container(
-                  width: 1,
-                  height: 24,
-                  color: SaoColors.borderFor(context),
-                ),
-                const SizedBox(width: 8),
+                if (canResetUserPasswords)
+                  _ActionIconBtn(
+                    icon: Icons.lock_reset_rounded,
+                    label: 'Reiniciar clave',
+                    color: SaoColors.primary,
+                    onPressed: () => _resetUserPassword(context, user),
+                  ),
                 _ActionIconBtn(
-                  icon: user.isActive
-                      ? Icons.person_off_rounded
-                      : Icons.person_rounded,
-                  label: user.isActive ? 'Desactivar' : 'Activar',
-                  color: user.isActive ? SaoColors.warning : SaoColors.success,
-                  emphasized: true,
-                  onPressed: () => _toggleStatus(context, user),
+                  icon: user.isProtectedAdmin
+                      ? Icons.shield_rounded
+                      : user.isActive
+                          ? Icons.person_off_rounded
+                          : Icons.person_rounded,
+                  label: user.isProtectedAdmin
+                      ? 'Protegido'
+                      : user.isActive
+                          ? 'Desactivar'
+                          : 'Activar',
+                  color: user.isProtectedAdmin
+                      ? SaoColors.gray500
+                      : user.isActive
+                          ? SaoColors.warning
+                          : SaoColors.success,
+                  emphasized: !user.isProtectedAdmin,
+                  onPressed: user.isProtectedAdmin
+                      ? null
+                      : () => _toggleStatus(context, user),
                 ),
-                const Spacer(),
-                Container(width: 1, height: 24, color: SaoColors.borderFor(context)),
-                const SizedBox(width: 8),
-                _ActionIconBtn(
-                  icon: Icons.delete_rounded,
-                  label: user.isActive ? 'Desactivar' : 'Eliminar',
-                  color: SaoColors.error,
-                  onPressed: () => _deleteUser(context, user),
-                ),
+                if (canDeleteUsers && !user.isProtectedAdmin)
+                  _ActionIconBtn(
+                    icon: Icons.delete_rounded,
+                    label: 'Eliminar',
+                    color: SaoColors.error,
+                    onPressed: () => _deleteUser(context, user),
+                  ),
               ],
             ),
           ),
@@ -2353,9 +2868,9 @@ class _UsersPageState extends ConsumerState<UsersPage> {
                                   label: 'Tipo',
                                   value: _activityViewFilter,
                                   items: const [
-                                    ('Todas', 'Todas'),
                                     ('Asignadas', 'Asignadas'),
                                     ('Creadas', 'Creadas'),
+                                    ('Todas', 'Todas'),
                                   ],
                                   onChanged: (v) {
                                     if (v == null) return;
@@ -2735,6 +3250,7 @@ class _ActionIconBtn extends StatelessWidget {
         onTap: onPressed,
         borderRadius: BorderRadius.circular(8),
         child: Container(
+          constraints: const BoxConstraints(minWidth: 76),
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
           decoration: BoxDecoration(
             color: emphasized ? fg.withValues(alpha: 0.14) : baseColor,
@@ -2748,6 +3264,9 @@ class _ActionIconBtn extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                     fontSize: 10, color: fg, fontWeight: FontWeight.w600),
               ),
@@ -2948,6 +3467,9 @@ class _UsersTable extends StatelessWidget {
   final void Function(_AdminUser) onSelectUser;
   final void Function(_AdminUser) onEdit;
   final void Function(_AdminUser) onManagePermissions;
+  final bool canResetPasswords;
+  final bool canDeleteUsers;
+  final void Function(_AdminUser) onResetPassword;
   final void Function(_AdminUser) onToggleStatus;
   final void Function(_AdminUser) onDelete;
 
@@ -2961,6 +3483,9 @@ class _UsersTable extends StatelessWidget {
     required this.onSelectUser,
     required this.onEdit,
     required this.onManagePermissions,
+    required this.canResetPasswords,
+    required this.canDeleteUsers,
+    required this.onResetPassword,
     required this.onToggleStatus,
     required this.onDelete,
   });
@@ -3217,6 +3742,9 @@ class _UsersTable extends StatelessWidget {
                           case 'permisos':
                             onManagePermissions(u);
                             break;
+                          case 'resetPassword':
+                            onResetPassword(u);
+                            break;
                           case 'togglEstatus':
                             onToggleStatus(u);
                             break;
@@ -3248,41 +3776,70 @@ class _UsersTable extends StatelessWidget {
                             ],
                           ),
                         ),
-                        PopupMenuItem(
-                          value: 'togglEstatus',
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                u.isActive
-                                    ? Icons.person_off_rounded
-                                    : Icons.person_rounded,
-                                size: 16,
-                                color: u.isActive
-                                    ? SaoColors.error
-                                    : SaoColors.success,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(u.isActive ? 'Desactivar' : 'Activar'),
-                            ],
+                        if (canResetPasswords)
+                          const PopupMenuItem(
+                            value: 'resetPassword',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.lock_reset_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Reiniciar contraseña'),
+                              ],
+                            ),
                           ),
-                        ),
-                        const PopupMenuDivider(),
-                        PopupMenuItem(
-                          value: 'eliminar',
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                                const Icon(Icons.delete_rounded,
-                                  size: 16, color: SaoColors.error),
+                        if (!u.isProtectedAdmin) ...[
+                          PopupMenuItem(
+                            value: 'togglEstatus',
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  u.isActive
+                                      ? Icons.person_off_rounded
+                                      : Icons.person_rounded,
+                                  size: 16,
+                                  color: u.isActive
+                                      ? SaoColors.error
+                                      : SaoColors.success,
+                                ),
                                 const SizedBox(width: 8),
-                              Text(
-                                u.isActive ? 'Desactivar' : 'Eliminar',
-                                style: const TextStyle(color: SaoColors.error),
-                              ),
-                            ],
+                                Text(u.isActive ? 'Desactivar' : 'Activar'),
+                              ],
+                            ),
                           ),
-                        ),
+                          if (canDeleteUsers) ...[
+                            const PopupMenuDivider(),
+                            const PopupMenuItem(
+                              value: 'eliminar',
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.delete_rounded,
+                                      size: 16, color: SaoColors.error),
+                                  SizedBox(width: 8),
+                                  Text(
+                                    'Eliminar',
+                                    style: TextStyle(color: SaoColors.error),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ] else ...[
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            enabled: false,
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.shield_rounded, size: 16),
+                                SizedBox(width: 8),
+                                Text('Usuario protegido'),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
             ),

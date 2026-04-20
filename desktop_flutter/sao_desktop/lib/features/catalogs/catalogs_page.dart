@@ -2757,15 +2757,12 @@ class CatalogDataTable extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scrollbar(
-      thumbVisibility: true,
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: SizedBox(
-          width: MediaQuery.of(context).size.width,
-          child: SingleChildScrollView(
-            child: DataTable(columns: columns, rows: rows),
-          ),
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: MediaQuery.of(context).size.width,
+        child: SingleChildScrollView(
+          child: DataTable(columns: columns, rows: rows),
         ),
       ),
     );

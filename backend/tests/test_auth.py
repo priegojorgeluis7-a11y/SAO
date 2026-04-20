@@ -11,6 +11,8 @@ from app.core.enums import UserStatus
 from app.core.security import get_password_hash
 from app.services.firestore_identity_service import FirestoreUserPrincipal
 from app.api.deps import verify_project_access
+from app.main import app
+from app.api import deps as deps_module
 
 
 def _login(client, email: str, password: str):
@@ -120,6 +122,58 @@ def test_login_nonexistent_user_returns_401(client, monkeypatch, force_firestore
     monkeypatch.setattr("app.api.v1.auth.get_firestore_user_by_email", lambda _email: None)
     response = _login(client, "nonexistent@example.com", "anypassword")
     assert response.status_code == 401
+
+
+def test_auth_me_includes_effective_permissions(client, monkeypatch, force_firestore_backend):
+    principal = FirestoreUserPrincipal(
+        id=uuid4(),
+        email="perm-user@example.com",
+        full_name="Perm User",
+        status=UserStatus.ACTIVE,
+        created_at=datetime.now(timezone.utc),
+        last_login_at=None,
+        roles=["COORD"],
+        project_ids=["TMQ"],
+        scopes=[],
+        permission_scopes=[
+            {
+                "permission_code": "Eliminar actividades",
+                "project_id": "TMQ",
+                "effect": "deny",
+            },
+            {
+                "permission_code": "Editar catálogo",
+                "project_id": "QRO",
+                "effect": "allow",
+            },
+        ],
+        password_hash="hash",
+        pin_hash=None,
+        last_logout_at=None,
+    )
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: principal
+    try:
+        response = client.get("/api/v1/auth/me")
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "Ver actividades" in payload["permission_codes"]
+    assert "Crear usuarios" not in payload["permission_codes"]
+    assert payload["permission_scopes"] == [
+        {
+            "permission_code": "Eliminar actividades",
+            "project_id": "TMQ",
+            "effect": "deny",
+        },
+        {
+            "permission_code": "Editar catálogo",
+            "project_id": "QRO",
+            "effect": "allow",
+        },
+    ]
 
 
 def test_signup_accepts_name_parts_and_birth_date(client, monkeypatch, force_firestore_backend):

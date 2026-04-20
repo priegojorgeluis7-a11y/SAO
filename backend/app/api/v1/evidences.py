@@ -1,11 +1,18 @@
 """Evidence API endpoints for upload and download URL workflows."""
 
+import base64
+import hashlib
+import hmac
+import json
 from datetime import datetime, timedelta, timezone
+from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote, urlparse
 from uuid import UUID, uuid4
 
 import google.auth
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import FileResponse, StreamingResponse
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage
 
@@ -62,6 +69,69 @@ def _sanitize_suffix(file_name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9.]", "", suffix)[:15]
 
 
+def _urlsafe_b64encode(raw: bytes) -> str:
+    return base64.urlsafe_b64encode(raw).decode("utf-8").rstrip("=")
+
+
+def _urlsafe_b64decode(raw: str) -> bytes:
+    return base64.urlsafe_b64decode(raw + ("=" * (-len(raw) % 4)))
+
+
+def _build_download_proxy_token(*, evidence_id: str, object_path: str, expires_at: datetime) -> str:
+    payload = {
+        "evidence_id": str(evidence_id).strip(),
+        "object_path": _normalize_object_path(object_path),
+        "exp": int(expires_at.timestamp()),
+    }
+    encoded = _urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    )
+    signature = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"),
+        encoded.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _resolve_download_proxy_token(token: str, *, evidence_id: str) -> str:
+    encoded, separator, provided_signature = str(token or "").partition(".")
+    if not encoded or not separator or not provided_signature:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid download token")
+
+    expected_signature = hmac.new(
+        settings.JWT_SECRET.encode("utf-8"),
+        encoded.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(provided_signature, expected_signature):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid download token")
+
+    try:
+        payload = json.loads(_urlsafe_b64decode(encoded).decode("utf-8"))
+    except Exception as exc:  # pragma: no cover - defensive decoding guard
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid download token") from exc
+
+    token_evidence_id = str(payload.get("evidence_id") or "").strip()
+    object_path = _normalize_object_path(payload.get("object_path"))
+    expires_at = int(payload.get("exp") or 0)
+    if token_evidence_id != str(evidence_id).strip() or not object_path or expires_at < int(_utc_now().timestamp()):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Expired or invalid download token")
+    return object_path
+
+
+def _build_download_proxy_url(*, evidence_id: str, object_path: str, expires_at: datetime) -> str:
+    token = _build_download_proxy_token(
+        evidence_id=evidence_id,
+        object_path=object_path,
+        expires_at=expires_at,
+    )
+    return (
+        f"{settings.LOCAL_BASE_URL}/api/v1/evidences/{evidence_id}"
+        f"/download-proxy?token={quote(token, safe='')}"
+    )
+
+
 def _generate_gcs_signed_url(blob, *, method: str, content_type: str | None = None) -> str:
     signed_url_kwargs: dict[str, Any] = {
         "version": "v4",
@@ -101,13 +171,70 @@ def _generate_signed_upload_url(object_path: str, mime_type: str, evidence_id: s
     return url, expires_at
 
 
-def _generate_signed_download_url(object_path: str) -> tuple[str, datetime]:
+def _generate_signed_download_url(object_path: str, *, evidence_id: str | None = None) -> tuple[str, datetime]:
     expires_at = _utc_now() + timedelta(minutes=settings.SIGNED_URL_EXPIRE_MINUTES)
     if _is_local_backend():
         return f"{settings.LOCAL_BASE_URL}/uploads/{object_path}", expires_at
     blob = storage.Client().bucket(_normalized_bucket_name()).blob(object_path)
-    url = _generate_gcs_signed_url(blob, method="GET")
+    try:
+        url = _generate_gcs_signed_url(blob, method="GET")
+    except AttributeError as exc:
+        if evidence_id is None or "private key" not in str(exc).lower():
+            raise
+        url = _build_download_proxy_url(
+            evidence_id=str(evidence_id),
+            object_path=object_path,
+            expires_at=expires_at,
+        )
     return url, expires_at
+
+
+def _normalize_object_path(raw_value: Any) -> str:
+    value = str(raw_value or "").strip()
+    if not value:
+        return ""
+
+    if value.startswith("gs://"):
+        bucket_and_path = value[len("gs://") :]
+        _bucket, _sep, path = bucket_and_path.partition("/")
+        return path.strip("/")
+
+    parsed = urlparse(value)
+    if parsed.scheme in {"http", "https"}:
+        path = parsed.path.strip("/")
+        if path.startswith("uploads/"):
+            return path[len("uploads/") :]
+        return path
+
+    normalized = value.strip("/")
+    if normalized.startswith("uploads/"):
+        return normalized[len("uploads/") :]
+    return normalized
+
+
+def _resolve_evidence_object_path(payload: dict[str, Any]) -> str:
+    for key in ("object_path", "gcs_path", "storage_path", "pending_object_path"):
+        normalized = _normalize_object_path(payload.get(key))
+        if normalized:
+            return normalized
+    return ""
+
+
+def _resolve_evidence_project_id(client, payload: dict[str, Any]) -> str:
+    direct_project_id = str(payload.get("project_id") or "").strip().upper()
+    if direct_project_id:
+        return direct_project_id
+
+    activity_id = str(payload.get("activity_id") or "").strip()
+    if not activity_id:
+        return ""
+
+    activity_snap = client.collection("activities").document(activity_id).get()
+    if not activity_snap.exists:
+        return ""
+
+    activity_payload = activity_snap.to_dict() or {}
+    return str(activity_payload.get("project_id") or "").strip().upper()
 
 
 def _object_exists(object_path: str) -> bool:
@@ -194,7 +321,7 @@ def upload_complete(
     if not snap.exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {request.evidenceId} not found")
     payload = snap.to_dict() or {}
-    project_id = str(payload.get("project_id") or "")
+    project_id = _resolve_evidence_project_id(client, payload)
     verify_project_access(current_user, project_id, None)
     if not user_has_permission(current_user, "activity.edit", None, project_id=project_id):
         raise HTTPException(
@@ -234,21 +361,74 @@ def get_download_url(
     if not snap.exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {evidence_id} not found")
     payload = snap.to_dict() or {}
-    project_id = str(payload.get("project_id") or "")
+    project_id = _resolve_evidence_project_id(client, payload)
     verify_project_access(_authenticated_user, project_id, None)
     if not user_has_permission(_authenticated_user, "activity.view", None, project_id=project_id):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Missing permission: activity.view for project: {project_id}",
         )
-    object_path = payload.get("object_path")
+    object_path = _resolve_evidence_object_path(payload)
     if not object_path:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence file not available yet")
-    signed_url, expires_at = _generate_signed_download_url(str(object_path))
+
+    legacy_backfill = {}
+    if not str(payload.get("project_id") or "").strip() and project_id:
+        legacy_backfill["project_id"] = project_id
+    if not str(payload.get("object_path") or "").strip() and object_path:
+        legacy_backfill["object_path"] = object_path
+    if legacy_backfill:
+        client.collection("evidences").document(str(evidence_id)).set(legacy_backfill, merge=True)
+
+    signed_url, expires_at = _generate_signed_download_url(
+        str(object_path),
+        evidence_id=str(evidence_id),
+    )
 
     return DownloadUrlResponse(
         signedUrl=signed_url,
         expiresAt=expires_at,
+    )
+
+
+@router.get("/{evidence_id}/download-proxy", status_code=status.HTTP_200_OK)
+def download_via_proxy(
+    evidence_id: str,
+    token: str,
+):
+    client = get_firestore_client()
+    snap = client.collection("evidences").document(str(evidence_id)).get()
+    if not snap.exists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {evidence_id} not found")
+
+    payload = snap.to_dict() or {}
+    token_object_path = _resolve_download_proxy_token(token, evidence_id=evidence_id)
+    resolved_object_path = _resolve_evidence_object_path(payload) or token_object_path
+    if resolved_object_path != token_object_path:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Download token no longer matches this evidence")
+
+    media_type = str(payload.get("mime_type") or "application/octet-stream").strip() or "application/octet-stream"
+    file_name = Path(str(payload.get("original_file_name") or Path(resolved_object_path).name or evidence_id)).name
+
+    if _is_local_backend():
+        local_file = Path(settings.LOCAL_UPLOADS_DIR) / resolved_object_path
+        if not local_file.exists():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence file not found in local storage")
+        return FileResponse(
+            path=local_file,
+            media_type=media_type,
+            filename=file_name,
+        )
+
+    storage_client = storage.Client()
+    blob = storage_client.bucket(_normalized_bucket_name()).blob(resolved_object_path)
+    if not blob.exists(client=storage_client):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evidence file not found in storage")
+
+    return StreamingResponse(
+        BytesIO(blob.download_as_bytes()),
+        media_type=media_type,
+        headers={"Content-Disposition": f'inline; filename="{file_name}"'},
     )
 
 

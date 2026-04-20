@@ -319,6 +319,29 @@ def update_firestore_user(
     return _principal_from_doc(refreshed.to_dict() or {})
 
 
+def reset_firestore_user_password(
+    user_id: UUID,
+    password_hash: str,
+) -> FirestoreUserPrincipal | None:
+    """Reset the stored password hash for an existing Firestore user."""
+    client = get_firestore_client()
+    ref = client.collection("users").document(str(user_id))
+    snap = ref.get()
+    if not snap.exists:
+        return None
+
+    ref.set(
+        {
+            "password_hash": password_hash,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        },
+        merge=True,
+    )
+
+    refreshed = ref.get()
+    return _principal_from_doc(refreshed.to_dict() or {})
+
+
 def delete_firestore_user(user_id: UUID) -> bool:
     """Delete an existing user document in Firestore. Returns True if deleted."""
     client = get_firestore_client()

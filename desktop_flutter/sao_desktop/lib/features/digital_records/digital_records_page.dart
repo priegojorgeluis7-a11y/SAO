@@ -56,6 +56,35 @@ String _sanitizeFolderSegment(String raw, {String fallback = 'SIN_DATO'}) {
   return sanitized.length <= 80 ? sanitized : sanitized.substring(0, 80).trim();
 }
 
+List<CompletedActivity> resolveDigitalRecordTreeItems(
+  List<CompletedActivity> items, {
+  String selectedProject = '',
+}) {
+  final sorted = List<CompletedActivity>.from(items)
+    ..sort((left, right) {
+      final selected = selectedProject.trim();
+      if (selected.isNotEmpty) {
+        final leftIsSelected = left.projectId.trim() == selected;
+        final rightIsSelected = right.projectId.trim() == selected;
+        if (leftIsSelected != rightIsSelected) {
+          return leftIsSelected ? -1 : 1;
+        }
+      }
+
+      final projectCompare = left.projectId.compareTo(right.projectId);
+      if (projectCompare != 0) return projectCompare;
+      final frontCompare = left.front.compareTo(right.front);
+      if (frontCompare != 0) return frontCompare;
+      final stateCompare = left.estado.compareTo(right.estado);
+      if (stateCompare != 0) return stateCompare;
+      final municipalityCompare = left.municipio.compareTo(right.municipio);
+      if (municipalityCompare != 0) return municipalityCompare;
+      return left.title.compareTo(right.title);
+    });
+
+  return sorted;
+}
+
 Future<File> _manualActivityLinksFile() async {
   final dir = await getApplicationDocumentsDirectory();
   return File('${dir.path}/manual_activity_links.json');
@@ -78,21 +107,6 @@ Future<Map<String, dynamic>> _readManualActivityLinksRegistry() async {
   return <String, dynamic>{};
 }
 
-List<String> _normalizeRelatedActivityIds(dynamic raw) {
-  if (raw is! List) return const <String>[];
-
-  final normalized = <String>[];
-  final seen = <String>{};
-  for (final item in raw) {
-    final value = item?.toString().trim() ?? '';
-    if (value.isEmpty || value.toLowerCase() == 'null' || !seen.add(value)) {
-      continue;
-    }
-    normalized.add(value);
-  }
-  return normalized;
-}
-
 Future<List<ManualRelatedLink>> _readManualRelatedLinks(
     String activityId) async {
   final registry = await _readManualActivityLinksRegistry();
@@ -100,11 +114,6 @@ Future<List<ManualRelatedLink>> _readManualRelatedLinks(
     registry[activityId],
     currentId: activityId,
   );
-}
-
-Future<List<String>> _readManualRelatedActivityIds(String activityId) async {
-  final links = await _readManualRelatedLinks(activityId);
-  return links.map((item) => item.activityId).toList(growable: false);
 }
 
 Future<void> _writeManualRelatedLinks({
@@ -359,14 +368,9 @@ Future<File> _downloadReportPdfForDetail(
   }
 }
 
-bool _isAdminUser(AppUser? user) {
+bool _canDeleteFromDigitalRecord(AppUser? user, {String? projectId}) {
   if (user == null) return false;
-  final normalizedRoles = <String>{
-    user.role.trim().toUpperCase(),
-    ...user.roles.map((role) => role.trim().toUpperCase()),
-  }..removeWhere((value) => value.isEmpty);
-  return normalizedRoles
-      .any((role) => role == 'ADMIN' || role.contains('ADMIN'));
+  return user.hasPermission('activity.delete', projectId: projectId);
 }
 
 bool _canManageActivityLinks(AppUser? user) {
@@ -422,6 +426,119 @@ Color _followUpStatusColor(String raw) {
   }
 }
 
+class DigitalRecordFollowUpSummary {
+  final int relatedCount;
+  final String latestStatus;
+
+  const DigitalRecordFollowUpSummary({
+    required this.relatedCount,
+    required this.latestStatus,
+  });
+
+  bool get hasRelatedActivities => relatedCount > 0;
+}
+
+DigitalRecordFollowUpSummary resolveDigitalRecordFollowUpSummary({
+  List<String> relatedActivityIds = const <String>[],
+  List<ManualRelatedLink> relatedLinks = const <ManualRelatedLink>[],
+}) {
+  final normalizedLinks = ManualRelatedLink.normalizeList(
+    relatedLinks.map((item) => item.toJson()).toList(growable: false),
+  );
+  final uniqueIds = <String>{
+    ...relatedActivityIds
+        .map((item) => item.trim())
+        .where((item) => item.isNotEmpty),
+    ...normalizedLinks
+        .map((item) => item.activityId.trim())
+        .where((item) => item.isNotEmpty),
+  };
+
+  ManualRelatedLink? latestLink;
+  var latestDate = DateTime.fromMillisecondsSinceEpoch(0);
+  for (final link in normalizedLinks) {
+    final candidateDate =
+        DateTime.tryParse(link.createdAt) ??
+        DateTime.tryParse(link.dueDate) ??
+        DateTime.fromMillisecondsSinceEpoch(0);
+    if (latestLink == null || candidateDate.isAfter(latestDate)) {
+      latestLink = link;
+      latestDate = candidateDate;
+    }
+  }
+
+  final normalizedStatus = latestLink?.status.trim().toLowerCase() ?? '';
+  return DigitalRecordFollowUpSummary(
+    relatedCount: uniqueIds.length,
+    latestStatus:
+        normalizedStatus.isEmpty ? 'sin_seguimiento' : normalizedStatus,
+  );
+}
+
+String digitalRecordFollowUpStatusLabel(String raw) {
+  if (raw.trim().toLowerCase() == 'sin_seguimiento') {
+    return 'Sin seguimiento';
+  }
+  return _followUpStatusLabel(raw);
+}
+
+String _cleanDigitalRecordUserName(String raw) {
+  final trimmed = raw.trim().replaceAll(RegExp(r'\s+'), ' ');
+  if (trimmed.isEmpty) return '';
+  final words = trimmed.split(' ');
+  return words
+      .map((word) {
+        if (word.isEmpty) return word;
+        final lower = word.toLowerCase();
+        if (word == lower) {
+          return '${lower[0].toUpperCase()}${lower.substring(1)}';
+        }
+        return word;
+      })
+      .join(' ');
+}
+
+List<String> resolveDigitalRecordUserOptions({
+  List<String> backendUsers = const <String>[],
+  List<CompletedActivity> items = const <CompletedActivity>[],
+}) {
+  final byKey = <String, String>{};
+
+  void addCandidate(String raw) {
+    final cleaned = _cleanDigitalRecordUserName(raw);
+    if (cleaned.isEmpty) return;
+    final key = cleaned.toLowerCase();
+    final existing = byKey[key];
+    if (existing == null || existing == existing.toLowerCase()) {
+      byKey[key] = cleaned;
+    }
+  }
+
+  for (final user in backendUsers) {
+    addCandidate(user);
+  }
+  for (final item in items) {
+    addCandidate(item.assignedName);
+  }
+
+  final values = byKey.values.toList()
+    ..sort((left, right) => left.toLowerCase().compareTo(right.toLowerCase()));
+  return <String>['Todo', ...values];
+}
+
+final manualActivityLinksRegistryProvider =
+    FutureProvider.autoDispose<Map<String, List<ManualRelatedLink>>>((ref) async {
+  final registry = await _readManualActivityLinksRegistry();
+  final normalized = <String, List<ManualRelatedLink>>{};
+  registry.forEach((key, value) {
+    final activityId = key.trim();
+    if (activityId.isEmpty) return;
+    normalized[activityId] =
+        ManualRelatedLink.normalizeList(value, currentId: activityId);
+  });
+  return normalized;
+});
+
 class DigitalRecordsPage extends ConsumerStatefulWidget {
   const DigitalRecordsPage({super.key});
 
@@ -464,7 +581,10 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
     _searchController.clear();
     ref.read(completedProjectFilterProvider.notifier).state = '';
     ref.read(completedFrenteFilterProvider.notifier).state = '';
+    ref.read(completedTemaFilterProvider.notifier).state = '';
     ref.read(completedEstadoFilterProvider.notifier).state = '';
+    ref.read(completedMunicipioFilterProvider.notifier).state = '';
+    ref.read(completedUsuarioFilterProvider.notifier).state = '';
     ref.read(completedSearchQueryProvider.notifier).state = '';
   }
 
@@ -533,6 +653,7 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
   @override
   Widget build(BuildContext context) {
     final completedItemsAsync = ref.watch(completedActivitiesProvider);
+    final explorerItemsAsync = ref.watch(completedExplorerActivitiesProvider);
     final projectsAsync = ref.watch(availableProjectsProvider);
     final filterOptionsAsync = ref.watch(completedFilterOptionsProvider);
     final focusedActivityId = ref.watch(operationsHubActivityIdProvider);
@@ -540,9 +661,13 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
     final selectedProject = ref.watch(completedProjectFilterProvider);
     final selectedFront = ref.watch(completedFrenteFilterProvider);
     final selectedState = ref.watch(completedEstadoFilterProvider);
-    final treeItems = completedItemsAsync.maybeWhen(
-      data: (items) => items,
-      orElse: () => const <CompletedActivity>[],
+    final selectedUser = ref.watch(completedUsuarioFilterProvider);
+    final treeItems = resolveDigitalRecordTreeItems(
+      explorerItemsAsync.maybeWhen(
+        data: (items) => items,
+        orElse: () => const <CompletedActivity>[],
+      ),
+      selectedProject: selectedProject,
     );
 
     return Scaffold(
@@ -551,7 +676,10 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
         children: [
           _Header(
             itemsAsync: completedItemsAsync,
-            onRefresh: () => ref.invalidate(completedActivitiesProvider),
+            onRefresh: () {
+              ref.invalidate(completedActivitiesProvider);
+              ref.invalidate(completedExplorerActivitiesProvider);
+            },
             activeMetricFilter: _activeMetricFilter,
             onMetricSelected: _toggleMetricFilter,
           ),
@@ -571,6 +699,7 @@ class _DigitalRecordsPageState extends ConsumerState<DigitalRecordsPage> {
                       selectedProject: selectedProject,
                       selectedFront: selectedFront,
                       selectedState: selectedState,
+                      selectedUser: selectedUser,
                       onApplySearch: _applySearch,
                       onReset: _resetFilters,
                     ),
@@ -846,6 +975,7 @@ class _FiltersPanel extends ConsumerWidget {
     required this.selectedProject,
     required this.selectedFront,
     required this.selectedState,
+    required this.selectedUser,
     required this.onApplySearch,
     required this.onReset,
   });
@@ -857,6 +987,7 @@ class _FiltersPanel extends ConsumerWidget {
   final String selectedProject;
   final String selectedFront;
   final String selectedState;
+  final String selectedUser;
   final VoidCallback onApplySearch;
   final VoidCallback onReset;
 
@@ -870,6 +1001,12 @@ class _FiltersPanel extends ConsumerWidget {
       data: (value) => value,
       orElse: () => const <String>[],
     );
+    final userOptions = resolveDigitalRecordUserOptions(
+      backendUsers: filters.usuarios,
+      items: items,
+    );
+    final selectedUserValue =
+        selectedUser.trim().isEmpty ? 'Todo' : _cleanDigitalRecordUserName(selectedUser);
 
     return SaoPanel(
       title: 'Carpetas SAO',
@@ -898,6 +1035,31 @@ class _FiltersPanel extends ConsumerWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
               ),
+            ),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<String>(
+              initialValue: userOptions.contains(selectedUserValue)
+                  ? selectedUserValue
+                  : 'Todo',
+              decoration: InputDecoration(
+                labelText: 'Usuario que realizó',
+                prefixIcon: const Icon(Icons.person_search_rounded),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              items: userOptions
+                  .map(
+                    (user) => DropdownMenuItem<String>(
+                      value: user,
+                      child: Text(user),
+                    ),
+                  )
+                  .toList(growable: false),
+              onChanged: (value) {
+                ref.read(completedUsuarioFilterProvider.notifier).state =
+                    value == null || value == 'Todo' ? '' : value;
+              },
             ),
             const SizedBox(height: 16),
             Container(
@@ -1201,7 +1363,7 @@ class _FolderTreeExplorer extends ConsumerWidget {
                       ref.read(completedFrenteFilterProvider.notifier).state =
                           front;
                       ref.read(completedEstadoFilterProvider.notifier).state =
-                          state;
+                          state == selectedState ? '' : state;
                     },
                   ),
             ],
@@ -1391,7 +1553,7 @@ class _RecordsList extends StatelessWidget {
   }
 }
 
-class _RecordRow extends StatelessWidget {
+class _RecordRow extends ConsumerWidget {
   const _RecordRow({
     required this.item,
     required this.isSelected,
@@ -1403,9 +1565,20 @@ class _RecordRow extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final status = _visualStatusFor(item);
     final pkValue = item.pk.trim();
+    final localRelatedLinks = ref.watch(manualActivityLinksRegistryProvider)
+        .maybeWhen(
+          data: (registry) => registry[item.id] ?? const <ManualRelatedLink>[],
+          orElse: () => const <ManualRelatedLink>[],
+        );
+    final followUpSummary = resolveDigitalRecordFollowUpSummary(
+      relatedActivityIds:
+          localRelatedLinks.map((link) => link.activityId).toList(growable: false),
+      relatedLinks: localRelatedLinks,
+    );
+
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
@@ -1497,6 +1670,27 @@ class _RecordRow extends StatelessWidget {
                       : _summaryDocumentCount(item) == 1
                           ? '1 reporte'
                           : '${_summaryDocumentCount(item)} reportes',
+                ),
+                _FollowUpChip(
+                  icon: followUpSummary.hasRelatedActivities
+                      ? Icons.link_rounded
+                      : Icons.link_off_rounded,
+                  label: followUpSummary.hasRelatedActivities
+                      ? (followUpSummary.relatedCount == 1
+                          ? '1 relacionada'
+                          : '${followUpSummary.relatedCount} relacionadas')
+                      : 'Sin relacionadas',
+                  color: followUpSummary.hasRelatedActivities
+                      ? DigitalRecordColors.accent
+                      : SaoColors.textMutedFor(context),
+                ),
+                _FollowUpChip(
+                  icon: Icons.track_changes_rounded,
+                  label:
+                      'Seguimiento: ${digitalRecordFollowUpStatusLabel(followUpSummary.latestStatus)}',
+                  color: followUpSummary.latestStatus == 'sin_seguimiento'
+                      ? SaoColors.textMutedFor(context)
+                      : _followUpStatusColor(followUpSummary.latestStatus),
                 ),
               ],
             ),
@@ -1648,7 +1842,10 @@ class _DetailPanel extends ConsumerWidget {
             : ((completion / checklist.length) * 100).round();
         final pkValue = detail.summary.pk.trim();
         final currentUser = ref.watch(currentAppUserProvider);
-        final canDelete = _isAdminUser(currentUser);
+        final canDelete = _canDeleteFromDigitalRecord(
+          currentUser,
+          projectId: detail.summary.projectId,
+        );
         final canManageLinks = _canManageActivityLinks(currentUser);
         final allActivities = ref.watch(completedActivitiesProvider).maybeWhen(
               data: (items) => items,
@@ -1685,6 +1882,7 @@ class _DetailPanel extends ConsumerWidget {
                 .deleteActivity(activityId!);
             onDeleted(activityId!);
             ref.invalidate(completedActivitiesProvider);
+            ref.invalidate(completedExplorerActivitiesProvider);
             ref.invalidate(completedFilterOptionsProvider);
             ref.invalidate(completedActivityDetailProvider(activityId!));
             ref.invalidate(planningAssignmentsProvider);
@@ -1792,15 +1990,31 @@ class _DetailPanel extends ConsumerWidget {
   }
 }
 
-class _DetailHero extends StatelessWidget {
+class _DetailHero extends ConsumerWidget {
   const _DetailHero({required this.detail, required this.completionPercent});
 
   final CompletedActivityDetail detail;
   final int completionPercent;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final summary = detail.summary;
+    final localRelatedLinks = ref.watch(manualActivityLinksRegistryProvider)
+        .maybeWhen(
+          data: (registry) =>
+              registry[detail.summary.id] ?? const <ManualRelatedLink>[],
+          orElse: () => const <ManualRelatedLink>[],
+        );
+    final followUpSummary = resolveDigitalRecordFollowUpSummary(
+      relatedActivityIds: <String>[
+        ...detail.relatedActivityIds,
+        ...localRelatedLinks.map((link) => link.activityId),
+      ],
+      relatedLinks: <ManualRelatedLink>[
+        ...detail.relatedLinks,
+        ...localRelatedLinks,
+      ],
+    );
     final pkValue = summary.pk.trim();
     final locationLabel = detail.colonia.isEmpty
         ? (summary.municipio.isEmpty
@@ -1886,6 +2100,27 @@ class _DetailHero extends StatelessWidget {
               _MetaChip(
                   icon: Icons.schedule_rounded,
                   label: _formatDate(summary.createdAt)),
+              _FollowUpChip(
+                icon: followUpSummary.hasRelatedActivities
+                    ? Icons.link_rounded
+                    : Icons.link_off_rounded,
+                label: followUpSummary.hasRelatedActivities
+                    ? (followUpSummary.relatedCount == 1
+                        ? '1 actividad relacionada'
+                        : '${followUpSummary.relatedCount} actividades relacionadas')
+                    : 'Sin actividades relacionadas',
+                color: followUpSummary.hasRelatedActivities
+                    ? DigitalRecordColors.accent
+                    : SaoColors.textMutedFor(context),
+              ),
+              _FollowUpChip(
+                icon: Icons.track_changes_rounded,
+                label:
+                    'Último seguimiento: ${digitalRecordFollowUpStatusLabel(followUpSummary.latestStatus)}',
+                color: followUpSummary.latestStatus == 'sin_seguimiento'
+                    ? SaoColors.textMutedFor(context)
+                    : _followUpStatusColor(followUpSummary.latestStatus),
+              ),
             ],
           ),
         ],
@@ -1999,6 +2234,7 @@ class _RelatedHistorySectionState
         activityId: widget.detail.summary.id,
         relatedLinks: normalizedNextLinks,
       );
+      ref.invalidate(manualActivityLinksRegistryProvider);
       try {
         await saveRelatedActivityLinks(
           activityId: widget.detail.summary.id,
@@ -2012,6 +2248,7 @@ class _RelatedHistorySectionState
         completedActivityDetailProvider(widget.detail.summary.id),
       );
       ref.invalidate(completedActivitiesProvider);
+      ref.invalidate(completedExplorerActivitiesProvider);
       await _loadLocalLinks();
       if (mounted) {
         setState(_resetForm);
@@ -2492,6 +2729,44 @@ class _HistoryReasonChip extends StatelessWidget {
           color: textColor ?? DigitalRecordColors.accent,
           fontWeight: FontWeight.w700,
         ),
+      ),
+    );
+  }
+}
+
+class _FollowUpChip extends StatelessWidget {
+  const _FollowUpChip({
+    required this.icon,
+    required this.label,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: SaoTypography.caption.copyWith(
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

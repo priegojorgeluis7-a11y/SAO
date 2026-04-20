@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:sao_desktop/core/providers/project_providers.dart';
 import 'package:sao_desktop/data/repositories/backend_api_client.dart';
+import 'package:sao_desktop/features/auth/app_session_controller.dart';
 
 class _FakeBackendApiClient extends BackendApiClient {
   const _FakeBackendApiClient(this.responses);
@@ -82,6 +83,15 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         backendApiClientProvider.overrideWithValue(client),
+        currentAppUserProvider.overrideWithValue(
+          const AppUser(
+            id: 'admin-1',
+            email: 'admin@sao.mx',
+            fullName: 'Admin',
+            role: 'ADMIN',
+            roles: ['ADMIN'],
+          ),
+        ),
       ],
     );
     addTearDown(container.dispose);
@@ -90,5 +100,42 @@ void main() {
 
     expect(ids, <String>['GEN', 'QIR']);
     expect(_FakeBackendApiClient.calls, contains('/api/v1/projects'));
+  });
+
+  test('availableProjectsProvider keeps operative users scoped on fallback', () async {
+    final client = _FakeBackendApiClient({
+      '/api/v1/me/projects': Exception('403'),
+      '/api/v1/projects': [
+        {'id': 'GEN', 'name': 'General'},
+        {'project_id': 'QIR', 'project_name': 'Queretaro'},
+      ],
+    });
+
+    final container = ProviderContainer(
+      overrides: [
+        backendApiClientProvider.overrideWithValue(client),
+        currentAppUserProvider.overrideWithValue(
+          const AppUser(
+            id: 'oper-1',
+            email: 'operativo@sao.mx',
+            fullName: 'Operativo TMQ',
+            role: 'OPERATIVO',
+            roles: ['OPERATIVO'],
+            permissionScopes: [
+              AppUserPermissionScope(
+                permissionCode: 'activity.view',
+                projectId: 'TMQ',
+                effect: 'allow',
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    final ids = await container.read(availableProjectsProvider.future);
+
+    expect(ids, <String>['TMQ']);
   });
 }
