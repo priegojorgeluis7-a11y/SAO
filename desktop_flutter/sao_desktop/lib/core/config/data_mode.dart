@@ -6,7 +6,7 @@ class AppDataMode {
     /// Si no se establece, usa fallback al backend productivo.
   static const String backendBaseUrl = String.fromEnvironment(
     'SAO_BACKEND_URL',
-    defaultValue: 'https://sao-api-fjzra25vya-uc.a.run.app',
+    defaultValue: 'https://sao-api-97150883570.us-central1.run.app',
   );
 
   static bool get isLocalBackendDisallowed {

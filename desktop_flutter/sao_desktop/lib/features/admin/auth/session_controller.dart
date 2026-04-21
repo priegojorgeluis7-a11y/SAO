@@ -87,7 +87,7 @@ final adminBaseUrlProvider = Provider<String>((ref) {
   if (fromDartDefine.trim().isNotEmpty) {
     return fromDartDefine.trim();
   }
-  return 'https://sao-api-fjzra25vya-uc.a.run.app';
+  return 'https://sao-api-97150883570.us-central1.run.app';
 });
 
 final adminTransportProvider = Provider<AdminApiTransport>((ref) {
