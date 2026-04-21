@@ -392,9 +392,21 @@ def list_assignees(
 @router.post("", response_model=AssignmentListItem, status_code=status.HTTP_201_CREATED)
 def create_assignment(
     payload: AssignmentCreate,
-    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
     project_id = payload.project_id.strip().upper()
+
+    # OPERATIVO can only create assignments for themselves.
+    if user_has_any_role(current_user, ["OPERATIVO"], None) and not user_has_any_role(
+        current_user, ["ADMIN", "COORD", "SUPERVISOR"], None
+    ):
+        if str(payload.assignee_user_id).strip() != str(current_user.id).strip():
+            raise api_error(
+                status_code=status.HTTP_403_FORBIDDEN,
+                code="ASSIGNMENT_SELF_ONLY",
+                message="Operativo users can only create assignments for themselves.",
+            )
+
     if payload.end_at <= payload.start_at:
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="ASSIGNMENT_INVALID_DATE_RANGE", message="end_at must be greater than start_at")
 
