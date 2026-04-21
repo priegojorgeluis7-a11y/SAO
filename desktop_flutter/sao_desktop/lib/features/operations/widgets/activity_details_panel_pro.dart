@@ -63,6 +63,7 @@ class _ActivityDetailsPanelProState
   String? _propositoLink;
   String? _municipioLink;
   final Set<String> _expandedCatalogFields = <String>{};
+  final Set<String> _catalogApplied = <String>{};
   List<String> _projectCoverageMunicipalities = const [];
 
   @override
@@ -177,6 +178,7 @@ class _ActivityDetailsPanelProState
     _temaLink = null;
     _propositoLink = null;
     _expandedCatalogFields.clear();
+    _catalogApplied.clear();
     _municipioLink =
         _extractLinkedMunicipality(description) ?? activity?.municipality?.name;
   }
@@ -1493,14 +1495,20 @@ class _ActivityDetailsPanelProState
             capturedValue: capturedSubcategoria,
             linkedValue: _subcategoriaLink,
             options: subcatOptions,
-            onLinkChanged: (v) => setState(() => _subcategoriaLink = v),
+            isApplied: _catalogApplied.contains('Subcategoría'),
+            onLinkChanged: (v) => setState(() {
+              _subcategoriaLink = v;
+              _catalogApplied.remove('Subcategoría');
+            }),
             onLinkToExisting: (selected) async {
               await widget.onCatalogLink
                   ?.call('subcategoria', capturedSubcategoria, selected);
+              if (mounted) setState(() => _catalogApplied.add('Subcategoría'));
             },
             onAddToCatalog: () async {
               await widget.onCatalogAdd
                   ?.call('subcategoria', capturedSubcategoria);
+              if (mounted) setState(() => _catalogApplied.add('Subcategoría'));
             },
             onRequestCorrection: () async {
               await widget.onCatalogCorrection
@@ -1514,12 +1522,18 @@ class _ActivityDetailsPanelProState
                 capturedTema.isEmpty ? 'Sin tema capturado' : capturedTema,
             linkedValue: _temaLink,
             options: temaOptions,
-            onLinkChanged: (v) => setState(() => _temaLink = v),
+            isApplied: _catalogApplied.contains('Tema'),
+            onLinkChanged: (v) => setState(() {
+              _temaLink = v;
+              _catalogApplied.remove('Tema');
+            }),
             onLinkToExisting: (selected) async {
               await widget.onCatalogLink?.call('tema', capturedTema, selected);
+              if (mounted) setState(() => _catalogApplied.add('Tema'));
             },
             onAddToCatalog: () async {
               await widget.onCatalogAdd?.call('tema', capturedTema);
+              if (mounted) setState(() => _catalogApplied.add('Tema'));
             },
             onRequestCorrection: () async {
               await widget.onCatalogCorrection?.call('tema', capturedTema);
@@ -1533,13 +1547,19 @@ class _ActivityDetailsPanelProState
                 : capturedProposito,
             linkedValue: _propositoLink,
             options: propOptions,
-            onLinkChanged: (v) => setState(() => _propositoLink = v),
+            isApplied: _catalogApplied.contains('Propósito'),
+            onLinkChanged: (v) => setState(() {
+              _propositoLink = v;
+              _catalogApplied.remove('Propósito');
+            }),
             onLinkToExisting: (selected) async {
               await widget.onCatalogLink
                   ?.call('proposito', capturedProposito, selected);
+              if (mounted) setState(() => _catalogApplied.add('Propósito'));
             },
             onAddToCatalog: () async {
               await widget.onCatalogAdd?.call('proposito', capturedProposito);
+              if (mounted) setState(() => _catalogApplied.add('Propósito'));
             },
             onRequestCorrection: () async {
               await widget.onCatalogCorrection
@@ -1552,13 +1572,19 @@ class _ActivityDetailsPanelProState
             capturedValue: capturedMunicipio,
             linkedValue: _municipioLink,
             options: munOptions,
-            onLinkChanged: (v) => setState(() => _municipioLink = v),
+            isApplied: _catalogApplied.contains('Municipio'),
+            onLinkChanged: (v) => setState(() {
+              _municipioLink = v;
+              _catalogApplied.remove('Municipio');
+            }),
             onLinkToExisting: (selected) async {
               await widget.onCatalogLink
                   ?.call('municipio', capturedMunicipio, selected);
+              if (mounted) setState(() => _catalogApplied.add('Municipio'));
             },
             onAddToCatalog: () async {
               await widget.onCatalogAdd?.call('municipio', capturedMunicipio);
+              if (mounted) setState(() => _catalogApplied.add('Municipio'));
             },
             onRequestCorrection: () async {
               await widget.onCatalogCorrection
@@ -1613,6 +1639,33 @@ class _ActivityDetailsPanelProState
               ],
             ),
           ],
+          if (_catalogApplied.isNotEmpty) ...[
+            const SizedBox(height: SaoSpacing.md),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: SaoColors.success.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(SaoRadii.md),
+                border: Border.all(color: SaoColors.success.withValues(alpha: 0.5)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.check_circle_rounded, color: SaoColors.success, size: 20),
+                  const SizedBox(width: SaoSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      '${_catalogApplied.length} cambio(s) aplicado(s): ${_catalogApplied.join(', ')}',
+                      style: SaoTypography.bodyText.copyWith(
+                        color: SaoColors.success,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1623,6 +1676,7 @@ class _ActivityDetailsPanelProState
     required String capturedValue,
     required String? linkedValue,
     required List<String> options,
+    required bool isApplied,
     required ValueChanged<String?> onLinkChanged,
     required Future<void> Function(String selectedValue) onLinkToExisting,
     required Future<void> Function() onAddToCatalog,
@@ -1640,10 +1694,10 @@ class _ActivityDetailsPanelProState
     final inferredFromCaptured =
         _findBestCatalogOption(capturedValue, dedupedOptions);
     final effectiveLinkedValue = safeLinkedValue ?? inferredFromCaptured;
-    final needsAttention = _requiresCatalogDecision(capturedValue, dedupedOptions);
-    final isExpanded = needsAttention || _expandedCatalogFields.contains(fieldLabel);
-    final statusColor = needsAttention ? SaoColors.warning : SaoColors.success;
-    final statusLabel = needsAttention ? 'Requiere cambio' : 'Correcto';
+    final needsAttention = _requiresCatalogDecision(capturedValue, dedupedOptions) && !isApplied;
+    final isExpanded = (needsAttention || isApplied) || _expandedCatalogFields.contains(fieldLabel);
+    final statusColor = isApplied ? SaoColors.success : (needsAttention ? SaoColors.warning : SaoColors.success);
+    final statusLabel = isApplied ? 'Aplicado ✓' : (needsAttention ? 'Requiere cambio' : 'Correcto');
     final normalizedCaptured = _normalizeCatalogValue(capturedValue);
     final summaryText = normalizedCaptured.isEmpty
         ? 'Sin valor capturado'
@@ -1653,13 +1707,17 @@ class _ActivityDetailsPanelProState
       duration: const Duration(milliseconds: 180),
       padding: const EdgeInsets.all(SaoSpacing.sm),
       decoration: BoxDecoration(
-        color: needsAttention
-            ? SaoColors.warning.withValues(alpha: 0.12)
-            : SaoColors.surfaceFor(context),
+        color: isApplied
+            ? SaoColors.success.withValues(alpha: 0.08)
+            : needsAttention
+                ? SaoColors.warning.withValues(alpha: 0.12)
+                : SaoColors.surfaceFor(context),
         border: Border.all(
-          color: needsAttention
-              ? SaoColors.warning
-              : SaoColors.borderFor(context),
+          color: isApplied
+              ? SaoColors.success.withValues(alpha: 0.6)
+              : needsAttention
+                  ? SaoColors.warning
+                  : SaoColors.borderFor(context),
         ),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
