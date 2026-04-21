@@ -179,13 +179,12 @@ class AssignmentsDao implements AssignmentsLocalStore {
             const <String, String>{};
 
         // Never delete assignments that were attempted but never confirmed by
-        // the backend (error/uploading with no linked activity). These should
-        // remain visible and be retried on the next sync cycle.
-        if (activity == null) {
-          final s = (assignment.syncStatus).trim().toLowerCase();
-          if (s == 'error' || s == 'uploading') {
-            continue;
-          }
+        // the backend (error/uploading). The backend has no record of them so
+        // GET /assignments will never return them — preserve regardless of
+        // whether a local activity row exists.
+        final s = (assignment.syncStatus).trim().toLowerCase();
+        if (s == 'error' || s == 'uploading') {
+          continue;
         }
 
         // Preserve items with real local progress or closed review outcomes
