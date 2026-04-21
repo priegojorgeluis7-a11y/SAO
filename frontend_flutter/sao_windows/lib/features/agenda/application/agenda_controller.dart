@@ -212,6 +212,26 @@ class AgendaController extends StateNotifier<AgendaState> {
       synced = await _assignmentsRepository.pushOne(item);
     }
 
+    // Navigate to the day of the new assignment so it is immediately visible.
+    final itemDay = DateTime(item.start.year, item.start.month, item.start.day);
+    final today = DateTime.now();
+    final todayDay = DateTime(today.year, today.month, today.day);
+    final diffDays = itemDay.difference(todayDay).inDays;
+    final newOffset = (diffDays / 7).floor();
+
+    // Switch filter to the assignee so the new item is visible regardless of
+    // which resource chip was previously selected.
+    final assigneeInResources =
+        state.resources.any((r) => r.id == item.resourceId);
+    final newFilterId =
+        assigneeInResources ? item.resourceId : 'Todos';
+
+    state = state.copyWith(
+      weekOffset: newOffset,
+      selectedDay: itemDay,
+      selectedFilterId: newFilterId,
+    );
+
     await _loadCurrentWeekAssignments();
     return synced;
   }
