@@ -10,8 +10,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../services/calendar_sync_service.dart';
-
 const _kEnabled = 'gcal_enabled';
 const _kCalendarId = 'gcal_calendar_id';
 const _kCalendarName = 'gcal_calendar_name';
@@ -93,8 +91,4 @@ class CalendarSettingsNotifier extends StateNotifier<CalendarSettings> {
 final calendarSettingsProvider =
     StateNotifierProvider<CalendarSettingsNotifier, CalendarSettings>(
   (ref) => CalendarSettingsNotifier(),
-);
-
-final calendarSyncServiceProvider = Provider<CalendarSyncService>(
-  (ref) => CalendarSyncService(),
 );

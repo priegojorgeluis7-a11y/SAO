@@ -10,7 +10,6 @@ import '../data/users_dao.dart';
 import '../data/users_repository.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
-import 'calendar_settings_provider.dart';
 
 class AgendaState {
   final DateTime selectedDay;
@@ -430,20 +429,9 @@ final assignmentsRepositoryProvider = Provider<AssignmentsRepository>((ref) {
 typedef CalendarSyncCallback = Future<int> Function(List<AgendaItem> items);
 
 final agendaControllerProvider = StateNotifierProvider<AgendaController, AgendaState>((ref) {
-  final calendarSettings = ref.watch(calendarSettingsProvider);
-  final calendarService = ref.read(calendarSyncServiceProvider);
-
-  CalendarSyncCallback? onCalendarSync;
-  if (calendarSettings.isConfigured) {
-    onCalendarSync = (List<AgendaItem> items) => calendarService.syncItems(
-          calendarId: calendarSettings.calendarId!,
-          items: items,
-        );
-  }
-
   return AgendaController(
     usersRepository: ref.read(agendaUsersRepositoryProvider),
     assignmentsRepository: ref.read(assignmentsRepositoryProvider),
-    onCalendarSync: onCalendarSync,
+    onCalendarSync: null,
   );
 });
