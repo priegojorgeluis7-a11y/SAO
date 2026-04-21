@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:googleapis/calendar/v3.dart' as gcal;
 
 import '../auth/app_session_controller.dart';
+import '../calendar/calendar_settings_provider.dart';
 
 class ProfilePage extends ConsumerWidget {
   const ProfilePage({super.key});
@@ -112,6 +114,8 @@ class ProfilePage extends ConsumerWidget {
           // ── Two-column layout ──────────────────────────────────────────
           LayoutBuilder(builder: (context, constraints) {
             final wide = constraints.maxWidth > 680;
+            final canUseCalendar =
+                user?.isAdmin == true || user?.hasRole('COORD') == true;
             final leftCard = _LeftCard(
               name: name,
               role: role,
@@ -120,7 +124,11 @@ class ProfilePage extends ConsumerWidget {
               initials: initials,
               onLogout: () => _confirmLogout(context, ref),
             );
-            final rightCards = _RightCards(email: email, userId: userId);
+            final rightCards = _RightCards(
+              email: email,
+              userId: userId,
+              showCalendar: canUseCalendar,
+            );
 
             if (wide) {
               return Row(
@@ -282,8 +290,13 @@ class _LeftCard extends StatelessWidget {
 class _RightCards extends StatefulWidget {
   final String email;
   final String userId;
+  final bool showCalendar;
 
-  const _RightCards({required this.email, required this.userId});
+  const _RightCards({
+    required this.email,
+    required this.userId,
+    this.showCalendar = false,
+  });
 
   @override
   State<_RightCards> createState() => _RightCardsState();
@@ -358,6 +371,9 @@ class _RightCardsState extends State<_RightCards> {
             const _LabelValueGrid(label: 'Idioma', value: 'Español'),
           ],
         ),
+        if (widget.showCalendar) ...[          const SizedBox(height: 16),
+          const _GoogleCalendarCard(),
+        ],
       ],
     );
   }
@@ -466,6 +482,340 @@ class _LabelValueGrid extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ── Google Calendar card ───────────────────────────────────────────────────
+
+/// Shown only to ADMIN and COORD users.
+/// Allows connecting a Google account and selecting a target calendar
+/// so that planning assignments are automatically synced.
+class _GoogleCalendarCard extends ConsumerStatefulWidget {
+  const _GoogleCalendarCard();
+
+  @override
+  ConsumerState<_GoogleCalendarCard> createState() =>
+      _GoogleCalendarCardState();
+}
+
+class _GoogleCalendarCardState extends ConsumerState<_GoogleCalendarCard> {
+  bool _loading = false;
+  String? _error;
+
+  Future<void> _connect() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final service = ref.read(desktopCalendarSyncServiceProvider);
+      final account = await service.signIn();
+      if (account == null) {
+        setState(() => _loading = false);
+        return;
+      }
+      final calendars = await service.listCalendars();
+      if (!mounted) return;
+
+      if (calendars.isEmpty) {
+        setState(() {
+          _error = 'No se encontraron calendarios con acceso de escritura.';
+          _loading = false;
+        });
+        return;
+      }
+
+      final picked = await _showCalendarPicker(calendars);
+      if (picked == null) {
+        setState(() => _loading = false);
+        return;
+      }
+
+      await ref.read(desktopCalendarSettingsProvider.notifier).connect(
+            calendarId: picked.id!,
+            calendarName: picked.summary ?? picked.id!,
+            accountEmail: account.email,
+          );
+    } catch (e) {
+      if (mounted) setState(() => _error = 'Error al conectar: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _disconnect() async {
+    setState(() => _loading = true);
+    try {
+      await ref.read(desktopCalendarSyncServiceProvider).signOut();
+      await ref.read(desktopCalendarSettingsProvider.notifier).disconnect();
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<gcal.CalendarListEntry?> _showCalendarPicker(
+      List<gcal.CalendarListEntry> calendars) {
+    return showDialog<gcal.CalendarListEntry>(
+      context: context,
+      builder: (ctx) => _CalendarPickerDialog(calendars: calendars),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final settings = ref.watch(desktopCalendarSettingsProvider);
+    final connected = settings.isConnected;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface,
+        border: Border.all(color: ProfilePage._softBorder),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: ProfilePage._softShadow,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 13, 16, 11),
+            child: Row(
+              children: [
+                Icon(Icons.calendar_month_outlined,
+                    size: 15, color: cs.primary),
+                const SizedBox(width: 7),
+                Text(
+                  'Google Calendar',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: connected
+                        ? Colors.green.withValues(alpha: 0.12)
+                        : cs.outline.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: connected
+                          ? Colors.green.withValues(alpha: 0.4)
+                          : cs.outline.withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Text(
+                    connected ? 'Conectado' : 'Desconectado',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: connected ? Colors.green.shade700 : cs.outline,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Divider(height: 1, color: Theme.of(context).dividerColor),
+
+          // Body
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (connected) ...[
+                  _Row(
+                    label: 'Calendario',
+                    value: settings.calendarName ?? '—',
+                  ),
+                  const SizedBox(height: 4),
+                  _Row(
+                    label: 'Cuenta',
+                    value: settings.accountEmail ?? '—',
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _loading ? null : _connect,
+                        icon: const Icon(Icons.swap_horiz_rounded, size: 16),
+                        label: const Text('Cambiar'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _loading ? null : _disconnect,
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: cs.error,
+                          side:
+                              BorderSide(color: cs.error.withValues(alpha: 0.5)),
+                        ),
+                        icon: const Icon(Icons.link_off_rounded, size: 16),
+                        label: const Text('Desconectar'),
+                      ),
+                    ],
+                  ),
+                ] else ...[
+                  Text(
+                    'Sincroniza las asignaciones de planeación con tu Google Calendar.',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: cs.onSurface.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  FilledButton.icon(
+                    onPressed: _loading ? null : _connect,
+                    icon: _loading
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Icon(Icons.add_link_rounded, size: 16),
+                    label: Text(_loading ? 'Conectando…' : 'Conectar con Google'),
+                  ),
+                ],
+                if (_error != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _error!,
+                    style: TextStyle(fontSize: 12, color: cs.error),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _Row extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _Row({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        SizedBox(
+          width: 90,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              color: cs.onSurface.withValues(alpha: 0.5),
+            ),
+          ),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontSize: 13),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _CalendarPickerDialog extends StatefulWidget {
+  final List<gcal.CalendarListEntry> calendars;
+
+  const _CalendarPickerDialog({required this.calendars});
+
+  @override
+  State<_CalendarPickerDialog> createState() => _CalendarPickerDialogState();
+}
+
+class _CalendarPickerDialogState extends State<_CalendarPickerDialog> {
+  gcal.CalendarListEntry? _selected;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.calendars.isNotEmpty) _selected = widget.calendars.first;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Seleccionar calendario'),
+      content: SizedBox(
+        width: 360,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Elige el calendario de Google donde se sincronizarán las asignaciones de planeación.',
+              style: TextStyle(fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            ...widget.calendars.map(
+              (cal) {
+                final isSelected = _selected == cal;
+                return InkWell(
+                  borderRadius: BorderRadius.circular(6),
+                  onTap: () => setState(() => _selected = cal),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Row(
+                      children: [
+                        Icon(
+                          isSelected
+                              ? Icons.radio_button_checked
+                              : Icons.radio_button_unchecked,
+                          size: 18,
+                          color: isSelected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.grey,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(cal.summary ?? cal.id ?? '—',
+                                  style: const TextStyle(fontSize: 13)),
+                              Text(cal.id ?? '',
+                                  style: const TextStyle(
+                                      fontSize: 11, color: Colors.grey)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _selected == null
+              ? null
+              : () => Navigator.pop(context, _selected),
+          child: const Text('Guardar'),
+        ),
+      ],
     );
   }
 }

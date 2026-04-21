@@ -44,6 +44,8 @@ dependencies:
   uuid: ^4.5.2
   collection: ^1.19.1
   crypto: ^3.0.6
+  device_calendar: ^4.3.0
+  timezone: ^0.9.2
 
 dev_dependencies:
   build_runner: ^2.11.1

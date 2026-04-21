@@ -118,6 +118,14 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   // _formatPk retiene "S/PK" como fallback específico de esta vista
   String _formatPk(int? pk) => pk == null ? 'S/PK' : formatPk(pk);
 
+  String _canonicalFrente(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return '—';
+    final abbrev = RegExp(r'^[Ff]\s*(\d+)$').firstMatch(value);
+    if (abbrev != null) return 'Frente ${abbrev.group(1)}';
+    return value;
+  }
+
   String _riskLabel(String? raw) {
     switch (raw?.toLowerCase()) {
       case 'bajo': return 'Bajo';
@@ -529,7 +537,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                   child: Column(
                     children: [
                       _kvRow('Proyecto', widget.projectCode, icon: Icons.business_center_outlined),
-                      _kvRow('Frente', a.frente.isNotEmpty ? a.frente : '—', icon: Icons.alt_route_rounded),
+                      _kvRow('Frente', _canonicalFrente(a.frente), icon: Icons.alt_route_rounded),
                       _kvRow('PK', _formatPk(db?.pk ?? a.pk), icon: Icons.add_road_rounded),
                       if ((a.municipio).isNotEmpty)
                         _kvRow('Municipio', a.municipio, icon: Icons.location_on_outlined),

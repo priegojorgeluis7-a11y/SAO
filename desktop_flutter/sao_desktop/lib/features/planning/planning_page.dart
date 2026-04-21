@@ -9,6 +9,8 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 
+import 'package:url_launcher/url_launcher.dart';
+
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/backend_api_client.dart';
@@ -281,7 +283,8 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(color: SaoColors.borderFor(context)),
                           ),
-                          child: Column(
+                          child: SingleChildScrollView(
+                            child: Column(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Icon(
@@ -317,6 +320,7 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
                                 label: const Text('Crear primera actividad'),
                               ),
                             ],
+                          ),
                           ),
                         ),
                       );
@@ -2023,6 +2027,75 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     }
   }
 
+  static const _kCalendarId =
+      '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
+
+  Future<void> _syncToGoogleCalendar() async {
+    final item = widget.item;
+
+    // Determine start/end datetimes
+    final rawStart = (item.startAt != null && item.startAt!.isNotEmpty)
+        ? item.startAt!
+        : item.scheduledDate;
+    final start = DateTime.tryParse(rawStart) ?? DateTime.now();
+    final end = start.add(const Duration(hours: 1));
+
+    String _fmt(DateTime dt) =>
+        dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first + 'Z';
+
+    final location = [
+      if ((item.colonia ?? '').isNotEmpty) item.colonia!,
+      if (item.municipio.isNotEmpty) item.municipio,
+      if (item.estado.isNotEmpty) item.estado,
+    ].join(', ');
+
+    final frente = item.frontName.isNotEmpty ? item.frontName : 'Sin frente';
+
+    // Duración en minutos entre start y end
+    final durationMin = item.endAt != null && item.endAt!.isNotEmpty
+        ? DateTime.tryParse(item.endAt!)?.difference(start).inMinutes
+        : null;
+    final durationStr = durationMin != null ? '$durationMin min' : '60 min';
+
+    final endReal = item.endAt != null && item.endAt!.isNotEmpty
+        ? (DateTime.tryParse(item.endAt!) ?? end)
+        : end;
+
+    final title = Uri.encodeComponent(item.title);
+    final details = Uri.encodeComponent(
+      'Actividad: ${item.title}\n'
+      'Frente: $frente\n'
+      'Estado: ${item.status}\n'
+      'Municipio: ${item.municipio}\n'
+      'Estado (geo): ${item.estado}\n'
+      'PK: ${item.pk}\n'
+      'Duración: $durationStr\n'
+      'Asignado a: ${item.assigneeName}\n'
+      'SAO-ID: ${item.id}',
+    );
+    final loc = Uri.encodeComponent(location);
+    final dates = '${_fmt(start)}/${_fmt(endReal)}';
+    final calId = Uri.encodeComponent(_kCalendarId);
+
+    final baseUrl = 'https://calendar.google.com/calendar/render'
+        '?action=TEMPLATE'
+        '&text=$title'
+        '&dates=$dates'
+        '&details=$details'
+        '&add=$calId';
+    final fullUrl = location.isNotEmpty ? '$baseUrl&location=$loc' : baseUrl;
+    final url = Uri.parse(fullUrl);
+
+    if (!await canLaunchUrl(url)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el navegador.')),
+      );
+      return;
+    }
+    await launchUrl(url, mode: LaunchMode.externalApplication);
+  }
+
   Future<void> _confirm() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -2096,6 +2169,9 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
         if (value == 'delete') {
           _confirm();
         }
+        if (value == 'sync_gcal') {
+          _syncToGoogleCalendar();
+        }
       },
       itemBuilder: (context) => const [
         PopupMenuItem<String>(
@@ -2125,6 +2201,16 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
               Icon(Icons.swap_horiz_rounded, size: 16),
               SizedBox(width: 8),
               Text('Transferir'),
+            ],
+          ),
+        ),
+        PopupMenuItem<String>(
+          value: 'sync_gcal',
+          child: Row(
+            children: [
+              Icon(Icons.calendar_month_outlined, size: 16, color: Colors.blue),
+              SizedBox(width: 8),
+              Text('Sincronizar con Google Calendar'),
             ],
           ),
         ),
@@ -2811,6 +2897,71 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
       if (km != null && m != null) return km * 1000 + m;
     }
     return int.tryParse(s);
+  }
+
+  static const _kCalendarId =
+      '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
+
+  Future<void> _syncItemToGoogleCalendar(AssignmentItem item) async {
+    final rawStart = (item.startAt != null && item.startAt!.isNotEmpty)
+        ? item.startAt!
+        : item.scheduledDate;
+    final start = DateTime.tryParse(rawStart) ?? DateTime.now();
+    final end = start.add(const Duration(hours: 1));
+
+    String fmt(DateTime dt) =>
+        dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first + 'Z';
+
+    final location = [
+      if ((item.colonia ?? '').isNotEmpty) item.colonia!,
+      if (item.municipio.isNotEmpty) item.municipio,
+      if (item.estado.isNotEmpty) item.estado,
+    ].join(', ');
+
+    final frente = item.frontName.isNotEmpty ? item.frontName : 'Sin frente';
+
+    final durationMin = item.endAt != null && item.endAt!.isNotEmpty
+        ? DateTime.tryParse(item.endAt!)?.difference(start).inMinutes
+        : null;
+    final durationStr = durationMin != null ? '$durationMin min' : '60 min';
+
+    final endReal = item.endAt != null && item.endAt!.isNotEmpty
+        ? (DateTime.tryParse(item.endAt!) ?? end)
+        : end;
+
+    final title = Uri.encodeComponent(item.title);
+    final details = Uri.encodeComponent(
+      'Actividad: ${item.title}\n'
+      'Frente: $frente\n'
+      'Estado: ${item.status}\n'
+      'Municipio: ${item.municipio}\n'
+      'Estado (geo): ${item.estado}\n'
+      'PK: ${item.pk}\n'
+      'Duración: $durationStr\n'
+      'Asignado a: ${item.assigneeName}\n'
+      'SAO-ID: ${item.id}',
+    );
+    final loc = Uri.encodeComponent(location);
+    final dates = '${fmt(start)}/${fmt(endReal)}';
+    final calId = Uri.encodeComponent(_kCalendarId);
+
+    final baseUrl = 'https://calendar.google.com/calendar/render'
+        '?action=TEMPLATE'
+        '&text=$title'
+        '&dates=$dates'
+        '&details=$details'
+        '&add=$calId';
+    final fullUrl = location.isNotEmpty ? '$baseUrl&location=$loc' : baseUrl;
+    final url = Uri.parse(fullUrl);
+
+    if (!await canLaunchUrl(url)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No se pudo abrir el navegador.')),
+      );
+      return;
+    }
+    await launchUrl(url, mode: LaunchMode.externalApplication);
   }
 
   Future<void> _generateDailyReport(
@@ -4593,15 +4744,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
               ),
               Row(
                 mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Exportar CSV',
-                    onPressed: visibleRows.isEmpty
-                        ? null
-                        : () => _generateDailyReport(visibleRows),
-                    icon: const Icon(Icons.download_rounded),
-                  ),
-                ],
+                children: const [],
               ),
             ],
           ),
@@ -5034,6 +5177,10 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                   _updateStatus(item, 'CANCELADA');
                                                   return;
                                                 }
+                                                if (value == 'SYNC_GCAL') {
+                                                  _syncItemToGoogleCalendar(item);
+                                                  return;
+                                                }
                                                 if (value == 'DELETE') {
                                                   _confirmDeleteAssignment(item);
                                                   return;
@@ -5070,6 +5217,17 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
                                                 const PopupMenuItem<String>(
                                                   value: 'CANCELADA',
                                                   child: Text('Cancelada'),
+                                                ),
+                                                const PopupMenuDivider(),
+                                                const PopupMenuItem<String>(
+                                                  value: 'SYNC_GCAL',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(Icons.calendar_month_outlined, size: 16, color: Colors.blue),
+                                                      SizedBox(width: 8),
+                                                      Text('Sincronizar con Google Calendar'),
+                                                    ],
+                                                  ),
                                                 ),
                                                 const PopupMenuDivider(),
                                                 const PopupMenuItem<String>(

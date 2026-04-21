@@ -1,10 +1,12 @@
 // lib/features/agenda/widgets/timeline_list.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/flow/activity_flow_projection.dart';
 import '../../../core/utils/logger.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
+import '../application/calendar_settings_provider.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
 import 'agenda_mini_card.dart';
@@ -259,7 +261,7 @@ class _TimelineListState extends State<TimelineList> {
 // Sheet de detalle con acciones
 // ---------------------------------------------------------------------------
 
-class _ItemDetailSheet extends StatelessWidget {
+class _ItemDetailSheet extends ConsumerWidget {
   const _ItemDetailSheet({
     required this.item,
     required this.resource,
@@ -277,7 +279,7 @@ class _ItemDetailSheet extends StatelessWidget {
   final bool Function(AgendaItem)? canTransferItem;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final canCancel = item.syncStatus == SyncStatus.pending ||
         item.syncStatus == SyncStatus.error;
 
@@ -396,6 +398,10 @@ class _ItemDetailSheet extends StatelessWidget {
             ),
             const SizedBox(height: 12),
           ],
+
+          // ── Sincronizar con Google Calendar ──────────────────────────
+          _GoogleCalSyncButton(item: item, ref: ref),
+          const SizedBox(height: 8),
 
           if (onCancelItem != null) ...[
             if (canCancel)
@@ -566,6 +572,88 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Botón de sincronización con Google Calendar
+// ---------------------------------------------------------------------------
+
+class _GoogleCalSyncButton extends StatefulWidget {
+  const _GoogleCalSyncButton({required this.item, required this.ref});
+
+  final AgendaItem item;
+  final WidgetRef ref;
+
+  @override
+  State<_GoogleCalSyncButton> createState() => _GoogleCalSyncButtonState();
+}
+
+class _GoogleCalSyncButtonState extends State<_GoogleCalSyncButton> {
+  bool _loading = false;
+
+  Future<void> _sync() async {
+    final settings = widget.ref.read(calendarSettingsProvider);
+    if (!settings.isConfigured) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Primero conecta un calendario en Perfil → Conectar calendario.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _loading = true);
+    try {
+      final service = widget.ref.read(calendarSyncServiceProvider);
+      final synced = await service.syncItems(
+        calendarId: settings.calendarId!,
+        items: [widget.item],
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              synced > 0
+                  ? 'Actividad sincronizada con Google Calendar.'
+                  : 'No se pudo sincronizar. Verifica permisos de calendario.',
+            ),
+          ),
+        );
+        if (synced > 0) Navigator.of(context).pop();
+      }
+    } catch (e) {
+      appLogger.e('_GoogleCalSyncButton._sync: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Error al sincronizar con el calendario.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        icon: _loading
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.calendar_month_outlined),
+        label: const Text('Sincronizar con Google Calendar'),
+        onPressed: _loading ? null : _sync,
+      ),
     );
   }
 }

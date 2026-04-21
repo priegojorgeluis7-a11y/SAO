@@ -243,16 +243,11 @@ class AuthController extends StateNotifier<AuthState> {
       // Fetch current user after successful login
       final user = await _repository.getCurrentUser();
 
-      // If no PIN is configured yet, prompt setup
-      final pinConfigured = await _repository.isPinConfigured();
       state = AuthState.authenticated(
         user,
         tutorialMode: tutorialMode,
-        needsPinSetup: !pinConfigured,
       );
-      appLogger.i(
-        'Login successful: ${user.email} (needsPinSetup=${!pinConfigured})',
-      );
+      appLogger.i('Login successful: ${user.email}');
     } on InvalidCredentialsException catch (e) {
       appLogger.w('Invalid credentials: $e');
       state = const AuthState.unauthenticated('Invalid email or password');

@@ -10,6 +10,7 @@ import '../data/users_dao.dart';
 import '../data/users_repository.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
+import 'calendar_settings_provider.dart';
 
 class AgendaState {
   final DateTime selectedDay;
@@ -82,12 +83,15 @@ class AgendaController extends StateNotifier<AgendaState> {
   AgendaController({
     required AgendaUsersRepository usersRepository,
     required AssignmentsRepository assignmentsRepository,
+    CalendarSyncCallback? onCalendarSync,
   })  : _usersRepository = usersRepository,
         _assignmentsRepository = assignmentsRepository,
+        _onCalendarSync = onCalendarSync,
         super(AgendaState.initial());
 
   final AgendaUsersRepository _usersRepository;
   final AssignmentsRepository _assignmentsRepository;
+  final CalendarSyncCallback? _onCalendarSync;
   String? _projectId;
   bool _isOffline = false;
   Resource? _selfResource;
@@ -170,6 +174,14 @@ class AgendaController extends StateNotifier<AgendaState> {
     );
 
     state = state.copyWith(items: items, loadingAssignments: false);
+
+    // Sincronizar al calendario del dispositivo si está configurado.
+    if (_onCalendarSync != null && items.isNotEmpty) {
+      _onCalendarSync!(items).catchError((Object e) {
+        appLogger.w('AgendaController: calendar sync background error: $e');
+        return 0;
+      });
+    }
   }
 
   /// Avanza o retrocede [delta] semanas.
@@ -414,9 +426,24 @@ final assignmentsRepositoryProvider = Provider<AssignmentsRepository>((ref) {
   );
 });
 
+/// Tipo del callback de sincronización de calendario.
+typedef CalendarSyncCallback = Future<int> Function(List<AgendaItem> items);
+
 final agendaControllerProvider = StateNotifierProvider<AgendaController, AgendaState>((ref) {
+  final calendarSettings = ref.watch(calendarSettingsProvider);
+  final calendarService = ref.read(calendarSyncServiceProvider);
+
+  CalendarSyncCallback? onCalendarSync;
+  if (calendarSettings.isConfigured) {
+    onCalendarSync = (List<AgendaItem> items) => calendarService.syncItems(
+          calendarId: calendarSettings.calendarId!,
+          items: items,
+        );
+  }
+
   return AgendaController(
     usersRepository: ref.read(agendaUsersRepositoryProvider),
     assignmentsRepository: ref.read(assignmentsRepositoryProvider),
+    onCalendarSync: onCalendarSync,
   );
 });

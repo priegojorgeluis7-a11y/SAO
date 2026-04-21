@@ -1,10 +1,13 @@
 // lib/features/profile/profile_page.dart
+import 'package:device_calendar/device_calendar.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/utils/snackbar.dart';
+import '../../features/agenda/application/calendar_settings_provider.dart';
+import '../../features/agenda/services/calendar_sync_service.dart';
 import '../../features/auth/application/auth_providers.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../ui/theme/sao_typography.dart';
@@ -329,6 +332,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                           ],
                         ),
                         const SizedBox(height: 24),
+                        _GoogleCalendarCard(),
+                        const SizedBox(height: 16),
                         SizedBox(
                           width: double.infinity,
                           child: OutlinedButton.icon(
@@ -753,3 +758,216 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     router.go('/auth/login');
   }
 }
+
+// ── Google Calendar card ──────────────────────────────────────────────────────
+
+class _GoogleCalendarCard extends ConsumerStatefulWidget {
+  @override
+  ConsumerState<_GoogleCalendarCard> createState() =>
+      _GoogleCalendarCardState();
+}
+
+class _GoogleCalendarCardState extends ConsumerState<_GoogleCalendarCard> {
+  bool _loading = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final settings = ref.watch(calendarSettingsProvider);
+    final service = ref.read(calendarSyncServiceProvider);
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: BorderSide(color: SaoColors.gray200),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.calendar_month_rounded,
+                    color: Color(0xFF4285F4), size: 22),
+                const SizedBox(width: 10),
+                Text(
+                  'Google Calendar',
+                  style: SaoTypography.bodyTextBold.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const Spacer(),
+                if (settings.isConfigured)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: SaoColors.successBg,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'Conectado',
+                      style: SaoTypography.bodyTextSmall.copyWith(
+                        color: SaoColors.success,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              settings.isConfigured
+                  ? 'Las asignaciones de agenda se sincronizan automáticamente a:\n${settings.calendarName}'
+                  : 'Vincular la agenda SAO con un calendario de Google para sincronizar automáticamente tus asignaciones.',
+              style: SaoTypography.bodyTextSmall
+                  .copyWith(color: SaoColors.gray500),
+            ),
+            const SizedBox(height: 14),
+            if (_loading)
+              const Center(
+                child: SizedBox(
+                  height: 24,
+                  width: 24,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else if (!settings.isConfigured)
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton.icon(
+                  onPressed: () => _connect(service),
+                  icon: const Icon(Icons.link_rounded, size: 18),
+                  label: const Text('Conectar calendario'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF4285F4),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              )
+            else
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => _connect(service),
+                      icon: const Icon(Icons.swap_horiz_rounded, size: 18),
+                      label: const Text('Cambiar calendario'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  OutlinedButton.icon(
+                    onPressed: _disconnect,
+                    icon: const Icon(Icons.link_off_rounded, size: 18),
+                    label: const Text('Desconectar'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: SaoColors.error,
+                      side: const BorderSide(color: SaoColors.error),
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _connect(CalendarSyncService service) async {
+    setState(() => _loading = true);
+    try {
+      final granted = await service.requestPermissions();
+      if (!granted) {
+        if (!mounted) return;
+        showTransientSnackBar(
+          context,
+          appSnackBar(message: 'Permiso de calendario denegado'),
+        );
+        return;
+      }
+      final calendars = await service.listCalendars();
+      if (calendars.isEmpty) {
+        if (!mounted) return;
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+              message:
+                  'No se encontraron calendarios. Asegúrate de tener una cuenta de Google en el dispositivo.'),
+        );
+        return;
+      }
+      if (!mounted) return;
+      final chosen = await showDialog<Calendar>(
+        context: context,
+        builder: (ctx) => _CalendarPickerDialog(calendars: calendars),
+      );
+      if (chosen == null || !mounted) return;
+      await ref.read(calendarSettingsProvider.notifier).setCalendar(
+            calendarId: chosen.id!,
+            calendarName: chosen.name ?? chosen.id!,
+          );
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Calendario vinculado: ${chosen.name}'),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _disconnect() async {
+    await ref.read(calendarSettingsProvider.notifier).disconnect();
+    if (!mounted) return;
+    showTransientSnackBar(
+      context,
+      appSnackBar(message: 'Calendario desvinculado'),
+    );
+  }
+}
+
+// ── diálogo selector de calendario ───────────────────────────────────────────
+
+class _CalendarPickerDialog extends StatelessWidget {
+  const _CalendarPickerDialog({required this.calendars});
+  final List<Calendar> calendars;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Seleccionar calendario'),
+      contentPadding: const EdgeInsets.symmetric(vertical: 8),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: ListView.builder(
+          shrinkWrap: true,
+          itemCount: calendars.length,
+          itemBuilder: (ctx, i) {
+            final cal = calendars[i];
+            final color = cal.color != null
+                ? Color(cal.color!)
+                : const Color(0xFF4285F4);
+            return ListTile(
+              leading: CircleAvatar(
+                radius: 12,
+                backgroundColor: color,
+              ),
+              title: Text(cal.name ?? cal.id ?? ''),
+              subtitle:
+                  cal.accountName != null ? Text(cal.accountName!) : null,
+              onTap: () => Navigator.pop(ctx, cal),
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+      ],
+    );
+  }
+}
+

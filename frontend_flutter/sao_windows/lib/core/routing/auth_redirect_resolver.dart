@@ -9,13 +9,11 @@ String? resolveAuthRedirect({
   final authState = authStateAsync.asData?.value;
   final isAuthenticated = authState?.isAuthenticated == true;
   final requiresPinUnlock = authState?.requiresPinUnlock == true;
-  final needsPinSetup = authState?.needsPinSetup == true;
   final isLoading = authStateAsync.isLoading;
 
   final isLoginRoute = uri.path == '/login' || uri.path == '/auth/login';
   final isSignupRoute = uri.path == '/auth/signup';
   final isPinUnlockRoute = uri.path == '/auth/pin-unlock';
-  final isPinSetupRoute = uri.path == '/auth/pin-setup';
   final isTutorialRoute = uri.path == '/tutorial';
   final isTutorialGuest = uri.queryParameters['tutorial'] == '1';
   final isTutorialGuestShellRoute = isTutorialGuest &&
@@ -31,11 +29,6 @@ String? resolveAuthRedirect({
   // PIN bloqueado → forzar pantalla de desbloqueo
   if (requiresPinUnlock && !isPinUnlockRoute) {
     return '/auth/pin-unlock';
-  }
-
-  // Autenticado + PIN no configurado → ir a setup
-  if (isAuthenticated && needsPinSetup && !isPinSetupRoute) {
-    return '/auth/pin-setup';
   }
 
   // No autenticado (ni PIN) → login

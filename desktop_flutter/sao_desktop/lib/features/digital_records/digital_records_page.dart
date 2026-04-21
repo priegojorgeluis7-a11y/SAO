@@ -3938,7 +3938,9 @@ class _MetaChip extends StatelessWidget {
         children: [
           Icon(icon, size: 14, color: SaoColors.gray500),
           const SizedBox(width: 6),
-          Text(label, style: SaoTypography.caption),
+          Flexible(
+            child: Text(label, style: SaoTypography.caption, overflow: TextOverflow.ellipsis),
+          ),
         ],
       ),
     );
