@@ -209,6 +209,17 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     return row != null;
   }
 
+  /// Deletes an activity and all its associated fields, log entries, and sync
+  /// queue rows from the local database. Does NOT communicate with the server.
+  Future<void> deleteActivity(String activityId) async {
+    await transaction(() async {
+      await (delete(activityFields)..where((t) => t.activityId.equals(activityId))).go();
+      await (delete(activityLog)..where((t) => t.activityId.equals(activityId))).go();
+      await (delete(syncQueue)..where((t) => t.entityId.equals(activityId))).go();
+      await (delete(activities)..where((t) => t.id.equals(activityId))).go();
+    });
+  }
+
   Future<Map<String, ActivityField>> getFieldsByKey(String activityId) async {
     var rows = await (select(activityFields)..where((t) => t.activityId.equals(activityId))).get();
     var byKey = {

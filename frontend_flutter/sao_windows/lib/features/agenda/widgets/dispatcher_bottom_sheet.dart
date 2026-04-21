@@ -823,12 +823,12 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         TextField(
           controller: _pkController,
           onChanged: (v) => setState(() => _pk = v),
-          keyboardType: const TextInputType.numberWithOptions(),
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[\d+]'))],
+          keyboardType: TextInputType.number,
+          inputFormatters: [_PkInputFormatter()],
           decoration: const InputDecoration(
             labelText: 'PK',
             border: OutlineInputBorder(),
-            hintText: 'Ej: 0+142',
+            hintText: 'Ej: 142+500',
           ),
         ),
         const SizedBox(height: 16),
@@ -1390,4 +1390,39 @@ class ProjectOption {
     required this.code,
     required this.name,
   });
+}
+
+/// Formatea el campo PK con la notación km+metros (p.ej. "142+500").
+/// - Solo permite dígitos.
+/// - Inserta automáticamente el "+" después de los primeros 3 dígitos.
+/// - El máximo es 7 caracteres visibles (3 km + "+" + 3 metros).
+class _PkInputFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) {
+    // Extraer solo dígitos, ignorar cualquier '+' que ya exista.
+    final digits =
+        newValue.text.replaceAll(RegExp(r'[^\d]'), '');
+
+    // Máximo 6 dígitos (hasta 999+999).
+    final capped = digits.length > 6 ? digits.substring(0, 6) : digits;
+
+    String formatted;
+    if (capped.length < 4) {
+      // Menos de 4 dígitos → solo km parcial, sin '+' todavía.
+      formatted = capped;
+    } else {
+      // Los últimos 3 dígitos son siempre metros; el resto es km.
+      final splitAt = capped.length - 3;
+      formatted =
+          '${capped.substring(0, splitAt)}+${capped.substring(splitAt)}';
+    }
+
+    return TextEditingValue(
+      text: formatted,
+      selection: TextSelection.collapsed(offset: formatted.length),
+    );
+  }
 }

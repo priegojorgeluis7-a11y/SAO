@@ -773,6 +773,13 @@ class _HomePageState extends ConsumerState<HomePage>
         items = _mergeAgendaFallbackActivities(items, agendaItems);
       }
 
+      // Dedup: when a self-assignment is synced successfully, the local activity
+      // (created by saveLocal with the assignment UUID) and the server activity
+      // (created by syncProject pull with the backend UUID) can both end up in
+      // the DB, producing two entries for the same logical activity. Remove the
+      // lower-priority duplicate keeping the one with more local state.
+      items = _deduplicateFinalItems(items);
+
       final newCorrectionCount = items
           .where(
             (item) =>
@@ -863,6 +870,70 @@ class _HomePageState extends ConsumerState<HomePage>
 
     merged.sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return merged;
+  }
+
+  /// Deduplicates items that represent the same logical activity.
+  /// Happens when a self-assignment sync creates a server-side activity UUID
+  /// while a local activity row (keyed by the original assignment UUID) still
+  /// exists — both survive `listHomeActivitiesByProject`.
+  List<TodayActivity> _deduplicateFinalItems(List<TodayActivity> items) {
+    final normalize = (String v) => v
+        .trim()
+        .toUpperCase()
+        .replaceAll('Á', 'A')
+        .replaceAll('É', 'E')
+        .replaceAll('Í', 'I')
+        .replaceAll('Ó', 'O')
+        .replaceAll('Ú', 'U')
+        .replaceAll(RegExp(r'\s+'), ' ');
+
+    // Map fingerprint → index in result (for possible replacement).
+    final fingerprintToIdx = <String, int>{};
+    final result = <TodayActivity>[];
+
+    for (final item in items) {
+      final pk = item.pk;
+      // Only deduplicate when both pk is set and positive; otherwise we cannot
+      // safely tell two activities apart by title alone.
+      if (pk == null || pk <= 0) {
+        result.add(item);
+        continue;
+      }
+
+      final key = '${pk}_${normalize(item.title)}';
+      final existingIdx = fingerprintToIdx[key];
+      if (existingIdx == null) {
+        fingerprintToIdx[key] = result.length;
+        result.add(item);
+      } else {
+        // Keep the item with more meaningful local state.
+        if (_hasMoreLocalState(item, result[existingIdx])) {
+          result[existingIdx] = item;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  int _executionStateScore(ExecutionState state) {
+    return switch (state) {
+      ExecutionState.terminada => 4,
+      ExecutionState.revisionPendiente => 3,
+      ExecutionState.enCurso => 2,
+      ExecutionState.pendiente => 1,
+    };
+  }
+
+  bool _hasMoreLocalState(TodayActivity a, TodayActivity b) {
+    final aScore = _executionStateScore(a.executionState);
+    final bScore = _executionStateScore(b.executionState);
+    if (aScore != bScore) return aScore > bScore;
+    // Prefer items with local-pending changes over purely-synced ones.
+    final aSynced = a.syncState == ActivitySyncState.synced;
+    final bSynced = b.syncState == ActivitySyncState.synced;
+    if (aSynced != bSynced) return !aSynced;
+    return false;
   }
 
   bool _sameLogicalActivity(TodayActivity left, TodayActivity right) {
@@ -1099,7 +1170,9 @@ class _HomePageState extends ConsumerState<HomePage>
     return TodayActivity(
       id: normalizedId,
       title: item.title.trim().isNotEmpty ? item.title.trim() : 'Actividad',
-      frente: item.frente.trim().isNotEmpty ? item.frente.trim() : 'Sin frente',
+      frente: _canonicalFrente(
+        item.frente.trim().isNotEmpty ? item.frente.trim() : 'Sin frente',
+      ),
       municipio: item.municipio,
       estado: item.estado,
       pk: item.pk,
@@ -1170,6 +1243,76 @@ class _HomePageState extends ConsumerState<HomePage>
       isOfflineMode: ref.read(offlineModeProvider),
       executionState: activity.executionState,
     );
+  }
+
+  /// Returns true if the current user is allowed to delete [activity].
+  /// - ADMIN: can delete any activity.
+  /// - OPERATIVO: can only delete activities assigned to themselves that have
+  ///   not yet been synced to the server (pending / error).
+  bool _canDeleteActivity(TodayActivity activity) {
+    if (_isAdminViewer) return true;
+    if (!_isOperativeViewer) return false;
+    // OPERATIVO: must own the activity.
+    final isOwn = _isAssignedToCurrentUser(
+      assignedToUserId: activity.assignedToUserId,
+      assignedToName: activity.assignedToName,
+    );
+    if (!isOwn) return false;
+    // Only allow deleting local-only activities (not yet confirmed by backend).
+    return activity.syncState == ActivitySyncState.pending ||
+        activity.syncState == ActivitySyncState.error;
+  }
+
+  Future<void> _confirmDeleteActivity(TodayActivity activity) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Eliminar actividad'),
+        content: Text(
+          '¿Seguro que quieres eliminar "${activity.title}"? Esta acción no se puede deshacer.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: SaoColors.riskHigh),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Eliminar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    await _deleteActivity(activity);
+  }
+
+  Future<void> _deleteActivity(TodayActivity activity) async {
+    final resolvedId = await _resolveLocalActivityIdForAction(activity);
+    try {
+      await _dao.deleteActivity(resolvedId);
+      if (!mounted) return;
+      setState(() {
+        _items.removeWhere((i) => i.id == activity.id || i.id == resolvedId);
+      });
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Actividad eliminada.',
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo eliminar la actividad. Intenta de nuevo.',
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
   }
 
   Future<void> _openTransferResponsibilitySheet(TodayActivity activity) async {
@@ -1364,7 +1507,7 @@ class _HomePageState extends ConsumerState<HomePage>
     return TodayActivity(
       id: activity.id,
       title: title,
-      frente: normalizedSegment ?? normalizedFront ?? 'Sin frente',
+      frente: _canonicalFrente(normalizedSegment ?? normalizedFront ?? 'Sin frente'),
       municipio: normalizedMunicipio ?? '',
       estado: normalizedEstado ?? '',
       pk: activity.pk,
@@ -1491,6 +1634,19 @@ class _HomePageState extends ConsumerState<HomePage>
         normalized == 'sin municipio' ||
         normalized == 'sin estado') {
       return null;
+    }
+    return value;
+  }
+
+  /// Normalizes front/frente abbreviations so that grouping treats them as
+  /// the same unit. For example: "F1" and "Frente 1" both become "Frente 1".
+  String _canonicalFrente(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty) return 'Sin frente';
+    // Match patterns like "F1", "F2", "F10", "F 1", case-insensitive.
+    final abbrev = RegExp(r'^[Ff]\s*(\d+)$').firstMatch(value);
+    if (abbrev != null) {
+      return 'Frente ${abbrev.group(1)}';
     }
     return value;
   }
@@ -3006,6 +3162,9 @@ class _HomePageState extends ConsumerState<HomePage>
                                           currentActivity,
                                         )
                                       : null,
+                                  onDelete: _canDeleteActivity(currentActivity)
+                                      ? () => _confirmDeleteActivity(currentActivity)
+                                      : null,
                                 );
                               }).toList()
                             : const [],
@@ -3350,6 +3509,7 @@ class _SwipeActivityTile extends StatelessWidget {
   final VoidCallback onSwipeRight;
   final VoidCallback onSwipeLeftIncident;
   final VoidCallback? onSyncCompleted;
+  final VoidCallback? onDelete;
 
   const _SwipeActivityTile({
     super.key,
@@ -3369,6 +3529,7 @@ class _SwipeActivityTile extends StatelessWidget {
     required this.onSwipeRight,
     required this.onSwipeLeftIncident,
     this.onSyncCompleted,
+    this.onDelete,
   });
 
   // Colores dinámicos según el estado
@@ -3511,6 +3672,7 @@ class _SwipeActivityTile extends StatelessWidget {
         transferInProgress: transferInProgress,
         onTap: onTapOpenWizard,
         onSyncCompleted: onSyncCompleted,
+        onDelete: onDelete,
       ),
     );
   }
@@ -3531,6 +3693,7 @@ class _ActivityTile extends StatelessWidget {
   final ActivitySyncState syncState;
   final VoidCallback onTap;
   final VoidCallback? onSyncCompleted;
+  final VoidCallback? onDelete;
 
   const _ActivityTile({
     required this.a,
@@ -3547,6 +3710,7 @@ class _ActivityTile extends StatelessWidget {
     required this.syncState,
     required this.onTap,
     this.onSyncCompleted,
+    this.onDelete,
   });
 
   (String, Color, IconData) _syncBadgeMeta() {
@@ -3751,6 +3915,17 @@ class _ActivityTile extends StatelessWidget {
                                   Icons.swap_horiz_rounded,
                                   size: 18,
                                   color: SaoColors.gray600,
+                                ),
+                              ),
+                            if (onDelete != null)
+                              IconButton(
+                                tooltip: 'Eliminar actividad',
+                                splashRadius: 18,
+                                onPressed: onDelete,
+                                icon: const Icon(
+                                  Icons.delete_outline_rounded,
+                                  size: 18,
+                                  color: SaoColors.riskHigh,
                                 ),
                               ),
                           ],
