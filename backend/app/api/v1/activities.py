@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Response, status
@@ -459,6 +459,15 @@ async def update_activity(
         updates["front_id"] = str(update_data.front_id)
     if getattr(update_data, "assigned_to_user_id", None) is not None:
         updates["assigned_to_user_id"] = str(update_data.assigned_to_user_id)
+        # When reassigning, stamp assignment_start_at so the mobile agenda can
+        # locate the activity in the current week. Only set it if the activity
+        # does not already have an explicit assignment window from the dispatcher.
+        has_window = bool(
+            existing.get("assignment_start_at") or existing.get("start_at")
+        )
+        if not has_window:
+            updates["assignment_start_at"] = now.isoformat()
+            updates["assignment_end_at"] = (now + timedelta(hours=8)).isoformat()
     doc_ref.update(updates)
     return _firestore_activity_dto(doc_ref, uuid)
 

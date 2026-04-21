@@ -146,7 +146,7 @@ def list_report_activities(
     for doc in candidate_docs:
         created_dt = _report_dt(doc)
         front_id = str(doc.get("front_id") or "")
-        front_name = fronts_map.get(front_id, "")
+        front_name = fronts_map.get(front_id, "") or str(doc.get("frente") or doc.get("front_name") or "").strip()
         assigned_to_user_id = str(doc.get("assigned_to_user_id") or "").strip()
         review_decision = str(doc.get("review_decision") or "").upper() or None
         if front_filter and front_filter not in front_name.lower():

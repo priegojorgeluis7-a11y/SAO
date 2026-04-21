@@ -379,7 +379,12 @@ def _resolve_activity_front_name(
     front_names: dict[str, str],
     project_front_scope_map: dict[str, dict[str, str]],
 ) -> str | None:
-    explicit_front = str(activity_payload.get("front") or activity_payload.get("front_name") or "").strip()
+    explicit_front = str(
+        activity_payload.get("front")
+        or activity_payload.get("front_name")
+        or activity_payload.get("frente")
+        or ""
+    ).strip()
     if explicit_front:
         return explicit_front
 
