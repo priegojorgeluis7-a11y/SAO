@@ -2,16 +2,18 @@
 
 import os
 
+# Must be set BEFORE any app module is imported so Settings() validates correctly
+# in CI environments where there is no .env file.
+os.environ.setdefault("DATA_BACKEND", "firestore")
+os.environ.setdefault("JWT_SECRET", "test-secret-for-ci-tests-minimum32chars!")
+os.environ.setdefault("GCS_BUCKET", "test-bucket")
+os.environ.setdefault("CORS_ORIGINS", "http://localhost:8000,http://localhost:3000")
+
 import pytest
 from fastapi.testclient import TestClient
 
 from app.core.rate_limit import rate_limiter
 from app.main import app
-
-os.environ.setdefault("DATA_BACKEND", "firestore")
-os.environ.setdefault("JWT_SECRET", "test-secret")
-os.environ.setdefault("GCS_BUCKET", "test-bucket")
-os.environ.setdefault("CORS_ORIGINS", "http://localhost:8000,http://localhost:3000")
 
 
 @pytest.fixture(scope="function")
