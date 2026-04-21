@@ -30,6 +30,7 @@ from app.api.v1 import (
     reports,
     review,
     sync,
+    system_config,
     territory,
     users,
 )
@@ -164,6 +165,7 @@ app.include_router(observations.router, prefix=settings.API_V1_STR)
 app.include_router(ocr.router, prefix=settings.API_V1_STR)
 app.include_router(reports.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard.router, prefix=settings.API_V1_STR)
+app.include_router(system_config.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard_kpis.router, prefix=settings.API_V1_STR)
 app.include_router(completed_activities.router, prefix=settings.API_V1_STR)
 

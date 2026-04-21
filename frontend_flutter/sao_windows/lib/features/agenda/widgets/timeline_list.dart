@@ -2,11 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
+import '../application/system_config_provider.dart';
 import '../../../core/flow/activity_flow_projection.dart';
 import '../../../core/utils/logger.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
-import '../application/calendar_settings_provider.dart';
 import '../models/agenda_item.dart';
 import '../models/resource.dart';
 import 'agenda_mini_card.dart';
@@ -591,47 +592,67 @@ class _GoogleCalSyncButton extends StatefulWidget {
 }
 
 class _GoogleCalSyncButtonState extends State<_GoogleCalSyncButton> {
+  static const _kFallbackCalendarId =
+      '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
+
   bool _loading = false;
 
   Future<void> _sync() async {
-    final settings = widget.ref.read(calendarSettingsProvider);
-    if (!settings.isConfigured) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Primero conecta un calendario en Perfil → Conectar calendario.',
-            ),
-          ),
-        );
-      }
-      return;
-    }
-
+    final item = widget.item;
     setState(() => _loading = true);
     try {
-      final service = widget.ref.read(calendarSyncServiceProvider);
-      final synced = await service.syncItems(
-        calendarId: settings.calendarId!,
-        items: [widget.item],
+      String fmt(DateTime dt) =>
+          dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first + 'Z';
+
+      final location = [
+        if (item.municipio.isNotEmpty) item.municipio,
+        if (item.estado.isNotEmpty) item.estado,
+      ].join(', ');
+
+      final frente = item.frente.isNotEmpty ? item.frente : 'Sin frente';
+      final pkStr = item.pk != null ? 'PK: ${item.pk}\n' : '';
+      final durationMin = item.end.difference(item.start).inMinutes;
+
+      final title = Uri.encodeComponent(item.title);
+      final details = Uri.encodeComponent(
+        'Actividad: ${item.title}\n'
+        'Frente: $frente\n'
+        'Estado: ${item.operationalState}\n'
+        'Municipio: ${item.municipio}\n'
+        'Estado (geo): ${item.estado}\n'
+        '${pkStr}'
+        'Duraci\u00f3n: $durationMin min\n'
+        'SAO-ID: ${item.id}',
       );
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              synced > 0
-                  ? 'Actividad sincronizada con Google Calendar.'
-                  : 'No se pudo sincronizar. Verifica permisos de calendario.',
-            ),
-          ),
-        );
-        if (synced > 0) Navigator.of(context).pop();
+      final loc = Uri.encodeComponent(location);
+      final dates = '${fmt(item.start)}/${fmt(item.end)}';
+      final calId = Uri.encodeComponent(
+          widget.ref.read(systemCalendarIdProvider).valueOrNull ?? _kFallbackCalendarId);
+
+      final baseUrl = 'https://calendar.google.com/calendar/render'
+          '?action=TEMPLATE'
+          '&text=\$title'
+          '&dates=\$dates'
+          '&details=\$details'
+          '&add=\$calId';
+      final fullUrl = location.isNotEmpty ? '\$baseUrl&location=\$loc' : baseUrl;
+      final url = Uri.parse(fullUrl);
+
+      if (!await canLaunchUrl(url)) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No se pudo abrir el navegador.')),
+          );
+        }
+        return;
       }
+      await launchUrl(url, mode: LaunchMode.externalApplication);
+      if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      appLogger.e('_GoogleCalSyncButton._sync: $e');
+      appLogger.e('_GoogleCalSyncButton._sync: \$e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Error al sincronizar con el calendario.')),
+          const SnackBar(content: Text('Error al abrir Google Calendar.')),
         );
       }
     } finally {

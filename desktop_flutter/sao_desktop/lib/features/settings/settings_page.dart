@@ -13,6 +13,7 @@ import '../../core/providers/app_refresh_provider.dart';
 import '../../core/settings/report_export_settings.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../features/auth/app_session_controller.dart';
+import '../../features/system/system_config_provider.dart';
 
 enum _ConnectionProbeStatus {
   idle,
@@ -558,6 +559,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       hint: 'Aplica cambios globales a los permisos base por rol.',
                     ),
                   ],
+                ),
+                const SizedBox(height: 20),
+                const _SectionHeader(
+                  title: 'Google Calendar',
+                  icon: Icons.calendar_month_rounded,
+                ),
+                const SizedBox(height: 12),
+                _GoogleCalendarAdminCard(
+                  onSaved: () => ref.invalidate(systemCalendarIdProvider),
                 ),
                 const SizedBox(height: 28),
               ],
@@ -1413,6 +1423,145 @@ class _Divider extends StatelessWidget {
       indent: 16,
       endIndent: 16,
       color: Theme.of(context).dividerColor,
+    );
+  }
+}
+
+// ── Admin: Google Calendar configuration ──────────────────────────────────
+
+class _GoogleCalendarAdminCard extends ConsumerStatefulWidget {
+  const _GoogleCalendarAdminCard({this.onSaved});
+  final VoidCallback? onSaved;
+
+  @override
+  ConsumerState<_GoogleCalendarAdminCard> createState() =>
+      _GoogleCalendarAdminCardState();
+}
+
+class _GoogleCalendarAdminCardState
+    extends ConsumerState<_GoogleCalendarAdminCard> {
+  final _ctrl = TextEditingController();
+  bool _loaded = false;
+  bool _saving = false;
+  String? _savedFeedback;
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final svc = ref.read(systemConfigServiceProvider);
+    final id = await svc.getCalendarId();
+    if (mounted) {
+      setState(() {
+        _ctrl.text = id;
+        _loaded = true;
+      });
+    }
+  }
+
+  Future<void> _save() async {
+    final val = _ctrl.text.trim();
+    if (val.isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      final svc = ref.read(systemConfigServiceProvider);
+      await svc.updateCalendarId(val);
+      widget.onSaved?.call();
+      if (mounted) {
+        setState(() => _savedFeedback = 'Guardado correctamente.');
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _savedFeedback = 'Error al guardar: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_loaded) {
+      _load();
+    }
+    final cs = Theme.of(context).colorScheme;
+    return _SettingsCard(
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'ID del calendario compartido',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                  color: cs.onSurface,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Este ID se usa en todos los clientes (escritorio y móvil) para '
+                'agregar eventos al calendario de Google compartido del sistema.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: 0.5),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _ctrl,
+                      decoration: const InputDecoration(
+                        hintText: 'xxxxxxxx@group.calendar.google.com',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        contentPadding: EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                      ),
+                      style: const TextStyle(fontSize: 13),
+                      onChanged: (_) =>
+                          setState(() => _savedFeedback = null),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  FilledButton.icon(
+                    onPressed: _saving ? null : _save,
+                    icon: _saving
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded, size: 16),
+                    label: const Text('Guardar'),
+                  ),
+                ],
+              ),
+              if (_savedFeedback != null) ...[
+                const SizedBox(height: 8),
+                Text(
+                  _savedFeedback!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _savedFeedback!.startsWith('Error')
+                        ? cs.error
+                        : Colors.green.shade700,
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

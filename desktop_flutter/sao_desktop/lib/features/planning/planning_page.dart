@@ -20,6 +20,7 @@ import '../../ui/theme/sao_colors.dart';
 import '../completed_activities/completed_activities_provider.dart';
 import '../dashboard/dashboard_provider.dart';
 import '../reports/reports_provider.dart';
+import '../system/system_config_provider.dart';
 import 'planning_provider.dart';
 
 class _ToggleCalendarIntent extends Intent {
@@ -2027,7 +2028,7 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     }
   }
 
-  static const _kCalendarId =
+  static const _kFallbackCalendarId =
       '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
 
   Future<void> _syncToGoogleCalendar() async {
@@ -2075,7 +2076,8 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     );
     final loc = Uri.encodeComponent(location);
     final dates = '${_fmt(start)}/${_fmt(endReal)}';
-    final calId = Uri.encodeComponent(_kCalendarId);
+    final calId = Uri.encodeComponent(
+        ref.read(systemCalendarIdProvider).valueOrNull ?? _kFallbackCalendarId);
 
     final baseUrl = 'https://calendar.google.com/calendar/render'
         '?action=TEMPLATE'
@@ -2716,7 +2718,7 @@ class _CollapsedCalendarRail extends StatelessWidget {
   }
 }
 
-class _HourlyAssignmentsView extends StatefulWidget {
+class _HourlyAssignmentsView extends ConsumerStatefulWidget {
   final String projectId;
   final List<AssignmentItem> assignments;
   final Set<String> reportActivityIds;
@@ -2738,10 +2740,10 @@ class _HourlyAssignmentsView extends StatefulWidget {
   });
 
   @override
-  State<_HourlyAssignmentsView> createState() => _HourlyAssignmentsViewState();
+  ConsumerState<_HourlyAssignmentsView> createState() => _HourlyAssignmentsViewState();
 }
 
-class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
+class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> {
   bool _showEmptySlots = false;
   final Set<String> _activeStatusFilters = <String>{};
   final Set<String> _dismissedAssignmentIds = <String>{};
@@ -2899,7 +2901,7 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     return int.tryParse(s);
   }
 
-  static const _kCalendarId =
+  static const _kFallbackCalendarId =
       '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
 
   Future<void> _syncItemToGoogleCalendar(AssignmentItem item) async {
@@ -2943,7 +2945,8 @@ class _HourlyAssignmentsViewState extends State<_HourlyAssignmentsView> {
     );
     final loc = Uri.encodeComponent(location);
     final dates = '${fmt(start)}/${fmt(endReal)}';
-    final calId = Uri.encodeComponent(_kCalendarId);
+    final calId = Uri.encodeComponent(
+        ref.read(systemCalendarIdProvider).valueOrNull ?? _kFallbackCalendarId);
 
     final baseUrl = 'https://calendar.google.com/calendar/render'
         '?action=TEMPLATE'
