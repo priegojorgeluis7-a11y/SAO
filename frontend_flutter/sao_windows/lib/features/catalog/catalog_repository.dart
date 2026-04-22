@@ -6,6 +6,7 @@ import 'package:get_it/get_it.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/network/api_client.dart';
+import '../../core/storage/kv_store.dart';
 import '../../data/local/app_db.dart';
 import 'data/catalog_offline_repository.dart';
 import 'models/catalog_bundle_models.dart';
@@ -358,6 +359,8 @@ class CatalogRepository {
     if (normalized.isEmpty) return const [];
 
     final apiClient = GetIt.instance<ApiClient>();
+    final kv = GetIt.instance<KvStore>();
+    final cacheKey = 'catalog_fronts:$normalized';
     final endpoints = ['/fronts', '/api/v1/fronts'];
 
     for (final endpoint in endpoints) {
@@ -367,6 +370,29 @@ class CatalogRepository {
           queryParameters: {'project_id': normalized},
         );
         final rows = (response.data as List<dynamic>)
+            .map((item) => Map<String, dynamic>.from(item as Map))
+            .toList();
+        final result = rows
+            .map(
+              (row) => ProjectFrontOption(
+                id: (row['id'] ?? '').toString(),
+                code: (row['code'] ?? '').toString(),
+                name: (row['name'] ?? '').toString(),
+              ),
+            )
+            .where((row) => row.id.trim().isNotEmpty && row.name.trim().isNotEmpty)
+            .toList();
+        // Persist for offline use
+        await kv.setString(cacheKey, jsonEncode(rows));
+        return result;
+      } catch (_) {}
+    }
+
+    // Offline fallback: return cached fronts if available
+    try {
+      final cached = await kv.getString(cacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        final rows = (jsonDecode(cached) as List<dynamic>)
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList();
         return rows
@@ -379,8 +405,8 @@ class CatalogRepository {
             )
             .where((row) => row.id.trim().isNotEmpty && row.name.trim().isNotEmpty)
             .toList();
-      } catch (_) {}
-    }
+      }
+    } catch (_) {}
 
     return const [];
   }
@@ -390,6 +416,8 @@ class CatalogRepository {
     if (normalized.isEmpty) return const [];
 
     final apiClient = GetIt.instance<ApiClient>();
+    final kv = GetIt.instance<KvStore>();
+    final cacheKey = 'catalog_states:$normalized';
     final endpoints = ['/locations/states', '/api/v1/locations/states'];
 
     for (final endpoint in endpoints) {
@@ -401,12 +429,26 @@ class CatalogRepository {
         final rows = (response.data as List<dynamic>)
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList();
-        return rows
+        final result = rows
             .map((row) => (row['estado'] ?? '').toString().trim())
             .where((item) => item.isNotEmpty)
             .toList();
+        // Persist for offline use
+        await kv.setString(cacheKey, jsonEncode(result));
+        return result;
       } catch (_) {}
     }
+
+    // Offline fallback: return cached states if available
+    try {
+      final cached = await kv.getString(cacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        return (jsonDecode(cached) as List<dynamic>)
+            .map((e) => e.toString())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
 
     return const [];
   }
@@ -417,6 +459,8 @@ class CatalogRepository {
     if (normalizedProject.isEmpty || normalizedState.isEmpty) return const [];
 
     final apiClient = GetIt.instance<ApiClient>();
+    final kv = GetIt.instance<KvStore>();
+    final cacheKey = 'catalog_municipios:$normalizedProject:$normalizedState';
     final endpoints = ['/locations', '/api/v1/locations'];
 
     for (final endpoint in endpoints) {
@@ -431,14 +475,28 @@ class CatalogRepository {
         final rows = (response.data as List<dynamic>)
             .map((item) => Map<String, dynamic>.from(item as Map))
             .toList();
-        return rows
+        final result = rows
             .map((row) => (row['municipio'] ?? '').toString().trim())
             .where((item) => item.isNotEmpty)
             .toSet()
             .toList()
           ..sort();
+        // Persist for offline use
+        await kv.setString(cacheKey, jsonEncode(result));
+        return result;
       } catch (_) {}
     }
+
+    // Offline fallback: return cached municipios if available
+    try {
+      final cached = await kv.getString(cacheKey);
+      if (cached != null && cached.isNotEmpty) {
+        return (jsonDecode(cached) as List<dynamic>)
+            .map((e) => e.toString())
+            .where((e) => e.isNotEmpty)
+            .toList();
+      }
+    } catch (_) {}
 
     return const [];
   }
