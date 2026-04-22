@@ -499,7 +499,7 @@ def _bootstrap_firestore_catalog(
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(
-    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR"])),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD"])),
 ):
     client = get_firestore_client()
     result: list[ProjectOut] = []
