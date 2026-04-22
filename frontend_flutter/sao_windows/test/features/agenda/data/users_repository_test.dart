@@ -15,6 +15,11 @@ class _FakeUsersLocalStore implements UsersLocalStore {
   }
 
   @override
+  Future<List<AgendaCachedUser>> getAllActiveUsers() async {
+    return _users.where((user) => user.isActive).toList();
+  }
+
+  @override
   Future<void> upsertUsers(List<AgendaCachedUser> users) async {
     upsertCalls++;
     _users = users;

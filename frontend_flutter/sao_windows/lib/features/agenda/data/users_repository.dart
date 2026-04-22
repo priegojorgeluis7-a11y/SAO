@@ -136,33 +136,76 @@ class AgendaUsersRepository {
     required bool isOffline,
   }) async {
     if (isOffline) {
-      return getOperationalUsers(projectId: projectId, isOffline: true);
+      // Offline: return all cached active users (any role) so OPERATIVO can
+      // transfer to any project member, not just other operatives.
+      final all = await _usersDao.getAllActiveUsers();
+      return _mapResources(all);
     }
 
+    // Online: use the dedicated transfer-candidates endpoint which returns ALL
+    // active project members regardless of the caller's role (unlike /users
+    // which restricts OPERATIVO-only callers to seeing only themselves).
     try {
-      final responseData = await _fetchUsers(
-        projectId: projectId,
-        role: '',
+      final client = _apiClient;
+      if (client == null) {
+        throw StateError('No API client available');
+      }
+      final effectiveProject = (projectId != null && projectId.trim().isNotEmpty)
+          ? projectId.trim()
+          : 'TMQ';
+      final response = await client.get<dynamic>(
+        '/assignments/transfer-candidates',
+        queryParameters: {'project_id': effectiveProject},
       );
-      final projectUsers = _parseOperationalUsers(responseData);
+      final responseData = response.data;
+      // The endpoint returns AssignmentAssigneeOption objects: { user_id, full_name, ... }
+      final List<dynamic> rawList = responseData is List<dynamic>
+          ? responseData
+          : (responseData is Map && responseData['items'] is List<dynamic>)
+              ? responseData['items'] as List<dynamic>
+              : <dynamic>[];
+
+      final candidates = rawList
+          .whereType<Map<dynamic, dynamic>>()
+          .map((raw) {
+            final map = Map<String, dynamic>.from(raw);
+            final id = (map['user_id'] ?? map['id'] ?? '').toString();
+            final fullName = (map['full_name'] ?? map['fullName'] ?? map['name'] ?? '').toString();
+            final roleName = (map['role_name'] ?? map['roleName'] ?? map['role'] ?? '').toString().toUpperCase();
+            final isActive = (map['is_active'] as bool?) ?? (map['isActive'] as bool?) ?? true;
+            return AgendaCachedUser(
+              id: id,
+              fullName: fullName,
+              roleId: _roleIdFromRoleName(roleName),
+              isActive: isActive,
+            );
+          })
+          .where((u) => u.id.isNotEmpty && u.fullName.isNotEmpty && u.isActive)
+          .toList();
+
       appLogger.i(
-        'Agenda transfer users parsed_count=${projectUsers.length} project=$projectId',
+        'Transfer candidates parsed_count=${candidates.length} project=$effectiveProject',
       );
 
-      if (projectUsers.isNotEmpty) {
+      if (candidates.isNotEmpty) {
         try {
-          await _usersDao.upsertUsers(projectUsers);
+          await _usersDao.upsertUsers(candidates);
         } catch (e) {
-          appLogger.w('Agenda transfer users cache update failed: $e');
+          appLogger.w('Transfer candidates cache update failed: $e');
         }
-        return _mapResources(projectUsers);
+        return _mapResources(candidates);
       }
     } on DioException catch (e) {
-      appLogger.w('Agenda transfer users fetch failed, falling back to operatives: $e');
+      appLogger.w('Transfer candidates fetch failed: $e');
     } catch (e) {
-      appLogger.w('Agenda transfer users unexpected error, falling back to operatives: $e');
+      appLogger.w('Transfer candidates unexpected error: $e');
     }
 
+    // Final fallback: cached all-roles users
+    final cached = await _usersDao.getAllActiveUsers();
+    if (cached.isNotEmpty) {
+      return _mapResources(cached);
+    }
     return getOperationalUsers(projectId: projectId, isOffline: false);
   }
 

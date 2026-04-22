@@ -339,6 +339,46 @@ def list_assignments(
     return items
 
 
+@router.get("/transfer-candidates", response_model=list[AssignmentAssigneeOption])
+def list_transfer_candidates(
+    project_id: str = Query(..., description="Project scope filter"),
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
+):
+    """Return all active project members eligible to receive an assignment transfer.
+
+    Unlike /assignees, this endpoint does NOT restrict OPERATIVO callers to
+    seeing only themselves — OPERATIVO needs the full list so they can pick a
+    recipient when transferring one of their activities.
+    """
+    _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD", "ADMIN"}
+    normalized_project_id = project_id.strip().upper()
+
+    principals = list_firestore_users()
+    options: list[AssignmentAssigneeOption] = []
+    for p in principals:
+        if p.status != UserStatus.ACTIVE:
+            continue
+        principal_roles = {
+            canonicalize_role_name(role) or ""
+            for role in (p.roles or [])
+            if str(role).strip()
+        }
+        if not principal_roles.intersection(_assignable_roles):
+            continue
+        if p.project_ids and normalized_project_id not in p.project_ids:
+            continue
+        options.append(
+            AssignmentAssigneeOption(
+                user_id=p.id,
+                full_name=p.full_name,
+                email=p.email,
+                role_name=_principal_role_name(p) or "",
+            )
+        )
+    options.sort(key=lambda item: (item.full_name.lower(), item.email.lower()))
+    return options
+
+
 @router.get("/assignees", response_model=list[AssignmentAssigneeOption])
 def list_assignees(
     project_id: str = Query(..., description="Project filter"),

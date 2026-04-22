@@ -17,6 +17,7 @@ class AgendaCachedUser {
 
 abstract class UsersLocalStore {
   Future<List<AgendaCachedUser>> getActiveUsersByRole(int roleId);
+  Future<List<AgendaCachedUser>> getAllActiveUsers();
   Future<void> upsertUsers(List<AgendaCachedUser> users);
   Future<void> replaceUsersByRole(int roleId, List<AgendaCachedUser> users);
 }
@@ -30,6 +31,25 @@ class UsersDao implements UsersLocalStore {
   Future<List<AgendaCachedUser>> getActiveUsersByRole(int roleId) async {
     final rows = await (_db.select(_db.users)
           ..where((t) => t.roleId.equals(roleId) & t.isActive.equals(true))
+          ..orderBy([(t) => drift.OrderingTerm.asc(t.name)]))
+        .get();
+
+    return rows
+        .map(
+          (row) => AgendaCachedUser(
+            id: row.id,
+            fullName: row.name,
+            roleId: row.roleId,
+            isActive: row.isActive,
+          ),
+        )
+        .toList();
+  }
+
+  @override
+  Future<List<AgendaCachedUser>> getAllActiveUsers() async {
+    final rows = await (_db.select(_db.users)
+          ..where((t) => t.isActive.equals(true))
           ..orderBy([(t) => drift.OrderingTerm.asc(t.name)]))
         .get();
 
