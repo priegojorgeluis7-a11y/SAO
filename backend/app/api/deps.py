@@ -143,7 +143,7 @@ def resolve_user_project_access(user: Any) -> tuple[bool, set[str]]:
     }
 
     has_global_scope = "*" in explicit_project_ids or "ADMIN" in role_names
-    if not has_global_scope and not explicit_project_ids and "SUPERVISOR" in role_names:
+    if not has_global_scope and ("SUPERVISOR" in role_names or "COORD" in role_names):
         has_global_scope = True
 
     allowed_project_ids = {
