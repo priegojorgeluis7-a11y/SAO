@@ -898,6 +898,20 @@ def get_completed_activity_detail(
         resolved_id,
     )
 
+    # Resolve result name from wizard_payload so clients get the human-readable
+    # text instead of the catalog ID (e.g. "R01"). data_fields may only store
+    # the raw ID, so we expose the full result object at the top level where
+    # the client's _extractNestedValue finds it before scanning data_fields.
+    _wizard_payload = doc.get("wizard_payload") or {}
+    _result_entry = _wizard_payload.get("result") if isinstance(_wizard_payload, dict) else None
+    _result_obj: dict | None = None
+    if isinstance(_result_entry, dict):
+        _result_obj = _result_entry
+    elif isinstance(_result_entry, str) and _result_entry:
+        # result stored as plain ID string — wrap with id only; name will be
+        # resolved by the client from the catalog or left as the ID.
+        _result_obj = {"id": _result_entry, "name": _result_entry}
+
     return {
         # List-compatible fields
         "id":               resolved_id,
@@ -919,6 +933,7 @@ def get_completed_activity_detail(
         # Detail-only fields
         "colonia":          str(doc.get("colonia") or ""),
         "review_notes":     str(doc.get("review_notes") or doc.get("rejection_reason") or ""),
+        "result":           _result_obj,
         "data_fields":      doc.get("data_fields") or {},
         "related_activity_ids": [item["activity_id"] for item in normalized_related_links],
         "related_links":    normalized_related_links,

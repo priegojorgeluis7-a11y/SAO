@@ -151,6 +151,16 @@ def list_report_activities(
         review_decision = str(doc.get("review_decision") or "").upper() or None
         if front_filter and front_filter not in front_name.lower():
             continue
+        # Resolve result name from wizard_payload.result so clients receive the
+        # human-readable text rather than just the catalog ID (e.g. "R01").
+        _wp = doc.get("wizard_payload") or {}
+        _res = _wp.get("result") if isinstance(_wp, dict) else None
+        if isinstance(_res, dict):
+            _result_obj = _res
+        elif isinstance(_res, str) and _res:
+            _result_obj = {"id": _res, "name": _res}
+        else:
+            _result_obj = None
         items.append(
             {
                 "id": str(doc.get("uuid") or ""),
@@ -173,6 +183,7 @@ def list_report_activities(
                 "assigned_to_user_id": assigned_to_user_id or None,
                 "assigned_name": users_map.get(assigned_to_user_id, "") or None,
                 "created_at": created_dt.isoformat() if created_dt else "",
+                "result": _result_obj,
             }
         )
 
