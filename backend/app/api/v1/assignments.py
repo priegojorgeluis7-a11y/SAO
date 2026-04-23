@@ -384,7 +384,7 @@ def list_assignees(
     project_id: str = Query(..., description="Project filter"),
     current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
-    _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD", "ADMIN"}
+    _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD"}
 
     # If user is OPERATIVO ONLY (no ADMIN/COORD/SUPERVISOR), only return self
     has_privileged_role = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
