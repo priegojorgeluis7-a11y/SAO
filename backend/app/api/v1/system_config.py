@@ -28,7 +28,7 @@ class SystemConfig(BaseModel):
 
 
 class SystemConfigUpdate(BaseModel):
-    google_calendar_id: str
+    google_calendar_id: str | None = None
 
 
 def _is_admin(user: Any) -> bool:
@@ -47,7 +47,7 @@ async def get_system_config(
         if doc.exists:
             data = doc.to_dict() or {}
             return SystemConfig(
-                google_calendar_id=data.get("google_calendar_id") or _DEFAULT_CALENDAR_ID
+                google_calendar_id=data.get("google_calendar_id") or _DEFAULT_CALENDAR_ID,
             )
     except Exception as exc:
         logger.warning("system_config read error: %s", exc)
@@ -65,21 +65,33 @@ async def update_system_config(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo ADMIN puede modificar la configuración del sistema.",
         )
-    cal_id = body.google_calendar_id.strip()
-    if not cal_id:
+
+    update: dict[str, Any] = {}
+
+    if body.google_calendar_id is not None:
+        cal_id = body.google_calendar_id.strip()
+        if not cal_id:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="google_calendar_id no puede estar vacío.",
+            )
+        update["google_calendar_id"] = cal_id
+
+    if not update:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="google_calendar_id no puede estar vacío.",
+            detail="No hay campos para actualizar.",
         )
+
     try:
         db = get_firestore_client()
-        db.collection(_COLLECTION).document(_DOC_ID).set(
-            {"google_calendar_id": cal_id}, merge=True
-        )
+        db.collection(_COLLECTION).document(_DOC_ID).set(update, merge=True)
     except Exception as exc:
         logger.error("system_config write error: %s", exc)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error al guardar la configuración.",
         )
-    return SystemConfig(google_calendar_id=cal_id)
+
+    # Return the merged state
+    return await get_system_config(current_user)
