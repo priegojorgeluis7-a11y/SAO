@@ -415,8 +415,20 @@ def list_assignees(
         }
         if not principal_roles.intersection(_assignable_roles):
             continue
-        if p.project_ids and project_id.strip().upper() not in p.project_ids:
-            continue
+        # ADMIN/SUPERVISOR/COORD have global scope: if project_ids is empty they
+        # appear in all projects; if set, it must include the requested project.
+        # OPERATIVO must be explicitly assigned to the project (project_ids required).
+        _global_scope_roles = {"ADMIN", "SUPERVISOR", "COORD"}
+        has_global_scope = bool(principal_roles.intersection(_global_scope_roles))
+        normalised_pid = project_id.strip().upper()
+        user_pids = {str(pid).strip().upper() for pid in (p.project_ids or []) if str(pid).strip()}
+        if has_global_scope:
+            if user_pids and normalised_pid not in user_pids:
+                continue
+        else:
+            # OPERATIVO: require explicit project membership
+            if not user_pids or normalised_pid not in user_pids:
+                continue
         options.append(
             AssignmentAssigneeOption(
                 user_id=p.id,
