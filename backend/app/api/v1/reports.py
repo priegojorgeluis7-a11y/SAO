@@ -104,7 +104,7 @@ def list_report_activities(
     include_already_reported: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD"])),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO"])),
 ):
     client = get_firestore_client()
 
@@ -112,6 +112,10 @@ def list_report_activities(
     front_filter = None if front_raw in _ALL_FRONTS else front_raw
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
     status_filter = status.strip().upper() if status and status.strip() else None
+
+    # OPERATIVO can only see activities assigned to them
+    is_operativo = (getattr(_current_user, "role", None) or "").upper() == "OPERATIVO"
+    caller_user_id = str(_current_user.id)
 
     query = client.collection("activities")
     if project_filter:
@@ -122,6 +126,12 @@ def list_report_activities(
     front_ids: set[str] = set()
     user_ids: set[str] = set()
     for doc in docs:
+        # OPERATIVO ownership guard: only their own assigned, approved activities
+        if is_operativo:
+            if str(doc.get("assigned_to_user_id") or "") != caller_user_id:
+                continue
+            if str(doc.get("review_decision") or "").upper() != "APPROVED":
+                continue
         if doc.get("deleted_at") is not None:
             continue
         if doc.get("report_generated_at") is not None and not include_already_reported:
