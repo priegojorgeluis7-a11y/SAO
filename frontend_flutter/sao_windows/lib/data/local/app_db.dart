@@ -1,20 +1,22 @@
 // lib/data/local/app_db.dart
-import 'dart:io';
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:path/path.dart' as p;
+import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import 'tables.dart';
 
 part 'app_db.g.dart';
 
-LazyDatabase _openConnection() {
-  return LazyDatabase(() async {
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dir.path, 'sigef_local.sqlite'));
-    return NativeDatabase(file);
-  });
+QueryExecutor _openConnection() {
+  return driftDatabase(
+    name: 'sigef_local',
+    web: kIsWeb
+        ? DriftWebOptions(
+            sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+            driftWorker: Uri.parse('drift_worker.js'),
+          )
+        : null,
+  );
 }
 
 @DriftDatabase(
