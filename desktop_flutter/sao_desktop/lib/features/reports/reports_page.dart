@@ -942,9 +942,22 @@ class _TopBar extends ConsumerWidget {
           const Icon(Icons.summarize_rounded,
               color: SaoColors.primary, size: 18),
           const SizedBox(width: SaoSpacing.sm),
-          const Text('Reportes Operativos', style: SaoTypography.sectionTitle),
+          const Flexible(
+            child: Text(
+              'Reportes Operativos',
+              style: SaoTypography.sectionTitle,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
           const SizedBox(width: SaoSpacing.lg),
 
+          // ── Filters (centre) — Expanded so they shrink before overflowing ──
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
           // Project filter
           projectsAsync.when(
             loading: () => const SizedBox(
@@ -1005,12 +1018,15 @@ class _TopBar extends ConsumerWidget {
                 const Text(
                   'Ver reportes anteriores',
                   style: SaoTypography.bodyTextSmall,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),
           ),
-
-          const Spacer(),
+                ],
+              ),
+            ),
+          ),
 
           // Refresh
           IconButton(
@@ -1206,9 +1222,12 @@ class _ActivityTray extends StatelessWidget {
             color: Theme.of(context).colorScheme.surface,
             child: Row(
               children: [
-                Text(
-                  'Actividades',
-                  style: SaoTypography.sectionTitle.copyWith(color: textColor),
+                Flexible(
+                  child: Text(
+                    'Actividades',
+                    style: SaoTypography.sectionTitle.copyWith(color: textColor),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 const SizedBox(width: SaoSpacing.xs),
                 if (approvedItems.isNotEmpty)
@@ -1229,7 +1248,7 @@ class _ActivityTray extends StatelessWidget {
                       child: AnimatedContainer(
                         duration: const Duration(milliseconds: 150),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 4),
+                            horizontal: 6, vertical: 4),
                         decoration: BoxDecoration(
                           color: allSelected
                               ? accent
@@ -1243,7 +1262,7 @@ class _ActivityTray extends StatelessWidget {
                           ),
                         ),
                         child: Text(
-                          allSelected ? 'Quitar todas' : 'Sel. todas',
+                          allSelected ? 'Quitar' : 'Sel. todas',
                           style: SaoTypography.caption.copyWith(
                             color: allSelected
                                 ? Theme.of(context).colorScheme.onPrimary
@@ -2548,15 +2567,18 @@ class _MiniDocPreviewState extends State<_MiniDocPreview> {
                 const Icon(Icons.article_rounded,
                     size: 14, color: SaoColors.gray500),
                 const SizedBox(width: 6),
-                Text(
-                  'Vista previa del documento',
-                  style: SaoTypography.caption.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: SaoColors.gray600,
+                Flexible(
+                  child: Text(
+                    'Vista previa del documento',
+                    overflow: TextOverflow.ellipsis,
+                    style: SaoTypography.caption.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: SaoColors.gray600,
+                    ),
                   ),
                 ),
-                const Spacer(),
                 if (widget.totalItems > 1) ...[
+                  const SizedBox(width: 4),
                   IconButton(
                     icon: const Icon(Icons.chevron_left_rounded, size: 18),
                     onPressed:
