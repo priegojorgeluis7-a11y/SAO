@@ -1,10 +1,13 @@
 """Sync schemas for pull/push operations"""
 
+import logging
 from datetime import datetime
 from typing import Literal, Union
 from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator, model_validator
+
+logger = logging.getLogger(__name__)
 
 from app.schemas.activity import ActivityDTO, VALID_EXECUTION_STATES
 
@@ -48,6 +51,20 @@ class SyncPushActivityItem(BaseModel):
     assigned_to_user_id: UUID | None = Field(None, description="User ID (UUID) assigned")
     participant_user_ids: list[UUID] = Field(default_factory=list, description="All participant user IDs assigned to this activity")
     created_by_user_id: UUID = Field(..., description="User ID (UUID) who created")
+
+    @field_validator("participant_user_ids", mode="before")
+    @classmethod
+    def coerce_participant_user_ids(cls, v: object) -> list[UUID]:
+        """Silently drop entries that are not valid UUIDs instead of failing the whole request."""
+        if not isinstance(v, list):
+            return []
+        result: list[UUID] = []
+        for item in v:
+            try:
+                result.append(UUID(str(item).strip()) if not isinstance(item, UUID) else item)
+            except (ValueError, AttributeError):
+                logger.warning("SYNC_PUSH_INVALID_PARTICIPANT_UUID value=%r — dropped", item)
+        return result
     catalog_version_id: Union[UUID, str] = Field(..., description="Catalog version ID (UUID or semantic string such as 'tmq-v1.0.0' for Firestore mode)")
 
     @field_validator("catalog_version_id", mode="before")
@@ -89,7 +106,13 @@ class SyncPushActivityItem(BaseModel):
     @model_validator(mode="after")
     def validate_pk_range(self):
         if self.pk_end is not None and self.pk_end < self.pk_start:
-            raise ValueError("pk_end must be >= pk_start")
+            logger.warning(
+                "SYNC_PUSH_PK_RANGE_INVALID uuid=%s pk_start=%d pk_end=%d — nullifying pk_end",
+                self.uuid,
+                self.pk_start,
+                self.pk_end,
+            )
+            self.pk_end = None
         return self
 
 
