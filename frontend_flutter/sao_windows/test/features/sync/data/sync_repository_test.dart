@@ -15,7 +15,8 @@ void main() {
   setUpAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pathProviderChannel, (call) async {
-      if (call.method == 'getApplicationDocumentsDirectory') {
+      if (call.method == 'getApplicationDocumentsDirectory' ||
+          call.method == 'getTemporaryDirectory') {
         return Directory.systemTemp.createTempSync('sao_windows_test').path;
       }
       return null;

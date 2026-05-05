@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants.dart';
 import '../../core/flow/activity_flow_projection.dart';
+import '../../core/utils/project_terminology.dart';
+import '../../core/sync/pending_sync_services.dart';
 import '../../data/local/app_db.dart';
 import '../../data/local/dao/activity_dao.dart';
 import '../home/models/today_activity.dart';
@@ -84,13 +86,65 @@ class _CompletedSyncedActivitiesPageState
     _db = GetIt.I<AppDb>();
     _dao = ActivityDao(_db);
     _projectFilter = _defaultProjectFilter;
-    _resolveViewerRole().then((_) => _load());
+    _resolveViewerRole().catchError((_) {}).then((_) => _load());
+    _triggerBackgroundSync();
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _triggerBackgroundSync() async {
+    final service = ref.read(activitySyncServiceProvider);
+    final projectIds = await _resolveProjectsForOnlineSync();
+    if (projectIds.isEmpty) {
+      if (mounted) {
+        await _load();
+      }
+      return;
+    }
+
+    for (final projectId in projectIds) {
+      try {
+        await service.syncProject(projectId);
+      } catch (_) {
+        // Sync errors are non-blocking; continue with remaining projects.
+      }
+    }
+
+    if (mounted) {
+      await _load();
+    }
+  }
+
+  Future<List<String>> _resolveProjectsForOnlineSync() async {
+    final projectId = widget.selectedProject.trim().toUpperCase();
+    if (projectId.isNotEmpty && projectId != kAllProjects) {
+      return <String>[projectId];
+    }
+
+    final projects = await ((_db.select(_db.projects)
+          ..where((p) => p.isActive.equals(true)))
+        .get());
+    final codes = projects
+        .map((p) => p.code.trim().toUpperCase())
+        .where((code) => code.isNotEmpty && code != kAllProjects)
+        .toSet()
+        .toList()
+      ..sort();
+    return codes;
+  }
+
+  Future<void> _refreshHistoryOnline() async {
+    try {
+      await _triggerBackgroundSync();
+    } catch (_) {
+      if (mounted) {
+        await _load();
+      }
+    }
   }
 
   Future<void> _resolveViewerRole() async {
@@ -126,12 +180,11 @@ class _CompletedSyncedActivitiesPageState
   Future<void> _load() async {
     setState(() => _loading = true);
     try {
-      final currentUserId = ref
-          .read(currentUserProvider)
-          ?.id
-          .trim()
-          .toLowerCase();
-      if (currentUserId == null || currentUserId.isEmpty) {
+      final currentUser = ref.read(currentUserProvider);
+      final currentUserId = currentUser?.id.trim().toLowerCase() ?? '';
+      final currentUserEmail = currentUser?.email.trim().toLowerCase() ?? '';
+      final currentUserName = currentUser?.fullName.trim().toLowerCase() ?? '';
+      if (currentUserId.isEmpty && currentUserEmail.isEmpty) {
         if (!mounted) return;
         setState(() {
           _allItems = const [];
@@ -145,17 +198,12 @@ class _CompletedSyncedActivitiesPageState
         if (_isAdminViewer) {
           return _isHistoryVisible(row);
         }
-        final assigned = row.assignedToUserId?.trim().toLowerCase();
-        final isAssignedToCurrentUser =
-            assigned != null &&
-            assigned.isNotEmpty &&
-            assigned == currentUserId;
-        final isCreatedByCurrentUser =
-            row.activity.createdByUserId.trim().toLowerCase() == currentUserId;
-        final includeAsCorrectionFallback =
-            isCreatedByCurrentUser && _isRejectedForCorrection(row);
-        return (isAssignedToCurrentUser || includeAsCorrectionFallback) &&
-            _isHistoryVisible(row);
+        return _isOwnedByCurrentUser(
+          row,
+          currentUserId: currentUserId,
+          currentUserEmail: currentUserEmail,
+          currentUserName: currentUserName,
+        );
       }).toList();
 
       final historyRows = candidateRows.toList()
@@ -536,6 +584,28 @@ class _CompletedSyncedActivitiesPageState
     return _hasMeaningfulHistorySignal(row);
   }
 
+  bool _isOwnedByCurrentUser(
+    HomeActivityRecord row, {
+    required String currentUserId,
+    required String currentUserEmail,
+    required String currentUserName,
+  }) {
+    final assignedTo = row.assignedToUserId?.trim().toLowerCase() ?? '';
+    if (assignedTo.isNotEmpty) {
+      if (assignedTo == currentUserId || assignedTo == currentUserEmail) {
+        return true;
+      }
+    }
+
+    final assignedName = row.assignedToName?.trim().toLowerCase() ?? '';
+    if (assignedName.isNotEmpty && currentUserName.isNotEmpty && assignedName == currentUserName) {
+      return true;
+    }
+
+    final createdBy = row.activity.createdByUserId.trim().toLowerCase();
+    return createdBy == currentUserId || createdBy == currentUserEmail;
+  }
+
   void _clearFilters() {
     _searchCtrl.clear();
     setState(() {
@@ -664,8 +734,23 @@ class _CompletedSyncedActivitiesPageState
 
   String _historyStatusLabel(HomeActivityRecord row) {
     final activity = row.activity;
+    final syncStatus = activity.status.trim().toUpperCase();
     if (_isRejectedForCorrection(row)) {
       return 'Rechazada · Requiere correccion';
+    }
+
+    if (syncStatus == 'ERROR') {
+      return 'Error de sincronizacion';
+    }
+
+    if (syncStatus == 'DRAFT' || syncStatus == 'READY_TO_SYNC') {
+      if (activity.finishedAt != null) {
+        return 'Pendiente de sincronizacion · ${_statusLabel(activity.finishedAt!, activity.startedAt)}';
+      }
+      if (activity.startedAt != null) {
+        return 'Pendiente de sincronizacion · En curso';
+      }
+      return 'Pendiente de sincronizacion · Pendiente';
     }
 
     final operationalState = row.operationalState?.trim().toUpperCase() ?? '';
@@ -699,10 +784,17 @@ class _CompletedSyncedActivitiesPageState
 
   Color _historyStatusColor(HomeActivityRecord row) {
     final activity = row.activity;
+    final syncStatus = activity.status.trim().toUpperCase();
     final reviewState = row.reviewState?.trim().toUpperCase() ?? '';
     final nextAction = row.nextAction?.trim().toUpperCase() ?? '';
     if (_isRejectedForCorrection(row)) {
       return SaoColors.riskHigh;
+    }
+    if (syncStatus == 'ERROR') {
+      return SaoColors.riskHigh;
+    }
+    if (syncStatus == 'DRAFT' || syncStatus == 'READY_TO_SYNC') {
+      return SaoColors.info;
     }
     if (reviewState == 'PENDING_REVIEW' ||
         nextAction == 'ESPERAR_DECISION_COORDINACION' ||
@@ -720,10 +812,17 @@ class _CompletedSyncedActivitiesPageState
 
   Color _historyStatusBackground(HomeActivityRecord row) {
     final activity = row.activity;
+    final syncStatus = activity.status.trim().toUpperCase();
     final reviewState = row.reviewState?.trim().toUpperCase() ?? '';
     final nextAction = row.nextAction?.trim().toUpperCase() ?? '';
     if (_isRejectedForCorrection(row)) {
       return SaoColors.riskHighBg;
+    }
+    if (syncStatus == 'ERROR') {
+      return SaoColors.riskHighBg;
+    }
+    if (syncStatus == 'DRAFT' || syncStatus == 'READY_TO_SYNC') {
+      return SaoColors.infoBg;
     }
     if (reviewState == 'PENDING_REVIEW' ||
         nextAction == 'ESPERAR_DECISION_COORDINACION' ||
@@ -857,7 +956,7 @@ class _CompletedSyncedActivitiesPageState
                       DropdownButtonFormField<String>(
                         initialValue: tempFront,
                         isExpanded: true,
-                        decoration: decoration('Frente'),
+                        decoration: decoration(frontTerminology(tempProject, capitalize: true)),
                         items: _frontOptions
                             .map(
                               (value) => DropdownMenuItem(
@@ -1290,7 +1389,7 @@ class _CompletedSyncedActivitiesPageState
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : RefreshIndicator(
-              onRefresh: _load,
+              onRefresh: _refreshHistoryOnline,
               child: Column(
                 children: [
                   Container(
@@ -1637,7 +1736,7 @@ class _CompletedSyncedActivitiesPageState
                                 if (_frontFilter != 'TODOS')
                                   _filterChip(
                                     icon: Icons.layers_rounded,
-                                    label: 'Frente',
+                                    label: frontTerminology(_projectFilter, capitalize: true),
                                     value: _frontFilter,
                                   ),
                                 if (_frontFilter != 'TODOS')
@@ -2028,7 +2127,7 @@ class _CompletedSyncedActivitiesPageState
                                             ),
                                             _metaChip(
                                               icon: Icons.layers_rounded,
-                                              label: 'Frente',
+                                              label: frontTerminology(activity.projectId, capitalize: true),
                                               value: _displayFront(front),
                                             ),
                                             if (_isAdminViewer && (row.assignedToName?.trim().isNotEmpty ?? false))

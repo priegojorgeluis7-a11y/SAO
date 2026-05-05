@@ -15,6 +15,7 @@ import '../../features/sync/services/auto_sync_service.dart';
 import '../../features/events/data/events_api_repository.dart';
 import '../../features/agenda/data/territory_api_repository.dart';
 import '../../features/events/data/events_local_repository.dart';
+import '../../features/notifications/data/notifications_repository.dart';
 import '../catalog/api/catalog_api.dart';
 import '../catalog/sync/catalog_sync_service.dart';
 import '../services/connectivity_service.dart';
@@ -158,6 +159,9 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
     () => AutoSyncService(
       syncService: getIt<SyncService>(),
       connectivity: getIt<ConnectivityService>(),
+      catalogSyncService: getIt<CatalogSyncService>(),
+      apiClient: getIt<ApiClient>(),
+      kv: getIt<KvStore>(),
     ),
   );
 
@@ -172,6 +176,14 @@ Future<void> setupServiceLocator({bool prewarmCatalog = true}) async {
   // Territory module
   getIt.registerLazySingleton<TerritoryApiRepository>(
     () => TerritoryApiRepository(apiClient: getIt<ApiClient>()),
+  );
+
+  // Notifications module
+  getIt.registerLazySingleton<NotificationsRepository>(
+    () => NotificationsRepository(
+      apiClient: getIt<ApiClient>(),
+      database: getIt<AppDb>(),
+    ),
   );
 }
 

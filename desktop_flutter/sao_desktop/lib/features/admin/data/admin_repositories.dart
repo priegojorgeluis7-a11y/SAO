@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 class AdminApiException implements Exception {
   final int statusCode;
@@ -36,6 +37,14 @@ class HttpAdminApiTransport implements AdminApiTransport {
     return uri.replace(queryParameters: queryParams);
   }
 
+  Map<String, String> _headers({String? token}) {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
   Future<dynamic> _send(
     String method,
     String path, {
@@ -44,40 +53,34 @@ class HttpAdminApiTransport implements AdminApiTransport {
     String? token,
   }) async {
     final uri = _buildUri(path, queryParams);
-    final client = HttpClient();
-    try {
-      final request = switch (method) {
-        'GET' => await client.getUrl(uri),
-        'POST' => await client.postUrl(uri),
-        'PUT' => await client.putUrl(uri),
-        'PATCH' => await client.patchUrl(uri),
-        'DELETE' => await client.deleteUrl(uri),
-        _ => throw StateError('Unsupported method: $method'),
-      };
+    final encodedBody = body != null ? jsonEncode(body) : null;
+    final headers = _headers(token: token);
+    const timeout = Duration(seconds: 15);
 
-      request.headers.contentType = ContentType.json;
-      if (token != null && token.isNotEmpty) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      }
-
-      if (body != null) {
-        request.write(jsonEncode(body));
-      }
-
-      final response = await request.close();
-      final responseBody = await response.transform(utf8.decoder).join();
-
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw AdminApiException(response.statusCode, responseBody);
-      }
-
-      if (responseBody.isEmpty) {
-        return null;
-      }
-      return jsonDecode(responseBody);
-    } finally {
-      client.close(force: true);
+    final http.Response response;
+    switch (method) {
+      case 'GET':
+        response = await http.get(uri, headers: headers).timeout(timeout);
+      case 'POST':
+        response = await http.post(uri, headers: headers, body: encodedBody).timeout(timeout);
+      case 'PUT':
+        response = await http.put(uri, headers: headers, body: encodedBody).timeout(timeout);
+      case 'PATCH':
+        response = await http.patch(uri, headers: headers, body: encodedBody).timeout(timeout);
+      case 'DELETE':
+        response = await http.delete(uri, headers: headers).timeout(timeout);
+      default:
+        throw StateError('Unsupported method: $method');
     }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AdminApiException(response.statusCode, response.body);
+    }
+
+    if (response.body.isEmpty) {
+      return null;
+    }
+    return jsonDecode(response.body);
   }
 
   @override
@@ -344,6 +347,47 @@ class AdminUserItem {
       status: json['status'] as String,
       roleName: json['role_name'] as String,
       projectId: json['project_id'] as String?,
+    );
+  }
+}
+
+// ─── Online presence model ────────────────────────────────────────────────────
+
+class OnlineUserItem {
+  final String id;
+  final String fullName;
+  final String email;
+  final String roleName;
+  final String? projectId;
+  final List<String> projectIds;
+  final bool isOnline;
+  final DateTime? lastActivityAt;
+
+  const OnlineUserItem({
+    required this.id,
+    required this.fullName,
+    required this.email,
+    required this.roleName,
+    required this.projectId,
+    required this.projectIds,
+    required this.isOnline,
+    required this.lastActivityAt,
+  });
+
+  factory OnlineUserItem.fromJson(Map<String, dynamic> json) {
+    DateTime? parseDate(dynamic v) {
+      if (v == null) return null;
+      try { return DateTime.parse(v.toString()).toLocal(); } catch (_) { return null; }
+    }
+    return OnlineUserItem(
+      id: json['id'].toString(),
+      fullName: (json['full_name'] ?? '').toString(),
+      email: (json['email'] ?? '').toString(),
+      roleName: (json['role_name'] ?? '').toString(),
+      projectId: json['project_id'] as String?,
+      projectIds: (json['project_ids'] as List<dynamic>? ?? []).map((e) => e.toString()).toList(),
+      isOnline: json['is_online'] as bool? ?? false,
+      lastActivityAt: parseDate(json['last_activity_at']),
     );
   }
 }
@@ -687,6 +731,21 @@ class UsersRepository {
       body: body,
     );
     return AdminUserItem.fromJson(response as Map<String, dynamic>);
+  }
+
+  Future<List<OnlineUserItem>> listOnline(String token, {String? projectId}) async {
+    final query = <String, String>{};
+    if (projectId != null && projectId.isNotEmpty && projectId != 'ALL') {
+      query['project_id'] = projectId;
+    }
+    final response = await transport.get(
+      '/api/v1/users/online',
+      token: token,
+      queryParams: query.isEmpty ? null : query,
+    ) as List<dynamic>;
+    return response
+        .map((e) => OnlineUserItem.fromJson(e as Map<String, dynamic>))
+        .toList();
   }
 }
 

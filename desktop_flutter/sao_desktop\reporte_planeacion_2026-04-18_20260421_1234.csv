@@ -1,0 +1,3 @@
+id_log,fecha,timestamp_ini,timestamp_fin,duracion_min,actividad_cod,frente,pk_m,estado_geo,municipio,responsable_id,workflow_status,nota
+"274c813a-f05d-4762-9caf-0a7545c249b5",2026-04-18,2026-04-18T08:00:00.000,2026-04-18T09:00:00.000,60,"274c813a-f05d-4762-9caf-0a7545c249b5","F1",80000,"Hidalgo","Cardonal","070137d8-3be2-4e05-9c8e-d3c38c54fd13","PROGRAMADA",
+"a1680c34-8827-4635-b952-348a123b84e2",2026-04-18,2026-04-18T10:00:00.000,2026-04-18T11:00:00.000,60,"a1680c34-8827-4635-b952-348a123b84e2","F1",90000,"Estado de México","Atenco","070137d8-3be2-4e05-9c8e-d3c38c54fd13","COMPLETADA",

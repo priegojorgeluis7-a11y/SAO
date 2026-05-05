@@ -15,8 +15,8 @@ class TimelineList extends StatefulWidget {
   final List<Resource> resources;
   final int startHour;
   final int endHour;
-  /// Invocado cuando el usuario confirma cancelar una asignación pendiente.
-  final void Function(AgendaItem)? onCancelItem;
+  /// Invocado cuando el usuario confirma eliminar una actividad desde Agenda.
+  final Future<void> Function(AgendaItem)? onCancelItem;
   /// Invocado para avanzar estado operativo desde Agenda.
   final Future<void> Function(AgendaItem)? onAdvanceState;
   /// Invocado para abrir una actividad en modo consulta/lectura.
@@ -272,15 +272,14 @@ class _ItemDetailSheet extends ConsumerWidget {
 
   final AgendaItem item;
   final Resource resource;
-  final void Function(AgendaItem)? onCancelItem;
+  final Future<void> Function(AgendaItem)? onCancelItem;
   final Future<void> Function(AgendaItem)? onAdvanceState;
   final Future<void> Function(AgendaItem)? onTransferItem;
   final bool Function(AgendaItem)? canTransferItem;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final canCancel = item.syncStatus == SyncStatus.pending ||
-        item.syncStatus == SyncStatus.error;
+    const canCancel = true;
 
     return Padding(
       padding: const EdgeInsets.all(20),
@@ -403,37 +402,13 @@ class _ItemDetailSheet extends ConsumerWidget {
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  icon: const Icon(Icons.cancel_outlined),
-                  label: const Text('Cancelar asignación'),
+                  icon: const Icon(Icons.delete_outline_rounded),
+                  label: const Text('Eliminar actividad'),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: SaoColors.error,
                     side: const BorderSide(color: SaoColors.error),
                   ),
                   onPressed: () => _confirmCancel(context),
-                ),
-              )
-            else
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: SaoColors.infoBg,
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: SaoColors.infoBorder),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.info_outline,
-                        size: 16, color: SaoColors.infoIcon),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Esta asignación ya fue sincronizada. '
-                        'Coordina con el despachador para cancelarla.',
-                        style: SaoTypography.bodyTextSmall
-                            .copyWith(color: SaoColors.infoText),
-                      ),
-                    ),
-                  ],
                 ),
               ),
           ],
@@ -447,9 +422,9 @@ class _ItemDetailSheet extends ConsumerWidget {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Cancelar asignación'),
+        title: const Text('Eliminar actividad'),
         content: Text(
-          '¿Cancelar "${item.title}" asignada a ${resource.name}? '
+          '¿Eliminar "${item.title}" asignada a ${resource.name}? '
           'Esta acción no se puede deshacer.',
         ),
         actions: [
@@ -461,7 +436,7 @@ class _ItemDetailSheet extends ConsumerWidget {
             onPressed: () => Navigator.of(ctx).pop(true),
             style:
                 FilledButton.styleFrom(backgroundColor: SaoColors.error),
-            child: const Text('Cancelar asignación'),
+            child: const Text('Eliminar actividad'),
           ),
         ],
       ),
@@ -469,7 +444,7 @@ class _ItemDetailSheet extends ConsumerWidget {
 
     if (confirmed == true && context.mounted) {
       Navigator.of(context).pop(); // cerrar sheet
-      onCancelItem?.call(item);
+      await onCancelItem?.call(item);
     }
   }
 

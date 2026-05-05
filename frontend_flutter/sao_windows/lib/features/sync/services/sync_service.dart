@@ -432,6 +432,16 @@ class SyncService {
   }) async {
     final dto = item.dto;
 
+    // Reject items with a non-UUID activity id — they can never succeed on the
+    // backend (HTTP 422) and should not be retried automatically.
+    if (!_isUuid(dto.uuid)) {
+      await _markError(
+        item.row,
+        'UUID de actividad inválido (${dto.uuid.length} chars): la actividad debe eliminarse y crearse de nuevo | accion sugerida: DELETE_AND_RECREATE',
+      );
+      return null;
+    }
+
     final normalizedCatalogVersionId = await _resolveCatalogVersionId(
       activityId: dto.uuid,
       dtoCatalogVersionId: dto.catalogVersionId,
@@ -478,6 +488,7 @@ class SyncService {
       executionState: dto.executionState,
       assignedToUserId: normalizedAssignedToUserId,
       assignedToUserName: dto.assignedToUserName,
+      participantUserIds: dto.participantUserIds,
       createdByUserId: normalizedCreatedByUserId,
       catalogVersionId: normalizedCatalogVersionId,
       activityTypeCode: normalizedActivityTypeCode,
@@ -943,6 +954,11 @@ class SyncService {
 
         await _ensureProjectExists(dto.projectId);
         await _ensureUserExists(dto.createdByUserId);
+        // Ensure assignedToUserId exists BEFORE the activities INSERT to avoid
+        // FOREIGN KEY constraint failure (code 787).
+        if (dto.assignedToUserId != null && dto.assignedToUserId!.trim().isNotEmpty) {
+          await _ensureUserExists(dto.assignedToUserId!, name: dto.assignedToUserName);
+        }
         final activityTypeId = await _ensureActivityTypeExists(dto.activityTypeCode);
         final activityTypeName = await _resolveActivityTypeName(activityTypeId);
         final resolvedTitle = _resolveActivityTitle(

@@ -1,4 +1,5 @@
 ﻿import 'package:dio/dio.dart';
+import '../../../core/constants.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/network/exceptions.dart';
 import '../../../core/utils/logger.dart';
@@ -150,12 +151,13 @@ class AgendaUsersRepository {
       if (client == null) {
         throw StateError('No API client available');
       }
-      final effectiveProject = (projectId != null && projectId.trim().isNotEmpty)
-          ? projectId.trim()
-          : 'TMQ';
+      final effectiveProject = (projectId ?? '').trim();
       final response = await client.get<dynamic>(
         '/assignments/transfer-candidates',
-        queryParameters: {'project_id': effectiveProject},
+        queryParameters: {
+          if (effectiveProject.isNotEmpty && effectiveProject != kAllProjects)
+            'project_id': effectiveProject,
+        },
       );
       final responseData = response.data;
       // The endpoint returns AssignmentAssigneeOption objects: { user_id, full_name, ... }
@@ -183,9 +185,7 @@ class AgendaUsersRepository {
           .where((u) => u.id.isNotEmpty && u.fullName.isNotEmpty && u.isActive)
           .toList();
 
-      appLogger.i(
-        'Transfer candidates parsed_count=${candidates.length} project=$effectiveProject',
-      );
+      appLogger.i('Transfer candidates parsed_count=${candidates.length} project=$effectiveProject');
 
       if (candidates.isNotEmpty) {
         try {
@@ -215,13 +215,14 @@ class AgendaUsersRepository {
       return const <dynamic>[];
     }
 
-    final effectiveProject = (projectId != null && projectId.trim().isNotEmpty)
-        ? projectId.trim()
-        : 'TMQ';
+    final effectiveProject = (projectId ?? '').trim();
 
     final response = await client.get<dynamic>(
       '/assignments/assignees',
-      queryParameters: {'project_id': effectiveProject},
+      queryParameters: {
+        if (effectiveProject.isNotEmpty && effectiveProject != kAllProjects)
+          'project_id': effectiveProject,
+      },
     );
     return response.data;
   }

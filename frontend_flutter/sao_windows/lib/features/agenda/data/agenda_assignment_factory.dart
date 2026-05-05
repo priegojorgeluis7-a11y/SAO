@@ -21,6 +21,7 @@ class AgendaAssignmentFactory {
     required String? effectiveVersionId,
     required String? municipio,
     required String? estado,
+    List<String> coResponsableIds = const [],
   }) {
     _ensureValid('projectCode', projectCode);
     _ensureValid('activityId', activity.id);
@@ -43,6 +44,7 @@ class AgendaAssignmentFactory {
       end: end,
       risk: risk,
       syncStatus: SyncStatus.pending,
+      coResponsableIds: coResponsableIds,
     );
   }
 

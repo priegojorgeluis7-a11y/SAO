@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:image_picker/image_picker.dart' show XFile;
 import 'package:drift/drift.dart' as drift;
 import 'package:get_it/get_it.dart';
 
@@ -112,7 +114,9 @@ class EvidenceUploadRetryWorker {
           );
         }
 
-        final bytes = await File(currentRow.localPath).readAsBytes();
+        final bytes = kIsWeb
+            ? await XFile(currentRow.localPath).readAsBytes()
+            : await File(currentRow.localPath).readAsBytes();
         await _repository.uploadBytesToSignedUrl(
           signedUrl: currentRow.signedUrl!,
           bytes: bytes,

@@ -274,7 +274,7 @@ jobs:
             --region "$REGION" \
             --project "$PROJECT_ID" \
             --platform managed \
-            --set-env-vars "DATA_BACKEND=firestore,RUN_STARTUP_MIGRATIONS=false,FIRESTORE_PROJECT_ID=${PROJECT_ID},FIRESTORE_DATABASE=(default),FIRESTORE_READ_EVENTS=true,FIRESTORE_READ_ACTIVITIES=true" \
+            --set-env-vars "^;^DATA_BACKEND=firestore;RUN_STARTUP_MIGRATIONS=false;FIRESTORE_PROJECT_ID=${PROJECT_ID};FIRESTORE_DATABASE=(default);FIRESTORE_READ_EVENTS=true;FIRESTORE_READ_ACTIVITIES=true;CORS_ORIGINS=http://localhost:8000,http://localhost:3000,https://storage.googleapis.com" \
             --update-secrets "JWT_SECRET=JWT_SECRET:latest,GCS_BUCKET=GCS_BUCKET:latest" \
             --remove-secrets "DATABASE_URL" \
             --clear-cloudsql-instances \

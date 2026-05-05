@@ -1,5 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
+import 'package:http/http.dart' as http;
+import '../../core/compat/io_compat.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -138,16 +139,9 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       }
 
       final uri = Uri.parse('$baseUrl/health');
-      final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
-      try {
-        final request = await client.getUrl(uri);
-        final response = await request.close().timeout(const Duration(seconds: 12));
-        final body = await response.transform(const Utf8Decoder()).join();
-        if (response.statusCode < 200 || response.statusCode >= 300) {
-          throw HttpException('HTTP ${response.statusCode}: $body', uri: uri);
-        }
-      } finally {
-        client.close(force: true);
+      final response = await http.get(uri).timeout(const Duration(seconds: 12));
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw Exception('HTTP ${response.statusCode}: ${response.body}');
       }
       stopwatch.stop();
       if (!mounted) return;
@@ -1565,3 +1559,4 @@ class _GoogleCalendarAdminCardState
     );
   }
 }
+

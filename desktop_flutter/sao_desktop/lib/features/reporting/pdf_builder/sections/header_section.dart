@@ -3,6 +3,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import '../../domain/entities/report_context.dart';
 import 'report_section.dart';
+import '../../../core/utils/project_terminology.dart';
 
 /// Sección: Encabezado institucional
 class HeaderSection extends ReportSection {
@@ -37,10 +38,10 @@ class HeaderSection extends ReportSection {
               color: const PdfColor.fromInt(0xFF4B5563),
             ),
           ),
-          // Frente
+          // Frente / Segmento
           if (context.activity.frontName != null)
             pw.Text(
-              'Frente: ${context.activity.frontName}',
+              '${frontTerminology(context.activity.projectCode, capitalize: true)}: ${toSegmentName(context.activity.frontName!)}',
               style: pw.TextStyle(
                 fontSize: 10,
                 color: const PdfColor.fromInt(0xFF4B5563),

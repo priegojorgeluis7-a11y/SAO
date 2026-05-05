@@ -37,6 +37,19 @@ class UserAgendaListItem(BaseModel):
     is_active: bool = True
 
 
+class OnlineUserListItem(BaseModel):
+    id: UUID
+    full_name: str
+    email: EmailStr
+    role_name: str
+    project_id: str | None = None
+    project_ids: list[str] = Field(default_factory=list)
+    is_active: bool = True
+    is_online: bool = False
+    last_activity_at: datetime | None = None
+    last_login_at: datetime | None = None
+
+
 class AdminUserScopeInput(BaseModel):
     role: str
     project_id: str | None = None

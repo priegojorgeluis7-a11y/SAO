@@ -7,6 +7,7 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
 }
 
 // Load signing properties from android/key.properties (excluded from VCS)
@@ -24,11 +25,12 @@ android {
     namespace = "com.tmq.sao"
     compileSdk = 36
     buildToolsVersion = "36.0.0"
-    ndkVersion = flutter.ndkVersion
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = javaVersion
         targetCompatibility = javaVersion
+        isCoreLibraryDesugaringEnabled = true
     }
 
     signingConfigs {
@@ -52,7 +54,13 @@ android {
 
     packaging {
         jniLibs {
-            keepDebugSymbols += setOf("**/*.so")
+            // Store native libs uncompressed so Flutter can load libflutter.so on Android 6+.
+            // useLegacyPackaging=true stores them uncompressed; the system then extracts them
+            // on install regardless of android:extractNativeLibs.
+            useLegacyPackaging = true
+        }
+        resources {
+            excludes += setOf("/META-INF/**.kotlin_module")
         }
     }
 
@@ -69,6 +77,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            ndk {
+                // Produce .so.sym files alongside stripped libraries so Flutter's
+                // post-build check (apkanalyzer) can verify strip succeeded.
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
         }
         debug {
             signingConfig = signingConfigs.getByName("debug")
@@ -84,4 +97,8 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

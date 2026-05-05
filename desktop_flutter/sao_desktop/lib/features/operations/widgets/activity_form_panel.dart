@@ -6,6 +6,7 @@ import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../ui/widgets/activity_diff_field.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../../core/widgets/status_badge.dart';
 
 /// Panel de detalles de actividad con diff view interactivo
@@ -268,7 +269,7 @@ class _ActivityFormPanelState extends State<ActivityFormPanel> {
                     children: [
                       Expanded(
                         child: _buildReadOnlyField(
-                          'FRENTE',
+                          frontTerminology(widget.activity!.activity.projectId).toUpperCase(),
                           widget.activity!.front?.name ?? 'N/A',
                           Icons.account_tree_rounded,
                         ),

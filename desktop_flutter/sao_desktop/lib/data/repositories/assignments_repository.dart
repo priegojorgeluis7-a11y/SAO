@@ -715,6 +715,7 @@ class AssignmentsRepository {
   Future<AssignmentItem> createAssignment({
     required String projectId,
     required String assigneeUserId,
+    List<String> assigneeUserIds = const <String>[],
     required String activityTypeCode,
     required DateTime startAt,
     required DateTime endAt,
@@ -728,12 +729,28 @@ class AssignmentsRepository {
     double? latitude,
     double? longitude,
   }) async {
+    final normalizedAssigneeUserIds = <String>[];
+    final seenAssigneeIds = <String>{};
+    for (final raw in assigneeUserIds) {
+      final value = raw.trim();
+      if (value.isEmpty) continue;
+      if (seenAssigneeIds.add(value)) {
+        normalizedAssigneeUserIds.add(value);
+      }
+    }
+    final fallbackAssignee = assigneeUserId.trim();
+    if (fallbackAssignee.isNotEmpty && seenAssigneeIds.add(fallbackAssignee)) {
+      normalizedAssigneeUserIds.insert(0, fallbackAssignee);
+    }
+
     final normalizedFrontId =
         frontId != null && _isUuid(frontId) ? frontId : null;
     final frontRef = normalizedFrontId == null ? frontId?.trim() : null;
     final decoded = await _client.postJson('/api/v1/assignments', {
       'project_id': projectId,
       'assignee_user_id': assigneeUserId,
+      if (normalizedAssigneeUserIds.isNotEmpty)
+        'assignee_user_ids': normalizedAssigneeUserIds,
       'activity_type_code': activityTypeCode,
       'title': title,
       'front_id': normalizedFrontId,

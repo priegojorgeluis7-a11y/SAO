@@ -18,7 +18,7 @@ class Shell extends StatefulWidget {
 
 class _ShellState extends State<Shell> {
   int _index = 0;
-  String _selectedProject = 'TMQ';
+  String _selectedProject = 'TODOS';
   late final AppDb _db;
 
   @override

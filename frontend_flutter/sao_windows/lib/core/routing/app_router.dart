@@ -27,9 +27,11 @@ import '../../features/projects/projects_page.dart';
 import '../../features/tutorial/tutorial_mode_page.dart';
 import '../../ui/bootstrap/catalog_bootstrap_screen.dart';
 import '../../features/admin/history/admin_activity_history_page.dart';
+import '../../features/admin/online/admin_online_users_page.dart';
 import '../../features/admin/admin_activity_detail.dart';
 import '../../features/admin/stats/admin_activity_stats_page.dart';
 import '../../features/profile/profile_page.dart';
+import '../../features/notifications/screens/notifications_screen.dart';
 import '../../ui/theme/sao_colors.dart';
 import 'auth_redirect_resolver.dart';
 
@@ -92,7 +94,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/',
             name: 'home',
             pageBuilder: (context, state) {
-              final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+              final projectCode =
+                  state.uri.queryParameters['project'] ?? kAllProjects;
               final normalizedProject = projectCode.trim().toUpperCase();
               final isTutorialGuest =
                   state.uri.queryParameters['tutorial'] == '1';
@@ -181,7 +184,7 @@ final goRouterProvider = Provider<GoRouter>((ref) {
               final selected =
                   state.uri.queryParameters['selected'] ??
                   state.uri.queryParameters['project'] ??
-                  'TMQ';
+                  '';
               return NoTransitionPage(
                 child: ProjectsPage(selectedCode: selected),
               );
@@ -212,7 +215,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
             path: '/history/completed',
             name: 'history-completed',
             pageBuilder: (context, state) {
-              final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+              final projectCode =
+                  state.uri.queryParameters['project'] ?? kAllProjects;
               return NoTransitionPage(
                 child: CompletedSyncedActivitiesPage(
                   selectedProject: projectCode.trim().toUpperCase(),
@@ -229,7 +233,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'activity-detail',
         builder: (context, state) {
           final activityId = state.pathParameters['id']!;
-          final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+          final projectCode =
+              state.uri.queryParameters['project'] ?? kAllProjects;
 
           final activity =
               state.extra as TodayActivity? ??
@@ -254,7 +259,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         name: 'activity-wizard',
         builder: (context, state) {
           final activityId = state.pathParameters['id']!;
-          final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+          final projectCode =
+              state.uri.queryParameters['project'] ?? kAllProjects;
 
           final catalogRepo = GetIt.I<CatalogRepository>();
           final pendingStore = GetIt.I<PendingEvidenceStore>();
@@ -283,7 +289,8 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         path: '/wizard/register',
         name: 'register-wizard',
         builder: (context, state) {
-          final projectCode = state.uri.queryParameters['project'] ?? 'TMQ';
+          final projectCode =
+              state.uri.queryParameters['project'] ?? kAllProjects;
           final isUnplanned = state.uri.queryParameters['mode'] == 'unplanned';
 
           final catalogRepo = GetIt.I<CatalogRepository>();
@@ -343,9 +350,19 @@ final goRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const AdminActivityStatsPage(),
       ),
       GoRoute(
+        path: '/admin/online-users',
+        name: 'admin-online-users',
+        builder: (context, state) => const AdminOnlineUsersPage(),
+      ),
+      GoRoute(
         path: '/profile',
         name: 'profile',
         builder: (context, state) => const ProfilePage(),
+      ),
+      GoRoute(
+        path: '/notifications',
+        name: 'notifications',
+        builder: (context, state) => const NotificationsScreen(),
       ),
       GoRoute(
         path: '/home/completed',
@@ -399,11 +416,12 @@ class ShellWithBottomNav extends StatefulWidget {
 class _ShellWithBottomNavState extends State<ShellWithBottomNav> {
   String _buildNavQuery(BuildContext context) {
     final uri = GoRouterState.of(context).uri;
-    final project = (uri.queryParameters['project'] ?? 'TMQ').trim();
+    final project =
+        (uri.queryParameters['project'] ?? kAllProjects).trim();
     final tutorial = uri.queryParameters['tutorial'] == '1';
 
     final query = <String, String>{
-      'project': project.isEmpty ? 'TMQ' : project,
+      'project': project,
     };
     if (tutorial) {
       query['tutorial'] = '1';

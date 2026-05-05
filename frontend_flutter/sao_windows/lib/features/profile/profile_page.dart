@@ -699,7 +699,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (normalized.contains('OPERAT') || normalized.contains('OPERAR') || normalized.contains('TECN') || normalized.contains('ING') || normalized.contains('TOP')) {
       return 'Operativo';
     }
-    return 'Operativo';
+    return _humanizeRoleLabel(role!);
+  }
+
+  String _humanizeRoleLabel(String role) {
+    final normalized = role.trim();
+    if (normalized.isEmpty) return 'Sin rol asignado';
+    final words = normalized.replaceAll(RegExp(r'[_-]+'), ' ').split(RegExp(r'\s+'));
+    return words
+        .where((word) => word.isNotEmpty)
+        .map((word) =>
+            '${word.substring(0, 1).toUpperCase()}${word.substring(1).toLowerCase()}')
+        .join(' ');
   }
 
   Color _roleColor(String? role) {

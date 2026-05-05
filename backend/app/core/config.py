@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     FCM_ENABLED: bool = False
     FCM_SERVICE_ACCOUNT_JSON: str | None = None
 
+    # Cloud Scheduler shared secret for the /notifications/daily-agenda endpoint.
+    # Set to a random string (>= 32 chars) in Cloud Run env vars.
+    SCHEDULER_SECRET: str | None = None
+
     # JWT
     JWT_SECRET: str
     JWT_ALGORITHM: str = "HS256"
@@ -44,7 +48,7 @@ class Settings(BaseSettings):
             raise ValueError("JWT_SECRET must be at least 32 characters")
         return v
 
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 720  # 12 hours (tokens issued before logout are rejected via last_logout_at)
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 hours (tokens issued before logout are rejected via last_logout_at)
     REFRESH_TOKEN_EXPIRE_DAYS: int = 30
 
     # Signup invite codes

@@ -1,10 +1,11 @@
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
+import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -17,6 +18,7 @@ import '../../ui/theme/sao_colors.dart';
 import '../completed_activities/completed_activities_provider.dart';
 import '../reports/reports_provider.dart';
 import 'dashboard_provider.dart';
+import '../../core/utils/project_terminology.dart';
 
 String _sanitizePdfFolderSegment(String raw, {String fallback = 'SIN_DATO'}) {
   final trimmed = raw.trim();
@@ -2199,7 +2201,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                   ],
                 ),
                 const SizedBox(height: 12),
-                _mapDetailRow(Icons.folder_open_rounded, 'Frente', point.front.isEmpty ? 'Sin frente' : point.front),
+                _mapDetailRow(Icons.folder_open_rounded, frontTerminology(point.projectId, capitalize: true), point.front.isEmpty ? 'Sin ${frontTerminology(point.projectId)}' : point.front),
                 _mapDetailRow(Icons.place_rounded, 'Ubicación', '${point.municipality.isEmpty ? 'Sin municipio' : point.municipality}${point.state.isNotEmpty ? ' / ${point.state}' : ''}'),
                 _mapDetailRow(Icons.person_outline_rounded, 'Responsable', (point.assignedName ?? '').trim().isEmpty ? 'Sin responsable' : point.assignedName!),
                 _mapDetailRow(Icons.tag_rounded, 'ID', point.id),
@@ -2395,50 +2397,40 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   ) async {
     final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
     final uri = Uri.parse(signedUrl);
-    final client = HttpClient();
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('No se pudo descargar PDF (${response.statusCode})');
-      }
-
-      final bytes = <int>[];
-      await for (final chunk in response) {
-        bytes.addAll(chunk);
-      }
-      if (bytes.isEmpty) {
-        throw const FileSystemException('El PDF descargado llegó vacío');
-      }
-
-      final docsRootPath = await _resolveDashboardDocumentsRootPath();
-      final projectFolder = _sanitizePdfFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
-      final frontFolder = _sanitizePdfFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
-      final stateFolder = _sanitizePdfFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
-      final municipalityFolder = _sanitizePdfFolderSegment(detail.summary.municipio, fallback: 'SIN_MUNICIPIO');
-      final activityFolder = _sanitizePdfFolderSegment(detail.summary.activityType, fallback: 'ACTIVIDAD');
-      final expedienteFolder = _sanitizePdfFolderSegment(detail.summary.id, fallback: 'SIN_ID');
-      final activityDir = Directory(
-        '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
-      );
-      if (!await activityDir.exists()) {
-        await activityDir.create(recursive: true);
-      }
-
-      final file = File('${activityDir.path}/${_inferPdfFileName(evidence, detail.summary.id)}');
-      await file.writeAsBytes(bytes, flush: true);
-
-      await registerDownloadedReportReference(
-        activityId: detail.summary.id,
-        file: file,
-        sourceEvidenceId: evidence.id,
-        generatedAt: evidence.uploadedAt,
-      );
-
-      return file;
-    } finally {
-      client.close(force: true);
+    final response = await http.get(uri);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException('No se pudo descargar PDF (${response.statusCode})');
     }
+    final bytes = response.bodyBytes;
+    if (bytes.isEmpty) {
+      throw const FileSystemException('El PDF descargado llegó vacío');
+    }
+
+    final docsRootPath = await _resolveDashboardDocumentsRootPath();
+    final projectFolder = _sanitizePdfFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
+    final frontFolder = _sanitizePdfFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
+    final stateFolder = _sanitizePdfFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
+    final municipalityFolder = _sanitizePdfFolderSegment(detail.summary.municipio, fallback: 'SIN_MUNICIPIO');
+    final activityFolder = _sanitizePdfFolderSegment(detail.summary.activityType, fallback: 'ACTIVIDAD');
+    final expedienteFolder = _sanitizePdfFolderSegment(detail.summary.id, fallback: 'SIN_ID');
+    final activityDir = Directory(
+      '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
+    );
+    if (!await activityDir.exists()) {
+      await activityDir.create(recursive: true);
+    }
+
+    final file = File('${activityDir.path}/${_inferPdfFileName(evidence, detail.summary.id)}');
+    await file.writeAsBytes(bytes, flush: true);
+
+    await registerDownloadedReportReference(
+      activityId: detail.summary.id,
+      file: file,
+      sourceEvidenceId: evidence.id,
+      generatedAt: evidence.uploadedAt,
+    );
+
+    return file;
   }
 
   void _openReviewPage(String activityId) {

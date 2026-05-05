@@ -1,6 +1,6 @@
 import 'dart:convert';
-import 'dart:io';
 
+import '../compat/io_compat.dart';
 import '../session/legacy_file_session_store.dart';
 import '../session/plain_file_session_store.dart';
 import '../session/secure_session_store.dart';

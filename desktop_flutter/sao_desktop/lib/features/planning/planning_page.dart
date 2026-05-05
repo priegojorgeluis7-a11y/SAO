@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'package:http/http.dart' as http;
+import '../../core/compat/io_compat.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -13,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../data/repositories/assignments_repository.dart';
 import '../../data/repositories/evidence_repository.dart';
@@ -495,7 +497,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   List<AssignmentActivityTypeOption> _activityTypes = const [];
   Map<String, List<AssignmentFrontCoverageOption>> _frontCoverageByKey = const {};
 
-  String? _assigneeId;
+  List<String> _assigneeIds = const [];
   String? _frontId;
   String? _activityTypeCode;
   String? _selectedEstado;
@@ -572,7 +574,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
       _activityTypes = results[2] as List<AssignmentActivityTypeOption>;
         _frontCoverageByKey =
           results[3] as Map<String, List<AssignmentFrontCoverageOption>>;
-      _assigneeId = null;
+      _assigneeIds = const [];
       _frontId = null;
       _activityTypeCode = null;
       _selectedEstado = null;
@@ -714,15 +716,16 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   }
 
   String? _checkConflict() {
-    final assigneeId = _assigneeId;
+    final assigneeIds = _assigneeIds;
     final startAt = _composeDateTime(_startController.text);
     final endAt = _composeDateTime(_endController.text);
-    if (assigneeId == null || startAt == null || endAt == null) {
+    if (assigneeIds.isEmpty || startAt == null || endAt == null) {
       return null;
     }
+    final assigneeIdSet = assigneeIds.toSet();
 
     for (final item in widget.existingAssignments) {
-      if (item.assigneeUserId != assigneeId) {
+      if (!assigneeIdSet.contains(item.assigneeUserId)) {
         continue;
       }
       final start = _parseAssignmentStart(item);
@@ -732,7 +735,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
       final overlaps = startAt.isBefore(end) && endAt.isAfter(start);
       if (!overlaps) continue;
       final endLabel = _formatTimeValue(end);
-      return 'Conflicto detectado: este responsable ya tiene una asignacion hasta $endLabel.';
+      return 'Conflicto detectado: uno de los responsables seleccionados ya tiene una asignacion hasta $endLabel.';
     }
     return null;
   }
@@ -740,9 +743,10 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   void _findNextFreeSlot() {
     final startAt = _composeDateTime(_startController.text);
     final endAt = _composeDateTime(_endController.text);
-    final assigneeId = _assigneeId;
-    if (startAt == null || endAt == null || assigneeId == null) return;
+    final assigneeIds = _assigneeIds;
+    if (startAt == null || endAt == null || assigneeIds.isEmpty) return;
     final duration = endAt.difference(startAt);
+    final assigneeIdSet = assigneeIds.toSet();
 
     var candidate = endAt;
     final mins = candidate.minute;
@@ -756,7 +760,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
       final nextStart = candidate.add(Duration(minutes: i * 30));
       final nextEnd = nextStart.add(duration);
       final hasConflict = widget.existingAssignments.any((item) {
-        if (item.assigneeUserId != assigneeId) return false;
+        if (!assigneeIdSet.contains(item.assigneeUserId)) return false;
         final itemStart = _parseAssignmentStart(item);
         if (itemStart == null) return false;
         final itemEnd = _parseAssignmentEnd(item, itemStart);
@@ -861,7 +865,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   bool _canProceedToNextStep() {
     switch (_currentStep) {
       case 0:
-        return _assigneeId != null;
+        return _assigneeIds.isNotEmpty;
       case 1:
         final pkInicio = _parsePkMeters(_pkController.text);
         final pkFin = _parsePkMeters(_pkFinController.text);
@@ -962,14 +966,11 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         '/search',
         {'q': query, 'format': 'json', 'limit': '1', 'countrycodes': 'mx'},
       );
-      final httpClient = HttpClient();
-      final request = await httpClient.getUrl(uri);
-      request.headers.set('User-Agent', 'SAO-Desktop/1.0 (mx.sao.desktop)');
-      final response = await request.close().timeout(const Duration(seconds: 6));
-      final body = await response.transform(const Utf8Decoder()).join();
-      httpClient.close(force: false);
+      final response = await http.get(uri, headers: {
+        'User-Agent': 'SAO-Desktop/1.0 (mx.sao.desktop)',
+      }).timeout(const Duration(seconds: 6));
       if (response.statusCode != 200) return null;
-      final list = jsonDecode(body) as List<dynamic>;
+      final list = jsonDecode(response.body) as List<dynamic>;
       if (list.isEmpty) return null;
       final first = list.first as Map<String, dynamic>;
       final lat = double.tryParse(first['lat'].toString());
@@ -984,10 +985,12 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   String _requiredErrorForCurrentStep() {
     switch (_currentStep) {
       case 0:
-        return 'Selecciona responsable.';
+        return 'Selecciona al menos un responsable.';
       case 1:
         if (_activityTypeCode == null) return 'Selecciona tipo de actividad.';
-        if (_frontId == null || _frontId!.trim().isEmpty) return 'Selecciona frente.';
+        if (_frontId == null || _frontId!.trim().isEmpty) {
+          return 'Selecciona ${frontTerminology(widget.projectId)}.';
+        }
         if (_tipoUbicacion == _tipoPuntual && _parsePkMeters(_pkController.text) == null) {
           return 'Captura PK valido.';
         }
@@ -1017,6 +1020,9 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   }
 
   Widget _buildStep1() {
+    final selectedAssignees = _assigneeIds.toSet();
+    final selectedCount = selectedAssignees.length;
+
     return Column(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1026,22 +1032,69 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
           style: TextStyle(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 10),
-        DropdownButtonFormField<String>(
-          initialValue: _assigneeId,
-          decoration: const InputDecoration(
-            labelText: 'Responsable',
-            border: OutlineInputBorder(),
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: SaoColors.border),
           ),
-          items: _assignees
-              .map(
-                (item) => DropdownMenuItem(
-                  value: item.userId,
-                  child: Text(item.fullName),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
+                child: Text(
+                  selectedCount == 0
+                      ? 'Responsables'
+                      : '$selectedCount responsables seleccionados',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: SaoColors.gray600,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
-              )
-              .toList(),
-          onChanged:
-              _submitting ? null : (value) => setState(() => _assigneeId = value),
+              ),
+              const Divider(height: 1),
+              SizedBox(
+                height: 220,
+                child: _assignees.isEmpty
+                    ? const Center(child: Text('No hay responsables disponibles'))
+                    : ListView.builder(
+                        itemCount: _assignees.length,
+                        itemBuilder: (context, index) {
+                          final item = _assignees[index];
+                          final selected = selectedAssignees.contains(item.userId);
+                          return CheckboxListTile(
+                            value: selected,
+                            dense: true,
+                            visualDensity: VisualDensity.compact,
+                            controlAffinity: ListTileControlAffinity.leading,
+                            title: Text(item.fullName),
+                            subtitle: item.email.trim().isEmpty
+                                ? null
+                                : Text(item.email.trim()),
+                            onChanged: _submitting
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      final current = _assigneeIds.toList();
+                                      final shouldSelect = value == true;
+                                      if (shouldSelect) {
+                                        if (!current.contains(item.userId)) {
+                                          current.add(item.userId);
+                                        }
+                                      } else {
+                                        current.remove(item.userId);
+                                      }
+                                      _assigneeIds = current;
+                                    });
+                                  },
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -1051,10 +1104,12 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     String selectedFrontName() {
       for (final front in _fronts) {
         if (front.id == _frontId) {
-          return front.name.trim().isEmpty ? 'Sin frente' : front.name.trim();
+          return front.name.trim().isEmpty
+              ? 'Sin ${frontTerminology(widget.projectId)}'
+              : front.name.trim();
         }
       }
-      return 'Sin frente';
+      return 'Sin ${frontTerminology(widget.projectId)}';
     }
 
     String selectedEstado() {
@@ -1119,8 +1174,8 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           initialValue: _frontId,
-          decoration: const InputDecoration(
-            labelText: 'Frente',
+          decoration: InputDecoration(
+            labelText: frontTerminology(widget.projectId, capitalize: true),
             border: OutlineInputBorder(),
           ),
           items: _fronts
@@ -1140,14 +1195,14 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         ),
         const SizedBox(height: 10),
         if (_estadoOptions.isEmpty)
-          const InputDecorator(
+          InputDecorator(
             decoration: InputDecoration(
               labelText: 'Estado',
               border: OutlineInputBorder(),
             ),
             child: Text(
-              'Sin cobertura de estado para este frente',
-              style: TextStyle(color: SaoColors.gray500),
+              'Sin cobertura de estado para este ${frontTerminology(widget.projectId)}',
+              style: const TextStyle(color: SaoColors.gray500),
             ),
           )
         else
@@ -1664,8 +1719,8 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   }
 
   Future<void> _submit() async {
-    if (_assigneeId == null || _activityTypeCode == null) {
-      setState(() => _error = 'Selecciona responsable y tipo de actividad.');
+    if (_assigneeIds.isEmpty || _activityTypeCode == null) {
+      setState(() => _error = 'Selecciona al menos un responsable y tipo de actividad.');
       return;
     }
     final startAt = _composeDateTime(_startController.text);
@@ -1710,7 +1765,8 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
       final repo = ref.read(assignmentsRepositoryProvider);
       await repo.createAssignment(
         projectId: widget.projectId,
-        assigneeUserId: _assigneeId!,
+        assigneeUserId: _assigneeIds.first,
+        assigneeUserIds: _assigneeIds,
         activityTypeCode: _activityTypeCode!,
         startAt: startAt,
         endAt: endAt,
@@ -1903,7 +1959,9 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     setState(() => _loading = false);
 
     final candidates = assignees
-        .where((item) => item.userId.trim() != widget.item.assigneeUserId.trim())
+        .where((item) =>
+            item.userId.trim() != widget.item.assigneeUserId.trim() &&
+            !const {'ADMIN', 'ADMINISTRADOR'}.contains(item.roleName.trim().toUpperCase()))
         .toList()
       ..sort((left, right) => left.fullName.toLowerCase().compareTo(right.fullName.toLowerCase()));
 
@@ -2050,7 +2108,9 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
       if (item.estado.isNotEmpty) item.estado,
     ].join(', ');
 
-    final frente = item.frontName.isNotEmpty ? item.frontName : 'Sin frente';
+    final frente = item.frontName.isNotEmpty
+      ? item.frontName
+      : 'Sin ${frontTerminology(item.projectId)}';
 
     // Duración en minutos entre start y end
     final durationMin = item.endAt != null && item.endAt!.isNotEmpty
@@ -2065,7 +2125,7 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     final title = Uri.encodeComponent(item.title);
     final details = Uri.encodeComponent(
       'Actividad: ${item.title}\n'
-      'Frente: $frente\n'
+      '${frontTerminology(item.projectId, capitalize: true)}: $frente\n'
       'Estado: ${item.status}\n'
       'Municipio: ${item.municipio}\n'
       'Estado (geo): ${item.estado}\n'
@@ -2076,8 +2136,8 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     );
     final loc = Uri.encodeComponent(location);
     final dates = '${_fmt(start)}/${_fmt(endReal)}';
-    final calId = Uri.encodeComponent(
-        ref.read(systemCalendarIdProvider).valueOrNull ?? _kFallbackCalendarId);
+    final _resolvedCalId = await ref.read(systemConfigServiceProvider).getCalendarId();
+    final calId = Uri.encodeComponent(_resolvedCalId);
 
     final baseUrl = 'https://calendar.google.com/calendar/render'
         '?action=TEMPLATE'
@@ -2920,7 +2980,9 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
       if (item.estado.isNotEmpty) item.estado,
     ].join(', ');
 
-    final frente = item.frontName.isNotEmpty ? item.frontName : 'Sin frente';
+    final frente = item.frontName.isNotEmpty
+      ? item.frontName
+      : 'Sin ${frontTerminology(item.projectId)}';
 
     final durationMin = item.endAt != null && item.endAt!.isNotEmpty
         ? DateTime.tryParse(item.endAt!)?.difference(start).inMinutes
@@ -2934,7 +2996,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     final title = Uri.encodeComponent(item.title);
     final details = Uri.encodeComponent(
       'Actividad: ${item.title}\n'
-      'Frente: $frente\n'
+      '${frontTerminology(item.projectId, capitalize: true)}: $frente\n'
       'Estado: ${item.status}\n'
       'Municipio: ${item.municipio}\n'
       'Estado (geo): ${item.estado}\n'
@@ -2945,8 +3007,8 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     );
     final loc = Uri.encodeComponent(location);
     final dates = '${fmt(start)}/${fmt(endReal)}';
-    final calId = Uri.encodeComponent(
-        ref.read(systemCalendarIdProvider).valueOrNull ?? _kFallbackCalendarId);
+    final resolvedCalId = await ref.read(systemConfigServiceProvider).getCalendarId();
+    final calId = Uri.encodeComponent(resolvedCalId);
 
     final baseUrl = 'https://calendar.google.com/calendar/render'
         '?action=TEMPLATE'
@@ -3019,11 +3081,11 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
         ? Directory.current.path
         : '$userProfile\\Downloads';
     final dir = Directory(downloadsPath);
-    if (!dir.existsSync()) {
-      dir.createSync(recursive: true);
+    if (!await dir.exists()) {
+      await dir.create(recursive: true);
     }
     final file = File('${dir.path}\\reporte_planeacion_${dateStamp}_$nowStamp.csv');
-    file.writeAsStringSync(csv.toString());
+    await file.writeAsString(csv.toString());
 
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3349,7 +3411,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     add('Tipo', summary.activityType);
     add('Responsable', summary.assignedName);
     add('PK', summary.pk);
-    add('Frente', summary.front);
+    add(frontTerminology(summary.projectId, capitalize: true), summary.front);
     return rows;
   }
 
@@ -3752,11 +3814,8 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
   Future<void> _openLocalPath(String path) async {
     final result = await Process.run('open', [path]);
     if (result.exitCode != 0) {
-      throw ProcessException(
-        'open',
-        [path],
-        '${result.stdout}\n${result.stderr}',
-        result.exitCode,
+      throw Exception(
+        'open failed (${result.exitCode}): ${result.stdout}\n${result.stderr}',
       );
     }
   }
@@ -3767,47 +3826,36 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
   ) async {
     final signedUrl = await EvidenceRepository().getDownloadSignedUrl(evidence.id);
     final uri = Uri.parse(signedUrl);
-    final client = HttpClient();
-
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException('No se pudo descargar PDF (${response.statusCode})');
-      }
-
-      final bytes = <int>[];
-      await for (final chunk in response) {
-        bytes.addAll(chunk);
-      }
-      if (bytes.isEmpty) {
-        throw const FileSystemException('El PDF descargado llegó vacío');
-      }
-
-      final targetDir = _resolveReportDirectory(detail);
-      if (!await targetDir.exists()) {
-        await targetDir.create(recursive: true);
-      }
-
-      final stamp = DateFormat('yyyyMMdd_HHmm').format(
-        DateTime.tryParse(evidence.uploadedAt)?.toLocal() ?? DateTime.now(),
-      );
-      final file = File(
-        '${targetDir.path}/SAO_${_sanitizeReportSegment(detail.summary.projectId, fallback: 'GENERAL')}_$stamp.pdf',
-      );
-      await file.writeAsBytes(bytes, flush: true);
-
-      await registerDownloadedReportReference(
-        activityId: detail.summary.id,
-        file: file,
-        sourceEvidenceId: evidence.id,
-        generatedAt: evidence.uploadedAt,
-      );
-
-      return file;
-    } finally {
-      client.close(force: true);
+    final httpResponse = await http.get(uri);
+    if (httpResponse.statusCode < 200 || httpResponse.statusCode >= 300) {
+      throw Exception('No se pudo descargar PDF (${httpResponse.statusCode})');
     }
+    final bytes = httpResponse.bodyBytes;
+    if (bytes.isEmpty) {
+      throw const FileSystemException('El PDF descargado llegó vacío');
+    }
+
+    final targetDir = _resolveReportDirectory(detail);
+    if (!await targetDir.exists()) {
+      await targetDir.create(recursive: true);
+    }
+
+    final stamp = DateFormat('yyyyMMdd_HHmm').format(
+      DateTime.tryParse(evidence.uploadedAt)?.toLocal() ?? DateTime.now(),
+    );
+    final file = File(
+      '${targetDir.path}/SAO_${_sanitizeReportSegment(detail.summary.projectId, fallback: 'GENERAL')}_$stamp.pdf',
+    );
+    await file.writeAsBytes(bytes, flush: true);
+
+    await registerDownloadedReportReference(
+      activityId: detail.summary.id,
+      file: file,
+      sourceEvidenceId: evidence.id,
+      generatedAt: evidence.uploadedAt,
+    );
+
+    return file;
   }
 
   Future<bool> _confirmReportDownload(AssignmentItem item) async {
@@ -3971,7 +4019,9 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     }
 
     final candidates = assignees
-        .where((candidate) => candidate.userId.trim() != item.assigneeUserId.trim())
+        .where((candidate) =>
+            candidate.userId.trim() != item.assigneeUserId.trim() &&
+            !const {'ADMIN', 'ADMINISTRADOR'}.contains(candidate.roleName.trim().toUpperCase()))
         .toList()
       ..sort((left, right) => left.fullName.toLowerCase().compareTo(right.fullName.toLowerCase()));
 
@@ -4466,13 +4516,16 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
 
   String _locationFront(AssignmentItem item) {
     final front = item.frontName.trim();
-    if (front.isNotEmpty && front.toLowerCase() != 'sin frente') {
+    final emptyFrontLabel = 'sin ${frontTerminology(item.projectId)}';
+    if (front.isNotEmpty && front.toLowerCase() != emptyFrontLabel) {
       return front;
     }
 
     final fromTitle = _extractTaggedValue(item.title, 'Frente');
-    if (fromTitle.isNotEmpty && fromTitle.toLowerCase() != 'sin frente') {
-      return fromTitle;
+    final fromSegmentTitle = _extractTaggedValue(item.title, 'Segmento');
+    final taggedFront = fromTitle.isNotEmpty ? fromTitle : fromSegmentTitle;
+    if (taggedFront.isNotEmpty && taggedFront.toLowerCase() != emptyFrontLabel) {
+      return taggedFront;
     }
 
     final fromFrontId = _frontOptions.where((option) => option.id == item.frontId).firstOrNull;
@@ -4492,7 +4545,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
       }
     }
 
-    return 'Sin frente';
+    return 'Sin ${frontTerminology(item.projectId)}';
   }
 
   String _normalizeKey(String value) => value.trim().toLowerCase();
@@ -4599,7 +4652,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
       final resolvedMunicipio = _locationMunicipio(item);
       var result = input
           .replaceAll(RegExp(r'estado/municipio\s*:\s*', caseSensitive: false), '')
-          .replaceAll(RegExp(r'frente\s*:\s*', caseSensitive: false), '')
+          .replaceAll(RegExp(r'(frente|segmento)\s*:\s*', caseSensitive: false), '')
           .replaceAll(RegExp(r'estado\s*:\s*', caseSensitive: false), '')
           .replaceAll(RegExp(r'municipio\s*:\s*', caseSensitive: false), '')
           .replaceAll(RegExp(r'\bpk\s*\d+\+\d+\b', caseSensitive: false), '');
@@ -4629,7 +4682,9 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
 
     bool looksLikeLocationText(String text) {
       final lower = text.toLowerCase();
-      if (lower.contains('frente') || lower.contains('pk')) return true;
+      if (lower.contains('frente') || lower.contains('segmento') || lower.contains('pk')) {
+        return true;
+      }
       final estado = _locationEstado(item).trim().toLowerCase();
       final municipio = _locationMunicipio(item).trim().toLowerCase();
       if (estado.isNotEmpty && !estado.startsWith('sin ') && lower.contains(estado)) {

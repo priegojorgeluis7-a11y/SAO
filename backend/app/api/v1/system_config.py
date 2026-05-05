@@ -25,10 +25,14 @@ _DEFAULT_CALENDAR_ID = (
 
 class SystemConfig(BaseModel):
     google_calendar_id: str | None = None
+    android_latest_version_code: int | None = None
+    android_update_url: str | None = None
 
 
 class SystemConfigUpdate(BaseModel):
     google_calendar_id: str | None = None
+    android_latest_version_code: int | None = None
+    android_update_url: str | None = None
 
 
 def _is_admin(user: Any) -> bool:
@@ -48,10 +52,23 @@ async def get_system_config(
             data = doc.to_dict() or {}
             return SystemConfig(
                 google_calendar_id=data.get("google_calendar_id") or _DEFAULT_CALENDAR_ID,
+                android_latest_version_code=(
+                    int(data.get("android_latest_version_code"))
+                    if data.get("android_latest_version_code") is not None
+                    else None
+                ),
+                android_update_url=(
+                    str(data.get("android_update_url") or "").strip()
+                    or "https://play.google.com/store/apps/details?id=com.tmq.sao"
+                ),
             )
     except Exception as exc:
         logger.warning("system_config read error: %s", exc)
-    return SystemConfig(google_calendar_id=_DEFAULT_CALENDAR_ID)
+    return SystemConfig(
+        google_calendar_id=_DEFAULT_CALENDAR_ID,
+        android_latest_version_code=None,
+        android_update_url="https://play.google.com/store/apps/details?id=com.tmq.sao",
+    )
 
 
 @router.put("/config", response_model=SystemConfig)
@@ -76,6 +93,23 @@ async def update_system_config(
                 detail="google_calendar_id no puede estar vacío.",
             )
         update["google_calendar_id"] = cal_id
+
+    if body.android_latest_version_code is not None:
+        if body.android_latest_version_code < 1:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="android_latest_version_code debe ser mayor a 0.",
+            )
+        update["android_latest_version_code"] = int(body.android_latest_version_code)
+
+    if body.android_update_url is not None:
+        normalized_url = body.android_update_url.strip()
+        if not normalized_url:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="android_update_url no puede estar vacío.",
+            )
+        update["android_update_url"] = normalized_url
 
     if not update:
         raise HTTPException(

@@ -1,5 +1,6 @@
 """Authentication and authorization dependencies for API endpoints."""
 
+from datetime import datetime, timedelta, timezone
 import logging
 from typing import Any
 
@@ -9,12 +10,13 @@ from fastapi.security import OAuth2PasswordBearer
 from app.core.config import settings
 from app.core.enums import UserStatus
 from app.core.security import verify_token
-from app.services.firestore_identity_service import get_firestore_user_by_id
+from app.services.firestore_identity_service import get_firestore_user_by_id, update_last_activity
 from app.services.role_permission_service import get_role_permission_map
 
 logger = logging.getLogger(__name__)
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+_PRESENCE_TOUCH_INTERVAL = timedelta(minutes=1)
 
 
 def get_db_optional():
@@ -109,11 +111,24 @@ async def get_current_user(
 
     token_iat = payload.get("iat")
     if token_iat and user.last_logout_at:
-        from datetime import datetime, timezone as _tz
-
-        token_issued_at = datetime.fromtimestamp(token_iat, tz=_tz.utc)
+        token_issued_at = datetime.fromtimestamp(token_iat, tz=timezone.utc)
         if token_issued_at < user.last_logout_at:
             raise credentials_exception
+
+    last_activity_at = getattr(user, "last_activity_at", None)
+    should_touch_activity = (
+        last_activity_at is None
+        or datetime.now(timezone.utc) - last_activity_at >= _PRESENCE_TOUCH_INTERVAL
+    )
+    if should_touch_activity:
+        try:
+            update_last_activity(user.id)
+        except Exception:
+            logger.warning(
+                "USER_ACTIVITY_TOUCH_FAILED user_id=%s",
+                getattr(user, "id", "?"),
+                exc_info=True,
+            )
 
     request.state.user_id = str(getattr(user, "id", ""))
     return user
@@ -142,9 +157,15 @@ def resolve_user_project_access(user: Any) -> tuple[bool, set[str]]:
         if normalized
     }
 
+    # Some users persist project assignments in role scopes; include them as accessible projects.
+    for scope in (getattr(user, "scopes", []) or []):
+        if not isinstance(scope, dict):
+            continue
+        scope_project_id = _normalize_project_id(scope.get("project_id"))
+        if scope_project_id:
+            explicit_project_ids.add(scope_project_id)
+
     has_global_scope = "*" in explicit_project_ids or "ADMIN" in role_names
-    if not has_global_scope and ("SUPERVISOR" in role_names or "COORD" in role_names):
-        has_global_scope = True
 
     allowed_project_ids = {
         project_id

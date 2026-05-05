@@ -1,6 +1,6 @@
-import 'dart:io';
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
+import 'package:drift_flutter/drift_flutter.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'tables.dart';
 
@@ -23,9 +23,17 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   SyncQueue,
 ])
 class AppDatabase extends _$AppDatabase {
-  AppDatabase(String path) : super(NativeDatabase(File(path)));
-
-  AppDatabase.memory() : super(NativeDatabase.memory());
+  AppDatabase([QueryExecutor? e])
+      : super(e ??
+            driftDatabase(
+              name: 'sao_desktop',
+              web: kIsWeb
+                  ? DriftWebOptions(
+                      sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+                      driftWorker: Uri.parse('drift_worker.js'),
+                    )
+                  : null,
+            ));
 
   @override
   int get schemaVersion => 1;

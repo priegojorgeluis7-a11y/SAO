@@ -27,6 +27,7 @@ class AssignmentListItem(BaseModel):
 class AssignmentCreate(BaseModel):
     project_id: str = Field(..., min_length=1, max_length=10)
     assignee_user_id: UUID
+    assignee_user_ids: list[UUID] = Field(default_factory=list)
     activity_type_code: str = Field(..., min_length=1, max_length=50)
     title: str | None = Field(default=None, max_length=200)
     front_id: UUID | None = None

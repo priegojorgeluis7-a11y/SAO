@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../../../../core/compat/io_compat.dart';
 import 'package:pdf/widgets.dart' as pw;
 import '../entities/report_context.dart';
 import '../../data/services/report_export_service.dart';

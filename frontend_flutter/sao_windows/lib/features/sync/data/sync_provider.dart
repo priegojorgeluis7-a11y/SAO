@@ -4,10 +4,10 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/catalog/state/catalog_providers.dart';
-import '../../../core/storage/kv_store.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
 import '../../../core/di/service_locator.dart';
+import '../../../data/repositories/projects_repository.dart';
 import 'sync_repository.dart';
 import '../models/sync_models.dart';
 import '../services/sync_service.dart';
@@ -77,9 +77,13 @@ final syncServiceProvider = Provider<SyncService>((ref) => getIt<SyncService>())
 class SyncStateNotifier extends StateNotifier<AsyncValue<SyncResult?>> {
   final SyncService _service;
   final SyncRepository _repository;
-  final KvStore _kv;
+  final Future<List<String>> Function() _resolveScopedProjectIds;
 
-  SyncStateNotifier(this._service, this._repository, this._kv)
+  SyncStateNotifier(
+    this._service,
+    this._repository,
+    this._resolveScopedProjectIds,
+  )
       : super(const AsyncValue.data(null));
 
   /// Ejecuta el push de todos los items pendientes, seguido de un pull
@@ -88,8 +92,12 @@ class SyncStateNotifier extends StateNotifier<AsyncValue<SyncResult?>> {
     state = const AsyncValue.loading();
     try {
       final result = await _service.pushPendingChanges();
-      final projectId = await _kv.getString('selected_project');
-      if (projectId != null && projectId.isNotEmpty) {
+
+      final scopedProjectIds = await _resolveScopedProjectIds();
+      for (final projectId in scopedProjectIds) {
+        if (projectId.trim().isEmpty) {
+          continue;
+        }
         try {
           await _service.pullChanges(projectId: projectId);
         } catch (firstPullErr) {
@@ -106,9 +114,9 @@ class SyncStateNotifier extends StateNotifier<AsyncValue<SyncResult?>> {
             // but do not fail the whole sync cycle — push results are still valid.
             if (_isPullUnavailableError(retryErr)) {
               appLogger.w('Pull skipped — endpoint unavailable in current backend mode: $retryErr');
-            } else {
-              rethrow;
+              continue;
             }
+            rethrow;
           }
         }
       }
@@ -241,5 +249,31 @@ final syncStateProvider =
   final service = ref.watch(syncServiceProvider);
   final repository = ref.watch(syncRepositoryProvider);
   final kv = ref.watch(kvStoreProvider);
-  return SyncStateNotifier(service, repository, kv);
+
+  Future<List<String>> resolveScopedProjectIds() async {
+    try {
+      final scopedProjects = await ref.read(projectsRepositoryProvider).getMyProjects();
+      final ids = scopedProjects
+          .where((project) => project.isActive)
+          .map((project) => project.code.trim().toUpperCase())
+          .where((code) => code.isNotEmpty)
+          .toSet()
+          .toList()
+        ..sort();
+      if (ids.isNotEmpty) {
+        return ids;
+      }
+    } catch (e) {
+      appLogger.w('Could not resolve scoped projects for sync pull: $e');
+    }
+
+    final selectedProject =
+        (await kv.getString('selected_project') ?? '').trim().toUpperCase();
+    if (selectedProject.isNotEmpty) {
+      return <String>[selectedProject];
+    }
+    return const <String>[];
+  }
+
+  return SyncStateNotifier(service, repository, resolveScopedProjectIds);
 });

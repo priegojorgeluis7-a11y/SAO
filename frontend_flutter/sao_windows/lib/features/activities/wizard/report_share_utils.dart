@@ -4,6 +4,7 @@ import 'package:share_plus/share_plus.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../../core/utils/format_utils.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../home/models/today_activity.dart';
 
 String buildInitialWhatsAppReport({
@@ -45,7 +46,8 @@ String buildInitialWhatsAppReport({
     if (cleanCustomTitle.isNotEmpty) '',
     '*Proyecto:* $cleanProject',
     '*Actividad:* $cleanTitle',
-    if (cleanFront.isNotEmpty) '*Frente:* $cleanFront',
+    if (cleanFront.isNotEmpty)
+      '*${frontTerminology(projectCode, capitalize: true)}:* $cleanFront',
     '*Ubicación:* $location',
     if (activity.pk != null) '*PK:* ${formatPk(activity.pk)}',
     if (schedule.isNotEmpty) '*Horario:* $schedule',

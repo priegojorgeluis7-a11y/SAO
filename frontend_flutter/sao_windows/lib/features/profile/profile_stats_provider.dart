@@ -71,6 +71,11 @@ final profileStatsProvider = StateNotifierProvider<ProfileStatsNotifier, Profile
 class ProfileStatsNotifier extends StateNotifier<ProfileStats> {
   final Ref ref;
   ProfileStatsNotifier(this.ref) : super(ProfileStats.initial()) {
+    ref.listen(currentUserProvider, (previous, next) {
+      if (previous?.id != next?.id) {
+        loadAll();
+      }
+    });
     loadAll();
   }
 
@@ -88,6 +93,15 @@ class ProfileStatsNotifier extends StateNotifier<ProfileStats> {
       state = state.copyWith(loadingRole: false);
       return;
     }
+    var backendRole = user.primaryRole;
+    if (backendRole == null || backendRole.trim().isEmpty) {
+      try {
+        final refreshedUser = await ref.read(authRepositoryProvider).getCurrentUser();
+        backendRole = refreshedUser.primaryRole;
+      } catch (_) {
+        // Keep local fallback when network refresh is unavailable.
+      }
+    }
     final db = GetIt.I<AppDb>();
     try {
       final localUser = await (db.select(db.users)
@@ -98,9 +112,16 @@ class ProfileStatsNotifier extends StateNotifier<ProfileStats> {
           : await (db.select(db.roles)
                 ..where((r) => r.id.equals(localUser.roleId)))
               .getSingleOrNull();
-      state = state.copyWith(roleName: roleRow?.name, loadingRole: false);
+      state = state.copyWith(
+        roleName: backendRole ?? roleRow?.name,
+        loadingRole: false,
+      );
     } catch (e) {
-      state = state.copyWith(loadingRole: false, error: e.toString());
+      state = state.copyWith(
+        roleName: backendRole,
+        loadingRole: false,
+        error: e.toString(),
+      );
     }
   }
 

@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/constants.dart';
 import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../features/auth/application/auth_providers.dart';
@@ -13,7 +14,7 @@ import '../../../data/local/app_db.dart';
 class EventsListPage extends ConsumerWidget {
   final String projectId;
 
-  const EventsListPage({super.key, this.projectId = 'TMQ'});
+  const EventsListPage({super.key, this.projectId = kAllProjects});
 
   Future<void> _editEvent(
     BuildContext context,

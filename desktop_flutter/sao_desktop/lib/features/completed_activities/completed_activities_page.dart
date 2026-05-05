@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -9,6 +9,7 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/project_providers.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../data/repositories/evidence_repository.dart';
 import '../../ui/sao_ui.dart';
 import '../digital_records/digital_records_colors.dart';
@@ -110,6 +111,11 @@ class _CompletedActivitiesPageState
             total: activitiesAsync.maybeWhen(
                 data: (d) => d.length, orElse: () => null),
             hasSelection: _selectedActivityId != null,
+            frontPluralLabel: frontTerminology(
+              selectedProject,
+              plural: true,
+              capitalize: true,
+            ),
             onRefresh: () {
               ref.invalidate(completedActivitiesProvider);
               ref.invalidate(completedFilterOptionsProvider);
@@ -184,11 +190,13 @@ class _CompletedActivitiesPageState
 class _PageHeader extends StatelessWidget {
   final int? total;
   final bool hasSelection;
+  final String frontPluralLabel;
   final VoidCallback onRefresh;
 
   const _PageHeader({
     this.total,
     required this.hasSelection,
+    required this.frontPluralLabel,
     required this.onRefresh,
   });
 
@@ -222,7 +230,7 @@ class _PageHeader extends StatelessWidget {
                 style: SaoTypography.caption
                     .copyWith(color: DigitalRecordColors.accent, fontSize: 12)),
           const SizedBox(width: 16),
-          Text('Proyectos, frentes, estados y documentos aprobados',
+          Text('Proyectos, ${frontPluralLabel.toLowerCase()}, estados y documentos aprobados',
               style: SaoTypography.caption
                 .copyWith(color: SaoColors.gray600, fontSize: 11)),
           const SizedBox(width: 12),
@@ -246,6 +254,11 @@ class _RecordsSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final frontPluralLabel = frontTerminology(
+      items.isNotEmpty ? items.first.projectId : null,
+      plural: true,
+      capitalize: true,
+    );
     final uniqueProjects = items
         .map((item) => item.projectId.trim())
         .where((value) => value.isNotEmpty)
@@ -281,7 +294,7 @@ class _RecordsSummary extends StatelessWidget {
             icon: Icons.domain_rounded,
           ),
           _SummaryChip(
-            label: 'Frentes',
+            label: frontPluralLabel,
             value: '$uniqueFronts',
             icon: Icons.alt_route_rounded,
           ),
@@ -832,7 +845,7 @@ class _HierarchyPanel extends ConsumerWidget {
                           const Text('Carpetas SAO', style: SaoTypography.sectionTitle),
                           const SizedBox(height: 4),
                           Text(
-                            'Proyecto > Frente > Estado. Abre una carpeta para navegar el expediente.',
+                            'Proyecto > ${frontTerminology(selectedProject, capitalize: true)} > Estado. Abre una carpeta para navegar el expediente.',
                             style: SaoTypography.caption.copyWith(
                               color: SaoColors.textMutedFor(context),
                             ),
@@ -876,8 +889,10 @@ class _HierarchyPanel extends ConsumerWidget {
                     const SizedBox(height: 8),
                     _FolderPathTile(
                       level: 1,
-                      title: 'Frente',
-                      value: selectedFront.isEmpty ? 'Todos los frentes' : selectedFront,
+                      title: frontTerminology(selectedProject, capitalize: true),
+                      value: selectedFront.isEmpty
+                          ? 'Todos los ${frontTerminology(selectedProject, plural: true)}'
+                          : selectedFront,
                       isOpen: selectedFront.isNotEmpty,
                       icon: Icons.folder_open_rounded,
                       onTap: () {
@@ -940,7 +955,9 @@ class _FolderBreadcrumbBar extends StatelessWidget {
   Widget build(BuildContext context) {
     final segments = <String>[
       project.isEmpty ? 'Proyectos' : project,
-      front.isEmpty ? 'Frentes' : front,
+      front.isEmpty
+          ? frontTerminology(project, plural: true, capitalize: true)
+          : front,
       state.isEmpty ? 'Estados' : state,
     ];
 
@@ -1288,7 +1305,9 @@ List<_ProjectHierarchyNode> _buildHierarchy(List<CompletedActivity> items) {
   final projects = <String, Map<String, List<CompletedActivity>>>{};
   for (final item in items) {
     final projectId = item.projectId.trim().isEmpty ? 'SIN_PROYECTO' : item.projectId.trim();
-    final frontName = item.front.trim().isEmpty ? 'Sin frente' : item.front.trim();
+    final frontName = item.front.trim().isEmpty
+        ? 'Sin ${frontTerminology(item.projectId)}'
+        : item.front.trim();
     final stateName = item.estado.trim().isEmpty ? 'Sin estado' : item.estado.trim();
     final fronts = projects.putIfAbsent(projectId, () => <String, List<CompletedActivity>>{});
     final frontKey = '$frontName::$stateName';
@@ -1495,6 +1514,19 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
         .join(' ');
   }
 
+  String _effectiveProjectId() {
+    if (widget.items.isEmpty) return '';
+    final projects = widget.items.map((i) => i.projectId).toSet();
+    return projects.length == 1 ? projects.first : '';
+  }
+
+  String _displayColumnName(String key) {
+    if (key == 'Frente') {
+      return frontTerminology(_effectiveProjectId(), capitalize: true);
+    }
+    return key;
+  }
+
   @override
   Widget build(BuildContext context) {
     final visible = _columnVisible.entries
@@ -1503,7 +1535,7 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
         .toList(growable: false);
 
     final columns = visible
-        .map((name) => DataColumn(label: Text(name)))
+        .map((name) => DataColumn(label: Text(_displayColumnName(name))))
         .toList(growable: false);
 
     return Column(
@@ -1522,7 +1554,7 @@ class _ActivitiesTableState extends State<_ActivitiesTable> {
                       (e) => CheckedPopupMenuItem<String>(
                         value: e.key,
                         checked: e.value,
-                        child: Text(e.key),
+                        child: Text(_displayColumnName(e.key)),
                       ),
                     )
                     .toList(growable: false),
@@ -1935,7 +1967,7 @@ class _PanelContent extends StatelessWidget {
     ].where((r) => _hasValue(r.value)).toList(growable: false);
 
     final locationRows = <_InfoRow>[
-      _InfoRow('Frente', s.front),
+      _InfoRow(frontTerminology(s.projectId, capitalize: true), s.front),
       _InfoRow('Estado', s.estado),
       _InfoRow('Municipio', s.municipio),
       _InfoRow('Colonia', detail.colonia),
@@ -2269,7 +2301,7 @@ class _PanelQuickActions extends StatelessWidget {
       title: s.title,
       activityType: s.activityType,
       pk: s.pk,
-      frontName: s.front.isEmpty ? 'Sin frente' : s.front,
+      frontName: s.front.isEmpty ? 'Sin ${frontTerminology(s.projectId)}' : s.front,
       status: s.reviewDecision.isEmpty ? 'COMPLETADA' : s.reviewDecision,
       reviewDecision: s.reviewDecision,
       reviewStatus: s.reviewDecision,
@@ -2395,7 +2427,7 @@ class _PanelQuickActions extends StatelessWidget {
     final resumen = StringBuffer()
       ..writeln('SAO - Resumen de actividad')
       ..writeln('Proyecto: ${s.projectId}')
-      ..writeln('Frente: ${s.front}')
+      ..writeln('${frontTerminology(s.projectId, capitalize: true)}: ${s.front}')
       ..writeln('Estado: ${s.estado}')
       ..writeln('Municipio: ${s.municipio}')
       ..writeln('Colonia: ${detail.colonia}')
@@ -2428,7 +2460,7 @@ class _PanelQuickActions extends StatelessWidget {
           ),
           pw.SizedBox(height: 10),
           pw.Text('Proyecto: ${s.projectId}'),
-          pw.Text('Frente: ${s.front}'),
+          pw.Text('${frontTerminology(s.projectId, capitalize: true)}: ${s.front}'),
           pw.Text('Estado: ${s.estado}'),
           pw.Text('Municipio: ${s.municipio}'),
           pw.Text('Colonia: ${detail.colonia}'),

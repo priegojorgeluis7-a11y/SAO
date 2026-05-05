@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/di/service_locator.dart';
@@ -92,17 +93,26 @@ class AgendaController extends StateNotifier<AgendaState> {
   final AssignmentsRepository _assignmentsRepository;
   final CalendarSyncCallback? _onCalendarSync;
   String? _projectId;
+  List<String> _projectIds = const [];
   bool _isOffline = false;
   Resource? _selfResource;
   bool _preferSelfFilter = true;
 
   Future<void> initialize({
     String? projectId,
+    List<String>? allProjectIds,
     required bool isOffline,
     Resource? selfResource,
     bool preferSelfFilter = true,
   }) async {
     _projectId = projectId;
+    if (allProjectIds != null && allProjectIds.isNotEmpty) {
+      _projectIds = allProjectIds;
+    } else if (projectId != null && projectId.trim().isNotEmpty) {
+      _projectIds = [projectId.trim()];
+    } else {
+      _projectIds = const [];
+    }
     _isOffline = isOffline;
     _selfResource = selfResource;
     _preferSelfFilter = preferSelfFilter;
@@ -151,7 +161,7 @@ class AgendaController extends StateNotifier<AgendaState> {
   }
 
   Future<void> _loadCurrentWeekAssignments() async {
-    if (_projectId == null || _projectId!.trim().isEmpty) {
+    if (_projectIds.isEmpty) {
       state = state.copyWith(items: const [], loadingAssignments: false);
       return;
     }
@@ -165,18 +175,40 @@ class AgendaController extends StateNotifier<AgendaState> {
     final from = DateTime(startOfWeek.year, startOfWeek.month, startOfWeek.day);
     final to = from.add(const Duration(days: 7));
 
-    final items = await _assignmentsRepository.loadRange(
-      projectId: _projectId!,
-      from: from,
-      to: to,
-      isOffline: _isOffline,
+    final allItems = <AgendaItem>[];
+    bool anyError = false;
+    for (final pid in _projectIds) {
+      try {
+        final items = await _assignmentsRepository.loadRange(
+          projectId: pid,
+          from: from,
+          to: to,
+          isOffline: _isOffline,
+        );
+        allItems.addAll(items);
+      } on DioException catch (e) {
+        appLogger.w('AgendaController: assignments API failed for $pid — $e');
+        if (_projectIds.length == 1) {
+          state = state.copyWith(loadingAssignments: false, hasSyncError: true);
+          return;
+        }
+        anyError = true;
+      }
+    }
+
+    // Dedup by assignment id
+    final seen = <String>{};
+    final merged = allItems.where((item) => seen.add(item.id)).toList();
+
+    state = state.copyWith(
+      items: merged,
+      loadingAssignments: false,
+      hasSyncError: anyError,
     );
 
-    state = state.copyWith(items: items, loadingAssignments: false);
-
     // Sincronizar al calendario del dispositivo si está configurado.
-    if (_onCalendarSync != null && items.isNotEmpty) {
-      _onCalendarSync!(items).catchError((Object e) {
+    if (_onCalendarSync != null && merged.isNotEmpty) {
+      _onCalendarSync(merged).catchError((Object e) {
         appLogger.w('AgendaController: calendar sync background error: $e');
         return 0;
       });
@@ -260,21 +292,26 @@ class AgendaController extends StateNotifier<AgendaState> {
     await _loadCurrentWeekAssignments();
   }
 
-  /// Cancela una asignación localmente.
-  /// - Si está pendiente/en error: la elimina sin necesitar red.
-  /// - Si ya fue sincronizada: la elimina del caché local; el próximo sync
-  ///   la restaurará desde el servidor (la cancelación en servidor debe
-  ///   gestionarse con el despachador).
-  Future<void> cancelAssignment(AgendaItem item) async {
-    // Eliminar optimistamente de la UI
+  Future<bool> cancelAssignment(AgendaItem item) async {
+    final previousItems = state.items;
     state = state.copyWith(
       items: state.items.where((i) => i.id != item.id).toList(),
     );
-    await _assignmentsRepository.deleteLocal(item.id);
-    appLogger.i(
-      'AgendaController.cancelAssignment id=${item.id} '
-      'syncStatus=${item.syncStatus}',
-    );
+
+    try {
+      final queuedOffline = await _assignmentsRepository.cancelAssignment(item: item);
+      if (item.syncStatus == SyncStatus.synced) {
+        await _loadCurrentWeekAssignments();
+      }
+      appLogger.i(
+        'AgendaController.cancelAssignment id=${item.id} '
+        'syncStatus=${item.syncStatus}',
+      );
+      return queuedOffline;
+    } catch (_) {
+      state = state.copyWith(items: previousItems);
+      rethrow;
+    }
   }
 
   Future<List<Resource>> getTransferCandidates({required AgendaItem item}) async {
@@ -287,23 +324,26 @@ class AgendaController extends StateNotifier<AgendaState> {
 
     final resources = await _usersRepository.getTransferCandidates(
       projectId: projectId,
-      isOffline: false,
+      isOffline: _isOffline,
     );
 
     final candidates = resources
-        .where((resource) => resource.isActive && resource.id != item.resourceId)
+        .where((resource) =>
+            resource.isActive &&
+            resource.id != item.resourceId &&
+            resource.role != ResourceRole.administrador)
         .toList()
       ..sort((left, right) => left.name.toLowerCase().compareTo(right.name.toLowerCase()));
 
     return candidates;
   }
 
-  Future<void> transferAssignment({
+  Future<bool> transferAssignment({
     required AgendaItem item,
     required Resource assignee,
     String? reason,
   }) async {
-    await _assignmentsRepository.transferAssignment(
+    final queuedOffline = await _assignmentsRepository.transferAssignment(
       assignmentId: item.id,
       projectId: item.projectCode,
       assigneeUserId: assignee.id,
@@ -315,6 +355,7 @@ class AgendaController extends StateNotifier<AgendaState> {
       'AgendaController.transferAssignment id=${item.id} '
       'assignee=${assignee.id}',
     );
+    return queuedOffline;
   }
 
   /// Verifica que los recursos estén cargados; si no, los carga ahora.
@@ -322,8 +363,8 @@ class AgendaController extends StateNotifier<AgendaState> {
   Future<void> ensureResourcesReady({required String? projectId}) async {
     if (state.resources.isNotEmpty || state.loadingUsers) return;
     if (projectId == null || projectId.trim().isEmpty) return;
-    appLogger.i('AgendaController.ensureResourcesReady retry project=$projectId');
-    await initialize(projectId: projectId, isOffline: false, selfResource: _selfResource);
+    appLogger.i('AgendaController.ensureResourcesReady retry project=$projectId offline=$_isOffline');
+    await initialize(projectId: projectId, isOffline: _isOffline, selfResource: _selfResource);
   }
 
   /// Guarantees the logged user is present in resources.
@@ -393,19 +434,35 @@ class AgendaController extends StateNotifier<AgendaState> {
   }
 
   Future<void> syncNow() async {
-    if (_projectId == null || _projectId!.trim().isEmpty) return;
-
     state = state.copyWith(isSyncing: true, hasSyncError: false);
+    // Manual sync always implies network intent; force online so that
+    // _loadCurrentWeekAssignments fetches from backend instead of local cache.
+    _isOffline = false;
     try {
-      if (!_isOffline) {
-        await _assignmentsRepository.syncPending(projectId: _projectId);
-      }
+      // Manual sync should always attempt upload. Connectivity state can lag
+      // behind real network availability when returning from offline mode.
+      final syncProjectId = _projectIds.length == 1 ? _projectIds.first : null;
+      await _assignmentsRepository.syncPending(projectId: syncProjectId);
       await _loadCurrentWeekAssignments();
       state = state.copyWith(isSyncing: false, hasSyncError: false);
     } catch (e) {
       appLogger.e('AgendaController.syncNow error: $e');
       state = state.copyWith(isSyncing: false, hasSyncError: true);
       rethrow;
+    }
+  }
+
+  /// Called by the page whenever the offline/online connectivity state changes.
+  /// Updating the flag here keeps [_loadCurrentWeekAssignments] in sync with
+  /// real network availability. When transitioning to online, a fresh pull is
+  /// triggered automatically so the view never shows stale data.
+  Future<void> updateConnectivity(bool isOffline) async {
+    if (_isOffline == isOffline) return;
+    final wasOffline = _isOffline;
+    _isOffline = isOffline;
+    // Auto-refresh when reconnecting so the agenda pulls latest from backend.
+    if (wasOffline && !isOffline) {
+      await _loadCurrentWeekAssignments();
     }
   }
 }
@@ -428,7 +485,7 @@ final assignmentsRepositoryProvider = Provider<AssignmentsRepository>((ref) {
 /// Tipo del callback de sincronización de calendario.
 typedef CalendarSyncCallback = Future<int> Function(List<AgendaItem> items);
 
-final agendaControllerProvider = StateNotifierProvider<AgendaController, AgendaState>((ref) {
+final agendaControllerProvider = StateNotifierProvider.autoDispose<AgendaController, AgendaState>((ref) {
   return AgendaController(
     usersRepository: ref.read(agendaUsersRepositoryProvider),
     assignmentsRepository: ref.read(assignmentsRepositoryProvider),

@@ -6,7 +6,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/catalog/state/catalog_providers.dart';
+import '../../core/constants.dart';
+import '../../core/di/service_locator.dart';
+import '../../core/network/api_client.dart';
 import '../../data/local/dao/activity_dao.dart';
+import '../../data/repositories/projects_repository.dart';
 import '../catalog/catalog_repository.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../core/utils/snackbar.dart';
@@ -80,9 +84,12 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     final query = GoRouterState.of(context).uri.queryParameters;
     _applyPendingPrefiltersFromRoute(query);
     final projectId =
-        (query['project'] ?? 'TMQ')
+        (query['project'] ?? kAllProjects)
             .trim()
             .toUpperCase();
+    if (projectId.isEmpty || projectId == kAllProjects || projectId == 'ALL') {
+      return;
+    }
     if (_catalogProjectChecked == projectId) return;
     _catalogProjectChecked = projectId;
     _checkCatalogUpdateAvailability(projectId);
@@ -216,6 +223,40 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     await ref.read(syncStateProvider.notifier).sync();
   }
 
+  Future<void> _discardItem(UploadQueueItem item) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Descartar error de sincronización'),
+        content: Text(
+          'Este registro no se puede reenviar automaticamente. Se eliminara de la cola de sincronización:\n\n${item.title}',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Descartar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    await ref.read(syncRepositoryProvider).deleteItem(item.id);
+    if (!mounted) return;
+    showTransientSnackBar(
+      context,
+      appSnackBar(
+        message: 'Registro descartado de la cola de sincronización.',
+        backgroundColor: SaoColors.info,
+      ),
+    );
+  }
+
   Future<void> _resolveConflictUseLocal(UploadQueueItem item) async {
     await ref.read(syncStateProvider.notifier).resolveConflictUseLocal(item.id);
     if (!mounted) return;
@@ -281,10 +322,24 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
   }
 
   Future<void> _syncCatalogConcepts() async {
-    final projectId = await _resolveCatalogProjectId();
-    final versionKey = 'catalog_version:$projectId';
     final kv = ref.read(kvStoreProvider);
-    final previousVersion = await kv.getString(versionKey);
+    final projectIds = await _resolveCatalogProjectsForSync();
+    if (projectIds.isEmpty) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se encontraron proyectos disponibles para sincronizar catalogos.',
+          backgroundColor: SaoColors.warning,
+        ),
+      );
+      return;
+    }
+
+    final previousVersions = <String, String?>{};
+    for (final pid in projectIds) {
+      previousVersions[pid] = await kv.getString('catalog_version:$pid');
+    }
 
     setState(() {
       _catalogSyncing = true;
@@ -293,20 +348,29 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
 
     try {
       final syncService = ref.read(catalogSyncServiceProvider);
-      await syncService.ensureCatalogUpToDate(projectId);
+      await syncService.syncAllIfNeeded(projectIds);
 
       // Also refresh the wizard/admin bundle cache used by CatalogRepository.
       // This avoids stale concepts lingering in mobile dropdowns after server removals.
-      try {
-        await GetIt.I<CatalogRepository>().refreshProjectBundleFromServer(
-          projectId,
-          purgeLocalCustom: true,
-        );
-      } catch (_) {
-        // Keep sync success even if bundle refresh fallback fails; Drift catalog is already updated.
+      for (final pid in projectIds) {
+        try {
+          await GetIt.I<CatalogRepository>().refreshProjectBundleFromServer(
+            pid,
+            purgeLocalCustom: true,
+          );
+        } catch (_) {
+          // Keep sync success even if bundle refresh fallback fails; Drift catalog is already updated.
+        }
       }
 
-      final currentVersion = await kv.getString(versionKey);
+      final updatedProjects = <String>[];
+      for (final pid in projectIds) {
+        final before = previousVersions[pid];
+        final after = await kv.getString('catalog_version:$pid');
+        if (after != null && after != before) {
+          updatedProjects.add(pid);
+        }
+      }
 
       if (!mounted) return;
 
@@ -318,11 +382,12 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
       // Persiste la fecha para que sobreviva navegaciones
       unawaited(kv.setString(_catalogUpdatedAtKey, now.toIso8601String()));
 
-      if (currentVersion != null && currentVersion != previousVersion) {
+      if (updatedProjects.isNotEmpty) {
         showTransientSnackBar(
           context,
           appSnackBar(
-            message: 'Catalogo actualizado a version $currentVersion.',
+            message:
+                'Catalogo actualizado para ${updatedProjects.length} proyecto(s): ${updatedProjects.join(', ')}.',
             backgroundColor: SaoColors.success,
           ),
         );
@@ -330,12 +395,16 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
         showTransientSnackBar(
           context,
           appSnackBar(
-            message: 'Ya cuentas con la ultima version del catalogo.',
+            message: 'Ya cuentas con la ultima version de catalogo en tus proyectos.',
             backgroundColor: SaoColors.info,
           ),
         );
       }
-      await _checkCatalogUpdateAvailability(projectId);
+
+      final currentProject = await _resolveCatalogProjectId();
+      if (currentProject.isNotEmpty && currentProject != kAllProjects && currentProject != 'ALL') {
+        await _checkCatalogUpdateAvailability(currentProject);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -357,22 +426,57 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     }
   }
 
+  Future<List<String>> _resolveCatalogProjectsForSync() async {
+    final fromRoute = (GoRouterState.of(context).uri.queryParameters['project'] ?? '')
+        .trim()
+        .toUpperCase();
+    if (fromRoute.isNotEmpty && fromRoute != kAllProjects && fromRoute != 'ALL') {
+      return [fromRoute];
+    }
+
+    try {
+      final repository = ProjectsRepository(apiClient: getIt<ApiClient>());
+      final scopedProjects = await repository.getMyProjects();
+      final ids = scopedProjects
+          .where((p) => p.isActive)
+          .map((p) => p.code.trim().toUpperCase())
+          .where((p) => p.isNotEmpty && p != kAllProjects && p != 'ALL')
+          .toSet()
+          .toList()
+        ..sort();
+      if (ids.isNotEmpty) {
+        return ids;
+      }
+    } catch (_) {
+      // Fallback to selected project in KV when project resolution request fails.
+    }
+
+    final fromKv = (await ref.read(kvStoreProvider).getString('selected_project') ?? '')
+        .trim()
+        .toUpperCase();
+    if (fromKv.isNotEmpty && fromKv != kAllProjects && fromKv != 'ALL') {
+      return [fromKv];
+    }
+
+    return const <String>[];
+  }
+
   Future<String> _resolveCatalogProjectId() async {
     final fromRoute = (GoRouterState.of(context).uri.queryParameters['project'] ?? '')
         .trim()
         .toUpperCase();
-    if (fromRoute.isNotEmpty) {
+    if (fromRoute.isNotEmpty && fromRoute != kAllProjects && fromRoute != 'ALL') {
       return fromRoute;
     }
 
     final fromKv = (await ref.read(kvStoreProvider).getString('selected_project') ?? '')
         .trim()
         .toUpperCase();
-    if (fromKv.isNotEmpty) {
+    if (fromKv.isNotEmpty && fromKv != kAllProjects && fromKv != 'ALL') {
       return fromKv;
     }
 
-    return 'TMQ';
+    return kAllProjects;
   }
 
   Future<void> _checkCatalogUpdateAvailability(String projectId) async {
@@ -621,7 +725,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
     }
 
     final projectOptions = pendingEvidence
-        .map((item) => (item.projectCode ?? 'TMQ').trim().toUpperCase())
+        .map((item) => (item.projectCode ?? kAllProjects).trim().toUpperCase())
         .toSet()
         .toList()
       ..sort();
@@ -640,7 +744,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
         : 'ALL';
 
     final filteredPendingEvidence = pendingEvidence.where((item) {
-      final projectCode = (item.projectCode ?? 'TMQ').trim().toUpperCase();
+      final projectCode = (item.projectCode ?? kAllProjects).trim().toUpperCase();
       final status = item.status.trim().toUpperCase();
       final matchProject =
           effectiveProjectFilter == 'ALL' || projectCode == effectiveProjectFilter;
@@ -735,7 +839,7 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
             ),
           ),
         ...filteredPendingEvidence.take(8).map((item) {
-          final projectCode = (item.projectCode ?? 'TMQ').trim().toUpperCase();
+          final projectCode = (item.projectCode ?? kAllProjects).trim().toUpperCase();
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: InkWell(
@@ -1159,6 +1263,11 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
       item: item,
       onRetry: item.retryable ? () => _retryItem(item) : null,
       onResolveConflict: item.isConflict ? () => _showConflictDialog(item) : null,
+      onDiscard: item.status == UploadItemStatus.error &&
+              !item.retryable &&
+              !item.isConflict
+          ? () => _discardItem(item)
+          : null,
     );
   }
 
@@ -1403,11 +1512,147 @@ class _SyncCenterPageState extends ConsumerState<SyncCenterPage> {
                 ),
                 activeThumbColor: SaoColors.success,
               ),
+              const Divider(height: 1),
+              // Limpiar almacenamiento local
+              ListTile(
+                leading: const Icon(
+                  Icons.delete_sweep_rounded,
+                  color: SaoColors.error,
+                ),
+                title: const Text(
+                  'Limpiar almacenamiento local',
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: SaoColors.error,
+                  ),
+                ),
+                subtitle: const Text(
+                  'Borra actividades, evidencias y cola de sync local',
+                  style: TextStyle(fontSize: 12),
+                ),
+                onTap: _confirmClearLocalData,
+              ),
             ],
           ),
         ),
       ],
     );
+  }
+
+  Future<void> _confirmClearLocalData() async {
+    final repo = ref.read(syncRepositoryProvider);
+    final pendingCount = await repo.countPendingItems();
+
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: SaoColors.warning),
+            SizedBox(width: 8),
+            Text('Limpiar almacenamiento local'),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (pendingCount > 0)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: SaoColors.errorLight,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: SaoColors.error),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline,
+                        color: SaoColors.error, size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Tienes $pendingCount elemento${pendingCount > 1 ? 's' : ''} pendiente${pendingCount > 1 ? 's' : ''} de sincronizar. '
+                        'Si limpias ahora se perderán.',
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: SaoColors.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            const Text(
+              'Esto borrará de este dispositivo:\n'
+              '• Actividades capturadas localmente\n'
+              '• Evidencias pendientes de subir\n'
+              '• Cola de sincronización\n'
+              '• Eventos locales\n\n'
+              'Los datos ya sincronizados con el servidor no se perderán. '
+              'Los catálogos y tu sesión se conservan.',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: SaoColors.error,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Limpiar'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await repo.clearLocalData();
+      // Limpiar también el estado persistido del último sync en KV
+      await ref
+          .read(kvStoreProvider)
+          .setString(_lastSyncHeaderStateKey, '');
+      setState(() {
+        _lastManualSyncStatus = null;
+        _lastPushed = null;
+        _lastCreated = null;
+        _lastUpdated = null;
+        _lastConflicts = null;
+        _lastErrors = null;
+      });
+      if (mounted) {
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Almacenamiento local limpiado correctamente',
+            backgroundColor: SaoColors.success,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: 'Error al limpiar: $e',
+            backgroundColor: SaoColors.error,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
   }
 
   // =================== Helpers ===================

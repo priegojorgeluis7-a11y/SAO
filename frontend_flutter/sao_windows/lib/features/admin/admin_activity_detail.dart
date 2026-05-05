@@ -7,6 +7,7 @@ import '../../catalog/roles_catalog.dart';
 import '../../core/network/api_client.dart';
 import '../../core/utils/snackbar.dart';
 import '../../data/local/app_db.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../data/local/dao/activity_dao.dart';
 import '../../ui/theme/sao_colors.dart';
 
@@ -239,7 +240,7 @@ class _AdminActivityDetailPageState extends ConsumerState<AdminActivityDetailPag
             _InfoRow(label: 'Estado', value: status),
             _InfoRow(label: 'Titulo', value: activity.title),
             _InfoRow(label: 'Usuario asignado', value: record.assignedToName ?? 'Sin asignar'),
-            _InfoRow(label: 'Frente', value: record.frente ?? 'Sin frente'),
+            _InfoRow(label: frontTerminology(widget.projectCode, capitalize: true), value: record.frente ?? 'Sin ${frontTerminology(widget.projectCode)}'),
             _InfoRow(label: 'Municipio', value: record.municipio ?? 'Sin municipio'),
             _InfoRow(label: 'Estado (MX)', value: record.estado ?? 'Sin estado'),
             _InfoRow(label: 'Fecha inicio', value: activity.startedAt?.toIso8601String() ?? '-'),

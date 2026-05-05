@@ -19,6 +19,7 @@ class FirestoreUserPrincipal:
     status: UserStatus
     created_at: datetime | None
     last_login_at: datetime | None
+    last_activity_at: datetime | None
     roles: list[str]
     project_ids: list[str]
     first_name: str | None = None
@@ -115,11 +116,31 @@ def _principal_from_doc(payload: dict[str, Any]) -> FirestoreUserPrincipal | Non
     else:
         roles = []
 
+    project_ids: list[str] = []
+    seen_project_ids: set[str] = set()
+
+    def _add_project(value: Any) -> None:
+        normalized = str(value or "").strip().upper()
+        if not normalized or normalized in seen_project_ids:
+            return
+        seen_project_ids.add(normalized)
+        project_ids.append(normalized)
+
     project_ids_value = payload.get("project_ids") or []
     if isinstance(project_ids_value, list):
-        project_ids = [str(item).strip() for item in project_ids_value if str(item).strip()]
-    else:
-        project_ids = []
+        for item in project_ids_value:
+            _add_project(item)
+
+    # Legacy payload compatibility: single project_id and nested projects arrays.
+    _add_project(payload.get("project_id"))
+
+    projects_value = payload.get("projects")
+    if isinstance(projects_value, list):
+        for item in projects_value:
+            if isinstance(item, dict):
+                _add_project(item.get("project_id") or item.get("id") or item.get("code"))
+            else:
+                _add_project(item)
 
     return FirestoreUserPrincipal(
         id=user_id,
@@ -128,6 +149,7 @@ def _principal_from_doc(payload: dict[str, Any]) -> FirestoreUserPrincipal | Non
         status=_normalize_status(payload.get("status")),
         created_at=_to_datetime(payload.get("created_at")),
         last_login_at=_to_datetime(payload.get("last_login_at")),
+        last_activity_at=_to_datetime(payload.get("last_activity_at")),
         last_logout_at=_to_datetime(payload.get("last_logout_at")),
         roles=roles,
         project_ids=project_ids,
@@ -177,8 +199,9 @@ def get_firestore_user_by_email(email: str) -> FirestoreUserPrincipal | None:
 
 def update_last_login(user_id: UUID) -> None:
     client = get_firestore_client()
+    now = datetime.now(timezone.utc).isoformat()
     client.collection("users").document(str(user_id)).set(
-        {"last_login_at": datetime.now(timezone.utc).isoformat()}, merge=True
+        {"last_login_at": now, "last_activity_at": now}, merge=True
     )
 
 
@@ -186,6 +209,13 @@ def update_last_logout(user_id: UUID) -> None:
     client = get_firestore_client()
     client.collection("users").document(str(user_id)).set(
         {"last_logout_at": datetime.now(timezone.utc).isoformat()}, merge=True
+    )
+
+
+def update_last_activity(user_id: UUID) -> None:
+    client = get_firestore_client()
+    client.collection("users").document(str(user_id)).set(
+        {"last_activity_at": datetime.now(timezone.utc).isoformat()}, merge=True
     )
 
 
@@ -252,6 +282,7 @@ def create_firestore_user(
         "permission_scopes": permission_scopes or [],
         "created_at": now,
         "last_login_at": None,
+        "last_activity_at": None,
         "pin_hash": None,
     }
     if first_name is not None:

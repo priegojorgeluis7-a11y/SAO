@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from app.api import deps as deps_module
@@ -23,6 +23,7 @@ def _principal(
         status=status,
         created_at=datetime.now(timezone.utc),
         last_login_at=None,
+        last_activity_at=None,
         roles=roles,
         project_ids=["TMQ"],
         scopes=scopes or [],
@@ -31,6 +32,90 @@ def _principal(
         pin_hash=None,
         last_logout_at=None,
     )
+
+
+def test_online_users_requires_admin_or_supervisor(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="coord@example.com", roles=["COORD"])
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.get("/api/v1/users/online")
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 403
+
+
+def test_online_users_returns_shared_scope_and_online_flags(client, monkeypatch):
+    monkeypatch.setattr(settings, "DATA_BACKEND", "firestore", raising=False)
+    current_user = _principal(email="supervisor@example.com", roles=["SUPERVISOR"])
+    now = datetime.now(timezone.utc)
+    shared_online = FirestoreUserPrincipal(
+        id=uuid4(),
+        email="online@example.com",
+        full_name="Online User",
+        status=UserStatus.ACTIVE,
+        created_at=now,
+        last_login_at=now,
+        last_activity_at=now,
+        roles=["OPERATIVO"],
+        project_ids=["TMQ"],
+        scopes=[],
+        permission_scopes=[],
+        password_hash="hash",
+        pin_hash=None,
+        last_logout_at=None,
+    )
+    shared_offline = FirestoreUserPrincipal(
+        id=uuid4(),
+        email="offline@example.com",
+        full_name="Offline User",
+        status=UserStatus.ACTIVE,
+        created_at=now,
+        last_login_at=now,
+        last_activity_at=now - timedelta(minutes=30),
+        roles=["OPERATIVO"],
+        project_ids=["TMQ"],
+        scopes=[],
+        permission_scopes=[],
+        password_hash="hash",
+        pin_hash=None,
+        last_logout_at=None,
+    )
+    foreign_online = FirestoreUserPrincipal(
+        id=uuid4(),
+        email="foreign@example.com",
+        full_name="Foreign User",
+        status=UserStatus.ACTIVE,
+        created_at=now,
+        last_login_at=now,
+        last_activity_at=now,
+        roles=["OPERATIVO"],
+        project_ids=["QRO"],
+        scopes=[],
+        permission_scopes=[],
+        password_hash="hash",
+        pin_hash=None,
+        last_logout_at=None,
+    )
+    monkeypatch.setattr(
+        users_api,
+        "list_firestore_users",
+        lambda role=None: [foreign_online, shared_offline, shared_online],
+    )
+
+    app.dependency_overrides[deps_module.get_current_user] = lambda: current_user
+    try:
+        response = client.get("/api/v1/users/online")
+    finally:
+        app.dependency_overrides.pop(deps_module.get_current_user, None)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["email"] for item in payload] == ["online@example.com", "offline@example.com"]
+    assert payload[0]["is_online"] is True
+    assert payload[1]["is_online"] is False
 
 
 def test_users_list_rejects_operativo_role(client, monkeypatch):

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart' as drift;
 
@@ -14,6 +16,8 @@ typedef FetchAssignments = Future<dynamic> Function({
 });
 
 class AssignmentsRepository {
+  static const String _queueEntity = 'AGENDA_ASSIGNMENT';
+
   AssignmentsRepository({
     ApiClient? apiClient,
     required AssignmentsLocalStore localStore,
@@ -58,7 +62,53 @@ class AssignmentsRepository {
     await _localStore.deleteById(id);
   }
 
+  Future<bool> cancelAssignment({
+    required AgendaItem item,
+    String? reason,
+  }) async {
+    if (item.syncStatus != SyncStatus.synced) {
+      await _deleteQueuedAgendaAction(item.id);
+      await _localStore.deleteById(item.id);
+      return false;
+    }
+
+    if (item.syncStatus == SyncStatus.synced) {
+      try {
+        await _apiClientOrThrow.post<dynamic>(
+          '/assignments/${item.id}/cancel',
+          data: (reason != null && reason.trim().isNotEmpty)
+              ? {'reason': reason.trim()}
+              : null,
+        );
+        await _deleteQueuedAgendaAction(item.id);
+      } on DioException catch (e) {
+        if (!_shouldQueueOffline(e)) {
+          rethrow;
+        }
+        await _queueAgendaAction(
+          assignmentId: item.id,
+          projectId: item.projectCode,
+          action: 'DELETE',
+          priority: 90,
+          payload: {
+            'op': 'CANCEL',
+            'assignment_id': item.id,
+            'project_id': item.projectCode,
+            if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+          },
+        );
+        await _localStore.deleteById(item.id);
+        return true;
+      }
+    }
+
+    await _localStore.deleteById(item.id);
+    return false;
+  }
+
   Future<void> syncPending({String? projectId}) async {
+    await _syncQueuedAgendaActions(projectId: projectId);
+
     final pending = await _localStore.listPending(projectId: projectId);
     for (final item in pending) {
       await pushOne(item);
@@ -109,50 +159,100 @@ class AssignmentsRepository {
     }
   }
 
-  Future<AgendaAssignmentRecord> transferAssignment({
+  Future<bool> transferAssignment({
     required String assignmentId,
     required String projectId,
     required String assigneeUserId,
     String? assigneeName,
     String? reason,
   }) async {
-    final response = await _apiClientOrThrow.post<dynamic>(
-      '/assignments/$assignmentId/transfer',
-      data: {
-        'assignee_user_id': assigneeUserId,
-        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
-      },
+    final currentLocal = await _findLocalAssignmentById(
+      assignmentId,
+      projectId: projectId,
     );
-
-    final rawData = response.data;
-    final remote = _parseRemoteRecords(rawData, projectId: projectId);
-    if (remote.isEmpty) {
-      throw StateError('Transfer response did not return a valid assignment payload');
+    if (currentLocal == null) {
+      throw StateError('Assignment not found locally: $assignmentId');
     }
 
-    final serverRecord = remote.first;
-    final resolvedAssigneeName = _extractAssigneeName(rawData) ?? assigneeName;
-    final localRecord = AgendaAssignmentRecord(
-      id: serverRecord.id,
-      projectId: serverRecord.projectId,
-      resourceId: serverRecord.resourceId,
-      resourceName: resolvedAssigneeName ?? serverRecord.resourceName,
-      activityId: serverRecord.activityId,
-      title: serverRecord.title,
-      frente: serverRecord.frente,
-      municipio: serverRecord.municipio,
-      estado: serverRecord.estado,
-      pk: serverRecord.pk,
-      startAt: serverRecord.startAt,
-      endAt: serverRecord.endAt,
-      risk: serverRecord.risk,
-      syncStatus: SyncStatus.synced,
-    );
+    if (currentLocal.syncStatus != SyncStatus.synced) {
+      await _localStore.upsertAssignments([
+        _copyRecord(
+          currentLocal,
+          resourceId: assigneeUserId,
+          resourceName: assigneeName,
+        ),
+      ]);
+      return false;
+    }
 
-    await _upsertUserSnapshot(localRecord.resourceId, displayName: localRecord.resourceName);
-    await _localStore.upsertAssignments([localRecord]);
-    await _upsertActivitiesFromAssignments([localRecord]);
-    return localRecord;
+    try {
+      final response = await _apiClientOrThrow.post<dynamic>(
+        '/assignments/$assignmentId/transfer',
+        data: {
+          'assignee_user_id': assigneeUserId,
+          if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        },
+      );
+
+      final rawData = response.data;
+      final remote = _parseRemoteRecords(rawData, projectId: projectId);
+      if (remote.isEmpty) {
+        throw StateError('Transfer response did not return a valid assignment payload');
+      }
+
+      final serverRecord = remote.first;
+      final resolvedAssigneeName = _extractAssigneeName(rawData) ?? assigneeName;
+      final localRecord = AgendaAssignmentRecord(
+        id: serverRecord.id,
+        projectId: serverRecord.projectId,
+        resourceId: serverRecord.resourceId,
+        resourceName: resolvedAssigneeName ?? serverRecord.resourceName,
+        activityId: serverRecord.activityId,
+        title: serverRecord.title,
+        frente: serverRecord.frente,
+        municipio: serverRecord.municipio,
+        estado: serverRecord.estado,
+        pk: serverRecord.pk,
+        startAt: serverRecord.startAt,
+        endAt: serverRecord.endAt,
+        risk: serverRecord.risk,
+        syncStatus: SyncStatus.synced,
+      );
+
+      await _deleteQueuedAgendaAction(assignmentId);
+      await _upsertUserSnapshot(localRecord.resourceId, displayName: localRecord.resourceName);
+      await _localStore.upsertAssignments([localRecord]);
+      await _upsertActivitiesFromAssignments([localRecord]);
+      return false;
+    } on DioException catch (e) {
+      if (!_shouldQueueOffline(e)) {
+        rethrow;
+      }
+
+      final optimisticRecord = _copyRecord(
+        currentLocal,
+        resourceId: assigneeUserId,
+        resourceName: assigneeName,
+      );
+      await _upsertUserSnapshot(assigneeUserId, displayName: assigneeName);
+      await _localStore.upsertAssignments([optimisticRecord]);
+      await _queueAgendaAction(
+        assignmentId: assignmentId,
+        projectId: projectId,
+        action: 'UPSERT',
+        priority: 80,
+        payload: {
+          'op': 'TRANSFER',
+          'assignment_id': assignmentId,
+          'project_id': projectId,
+          'assignee_user_id': assigneeUserId,
+          if (assigneeName != null && assigneeName.trim().isNotEmpty)
+            'assignee_name': assigneeName.trim(),
+          if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+        },
+      );
+      return true;
+    }
   }
 
   Future<List<AgendaItem>> loadRange({
@@ -167,7 +267,9 @@ class AssignmentsRepository {
       to: to,
     );
 
-    if (isOffline) return local;
+    if (isOffline) {
+      return _applyQueuedAgendaActionsToItems(local, projectId: projectId);
+    }
 
     try {
       final raw = await _fetchAssignments(
@@ -175,7 +277,10 @@ class AssignmentsRepository {
         from: from,
         to: to,
       );
-      final remote = _parseRemoteRecords(raw, projectId: projectId);
+      final remote = await _applyQueuedAgendaActionsToRecords(
+        _parseRemoteRecords(raw, projectId: projectId),
+        projectId: projectId,
+      );
       await _localStore.replaceSyncedInRange(
         projectId: projectId,
         from: from,
@@ -183,15 +288,331 @@ class AssignmentsRepository {
         records: remote,
       );
       await _upsertActivitiesFromAssignments(remote);
-      return _localStore.queryRange(projectId: projectId, from: from, to: to);
+      final refreshed = await _localStore.queryRange(
+        projectId: projectId,
+        from: from,
+        to: to,
+      );
+      return _applyQueuedAgendaActionsToItems(refreshed, projectId: projectId);
     } on DioException catch (e) {
-      appLogger.w('Assignments fetch failed: $e');
-      return local;
+      appLogger.w('Assignments fetch failed (network/auth): $e');
+      rethrow;
     } catch (e) {
       appLogger.w('Assignments parse/upsert failed: $e');
-      return local;
+      return _applyQueuedAgendaActionsToItems(local, projectId: projectId);
     }
   }
+
+  Future<List<AgendaItem>> _applyQueuedAgendaActionsToItems(
+    List<AgendaItem> items, {
+    required String projectId,
+  }) async {
+    final queued = await _pendingAgendaQueueRows(projectId: projectId);
+    if (queued.isEmpty) {
+      return items;
+    }
+
+    final canceledIds = <String>{};
+    final transferredByAssignmentId = <String, Map<String, dynamic>>{};
+    for (final row in queued) {
+      final payload = _decodeQueuePayload(row.payloadJson);
+      switch ((payload['op'] ?? '').toString().trim().toUpperCase()) {
+        case 'CANCEL':
+          canceledIds.add((payload['assignment_id'] ?? row.entityId).toString());
+          break;
+        case 'TRANSFER':
+          transferredByAssignmentId[(payload['assignment_id'] ?? row.entityId).toString()] = payload;
+          break;
+      }
+    }
+
+    return items
+        .where((item) => !canceledIds.contains(item.id))
+        .map((item) {
+          final payload = transferredByAssignmentId[item.id];
+          if (payload == null) {
+            return item;
+          }
+          return item.copyWith(
+            resourceId: (payload['assignee_user_id'] ?? item.resourceId).toString(),
+            syncStatus: SyncStatus.pending,
+          );
+        })
+        .toList();
+  }
+
+  Future<List<AgendaAssignmentRecord>> _applyQueuedAgendaActionsToRecords(
+    List<AgendaAssignmentRecord> records, {
+    required String projectId,
+  }) async {
+    final queued = await _pendingAgendaQueueRows(projectId: projectId);
+    if (queued.isEmpty) {
+      return records;
+    }
+
+    final canceledIds = <String>{};
+    final transferredByAssignmentId = <String, Map<String, dynamic>>{};
+    for (final row in queued) {
+      final payload = _decodeQueuePayload(row.payloadJson);
+      switch ((payload['op'] ?? '').toString().trim().toUpperCase()) {
+        case 'CANCEL':
+          canceledIds.add((payload['assignment_id'] ?? row.entityId).toString());
+          break;
+        case 'TRANSFER':
+          transferredByAssignmentId[(payload['assignment_id'] ?? row.entityId).toString()] = payload;
+          break;
+      }
+    }
+
+    return records
+        .where((record) => !canceledIds.contains(record.id))
+        .map((record) {
+          final payload = transferredByAssignmentId[record.id];
+          if (payload == null) {
+            return record;
+          }
+          return _copyRecord(
+            record,
+            resourceId: (payload['assignee_user_id'] ?? record.resourceId).toString(),
+            resourceName: (payload['assignee_name'] ?? record.resourceName)?.toString(),
+            syncStatus: SyncStatus.pending,
+          );
+        })
+        .toList();
+  }
+
+  Future<void> _syncQueuedAgendaActions({String? projectId}) async {
+    final queueRows = await _pendingAgendaQueueRows(projectId: projectId);
+    for (final row in queueRows) {
+      final payload = _decodeQueuePayload(row.payloadJson);
+      final assignmentId = (payload['assignment_id'] ?? row.entityId).toString();
+      try {
+        await (_database.update(_database.syncQueue)..where((t) => t.id.equals(row.id))).write(
+          SyncQueueCompanion(
+            status: const drift.Value('IN_PROGRESS'),
+            attempts: drift.Value(row.attempts + 1),
+            lastAttemptAt: drift.Value(DateTime.now()),
+            lastError: const drift.Value(null),
+          ),
+        );
+
+        switch ((payload['op'] ?? '').toString().trim().toUpperCase()) {
+          case 'CANCEL':
+            await _apiClientOrThrow.post<dynamic>(
+              '/assignments/$assignmentId/cancel',
+              data: (payload['reason'] is String &&
+                      (payload['reason'] as String).trim().isNotEmpty)
+                  ? {'reason': (payload['reason'] as String).trim()}
+                  : null,
+            );
+            await _localStore.deleteById(assignmentId);
+            break;
+          case 'TRANSFER':
+            final response = await _apiClientOrThrow.post<dynamic>(
+              '/assignments/$assignmentId/transfer',
+              data: {
+                'assignee_user_id': (payload['assignee_user_id'] ?? '').toString(),
+                if (payload['reason'] is String &&
+                    (payload['reason'] as String).trim().isNotEmpty)
+                  'reason': (payload['reason'] as String).trim(),
+              },
+            );
+            final effectiveProjectId =
+                (payload['project_id'] ?? projectId ?? '').toString();
+            final remote = _parseRemoteRecords(
+              response.data,
+              projectId: effectiveProjectId,
+            );
+            if (remote.isNotEmpty) {
+              final serverRecord = remote.first;
+              final assigneeName =
+                  (payload['assignee_name'] ?? _extractAssigneeName(response.data))?.toString();
+              final syncedRecord = _copyRecord(
+                serverRecord,
+                resourceName: assigneeName,
+                syncStatus: SyncStatus.synced,
+              );
+              await _upsertUserSnapshot(
+                syncedRecord.resourceId,
+                displayName: syncedRecord.resourceName,
+              );
+              await _localStore.upsertAssignments([syncedRecord]);
+              await _upsertActivitiesFromAssignments([syncedRecord]);
+            }
+            break;
+        }
+
+        await _deleteQueuedAgendaAction(assignmentId);
+      } on DioException catch (e) {
+        await _markQueuedAgendaActionError(row.id, e.toString());
+        if (_shouldQueueOffline(e)) {
+          break;
+        }
+      } catch (e) {
+        await _markQueuedAgendaActionError(row.id, e.toString());
+      }
+    }
+  }
+
+  Future<void> _queueAgendaAction({
+    required String assignmentId,
+    required String projectId,
+    required String action,
+    required int priority,
+    required Map<String, dynamic> payload,
+  }) async {
+    await _database.into(_database.syncQueue).insertOnConflictUpdate(
+      SyncQueueCompanion.insert(
+        id: _queueIdForAssignment(assignmentId),
+        entity: _queueEntity,
+        entityId: assignmentId,
+        action: action,
+        payloadJson: jsonEncode(payload),
+        priority: drift.Value(priority),
+        attempts: const drift.Value(0),
+        status: const drift.Value('PENDING'),
+        retryable: const drift.Value(true),
+        lastError: const drift.Value(null),
+      ),
+    );
+  }
+
+  Future<void> _deleteQueuedAgendaAction(String assignmentId) async {
+    await (_database.delete(_database.syncQueue)
+          ..where((t) => t.id.equals(_queueIdForAssignment(assignmentId))))
+        .go();
+  }
+
+  Future<void> _markQueuedAgendaActionError(String queueId, String message) async {
+    await (_database.update(_database.syncQueue)..where((t) => t.id.equals(queueId))).write(
+      SyncQueueCompanion(
+        status: const drift.Value('ERROR'),
+        lastError: drift.Value(message),
+        lastAttemptAt: drift.Value(DateTime.now()),
+      ),
+    );
+  }
+
+  Future<List<SyncQueueData>> _pendingAgendaQueueRows({String? projectId}) async {
+    final rows = await (_database.select(_database.syncQueue)
+          ..where(
+            (t) =>
+                t.entity.equals(_queueEntity) &
+                (t.status.equals('PENDING') | t.status.equals('ERROR')),
+          )
+          ..orderBy([
+            (t) => drift.OrderingTerm.desc(t.priority),
+            (t) => drift.OrderingTerm.asc(t.lastAttemptAt),
+          ]))
+        .get();
+
+    if (projectId == null || projectId.trim().isEmpty) {
+      return rows;
+    }
+
+    final normalizedProjectId = projectId.trim().toUpperCase();
+    return rows.where((row) {
+      final payload = _decodeQueuePayload(row.payloadJson);
+      final queuedProjectId =
+          (payload['project_id'] ?? '').toString().trim().toUpperCase();
+      return queuedProjectId.isEmpty || queuedProjectId == normalizedProjectId;
+    }).toList();
+  }
+
+  Future<AgendaAssignmentRecord?> _findLocalAssignmentById(
+    String assignmentId, {
+    required String projectId,
+  }) async {
+    final now = DateTime.now();
+    final localItems = await _localStore.queryRange(
+      projectId: projectId,
+      from: now.subtract(const Duration(days: 120)),
+      to: now.add(const Duration(days: 120)),
+    );
+    final item = localItems.where((candidate) => candidate.id == assignmentId).cast<AgendaItem?>().firstWhere(
+          (candidate) => candidate != null,
+          orElse: () => null,
+        );
+    if (item == null) {
+      return null;
+    }
+    return _recordFromItem(item);
+  }
+
+  AgendaAssignmentRecord _recordFromItem(
+    AgendaItem item, {
+    String? resourceName,
+    SyncStatus? syncStatus,
+  }) {
+    return AgendaAssignmentRecord(
+      id: item.id,
+      projectId: item.projectCode.trim(),
+      resourceId: item.resourceId,
+      resourceName: resourceName,
+      activityId: item.activityId,
+      title: item.title,
+      frente: item.frente,
+      municipio: item.municipio,
+      estado: item.estado,
+      pk: item.pk,
+      startAt: item.start,
+      endAt: item.end,
+      risk: item.risk,
+      syncStatus: syncStatus ?? item.syncStatus,
+    );
+  }
+
+  AgendaAssignmentRecord _copyRecord(
+    AgendaAssignmentRecord record, {
+    String? resourceId,
+    String? resourceName,
+    SyncStatus? syncStatus,
+  }) {
+    return AgendaAssignmentRecord(
+      id: record.id,
+      projectId: record.projectId,
+      resourceId: resourceId ?? record.resourceId,
+      resourceName: resourceName ?? record.resourceName,
+      activityId: record.activityId,
+      title: record.title,
+      frente: record.frente,
+      municipio: record.municipio,
+      estado: record.estado,
+      pk: record.pk,
+      latitude: record.latitude,
+      longitude: record.longitude,
+      startAt: record.startAt,
+      endAt: record.endAt,
+      risk: record.risk,
+      syncStatus: syncStatus ?? record.syncStatus,
+    );
+  }
+
+  Map<String, dynamic> _decodeQueuePayload(String raw) {
+    final decoded = jsonDecode(raw);
+    if (decoded is Map<String, dynamic>) {
+      return decoded;
+    }
+    if (decoded is Map) {
+      return Map<String, dynamic>.from(decoded);
+    }
+    return const <String, dynamic>{};
+  }
+
+  bool _shouldQueueOffline(DioException error) {
+    if (error.response != null) {
+      return false;
+    }
+
+    return error.type == DioExceptionType.connectionError ||
+        error.type == DioExceptionType.connectionTimeout ||
+        error.type == DioExceptionType.receiveTimeout ||
+        error.type == DioExceptionType.sendTimeout ||
+        error.type == DioExceptionType.unknown;
+  }
+
+  String _queueIdForAssignment(String assignmentId) =>
+      'agenda-assignment:$assignmentId';
 
   static FetchAssignments _defaultFetchAssignments(ApiClient apiClient) {
     return ({
@@ -223,6 +644,8 @@ class AssignmentsRepository {
       data: {
         'project_id': item.projectCode,
         'assignee_user_id': item.resourceId,
+        if (item.coResponsableIds.isNotEmpty)
+          'assignee_user_ids': item.coResponsableIds,
         'activity_type_code': activityTypeCode,
         'title': item.title,
         if (safeFront.isNotEmpty) 'front_ref': safeFront,
@@ -338,6 +761,12 @@ class AssignmentsRepository {
       final startAt = DateTime.tryParse(startRaw.toString());
       final endAt = DateTime.tryParse(endRaw.toString());
       if (startAt == null || endAt == null) continue;
+
+      final remoteStatus =
+          (map['status'] ?? map['execution_state'] ?? '').toString().trim().toUpperCase();
+      if (remoteStatus == 'CANCELADA' || remoteStatus == 'CANCELED') {
+        continue;
+      }
 
       out.add(
         AgendaAssignmentRecord(

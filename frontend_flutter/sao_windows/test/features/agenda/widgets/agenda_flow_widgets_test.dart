@@ -166,4 +166,41 @@ void main() {
     );
     expect(find.text('23:00'), findsOneWidget);
   });
+
+  testWidgets('TimelineList allows deleting synced agenda items from detail sheet', (tester) async {
+    final item = _agendaItem(
+      id: 'A5',
+      nextAction: 'INICIAR_ACTIVIDAD',
+      syncStatus: SyncStatus.synced,
+    );
+    AgendaItem? deletedItem;
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: TimelineList(
+            items: [item],
+            resources: const [_resource],
+            startHour: 8,
+            endHour: 10,
+            onCancelItem: (agendaItem) async {
+              deletedItem = agendaItem;
+            },
+          ),
+        ),
+      ),
+    );
+
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Inspeccion A5'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Eliminar actividad'), findsWidgets);
+    await tester.tap(find.text('Eliminar actividad').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Eliminar actividad').last);
+    await tester.pumpAndSettle();
+
+    expect(deletedItem?.id, 'A5');
+  });
 }

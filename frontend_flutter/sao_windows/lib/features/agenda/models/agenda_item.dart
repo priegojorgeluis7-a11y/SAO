@@ -37,6 +37,7 @@ class AgendaItem {
   final String nextAction;
   final String? activityTypeId;
   final String? notes;
+  final List<String> coResponsableIds;
 
   const AgendaItem({
     required this.id,
@@ -61,6 +62,7 @@ class AgendaItem {
     this.nextAction = 'SIN_ACCION',
     this.activityTypeId,
     this.notes,
+    this.coResponsableIds = const [],
   });
 
   AgendaItem copyWith({
@@ -85,6 +87,7 @@ class AgendaItem {
     String? nextAction,
     String? activityTypeId,
     String? notes,
+    List<String>? coResponsableIds,
   }) {
     return AgendaItem(
       id: id,
@@ -109,6 +112,7 @@ class AgendaItem {
       nextAction: nextAction ?? this.nextAction,
       activityTypeId: activityTypeId ?? this.activityTypeId,
       notes: notes ?? this.notes,
+      coResponsableIds: coResponsableIds ?? this.coResponsableIds,
     );
   }
 

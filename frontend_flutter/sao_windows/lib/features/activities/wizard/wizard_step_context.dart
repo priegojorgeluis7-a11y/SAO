@@ -3,7 +3,9 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
+import '../../agenda/models/resource.dart';
 import '../../../core/utils/format_utils.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
@@ -249,6 +251,12 @@ class _WizardStepContextState extends State<WizardStepContext> {
   Widget build(BuildContext context) {
     final a = widget.controller.activity;
     final c = widget.controller;
+    final terminologyProjectCode =
+        c.selectedProjectCode.isNotEmpty ? c.selectedProjectCode : c.projectCode;
+    final frontLabel = frontTerminology(
+      terminologyProjectCode,
+      capitalize: true,
+    );
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
@@ -297,7 +305,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
                 ),
                 const SizedBox(height: 8),
                 Text('Proyecto: ${c.contextProjectLabel}', style: const TextStyle(color: SaoColors.gray700)),
-                Text('Frente: ${c.contextFrontLabel}', style: const TextStyle(color: SaoColors.gray700)),
+                Text('$frontLabel: ${c.contextFrontLabel}', style: const TextStyle(color: SaoColors.gray700)),
                 Text('Ubicación: ${c.contextLocationLabel}', style: const TextStyle(color: SaoColors.gray700)),
               ],
             ),
@@ -764,6 +772,10 @@ class _WizardStepContextState extends State<WizardStepContext> {
 
         const SizedBox(height: 14),
 
+        // ── Responsables (multi-assign) ───────────────────
+        // Siempre visible; el usuario actual está bloqueado como responsable fijo.
+        _CoAssigneesSection(controller: c),
+
         _card(
           child: Row(
             children: [
@@ -1224,6 +1236,17 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
     final c = widget.controller;
     final projects = c.availableProjects;
     final fronts = c.availableFronts;
+    final terminologyProjectCode =
+        c.selectedProjectCode.isNotEmpty ? c.selectedProjectCode : c.projectCode;
+    final frontLabel = frontTerminology(
+      terminologyProjectCode,
+      capitalize: true,
+    );
+    final frontLabelLower = frontTerminology(terminologyProjectCode);
+    final frontLabelPlural = frontTerminology(
+      terminologyProjectCode,
+      plural: true,
+    );
 
     final currentProject = projects.cast<ProjectRef?>().firstWhere(
           (p) => p!.id == c.selectedProjectId,
@@ -1277,10 +1300,7 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
                 },
               ),
               const SizedBox(height: 14),
-              const Text(
-                'Frente',
-                style: SaoTypography.bodyTextSmall,
-              ),
+              Text(frontLabel, style: SaoTypography.bodyTextSmall),
               const SizedBox(height: 6),
               if (fronts.isNotEmpty)
                 DropdownButtonFormField<FrontRef>(
@@ -1308,15 +1328,15 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
               else ...[
                 TextField(
                   controller: _frontNameController,
-                  decoration: const InputDecoration(
-                    hintText: 'Captura el nombre del frente',
+                  decoration: InputDecoration(
+                    hintText: 'Captura el nombre del $frontLabelLower',
                     border: OutlineInputBorder(),
                   ),
                   onChanged: c.setFrontName,
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  'Sin frentes en catálogo para este proyecto. Captura el nombre manualmente.',
+                  'Sin $frontLabelPlural en catálogo para este proyecto. Captura el nombre manualmente.',
                   style: SaoTypography.caption.copyWith(color: SaoColors.onSurfaceVariant),
                 ),
               ],
@@ -1467,6 +1487,259 @@ class _UnplannedBannerState extends State<_UnplannedBanner> {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sección de Co-responsables
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _CoAssigneesSection extends StatelessWidget {
+  final WizardController controller;
+  const _CoAssigneesSection({required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final c = controller;
+    return AnimatedBuilder(
+      animation: c,
+      builder: (context, _) {
+        final assigneeIds = c.coAssigneeIds;
+        final assigneeNames = c.coAssigneeNames;
+
+        return Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: SaoColors.gray200),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x0A000000),
+                blurRadius: 4,
+                offset: Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.people_outline_rounded,
+                        color: SaoColors.gray600, size: 18),
+                    const SizedBox(width: 8),
+                    const Text('Responsables', style: SaoTypography.caption),
+                    const Spacer(),
+                    TextButton.icon(
+                      onPressed: () => _openPicker(context),
+                      icon: const Icon(Icons.person_add_alt_1_outlined, size: 18),
+                      label: const Text('Agregar'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: SaoColors.info,
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: assigneeIds.map((id) {
+                    final name = assigneeNames[id] ?? id;
+                    final isCurrentUser = id == c.currentUserId;
+                    return Chip(
+                      label: Text(name,
+                          style: const TextStyle(fontSize: 12)),
+                      avatar: CircleAvatar(
+                        radius: 10,
+                        backgroundColor: isCurrentUser
+                            ? SaoColors.info
+                            : SaoColors.gray400,
+                        child: Text(
+                          name.isNotEmpty
+                              ? name[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                              fontSize: 9,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                      deleteIcon: isCurrentUser
+                          ? const Icon(Icons.lock_outline_rounded,
+                              size: 14)
+                          : const Icon(Icons.close_rounded, size: 14),
+                      onDeleted: isCurrentUser
+                          ? null
+                          : () => c.removeCoAssignee(id),
+                      backgroundColor: isCurrentUser
+                          ? SaoColors.info.withValues(alpha: 0.08)
+                          : SaoColors.gray100,
+                      side: BorderSide(
+                        color: isCurrentUser
+                            ? SaoColors.info.withValues(alpha: 0.3)
+                            : SaoColors.gray300,
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openPicker(BuildContext context) async {
+    // Load available co-assignees from the repository.
+    await controller.loadCoAssigneesIfNeeded();
+
+    if (!context.mounted) return;
+
+    final available = controller.availableCoAssignees;
+
+    if (available.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No hay más usuarios disponibles en este proyecto.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => _CoAssigneePicker(
+        controller: controller,
+        available: available,
+      ),
+    );
+  }
+}
+
+class _CoAssigneePicker extends StatefulWidget {
+  final WizardController controller;
+  final List<Resource> available;
+  const _CoAssigneePicker(
+      {required this.controller, required this.available});
+
+  @override
+  State<_CoAssigneePicker> createState() => _CoAssigneePickerState();
+}
+
+class _CoAssigneePickerState extends State<_CoAssigneePicker> {
+  String _query = '';
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Resource> filtered = widget.available
+        .where((u) =>
+            _query.isEmpty ||
+            u.name.toLowerCase().contains(_query.toLowerCase()))
+        .toList();
+
+    return DraggableScrollableSheet(
+      initialChildSize: 0.55,
+      minChildSize: 0.35,
+      maxChildSize: 0.9,
+      expand: false,
+      builder: (ctx, scrollCtrl) => Column(
+        children: [
+          const SizedBox(height: 8),
+          Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: SaoColors.gray300,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                const Text('Agregar responsable',
+                    style: SaoTypography.sectionTitle),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close_rounded),
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: TextField(
+              autofocus: true,
+              decoration: const InputDecoration(
+                hintText: 'Buscar por nombre…',
+                prefixIcon: Icon(Icons.search_rounded),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                border: OutlineInputBorder(),
+              ),
+              onChanged: (v) => setState(() => _query = v),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: filtered.isEmpty
+                ? const Center(
+                    child: Text('Sin resultados',
+                        style: TextStyle(color: SaoColors.gray500)))
+                : ListView.builder(
+                    controller: scrollCtrl,
+                    itemCount: filtered.length,
+                    itemBuilder: (ctx2, i) {
+                      final user = filtered[i];
+                      final alreadyAdded = widget.controller.coAssigneeIds
+                          .contains(user.id);
+                      return ListTile(
+                        leading: CircleAvatar(
+                          backgroundColor: SaoColors.info,
+                          child: Text(
+                            user.name.isNotEmpty
+                                ? user.name[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        title: Text(user.name),
+                        trailing: alreadyAdded
+                            ? const Icon(Icons.check_circle_rounded,
+                                color: SaoColors.success)
+                            : const Icon(Icons.add_circle_outline_rounded,
+                                color: SaoColors.info),
+                        onTap: alreadyAdded
+                            ? null
+                            : () {
+                                widget.controller.addCoAssignee(user);
+                                Navigator.of(ctx).pop();
+                              },
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }

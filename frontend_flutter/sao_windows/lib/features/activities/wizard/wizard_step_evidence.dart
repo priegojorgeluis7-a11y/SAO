@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import '../../../core/utils/snackbar.dart';
@@ -146,6 +147,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
           evidence.localPath,
           lat: evidence.gpsLocation?.latitude,
           lng: evidence.gpsLocation?.longitude,
+          cachedBytes: evidence.cachedBytes,
         );
       }
     } catch (e) {
@@ -353,20 +355,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.file(
-                        File(evidencia.localPath),
-                        width: 80,
-                        height: 80,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: 80,
-                            height: 80,
-                            color: SaoColors.gray100,
-                            child: const Icon(Icons.broken_image, color: SaoColors.gray400),
-                          );
-                        },
-                      ),
+                      child: _buildThumbnail(evidencia),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -463,6 +452,33 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildThumbnail(EvidenceDraft evidencia) {
+    const size = 80.0;
+    final fallback = Container(
+      width: size,
+      height: size,
+      color: SaoColors.gray100,
+      child: const Icon(Icons.broken_image, color: SaoColors.gray400),
+    );
+    // On web, dart:io File cannot read blob URLs — use pre-read bytes instead.
+    if (kIsWeb && evidencia.cachedBytes != null) {
+      return Image.memory(
+        evidencia.cachedBytes!,
+        width: size,
+        height: size,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => fallback,
+      );
+    }
+    return Image.file(
+      File(evidencia.localPath),
+      width: size,
+      height: size,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => fallback,
     );
   }
 }

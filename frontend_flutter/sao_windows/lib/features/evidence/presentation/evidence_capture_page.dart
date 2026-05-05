@@ -3,6 +3,7 @@
 // Flows: Select camera/gallery → Capture/Pick → Add description → Preview → Submit
 
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -165,8 +166,14 @@ class _EvidenceCapturePageState extends State<EvidenceCapturePage> {
 
       // Step 2: Read file bytes and PUT to signed URL
       appLogger.d('📤 Uploading file to GCS...');
-      final file = File(_evidence!.localPath);
-      final bytes = await file.readAsBytes();
+      // Use cached bytes if available (set by web gallery picker).
+      // On web, dart:io File cannot read blob URLs.
+      final Uint8List bytes;
+      if (_evidence!.cachedBytes != null) {
+        bytes = _evidence!.cachedBytes!;
+      } else {
+        bytes = await File(_evidence!.localPath).readAsBytes();
+      }
 
       await _uploadRepository.uploadBytesToSignedUrl(
         signedUrl: initResult.signedUrl,

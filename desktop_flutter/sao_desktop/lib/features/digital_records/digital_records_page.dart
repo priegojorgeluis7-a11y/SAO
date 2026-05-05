@@ -1,15 +1,17 @@
 import 'dart:convert';
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../data/repositories/activity_repository.dart';
 import '../../data/repositories/evidence_repository.dart';
 import '../../ui/sao_ui.dart';
@@ -315,57 +317,47 @@ Future<File> _downloadReportPdfForDetail(
   final signedUrl =
       await EvidenceRepository().getDownloadSignedUrl(evidence.id);
   final uri = Uri.parse(signedUrl);
-  final client = HttpClient();
-  try {
-    final request = await client.getUrl(uri);
-    final response = await request.close();
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException('No se pudo descargar PDF (${response.statusCode})');
-    }
-
-    final bytes = <int>[];
-    await for (final chunk in response) {
-      bytes.addAll(chunk);
-    }
-    if (bytes.isEmpty) {
-      throw const FileSystemException('El PDF descargado llegó vacío');
-    }
-
-    final docsRootPath = await _resolveUserDocumentsRootPath();
-    final projectFolder =
-        _sanitizeFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
-    final frontFolder =
-        _sanitizeFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
-    final stateFolder =
-        _sanitizeFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
-    final municipalityFolder = _sanitizeFolderSegment(detail.summary.municipio,
-        fallback: 'SIN_MUNICIPIO');
-    final activityFolder = _sanitizeFolderSegment(detail.summary.activityType,
-        fallback: 'ACTIVIDAD');
-    final expedienteFolder =
-        _sanitizeFolderSegment(detail.summary.id, fallback: 'SIN_ID');
-    final activityDir = Directory(
-      '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
-    );
-    if (!await activityDir.exists()) {
-      await activityDir.create(recursive: true);
-    }
-
-    final file = File(
-        '${activityDir.path}/${_inferredReportFileName(detail, evidence)}');
-    await file.writeAsBytes(bytes, flush: true);
-
-    await registerDownloadedReportReference(
-      activityId: detail.summary.id,
-      file: file,
-      sourceEvidenceId: evidence.id,
-      generatedAt: evidence.uploadedAt,
-    );
-
-    return file;
-  } finally {
-    client.close(force: true);
+  final response = await http.get(uri);
+  if (response.statusCode < 200 || response.statusCode >= 300) {
+    throw HttpException('No se pudo descargar PDF (${response.statusCode})');
   }
+  final bytes = response.bodyBytes;
+  if (bytes.isEmpty) {
+    throw const FileSystemException('El PDF descargado llegó vacío');
+  }
+
+  final docsRootPath = await _resolveUserDocumentsRootPath();
+  final projectFolder =
+      _sanitizeFolderSegment(detail.summary.projectId, fallback: 'GENERAL');
+  final frontFolder =
+      _sanitizeFolderSegment(detail.summary.front, fallback: 'SIN_FRENTE');
+  final stateFolder =
+      _sanitizeFolderSegment(detail.summary.estado, fallback: 'SIN_ESTADO');
+  final municipalityFolder = _sanitizeFolderSegment(detail.summary.municipio,
+      fallback: 'SIN_MUNICIPIO');
+  final activityFolder = _sanitizeFolderSegment(detail.summary.activityType,
+      fallback: 'ACTIVIDAD');
+  final expedienteFolder =
+      _sanitizeFolderSegment(detail.summary.id, fallback: 'SIN_ID');
+  final activityDir = Directory(
+    '$docsRootPath/SAO_Expedientes/$projectFolder/$frontFolder/$stateFolder/$municipalityFolder/$activityFolder/$expedienteFolder/Reportes',
+  );
+  if (!await activityDir.exists()) {
+    await activityDir.create(recursive: true);
+  }
+
+  final file = File(
+      '${activityDir.path}/${_inferredReportFileName(detail, evidence)}');
+  await file.writeAsBytes(bytes, flush: true);
+
+  await registerDownloadedReportReference(
+    activityId: detail.summary.id,
+    file: file,
+    sourceEvidenceId: evidence.id,
+    generatedAt: evidence.uploadedAt,
+  );
+
+  return file;
 }
 
 bool _canDeleteFromDigitalRecord(AppUser? user, {String? projectId}) {
@@ -1038,12 +1030,12 @@ class _FiltersPanel extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: userOptions.contains(selectedUserValue)
                   ? selectedUserValue
                   : 'Todo',
               decoration: InputDecoration(
                 labelText: 'Usuario que realizó',
-                prefixIcon: const Icon(Icons.person_search_rounded),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
@@ -1108,7 +1100,9 @@ class _ExplorerBreadcrumb extends StatelessWidget {
   Widget build(BuildContext context) {
     final segments = <String>[
       project.isEmpty ? 'Proyectos' : project,
-      front.isEmpty ? 'Frentes' : front,
+      front.isEmpty
+          ? frontTerminology(project, plural: true, capitalize: true)
+          : front,
       state.isEmpty ? 'Estados' : state,
     ];
 
@@ -1197,7 +1191,7 @@ class _FolderTreeExplorer extends ConsumerWidget {
 
     String normalizedFront(CompletedActivity item) {
       final value = item.front.trim();
-      return value.isEmpty ? 'Sin frente' : value;
+      return value.isEmpty ? 'Sin ${frontTerminology(item.projectId)}' : value;
     }
 
     String normalizedState(CompletedActivity item) {
@@ -1207,9 +1201,9 @@ class _FolderTreeExplorer extends ConsumerWidget {
 
     final derivedProjects = items.map(normalizedProject).toSet();
     final configuredProjects = projects
-        .map((item) => item.trim())
-        .where((item) => item.isNotEmpty)
-        .toSet();
+      .map((item) => item.trim())
+      .where((item) => item.isNotEmpty)
+      .toSet();
     final sortedProjects = <String>{
       ...configuredProjects,
       ...derivedProjects,
@@ -1628,7 +1622,9 @@ class _RecordRow extends ConsumerWidget {
                   ),
                 _MetaChip(
                     icon: Icons.folder_open_rounded,
-                    label: item.front.isEmpty ? 'Sin frente' : item.front),
+                  label: item.front.isEmpty
+                    ? 'Sin ${frontTerminology(item.projectId)}'
+                    : item.front),
                 _MetaChip(
                     icon: Icons.map_outlined,
                     label: item.estado.isEmpty ? 'Sin estado' : item.estado),
@@ -2048,7 +2044,7 @@ class _DetailHero extends ConsumerWidget {
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      '${summary.projectId} · ${summary.front.isEmpty ? 'Sin frente' : summary.front} · ${summary.estado.isEmpty ? 'Sin estado' : summary.estado}',
+                      '${summary.projectId} · ${summary.front.isEmpty ? 'Sin ${frontTerminology(summary.projectId)}' : summary.front} · ${summary.estado.isEmpty ? 'Sin estado' : summary.estado}',
                       style: SaoTypography.bodyText.copyWith(
                         color: SaoColors.textMutedFor(context),
                       ),
@@ -2603,7 +2599,7 @@ class _ManualRelatedHistoryCard extends StatelessWidget {
         : (item!.title.trim().isEmpty ? item!.activityType : item!.title);
     final subtitle = item == null
         ? (unresolvedId ?? 'Sin referencia')
-        : '${item!.projectId} · ${item!.front.isEmpty ? 'Sin frente' : item!.front} · ${_formatDate(item!.createdAt)}';
+      : '${item!.projectId} · ${item!.front.isEmpty ? 'Sin ${frontTerminology(item!.projectId)}' : item!.front} · ${_formatDate(item!.createdAt)}';
     final chipLabel = item?.pk.trim().isNotEmpty == true
         ? item!.pk.trim()
         : (unresolvedId ?? 'Vínculo manual');
@@ -2852,22 +2848,15 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
     final signedUrl =
         await EvidenceRepository().getDownloadSignedUrl(evidence.id);
     final uri = Uri.parse(signedUrl);
-    final client = HttpClient();
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException(
-            'No se pudo descargar PDF (${response.statusCode})');
-      }
-
-      final bytes = <int>[];
-      await for (final chunk in response) {
-        bytes.addAll(chunk);
-      }
-      if (bytes.isEmpty) {
-        throw const FileSystemException('El PDF descargado llegó vacío');
-      }
+    final httpResponse = await http.get(uri);
+    if (httpResponse.statusCode < 200 || httpResponse.statusCode >= 300) {
+      throw HttpException(
+          'No se pudo descargar PDF (${httpResponse.statusCode})');
+    }
+    final bytes = httpResponse.bodyBytes;
+    if (bytes.isEmpty) {
+      throw const FileSystemException('El PDF descargado llegó vacío');
+    }
 
       final docsRootPath = await _resolveUserDocumentsRootPath();
       final projectFolder =
@@ -2902,9 +2891,6 @@ class _DocumentsSectionState extends ConsumerState<_DocumentsSection> {
       );
 
       return file;
-    } finally {
-      client.close(force: true);
-    }
   }
 
   Future<void> _downloadAndOpen(
@@ -3217,11 +3203,11 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
       );
     }
 
-    final file = source.startsWith('file://')
-        ? File(Uri.parse(source).toFilePath())
-        : File(source);
-    return Image.file(
-      file,
+    final fileUrl = source.startsWith('file://')
+        ? source
+        : Uri.file(source).toString();
+    return Image.network(
+      fileUrl,
       fit: BoxFit.cover,
       errorBuilder: (_, __, ___) => const Center(
         child: Icon(
@@ -3406,38 +3392,27 @@ class _EvidenceSectionState extends ConsumerState<_EvidenceSection> {
     final signedUrl =
         await EvidenceRepository().getDownloadSignedUrl(evidence.id);
     final uri = Uri.parse(signedUrl);
-    final client = HttpClient();
-
-    try {
-      final request = await client.getUrl(uri);
-      final response = await request.close();
-      if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException(
-            'No se pudo descargar la evidencia (${response.statusCode})');
-      }
-
-      final bytes = <int>[];
-      await for (final chunk in response) {
-        bytes.addAll(chunk);
-      }
-      if (bytes.isEmpty) {
-        throw const FileSystemException('La evidencia descargada llegó vacía');
-      }
-
-      final targetDir = _buildTargetDirectory(evidence);
-      if (!await targetDir.exists()) {
-        await targetDir.create(recursive: true);
-      }
-
-      final ext = _guessExtension(evidence, signedUrl);
-      final file =
-          File('${targetDir.path}/${_buildEvidenceFilePrefix(evidence)}$ext');
-      await file.writeAsBytes(bytes, flush: true);
-      _previewSourceCache[evidence.id] = Future<String>.value(file.path);
-      return file;
-    } finally {
-      client.close(force: true);
+    final response = await http.get(uri);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+          'No se pudo descargar la evidencia (${response.statusCode})');
     }
+    final bytes = response.bodyBytes;
+    if (bytes.isEmpty) {
+      throw const FileSystemException('La evidencia descargada llegó vacía');
+    }
+
+    final targetDir = _buildTargetDirectory(evidence);
+    if (!await targetDir.exists()) {
+      await targetDir.create(recursive: true);
+    }
+
+    final ext = _guessExtension(evidence, signedUrl);
+    final file =
+        File('${targetDir.path}/${_buildEvidenceFilePrefix(evidence)}$ext');
+    await file.writeAsBytes(bytes, flush: true);
+    _previewSourceCache[evidence.id] = Future<String>.value(file.path);
+    return file;
   }
 
   Future<void> _downloadAndOpen(EvidenceItem evidence) async {

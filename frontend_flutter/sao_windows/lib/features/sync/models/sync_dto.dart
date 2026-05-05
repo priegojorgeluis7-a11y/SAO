@@ -74,6 +74,7 @@ class ActivityDTO {
   final String? reviewComment;
   final String? assignedToUserId;
   final String? assignedToUserName;
+  final List<String> participantUserIds;
   final String createdByUserId;
   final String? catalogVersionId;
   final String activityTypeCode;
@@ -104,6 +105,7 @@ class ActivityDTO {
     this.reviewComment,
     this.assignedToUserId,
     this.assignedToUserName,
+    this.participantUserIds = const [],
     required this.createdByUserId,
     required this.catalogVersionId,
     required this.activityTypeCode,
@@ -156,6 +158,10 @@ class ActivityDTO {
       reviewComment: asStringOrNull('review_comment'),
       assignedToUserId: asStringOrNull('assigned_to_user_id'),
       assignedToUserName: asStringOrNull('assigned_to_user_name'),
+      participantUserIds: (json['participant_user_ids'] as List<dynamic>? ?? [])
+          .map((e) => e.toString())
+          .where((e) => e.isNotEmpty)
+          .toList(),
       createdByUserId: asStringOrNull('created_by_user_id') ?? '',
       catalogVersionId: asStringOrNull('catalog_version_id'),
       activityTypeCode: asStringOrNull('activity_type_code') ?? 'UNKNOWN',
@@ -192,6 +198,7 @@ class ActivityDTO {
       'review_reject_reason_code': reviewRejectReasonCode,
       'review_comment': reviewComment,
       'assigned_to_user_id': assignedToUserId,
+      if (participantUserIds.isNotEmpty) 'participant_user_ids': participantUserIds,
       'created_by_user_id': createdByUserId,
       'catalog_version_id': catalogVersionId,
       'activity_type_code': activityTypeCode,

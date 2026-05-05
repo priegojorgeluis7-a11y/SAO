@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../core/constants.dart';
 import '../../data/repositories/projects_repository.dart';
 import '../../ui/theme/sao_colors.dart';
 
@@ -31,12 +30,6 @@ class ProjectsPage extends ConsumerStatefulWidget {
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   static const _hiddenTemplateProjectCodes = {'PROJECT_0', 'P0'};
 
-  static const _allProjectsItem = ProjectItem(
-    code: kAllProjects,
-    name: 'Todos los proyectos',
-    isActive: true,
-  );
-
   static const _fallbackProjects = <ProjectItem>[
     ProjectItem(code: 'TMQ', name: 'Tren México–Querétaro', isActive: true),
     ProjectItem(code: 'TAP', name: 'Tren AIFA–Pachuca', isActive: true),
@@ -56,8 +49,28 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
         if (!mounted) return;
         ref.read(projectSelectionControllerProvider).setActiveProject(initialCode);
       });
+    } else {
+      // If no project is specified, resolve to the first available project after loading
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _selectFirstProjectIfAvailable();
+      });
     }
     _loadProjects();
+  }
+
+  Future<void> _selectFirstProjectIfAvailable() async {
+    if (!mounted || widget.selectedCode.trim().isNotEmpty) return;
+    try {
+      final projects = await ref.read(allProjectsProvider.future);
+      if (!mounted || projects.isEmpty) return;
+      
+      final firstProject = projects[0].code.trim().toUpperCase();
+      if (firstProject.isNotEmpty) {
+        ref.read(projectSelectionControllerProvider).setActiveProject(firstProject);
+      }
+    } catch (e) {
+      // Silently fail; user can select a project manually
+    }
   }
 
   Future<void> _loadProjects() async {
@@ -104,7 +117,7 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
 
   List<ProjectItem> get _filtered {
     final q = _query.trim().toLowerCase();
-    final base = <ProjectItem>[_allProjectsItem, ..._projects];
+    final base = <ProjectItem>[..._projects];
     if (q.isEmpty) return base;
     return base.where((p) {
       return p.code.toLowerCase().contains(q) || p.name.toLowerCase().contains(q);

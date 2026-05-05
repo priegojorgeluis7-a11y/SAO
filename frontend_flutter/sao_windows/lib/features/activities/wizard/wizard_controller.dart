@@ -2,7 +2,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:drift/drift.dart' as drift;
 import 'package:get_it/get_it.dart';
@@ -13,6 +15,7 @@ import '../../../data/local/dao/activity_dao.dart';
 import '../../../core/constants.dart';
 import '../../../core/catalog/sync/catalog_sync_service.dart';
 import '../../../core/services/connectivity_service.dart';
+import '../../../core/network/api_client.dart';
 import '../../../core/utils/logger.dart';
 import '../../../core/utils/format_utils.dart';
 import '../../home/models/today_activity.dart';
@@ -20,6 +23,9 @@ import '../../catalog/catalog_repository.dart';
 import '../../evidence/pending_evidence_store.dart';
 import '../../sync/models/sync_dto.dart';
 import '../../sync/services/sync_service.dart';
+import '../../agenda/data/users_repository.dart';
+import '../../agenda/data/users_dao.dart';
+import '../../agenda/models/resource.dart';
 import 'wizard_validation.dart';
 import 'validation/unplanned_validation.dart' as unplanned_val;
 import 'models/evidence_draft.dart';
@@ -54,6 +60,7 @@ class WizardController extends ChangeNotifier {
   final PendingEvidenceStore pendingStore;
   final AppDb database;
   final String currentUserId; // Usuario que está creando la actividad
+  final String currentUserName; // Nombre legible del usuario actual
   final bool isUnplanned; // true → modo actividad no planeada
 
   late final ActivityDao _dao;
@@ -65,14 +72,79 @@ class WizardController extends ChangeNotifier {
     required this.pendingStore,
     required this.database,
     required this.currentUserId,
+    this.currentUserName = '',
     this.isUnplanned = false,
   }) {
     _dao = ActivityDao(database);
+    // Current user is always a co-assignee (non-removable).
+    _coAssigneeIds.add(currentUserId);
+    if (currentUserName.isNotEmpty) {
+      _coAssigneeNames[currentUserId] = currentUserName;
+    }
   }
 
   bool _loading = true;
   bool _draftHydrationReady = false;
   bool get loading => _loading;
+
+  // ── Co-responsables ────────────────────────────────────
+  /// IDs seleccionados como co-responsables (incluye siempre al usuario actual).
+  final Set<String> _coAssigneeIds = {};
+  /// Nombres legibles de los co-responsables, indexados por userId.
+  final Map<String, String> _coAssigneeNames = {};
+  /// Usuarios disponibles para seleccionar como co-responsables.
+  List<Resource> _availableCoAssignees = const [];
+  bool _coAssigneesLoaded = false;
+
+  Set<String> get coAssigneeIds => Set.unmodifiable(_coAssigneeIds);
+  Map<String, String> get coAssigneeNames => Map.unmodifiable(_coAssigneeNames);
+  List<Resource> get availableCoAssignees => List.unmodifiable(_availableCoAssignees);
+
+  void addCoAssignee(Resource user) {
+    if (_coAssigneeIds.add(user.id)) {
+      _coAssigneeNames[user.id] = user.name;
+      notifyListeners();
+    }
+  }
+
+  /// El usuario actual no puede ser removido.
+  void removeCoAssignee(String userId) {
+    if (userId == currentUserId) return;
+    if (_coAssigneeIds.remove(userId)) {
+      _coAssigneeNames.remove(userId);
+      notifyListeners();
+    }
+  }
+
+  /// Carga usuarios del proyecto para mostrar en el picker de co-responsables.
+  Future<void> loadCoAssigneesIfNeeded() async {
+    if (_coAssigneesLoaded) return;
+    _coAssigneesLoaded = true;
+    try {
+      final apiClient = GetIt.I.isRegistered<ApiClient>() ? GetIt.I<ApiClient>() : null;
+      if (apiClient == null) return;
+      final repo = AgendaUsersRepository(
+        apiClient: apiClient,
+        usersDao: UsersDao(database),
+      );
+      final connectivity = GetIt.I.isRegistered<ConnectivityService>()
+          ? GetIt.I<ConnectivityService>()
+          : null;
+      final isOffline = connectivity == null || !(await connectivity.hasConnection());
+      final projectId = selectedProjectId?.trim().isNotEmpty == true
+          ? selectedProjectId!.trim()
+          : selectedProjectCode.trim();
+      final users = await repo.getOperationalUsers(
+        projectId: projectId.isNotEmpty ? projectId : null,
+        isOffline: isOffline,
+      );
+      // Exclude current user from the picker (they're already locked in).
+      _availableCoAssignees = users.where((u) => u.id != currentUserId).toList();
+      notifyListeners();
+    } catch (e) {
+      appLogger.w('loadCoAssigneesIfNeeded failed: $e');
+    }
+  }
 
   /// Verdadero cuando el usuario pasó el paso 1 en esta sesión del wizard.
   bool _hasPassedStep1 = false;
@@ -228,7 +300,7 @@ class WizardController extends ChangeNotifier {
       }
     } catch (e, st) {
       appLogger.w(
-        'resolveInitialProjectCode: fallback to TMQ — $e',
+        'resolveInitialProjectCode: fallback to ALL — $e',
         stackTrace: st,
       );
     }
@@ -240,7 +312,7 @@ class WizardController extends ChangeNotifier {
         return projects.first.code.trim().toUpperCase();
       }
     } catch (_) {}
-    return 'TMQ';
+    return kAllProjects;
   }
 
   Future<void> _refreshCatalogIfOnline(String projectId) async {
@@ -364,12 +436,19 @@ class WizardController extends ChangeNotifier {
     selectedFrontName = activity.frente;
   }
 
-  static const List<ProjectRef> _fallbackProjects = [
-    ProjectRef(id: 'TMQ', code: 'TMQ', name: 'Tren México–Querétaro'),
-    ProjectRef(id: 'TAP', code: 'TAP', name: 'Tren AIFA–Pachuca'),
-    ProjectRef(id: 'TQI', code: 'TQI', name: 'Tren Querétaro–Irapuato'),
-    ProjectRef(id: 'TSNL', code: 'TSNL', name: 'Tren Saltillo–Nuevo Laredo'),
-  ];
+  List<ProjectRef> _fallbackProjectsForContext() {
+    final normalizedProjectCode = projectCode.trim().toUpperCase();
+    if (normalizedProjectCode.isNotEmpty && normalizedProjectCode != kAllProjects) {
+      return <ProjectRef>[
+        ProjectRef(
+          id: normalizedProjectCode,
+          code: normalizedProjectCode,
+          name: normalizedProjectCode,
+        ),
+      ];
+    }
+    return const <ProjectRef>[];
+  }
 
   List<ProjectRef> get availableProjects =>
       List.unmodifiable(_availableProjects);
@@ -417,14 +496,15 @@ class WizardController extends ChangeNotifier {
 
     try {
       final projects = await dao.listActiveProjects();
+      final fallbackProjects = _fallbackProjectsForContext();
       _availableProjects = projects.isNotEmpty
           ? projects
                 .map((p) => ProjectRef(id: p.id, code: p.code, name: p.name))
                 .toList()
-          : _fallbackProjects;
+          : fallbackProjects;
     } catch (e) {
       appLogger.w('loadProjectOptions: falling back to local projects — $e');
-      _availableProjects = _fallbackProjects;
+      _availableProjects = _fallbackProjectsForContext();
     }
 
     final selected = _availableProjects.cast<ProjectRef?>().firstWhere(
@@ -996,8 +1076,8 @@ class WizardController extends ChangeNotifier {
     unawaited(_persistEvidenceDraftsForCurrentActivity());
   }
 
-  void addPhotoWithMetadata(String path, {double? lat, double? lng}) {
-    evidencias.add(EvidenceDraft(localPath: path, lat: lat, lng: lng));
+  void addPhotoWithMetadata(String path, {double? lat, double? lng, Uint8List? cachedBytes}) {
+    evidencias.add(EvidenceDraft(localPath: path, lat: lat, lng: lng, cachedBytes: cachedBytes));
     notifyListeners();
     unawaited(_persistEvidenceDraftsForCurrentActivity());
   }
@@ -1909,6 +1989,22 @@ class WizardController extends ChangeNotifier {
             fieldKey: 'unplanned_reference',
             valueText: drift.Value(unplannedReference.trim()),
           ),
+
+        // Co-responsables (IDs y nombres)
+        if (_coAssigneeIds.length > 1)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'co_assignee_ids',
+            valueJson: drift.Value(jsonEncode(_coAssigneeIds.toList())),
+          ),
+        if (_coAssigneeNames.isNotEmpty)
+          ActivityFieldsCompanion.insert(
+            id: _uuid.v4(),
+            activityId: activityId,
+            fieldKey: 'co_assignee_names',
+            valueJson: drift.Value(jsonEncode(_coAssigneeNames)),
+          ),
       ];
 
       // Guardar en DB usando el DAO
@@ -2240,6 +2336,32 @@ class WizardController extends ChangeNotifier {
       final refField = fields['unplanned_reference'];
       if (refField?.valueText != null)
         unplannedReference = refField!.valueText!;
+    }
+
+    // Co-responsables (restaurar desde draft)
+    if (_coAssigneeIds.length <= 1) {
+      final coIdsField = fields['co_assignee_ids'];
+      if (coIdsField?.valueJson != null) {
+        try {
+          final decoded = jsonDecode(coIdsField!.valueJson!);
+          if (decoded is List) {
+            for (final id in decoded) {
+              _coAssigneeIds.add(id.toString());
+            }
+          }
+        } catch (_) {}
+      }
+      final coNamesField = fields['co_assignee_names'];
+      if (coNamesField?.valueJson != null) {
+        try {
+          final decoded = jsonDecode(coNamesField!.valueJson!);
+          if (decoded is Map) {
+            decoded.forEach((k, v) {
+              _coAssigneeNames[k.toString()] = v.toString();
+            });
+          }
+        } catch (_) {}
+      }
     }
 
     // Evidencias guardadas en DB
@@ -2811,6 +2933,12 @@ class WizardController extends ChangeNotifier {
         add('unplanned_reference', text: unplannedReference.trim());
       }
     }
+    if (_coAssigneeIds.length > 1) {
+      add('co_assignee_ids', json: jsonEncode(_coAssigneeIds.toList()));
+    }
+    if (_coAssigneeNames.isNotEmpty) {
+      add('co_assignee_names', json: jsonEncode(_coAssigneeNames));
+    }
     add(
       'wizard_payload_snapshot',
       json: jsonEncode(
@@ -2899,17 +3027,28 @@ class WizardController extends ChangeNotifier {
           continue;
         }
 
-        final file = File(localPath);
-        if (!await file.exists()) {
-          appLogger.w(
-            'Skipping pending upload; local evidence file is missing: $localPath',
-          );
-          continue;
+        int sizeBytes;
+        String fileName;
+        if (kIsWeb) {
+          // On web, localPath is a blob URL; File.exists() always returns false.
+          // Compute sizeBytes from in-memory cachedBytes if available.
+          final draft = evidencias.where((d) => d.localPath == localPath).firstOrNull;
+          sizeBytes = draft?.cachedBytes?.length ?? 0;
+          fileName = 'evidence.jpg';
+        } else {
+          final file = File(localPath);
+          if (!await file.exists()) {
+            appLogger.w(
+              'Skipping pending upload; local evidence file is missing: $localPath',
+            );
+            continue;
+          }
+          sizeBytes = await file.length();
+          fileName = file.uri.pathSegments.isNotEmpty
+              ? file.uri.pathSegments.last
+              : 'evidence.jpg';
         }
 
-        final fileName = file.uri.pathSegments.isNotEmpty
-            ? file.uri.pathSegments.last
-            : 'evidence.jpg';
         final lowerPath = localPath.toLowerCase();
         final mimeType = lowerPath.endsWith('.png')
             ? 'image/png'
@@ -2926,7 +3065,7 @@ class WizardController extends ChangeNotifier {
                 localPath: localPath,
                 fileName: fileName,
                 mimeType: mimeType,
-                sizeBytes: await file.length(),
+                sizeBytes: sizeBytes,
                 description: drift.Value(
                   evidence.caption?.trim().isNotEmpty == true
                       ? evidence.caption!.trim()
@@ -2976,6 +3115,7 @@ class WizardController extends ChangeNotifier {
         pkEnd: pkEndForSync,
         executionState: 'COMPLETADA',
         assignedToUserId: assignedToUserId,
+        participantUserIds: _coAssigneeIds.toList(),
         createdByUserId: companion.createdByUserId.value,
         catalogVersionId: companion.catalogVersionId.value ?? '',
         activityTypeCode: activityTypeCode,

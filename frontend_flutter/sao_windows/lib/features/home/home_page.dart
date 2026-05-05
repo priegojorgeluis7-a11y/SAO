@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/catalog/state/catalog_providers.dart';
 import '../../core/connectivity/offline_mode_controller.dart';
@@ -17,6 +19,7 @@ import '../../core/notifications/push_notifications_service.dart';
 import '../../core/sync/pending_sync_services.dart';
 import '../../core/sync/sync_orchestrator.dart';
 import '../../core/flow/activity_flow_projection.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../data/local/app_db.dart';
 import '../../data/local/dao/activity_dao.dart';
 import '../auth/application/auth_providers.dart';
@@ -33,10 +36,9 @@ import 'home_push_refresh_policy.dart';
 import 'home_task_sections.dart';
 import 'models/today_activity.dart';
 import 'widgets/home_task_inbox.dart';
+import '../notifications/state/notifications_provider.dart';
 
 enum FilterMode { totales, vencidas, completadas, pendienteSync }
-
-enum DateRangeFilter { hoy, semana, mes }
 
 bool canTransferResponsibilityForViewer({
   required bool isPrivilegedAssignmentManager,
@@ -91,6 +93,8 @@ class HomePage extends ConsumerStatefulWidget {
 
 class _HomePageState extends ConsumerState<HomePage>
     with WidgetsBindingObserver {
+  static bool _updateCheckDone = false;
+
   // ====== Estado de datos (MUTABLE) ======
   List<TodayActivity> _items = [];
   bool _loadingActivities = true;
@@ -102,15 +106,14 @@ class _HomePageState extends ConsumerState<HomePage>
 
   // Filtros interactivos
   FilterMode _filterMode = FilterMode.totales;
-  DateRangeFilter _dateRangeFilter = DateRangeFilter.hoy;
 
   static const _filterModeKey = 'home_filter_mode';
-  static const _dateRangeFilterKey = 'home_date_range_filter';
   static const Duration _catalogAutoCheckInterval = Duration(minutes: 5);
   static const Duration _remoteHomeRefreshInterval = Duration(seconds: 20);
 
   // ====== Estado de ejecución usando ExecutionState ======
   bool _isAdminViewer = false;
+  bool _canViewOnlineUsers = false;
   bool _hasPrivilegedAssignmentTransferAccess = false;
   // Default: filterrar por asignado al usuario (seguro por defecto) hasta que se resuelva el rol.
   bool _isOperativeViewer = true;
@@ -127,6 +130,7 @@ class _HomePageState extends ConsumerState<HomePage>
   String? _lastCatalogNotifiedVersion;
   StreamSubscription<RemoteMessage>? _pushMessageSubscription;
   Timer? _remoteHomeRefreshTimer;
+  bool _updateDialogVisible = false;
 
   @override
   void initState() {
@@ -143,6 +147,15 @@ class _HomePageState extends ConsumerState<HomePage>
       localStore: AssignmentsDao(db),
       database: db,
     );
+    
+    // If no project is specified, default to TODOS.
+    if (widget.selectedProject.trim().isEmpty ||
+        widget.selectedProject.trim().toUpperCase() == kAllProjects) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _resolveDefaultProjectAndNavigate();
+      });
+    }
+    
     // Persist active project so sync pull can use it from the sync center.
     if (widget.selectedProject.trim().toUpperCase() != kAllProjects) {
       // ignore: unawaited_futures
@@ -155,8 +168,6 @@ class _HomePageState extends ConsumerState<HomePage>
     // ignore: unawaited_futures
     _loadFilterMode();
     // ignore: unawaited_futures
-    _loadDateRangeFilter();
-    // ignore: unawaited_futures
     _loadHomeActivities();
 
     // ignore: unawaited_futures
@@ -168,6 +179,74 @@ class _HomePageState extends ConsumerState<HomePage>
     _startRemoteRefreshTimer();
     // ignore: unawaited_futures
     _refreshRemoteHomeStateIfNeeded(force: true);
+    // ignore: unawaited_futures
+    _checkForAppUpdateOnce();
+  }
+
+  Future<void> _checkForAppUpdateOnce() async {
+    if (_updateCheckDone) return;
+    _updateCheckDone = true;
+
+    try {
+      final packageInfo = await PackageInfo.fromPlatform();
+      final currentVersionCode = int.tryParse(packageInfo.buildNumber) ?? 0;
+
+      final response = await GetIt.I<ApiClient>().get<Map<String, dynamic>>(
+        '/system/config',
+      );
+      final payload = response.data ?? const <String, dynamic>{};
+
+      final latestVersionCode =
+          int.tryParse('${payload['android_latest_version_code'] ?? ''}') ?? 0;
+      if (latestVersionCode <= 0 || currentVersionCode >= latestVersionCode) {
+        return;
+      }
+
+      final updateUrl = (payload['android_update_url'] as String?)?.trim();
+      final targetUrl =
+          (updateUrl != null && updateUrl.isNotEmpty)
+              ? updateUrl
+              : 'https://play.google.com/store/apps/details?id=com.tmq.sao';
+
+      if (!mounted || _updateDialogVisible) return;
+      _updateDialogVisible = true;
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('Actualización disponible'),
+            content: Text(
+              'Hay una nueva versión de SAO disponible en Google Play '
+              '(actual: $currentVersionCode, nueva: $latestVersionCode).',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Más tarde'),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final uri = Uri.parse(targetUrl);
+                  if (await canLaunchUrl(uri)) {
+                    await launchUrl(uri, mode: LaunchMode.externalApplication);
+                  }
+                  if (dialogContext.mounted) {
+                    Navigator.of(dialogContext).pop();
+                  }
+                },
+                child: const Text('Actualizar'),
+              ),
+            ],
+          );
+        },
+      );
+    } catch (e) {
+      appLogger.w('Update check failed: $e');
+    } finally {
+      _updateDialogVisible = false;
+    }
   }
 
   @override
@@ -227,6 +306,20 @@ class _HomePageState extends ConsumerState<HomePage>
       // ignore: unawaited_futures
       _refreshRemoteHomeStateIfNeeded(force: false);
     });
+  }
+
+  Future<void> _resolveDefaultProjectAndNavigate() async {
+    if (!mounted) return;
+    final projects = await _loadAccessibleProjectIdsForPush();
+    if (!mounted) return;
+    // Only auto-navigate when the user belongs to exactly one project
+    // (typically OPERATIVO). Multi-project users (ADMIN/COORD/SUPERVISOR)
+    // stay on TODOS so they can see activity across all projects.
+    if (projects.length == 1) {
+      if (context.mounted) {
+        context.go('/?project=${Uri.encodeQueryComponent(projects.first)}');
+      }
+    }
   }
 
   Future<void> _refreshRemoteHomeStateIfNeeded({
@@ -461,31 +554,13 @@ class _HomePageState extends ConsumerState<HomePage>
     return ref.read(kvStoreProvider).setString(_filterModeKey, mode.name);
   }
 
-  Future<void> _loadDateRangeFilter() async {
-    final stored = await ref
-        .read(kvStoreProvider)
-        .getString(_dateRangeFilterKey);
-    if (!mounted || stored == null) return;
-    final filter = DateRangeFilter.values.firstWhere(
-      (f) => f.name == stored,
-      orElse: () => DateRangeFilter.hoy,
-    );
-    if (filter != _dateRangeFilter) setState(() => _dateRangeFilter = filter);
-  }
-
-  Future<void> _setDateRangeFilter(DateRangeFilter filter) {
-    setState(() => _dateRangeFilter = filter);
-    return ref
-        .read(kvStoreProvider)
-        .setString(_dateRangeFilterKey, filter.name);
-  }
-
   Future<void> _resolveViewerRole() async {
     final user = ref.read(currentUserProvider);
     if (user == null) {
       if (!mounted) return;
       setState(() {
         _isAdminViewer = false;
+        _canViewOnlineUsers = false;
         _hasPrivilegedAssignmentTransferAccess = false;
         _isOperativeViewer = false;
       });
@@ -516,6 +591,10 @@ class _HomePageState extends ConsumerState<HomePage>
     final email = user.email.trim().toLowerCase();
     final isAdminByEmail =
         email == 'admin@sao.mx' || email.startsWith('admin.');
+    final isSupervisorByRole =
+      localUser?.roleId == 3 || normalizedRoleName == 'SUPERVISOR';
+    final nextCanViewOnlineUsers =
+      isAdminByRole || isAdminByEmail || isSupervisorByRole;
 
     if (!mounted) return;
     final nextIsAdmin = isAdminByRole || isAdminByEmail;
@@ -526,11 +605,13 @@ class _HomePageState extends ConsumerState<HomePage>
     final nextIsOperative = hasKnownRole ? isOperativeByRole : !nextIsAdmin;
     final changed =
         nextIsAdmin != _isAdminViewer ||
+        nextCanViewOnlineUsers != _canViewOnlineUsers ||
         nextIsOperative != _isOperativeViewer ||
         nextHasPrivilegedAssignmentTransferAccess !=
             _hasPrivilegedAssignmentTransferAccess;
     setState(() {
       _isAdminViewer = nextIsAdmin;
+      _canViewOnlineUsers = nextCanViewOnlineUsers;
       _hasPrivilegedAssignmentTransferAccess =
           nextHasPrivilegedAssignmentTransferAccess;
       _isOperativeViewer = nextIsOperative;
@@ -625,81 +706,10 @@ class _HomePageState extends ConsumerState<HomePage>
   int get _notificationCount => _buildNotifications().length;
 
   Future<void> _openNotificationsCenter() async {
-    final notifications = _buildNotifications();
-
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 12),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.notifications_active_rounded,
-                      color: SaoColors.primary,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Notificaciones (${notifications.length})',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w900,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                if (notifications.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 14),
-                    child: Text('Sin alertas por ahora. Todo en orden.'),
-                  )
-                else
-                  Flexible(
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: notifications.length,
-                      separatorBuilder: (_, index) => const Divider(height: 1),
-                      itemBuilder: (context, index) {
-                        final item = notifications[index];
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(item.icon, color: item.color),
-                          title: Text(
-                            item.title,
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          subtitle: Text(item.message),
-                          trailing: const Icon(Icons.chevron_right_rounded),
-                          onTap: () async {
-                            Navigator.pop(ctx);
-                            if (!mounted) return;
-
-                            if (_isAdminViewer) {
-                              await context.push(
-                                '/activity/${item.activity.id}?project=${widget.selectedProject}',
-                                extra: item.activity,
-                              );
-                            } else {
-                              await _openRegisterWizard(item.activity);
-                            }
-                          },
-                        );
-                      },
-                    ),
-                  ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    // Navigate to the full notifications screen for server-side notifications.
+    if (mounted) {
+      await context.push('/notifications');
+    }
   }
 
   bool _requiresCorrectionAttention(TodayActivity activity) {
@@ -873,44 +883,27 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   /// Deduplicates items that represent the same logical activity.
-  /// Happens when a self-assignment sync creates a server-side activity UUID
-  /// while a local activity row (keyed by the original assignment UUID) still
-  /// exists — both survive `listHomeActivitiesByProject`.
+  /// Only merges activities that share the same server-side pk (integer ID).
+  /// Title-based deduplication is intentionally avoided: two distinct activities
+  /// of the same type (e.g., two "Inspección" tasks assigned to the same user)
+  /// would otherwise be incorrectly merged and one hidden from the operative.
   List<TodayActivity> _deduplicateFinalItems(List<TodayActivity> items) {
-    final normalize = (String v) => v
-        .trim()
-        .toUpperCase()
-        .replaceAll('Á', 'A')
-        .replaceAll('É', 'E')
-        .replaceAll('Í', 'I')
-        .replaceAll('Ó', 'O')
-        .replaceAll('Ú', 'U')
-        .replaceAll(RegExp(r'\s+'), ' ');
-
-    // Map fingerprint → index in result (for possible replacement).
-    final fingerprintToIdx = <String, int>{};
+    final pkToIdx = <int, int>{};
     final result = <TodayActivity>[];
 
     for (final item in items) {
       final pk = item.pk;
-      // Only deduplicate when both pk is set and positive; otherwise we cannot
-      // safely tell two activities apart by title alone.
-      if (pk == null || pk <= 0) {
-        result.add(item);
-        continue;
-      }
-
-      final key = '${pk}_${normalize(item.title)}';
-      final existingIdx = fingerprintToIdx[key];
-      if (existingIdx == null) {
-        fingerprintToIdx[key] = result.length;
-        result.add(item);
-      } else {
-        // Keep the item with more meaningful local state.
-        if (_hasMoreLocalState(item, result[existingIdx])) {
-          result[existingIdx] = item;
+      if (pk != null && pk > 0) {
+        final existingIdx = pkToIdx[pk];
+        if (existingIdx != null) {
+          if (_hasMoreLocalState(item, result[existingIdx])) {
+            result[existingIdx] = item;
+          }
+          continue;
         }
+        pkToIdx[pk] = result.length;
       }
+      result.add(item);
     }
 
     return result;
@@ -941,9 +934,6 @@ class _HomePageState extends ConsumerState<HomePage>
 
     final leftPk = left.pk;
     final rightPk = right.pk;
-    if (leftPk == null || rightPk == null || leftPk != rightPk) {
-      return false;
-    }
 
     final normalize = (String value) => value
         .trim()
@@ -955,7 +945,22 @@ class _HomePageState extends ConsumerState<HomePage>
         .replaceAll('Ú', 'U')
         .replaceAll(RegExp(r'\s+'), ' ');
 
-    return normalize(left.title) == normalize(right.title);
+    final nLeftTitle = normalize(left.title);
+    final nRightTitle = normalize(right.title);
+
+    // Different titles → definitely different activities.
+    if (nLeftTitle != nRightTitle) return false;
+
+    // Same title + both pks present and positive → match only if pks agree.
+    if (leftPk != null && leftPk > 0 && rightPk != null && rightPk > 0) {
+      return leftPk == rightPk;
+    }
+
+    // Same title + one or both missing pk: treat as same logical activity.
+    // This handles the common case where the local assignment row (pk=null) and
+    // the server-pulled row (pk=N) represent the same activity but were stored
+    // under different UUIDs before the canonical activity_id was resolved.
+    return true;
   }
 
   Future<String?> _resolveProjectFromAssignment(String activityId) async {
@@ -1247,20 +1252,15 @@ class _HomePageState extends ConsumerState<HomePage>
 
   /// Returns true if the current user is allowed to delete [activity].
   /// - ADMIN: can delete any activity.
-  /// - OPERATIVO: can only delete activities assigned to themselves that have
-  ///   not yet been synced to the server (pending / error).
+  /// - Any other role: can delete only activities assigned to themselves.
   bool _canDeleteActivity(TodayActivity activity) {
     if (_isAdminViewer) return true;
-    if (!_isOperativeViewer) return false;
-    // OPERATIVO: must own the activity.
+    // Non-admin users: must own the activity.
     final isOwn = _isAssignedToCurrentUser(
       assignedToUserId: activity.assignedToUserId,
       assignedToName: activity.assignedToName,
     );
-    if (!isOwn) return false;
-    // Only allow deleting local-only activities (not yet confirmed by backend).
-    return activity.syncState == ActivitySyncState.pending ||
-        activity.syncState == ActivitySyncState.error;
+    return isOwn;
   }
 
   Future<void> _confirmDeleteActivity(TodayActivity activity) async {
@@ -1289,6 +1289,14 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   Future<void> _deleteActivity(TodayActivity activity) async {
+    final isLocalOnly = activity.syncState == ActivitySyncState.pending ||
+        activity.syncState == ActivitySyncState.error;
+
+    if (!isLocalOnly) {
+      await _cancelActivityWithSync(activity, reason: 'Cancelada');
+      return;
+    }
+
     final resolvedId = await _resolveLocalActivityIdForAction(activity);
     try {
       await _dao.deleteActivity(resolvedId);
@@ -1353,7 +1361,9 @@ class _HomePageState extends ConsumerState<HomePage>
         resources
             .where(
               (resource) =>
-                  resource.isActive && resource.id != activity.assignedToUserId,
+                  resource.isActive &&
+                  resource.id != activity.assignedToUserId &&
+                  resource.role != ResourceRole.administrador,
             )
             .toList()
           ..sort(
@@ -1641,12 +1651,14 @@ class _HomePageState extends ConsumerState<HomePage>
   /// Normalizes front/frente abbreviations so that grouping treats them as
   /// the same unit. For example: "F1" and "Frente 1" both become "Frente 1".
   String _canonicalFrente(String raw) {
+    final frontLabel = frontTerminology(widget.selectedProject, capitalize: true);
+    final frontLabelLower = frontTerminology(widget.selectedProject);
     final value = raw.trim();
-    if (value.isEmpty) return 'Sin frente';
+    if (value.isEmpty) return 'Sin $frontLabelLower';
     // Match patterns like "F1", "F2", "F10", "F 1", case-insensitive.
     final abbrev = RegExp(r'^[Ff]\s*(\d+)$').firstMatch(value);
     if (abbrev != null) {
-      return 'Frente ${abbrev.group(1)}';
+      return '$frontLabel ${abbrev.group(1)}';
     }
     return value;
   }
@@ -1882,19 +1894,26 @@ class _HomePageState extends ConsumerState<HomePage>
   }
 
   bool _matchesOperativeHomeRules(TodayActivity activity) {
-    switch (activity.nextAction) {
-      case 'INICIAR_ACTIVIDAD':
-      case 'TERMINAR_ACTIVIDAD':
-      case 'COMPLETAR_WIZARD':
-      case 'CORREGIR_Y_REENVIAR':
-      case 'CERRADA_RECHAZADA':
-      case 'REVISAR_ERROR_SYNC':
-      case 'SINCRONIZAR_PENDIENTE':
-      case 'ESPERAR_DECISION_COORDINACION':
-        return true;
-      default:
-        return false;
+    // Never show truly finalized activities.
+    if (activity.nextAction == 'CERRADA_APROBADA' ||
+        activity.nextAction == 'CERRADA_CANCELADA') {
+      return false;
     }
+
+    // Always show activities that are actively being worked on or need action.
+    if (activity.executionState != ExecutionState.pendiente) {
+      return true;
+    }
+
+    // For pending activities: show only if scheduled for today or overdue.
+    final today = DateTime.now();
+    final todayDay = DateTime(today.year, today.month, today.day);
+    final activityDay = DateTime(
+      activity.createdAt.year,
+      activity.createdAt.month,
+      activity.createdAt.day,
+    );
+    return !activityDay.isAfter(todayDay);
   }
 
   bool _isAssignedToCurrentUser({
@@ -2268,6 +2287,9 @@ class _HomePageState extends ConsumerState<HomePage>
 
   // ====== Swipe izquierda: Incidencia/Bloqueo ======
   Future<void> _reportIncident(TodayActivity a) async {
+    const incidencias = ['Clima', 'Acceso denegado', 'Riesgo', 'Cancelada'];
+    final canDelete = _canDeleteActivity(a);
+
     final reason = await showModalBottomSheet<String>(
       context: context,
       showDragHandle: true,
@@ -2285,19 +2307,36 @@ class _HomePageState extends ConsumerState<HomePage>
               ),
             ),
             const Divider(height: 0),
-            ...['Clima', 'Acceso denegado', 'Riesgo', 'Cancelada'].map((r) {
+            ...incidencias.map((r) {
               final icon = switch (r) {
                 'Clima' => Icons.cloud_rounded,
                 'Acceso denegado' => Icons.lock_rounded,
                 'Riesgo' => Icons.warning_rounded,
                 _ => Icons.cancel_rounded,
               };
+              final isCancel = r == 'Cancelada';
               return ListTile(
-                leading: Icon(icon),
-                title: Text(r),
+                leading: Icon(icon, color: isCancel ? SaoColors.riskHigh : null),
+                title: Text(
+                  r,
+                  style: isCancel
+                      ? const TextStyle(color: SaoColors.riskHigh, fontWeight: FontWeight.w700)
+                      : null,
+                ),
                 onTap: () => Navigator.pop(ctx, r),
               );
             }),
+            if (canDelete) ...[
+              const Divider(height: 16),
+              ListTile(
+                leading: const Icon(Icons.delete_outline_rounded, color: SaoColors.riskHigh),
+                title: const Text(
+                  'Eliminar actividad',
+                  style: TextStyle(color: SaoColors.riskHigh, fontWeight: FontWeight.w700),
+                ),
+                onTap: () => Navigator.pop(ctx, '__delete__'),
+              ),
+            ],
             const SizedBox(height: 10),
           ],
         ),
@@ -2307,14 +2346,23 @@ class _HomePageState extends ConsumerState<HomePage>
     if (reason == null) return;
     if (!mounted) return;
 
-    // ✅ Obtener la actividad actualizada del estado (con horaInicio/horaFin preservados)
-    final currentActivity = _findById(a.id) ?? a;
+    // Acción de eliminar seleccionada desde el sheet
+    if (reason == '__delete__') {
+      await _confirmDeleteActivity(a);
+      return;
+    }
 
-    // Marcar como incidencia - resetea el estado a pendiente pero conserva tiempos
+    if (reason == 'Cancelada') {
+      // Cancelar: persistir en DB, encolar para sync y quitar del home
+      await _cancelActivityWithSync(a, reason: reason);
+      return;
+    }
+
+    // Para otras incidencias (Clima, Acceso, Riesgo): resetear visualmente a pendiente
+    final currentActivity = _findById(a.id) ?? a;
     final updated = currentActivity.copyWith(
       executionState: ExecutionState.pendiente,
     );
-
     setState(() {
       _updateItem(a.id, _rehydrateFlow(updated));
     });
@@ -2326,6 +2374,58 @@ class _HomePageState extends ConsumerState<HomePage>
         backgroundColor: SaoColors.riskHigh,
       ),
     );
+  }
+
+  /// Guarda el estado CANCELADA en BD local, lo encola para sync y
+  /// elimina la actividad de la vista de home.
+  Future<void> _cancelActivityWithSync(
+    TodayActivity activity, {
+    String? reason,
+  }) async {
+    final resolvedId = await _resolveLocalActivityIdForAction(activity);
+    final userId = ref.read(currentUserProvider)?.id.trim() ?? '';
+
+    try {
+      await _dao.markActivityCanceled(
+        activityId: resolvedId,
+        userId: userId,
+        reason: reason,
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _items.removeWhere(
+          (i) => i.id == activity.id || i.id == resolvedId,
+        );
+      });
+
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'Actividad cancelada y enviada a sincronizar.',
+          backgroundColor: SaoColors.riskHigh,
+        ),
+      );
+
+      // Disparar sync en segundo plano
+      final isOffline = ref.read(offlineModeProvider);
+      if (!isOffline) {
+        unawaited(
+          ref
+              .read(syncOrchestratorProvider.notifier)
+              .syncAll(projectId: widget.selectedProject),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo cancelar la actividad. Intenta de nuevo.',
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
   }
 
   // ====== Colores / iconos / textos efectivos basados en ExecutionState ======
@@ -2590,6 +2690,10 @@ class _HomePageState extends ConsumerState<HomePage>
     final userInitial = currentUser?.fullName.trim().isNotEmpty == true
         ? currentUser!.fullName.trim()[0].toUpperCase()
         : '?';
+    // Unread backend notifications count for the bell badge.
+    final backendUnreadCount =
+        ref.watch(unreadNotificationsCountProvider).valueOrNull ?? 0;
+    final totalBellCount = _notificationCount + backendUnreadCount;
 
     final baseItems = _items.where((a) {
       if (_isOperativeViewer) {
@@ -2600,21 +2704,7 @@ class _HomePageState extends ConsumerState<HomePage>
             a.assignedToUserId != null && a.assignedToUserId!.trim().isNotEmpty;
         if (!assigned) return false;
       }
-      final today = DateTime.now();
-      final todayDate = DateTime(today.year, today.month, today.day);
-      final dateFrom = switch (_dateRangeFilter) {
-        DateRangeFilter.hoy => todayDate,
-        DateRangeFilter.semana => todayDate.subtract(const Duration(days: 6)),
-        DateRangeFilter.mes => DateTime(today.year, today.month - 1, today.day),
-      };
-      final created = DateTime(
-        a.createdAt.year,
-        a.createdAt.month,
-        a.createdAt.day,
-      );
-      // Always show active (non-terminated) activities regardless of date range
-      if (a.executionState != ExecutionState.terminada) return true;
-      return !created.isBefore(dateFrom);
+      return true;
     }).toList();
 
     // ====== Filtrado por búsqueda ======
@@ -2678,27 +2768,6 @@ class _HomePageState extends ConsumerState<HomePage>
 
     return Scaffold(
       backgroundColor: SaoColors.gray50,
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          FloatingActionButton.small(
-            heroTag: 'fab_report_event',
-            tooltip: 'Actividad no planeada',
-            backgroundColor: SaoColors.riskHigh,
-            foregroundColor: Colors.white,
-            onPressed: () async {
-              final result = await context.push(
-                '/wizard/register?project=${widget.selectedProject}&mode=unplanned',
-              );
-              if (result != null) {
-                await _loadHomeActivities();
-              }
-            },
-            child: const Icon(Icons.warning_rounded),
-          ),
-        ],
-      ),
       body: CustomScrollView(
         slivers: [
           SliverAppBar(
@@ -2776,7 +2845,7 @@ class _HomePageState extends ConsumerState<HomePage>
                         color: SaoColors.primary,
                       ),
                     ),
-                    if (_notificationCount > 0)
+                    if (totalBellCount > 0)
                       Positioned(
                         right: 10,
                         top: 10,
@@ -2798,7 +2867,7 @@ class _HomePageState extends ConsumerState<HomePage>
               ],
             ),
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(152),
+              preferredSize: const Size.fromHeight(104),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: Column(
@@ -2823,10 +2892,11 @@ class _HomePageState extends ConsumerState<HomePage>
                             child: TextField(
                               controller: _searchCtrl,
                               onChanged: (v) => setState(() => _query = v),
-                              decoration: const InputDecoration(
+                              decoration: InputDecoration(
                                 border: InputBorder.none,
-                                hintText: 'Buscar PK, Frente, Municipio…',
-                                hintStyle: TextStyle(color: SaoColors.gray400),
+                                hintText:
+                                    'Buscar PK, ${frontTerminology(widget.selectedProject, capitalize: true)}, Municipio…',
+                                hintStyle: const TextStyle(color: SaoColors.gray400),
                               ),
                             ),
                           ),
@@ -2884,39 +2954,6 @@ class _HomePageState extends ConsumerState<HomePage>
                         ],
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    // Filtro de rango de fechas
-                    SegmentedButton<DateRangeFilter>(
-                      showSelectedIcon: false,
-                      style: SegmentedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        textStyle: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                        minimumSize: const Size(0, 30),
-                      ),
-                      segments: const [
-                        ButtonSegment(
-                          value: DateRangeFilter.hoy,
-                          label: Text('Hoy'),
-                        ),
-                        ButtonSegment(
-                          value: DateRangeFilter.semana,
-                          label: Text('7 días'),
-                        ),
-                        ButtonSegment(
-                          value: DateRangeFilter.mes,
-                          label: Text('1 mes'),
-                        ),
-                      ],
-                      selected: {_dateRangeFilter},
-                      onSelectionChanged: (selection) {
-                        if (selection.isNotEmpty)
-                          _setDateRangeFilter(selection.first);
-                      },
-                    ),
                   ],
                 ),
               ),
@@ -2973,8 +3010,7 @@ class _HomePageState extends ConsumerState<HomePage>
               ),
             ),
 
-          if (_isAdminViewer)
-            SliverToBoxAdapter(
+          SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
                 child: Row(
@@ -3060,6 +3096,49 @@ class _HomePageState extends ConsumerState<HomePage>
                         ),
                       ),
                     ),
+                    if (_canViewOnlineUsers) ...[
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => context.push('/admin/online-users'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: SaoColors.success,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(
+                                  Icons.wifi_tethering_rounded,
+                                  color: SaoColors.onPrimary,
+                                  size: 20,
+                                ),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'En línea',
+                                    style: TextStyle(
+                                      color: SaoColors.onPrimary,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ),
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: SaoColors.onPrimary,
+                                  size: 18,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -3079,14 +3158,14 @@ class _HomePageState extends ConsumerState<HomePage>
                     ? 'Sin actividades'
                     : 'Sin resultados',
                 subtitle: _query.trim().isEmpty
-                    ? 'Todavía no hay registros para mostrar.\nCrea una nueva actividad con el botón +.'
-                    : 'Prueba con otro PK, municipio o frente.',
+                    ? 'No tienes actividades programadas para hoy.'
+                    : 'Prueba con otro PK, municipio o ${frontTerminology(widget.selectedProject)}.',
                 onClear: _query.trim().isEmpty ? null : _clearSearch,
               ),
             )
           else
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 120), // anti-FAB
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
               sliver: SliverToBoxAdapter(
                 child: HomeTaskInboxList(
                   sections: taskSections,
@@ -3102,6 +3181,10 @@ class _HomePageState extends ConsumerState<HomePage>
 
                       return _FrenteSection(
                         frente: frente,
+                        frontLabel: frontTerminology(
+                          widget.selectedProject,
+                          capitalize: true,
+                        ),
                         count: items.length,
                         expanded: expanded,
                         onToggle: () => setState(
@@ -3421,6 +3504,7 @@ class _MetricBadge extends StatelessWidget {
 
 class _FrenteSection extends StatelessWidget {
   final String frente;
+  final String frontLabel;
   final int count;
   final bool expanded;
   final VoidCallback onToggle;
@@ -3428,6 +3512,7 @@ class _FrenteSection extends StatelessWidget {
 
   const _FrenteSection({
     required this.frente,
+    required this.frontLabel,
     required this.count,
     required this.expanded,
     required this.onToggle,
@@ -3450,7 +3535,7 @@ class _FrenteSection extends StatelessWidget {
                 children: [
                   Expanded(
                     child: Text(
-                      'Frente: $frente',
+                      '$frontLabel: $frente',
                       style: const TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w900,

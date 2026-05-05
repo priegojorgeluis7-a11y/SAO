@@ -9,11 +9,13 @@ class UploadQueueItemCard extends StatelessWidget {
     required this.item,
     this.onRetry,
     this.onResolveConflict,
+    this.onDiscard,
   });
 
   final UploadQueueItem item;
   final VoidCallback? onRetry;
   final VoidCallback? onResolveConflict;
+  final VoidCallback? onDiscard;
 
   @override
   Widget build(BuildContext context) {
@@ -159,18 +161,18 @@ class UploadQueueItemCard extends StatelessWidget {
                     ? Icons.merge_type_rounded
                     : (item.retryable
                         ? Icons.refresh_rounded
-                        : Icons.sync_disabled_rounded),
+                        : Icons.delete_outline_rounded),
                 size: 20,
               ),
-              color: item.retryable || item.isConflict
+              color: item.retryable || item.isConflict || onDiscard != null
                   ? SaoColors.error
                   : SaoColors.gray400,
               onPressed: item.isConflict
                   ? onResolveConflict
-                  : (item.retryable ? onRetry : null),
+                  : (item.retryable ? onRetry : onDiscard),
               tooltip: item.isConflict
                   ? 'Resolver conflicto'
-                  : (item.retryable ? 'Reintentar' : 'No reintentable'),
+                  : (item.retryable ? 'Reintentar' : 'Descartar de la cola'),
             ),
         ],
       ),

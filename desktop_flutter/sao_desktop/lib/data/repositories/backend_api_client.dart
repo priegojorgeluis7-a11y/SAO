@@ -1,9 +1,19 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+
+import 'package:http/http.dart' as http;
 
 import '../../core/auth/token_store.dart';
 import '../../core/config/data_mode.dart';
+
+class BackendApiException implements Exception {
+  final int statusCode;
+  final String message;
+  final Uri uri;
+  BackendApiException(this.statusCode, this.message, this.uri);
+  @override
+  String toString() => 'BackendApiException($statusCode) for $uri: $message';
+}
 
 class BackendApiClient {
   const BackendApiClient();
@@ -25,6 +35,17 @@ class BackendApiClient {
     return AppDataMode.backendBearerToken.trim();
   }
 
+  Map<String, String> _buildHeaders(String token) {
+    final headers = <String, String>{
+      'Content-Type': 'application/json',
+    };
+    final authToken = token.trim();
+    if (authToken.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $authToken';
+    }
+    return headers;
+  }
+
   Future<_ApiRawResponse> _sendRaw(
     String method,
     String path, {
@@ -32,38 +53,31 @@ class BackendApiClient {
     String? token,
   }) async {
     final uri = Uri.parse('$_baseUrl$path');
-    final client = HttpClient()
-      ..connectionTimeout = const Duration(seconds: 15)
-      ..idleTimeout = const Duration(seconds: 15);
-    try {
-      final request = switch (method) {
-        'GET' => await client.getUrl(uri),
-        'POST' => await client.postUrl(uri),
-        'PUT' => await client.putUrl(uri),
-        'PATCH' => await client.patchUrl(uri),
-        'DELETE' => await client.deleteUrl(uri),
-        _ => throw StateError('Unsupported method: $method'),
-      };
+    final headers = _buildHeaders(token ?? '');
+    final body = payload != null ? jsonEncode(payload) : null;
+    const timeout = Duration(seconds: 15);
 
-      request.headers.contentType = ContentType.json;
-      final authToken = (token ?? '').trim();
-      if (authToken.isNotEmpty) {
-        request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $authToken');
-      }
-      if (payload != null) {
-        request.write(jsonEncode(payload));
-      }
-
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
-      return _ApiRawResponse(
-        statusCode: response.statusCode,
-        body: body,
-        uri: uri,
-      );
-    } finally {
-      client.close(force: true);
+    final http.Response response;
+    switch (method) {
+      case 'GET':
+        response = await http.get(uri, headers: headers).timeout(timeout);
+      case 'POST':
+        response = await http.post(uri, headers: headers, body: body).timeout(timeout);
+      case 'PUT':
+        response = await http.put(uri, headers: headers, body: body).timeout(timeout);
+      case 'PATCH':
+        response = await http.patch(uri, headers: headers, body: body).timeout(timeout);
+      case 'DELETE':
+        response = await http.delete(uri, headers: headers).timeout(timeout);
+      default:
+        throw StateError('Unsupported method: $method');
     }
+
+    return _ApiRawResponse(
+      statusCode: response.statusCode,
+      body: response.body,
+      uri: uri,
+    );
   }
 
   Future<dynamic> _sendJson(
@@ -74,7 +88,7 @@ class BackendApiClient {
     var token = _resolveAccessToken();
     var result = await _sendRaw(method, path, payload: payload, token: token);
 
-    if (result.statusCode == HttpStatus.unauthorized &&
+    if (result.statusCode == 401 &&
         path != '/api/v1/auth/refresh' &&
         TokenStore.hasRefreshToken) {
       final refreshed = await _BackendAuthRefreshCoordinator.refreshIfNeeded(_baseUrl);
@@ -86,15 +100,16 @@ class BackendApiClient {
 
     // Si persiste el 401 después del intento de refresh, la sesión expiró o fue
     // invalidada en el servidor. Se limpia el TokenStore para forzar re-login.
-    if (result.statusCode == HttpStatus.unauthorized) {
+    if (result.statusCode == 401) {
       unawaited(TokenStore.clear());
       onSessionExpired?.call();
     }
 
     if (result.statusCode < 200 || result.statusCode >= 300) {
-      throw HttpException(
+      throw BackendApiException(
+        result.statusCode,
         'Backend $method failed (${result.statusCode}) for $path: ${result.body}',
-        uri: result.uri,
+        result.uri,
       );
     }
 
@@ -158,20 +173,21 @@ class _BackendAuthRefreshCoordinator {
     }
 
     final uri = Uri.parse('$baseUrl/api/v1/auth/refresh');
-    final client = HttpClient();
+    const timeout = Duration(seconds: 15);
     try {
-      final request = await client.postUrl(uri);
-      request.headers.contentType = ContentType.json;
-      request.write(
-        jsonEncode({'refresh_token': TokenStore.currentRefreshToken}),
-      );
-      final response = await request.close();
-      final body = await response.transform(utf8.decoder).join();
+      final response = await http
+          .post(
+            uri,
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'refresh_token': TokenStore.currentRefreshToken}),
+          )
+          .timeout(timeout);
+
       if (response.statusCode < 200 || response.statusCode >= 300) {
         return false;
       }
 
-      final decoded = jsonDecode(body) as Map<String, dynamic>;
+      final decoded = jsonDecode(response.body) as Map<String, dynamic>;
       final accessToken = decoded['access_token'] as String? ?? '';
       if (accessToken.isEmpty) {
         return false;
@@ -192,8 +208,6 @@ class _BackendAuthRefreshCoordinator {
       return true;
     } catch (_) {
       return false;
-    } finally {
-      client.close(force: true);
     }
   }
 }

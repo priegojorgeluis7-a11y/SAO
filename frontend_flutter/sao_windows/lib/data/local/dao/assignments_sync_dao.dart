@@ -13,7 +13,7 @@ class AssignmentsSyncDao extends DatabaseAccessor<AppDb> with _$AssignmentsSyncD
   /// Get all assignments ready to sync
   Future<List<LocalAssignment>> getPendingSync() {
     return (select(localAssignments)
-          ..where((t) => t.syncStatus.isIn(const ['DRAFT', 'READY_TO_SYNC', 'ERROR']))
+          ..where((t) => t.syncStatus.isIn(const ['DRAFT', 'READY_TO_SYNC', 'ERROR', 'CANCELED']))
           ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
         .get();
   }
@@ -54,6 +54,19 @@ class AssignmentsSyncDao extends DatabaseAccessor<AppDb> with _$AssignmentsSyncD
         ),
       );
     });
+  }
+
+  /// Mark assignment as canceled locally and pending sync.
+  Future<void> markAsCanceled(String assignmentId) {
+    return (update(localAssignments)
+          ..where((t) => t.id.equals(assignmentId)))
+        .write(
+      LocalAssignmentsCompanion(
+        syncStatus: const Value('CANCELED'),
+        syncError: const Value(null),
+        updatedAt: Value(DateTime.now()),
+      ),
+    );
   }
 
   /// Get assignment by ID

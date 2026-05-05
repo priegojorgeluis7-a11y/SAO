@@ -14930,6 +14930,838 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
   }
 }
 
+class $UserNotificationsTable extends UserNotifications
+    with TableInfo<$UserNotificationsTable, UserNotification> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $UserNotificationsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<String> id = GeneratedColumn<String>(
+    'id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _typeMeta = const VerificationMeta('type');
+  @override
+  late final GeneratedColumn<String> type = GeneratedColumn<String>(
+    'type',
+    aliasedName,
+    false,
+    additionalChecks: GeneratedColumn.checkTextLength(
+      minTextLength: 3,
+      maxTextLength: 60,
+    ),
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _activityIdMeta = const VerificationMeta(
+    'activityId',
+  );
+  @override
+  late final GeneratedColumn<String> activityId = GeneratedColumn<String>(
+    'activity_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _activityTitleMeta = const VerificationMeta(
+    'activityTitle',
+  );
+  @override
+  late final GeneratedColumn<String> activityTitle = GeneratedColumn<String>(
+    'activity_title',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _projectIdMeta = const VerificationMeta(
+    'projectId',
+  );
+  @override
+  late final GeneratedColumn<String> projectId = GeneratedColumn<String>(
+    'project_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _fromUserIdMeta = const VerificationMeta(
+    'fromUserId',
+  );
+  @override
+  late final GeneratedColumn<String> fromUserId = GeneratedColumn<String>(
+    'from_user_id',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _fromUserNameMeta = const VerificationMeta(
+    'fromUserName',
+  );
+  @override
+  late final GeneratedColumn<String> fromUserName = GeneratedColumn<String>(
+    'from_user_name',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _statusMeta = const VerificationMeta('status');
+  @override
+  late final GeneratedColumn<String> status = GeneratedColumn<String>(
+    'status',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('unread'),
+  );
+  static const VerificationMeta _requiresAcceptanceMeta =
+      const VerificationMeta('requiresAcceptance');
+  @override
+  late final GeneratedColumn<bool> requiresAcceptance = GeneratedColumn<bool>(
+    'requires_acceptance',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("requires_acceptance" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> createdAt = GeneratedColumn<DateTime>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _readAtMeta = const VerificationMeta('readAt');
+  @override
+  late final GeneratedColumn<DateTime> readAt = GeneratedColumn<DateTime>(
+    'read_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _respondedAtMeta = const VerificationMeta(
+    'respondedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> respondedAt = GeneratedColumn<DateTime>(
+    'responded_at',
+    aliasedName,
+    true,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _syncedAtMeta = const VerificationMeta(
+    'syncedAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> syncedAt = GeneratedColumn<DateTime>(
+    'synced_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: false,
+    defaultValue: currentDateAndTime,
+  );
+  static const VerificationMeta _metadataJsonMeta = const VerificationMeta(
+    'metadataJson',
+  );
+  @override
+  late final GeneratedColumn<String> metadataJson = GeneratedColumn<String>(
+    'metadata_json',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    type,
+    activityId,
+    activityTitle,
+    projectId,
+    fromUserId,
+    fromUserName,
+    status,
+    requiresAcceptance,
+    createdAt,
+    readAt,
+    respondedAt,
+    syncedAt,
+    metadataJson,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'user_notifications';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<UserNotification> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    } else if (isInserting) {
+      context.missing(_idMeta);
+    }
+    if (data.containsKey('type')) {
+      context.handle(
+        _typeMeta,
+        type.isAcceptableOrUnknown(data['type']!, _typeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeMeta);
+    }
+    if (data.containsKey('activity_id')) {
+      context.handle(
+        _activityIdMeta,
+        activityId.isAcceptableOrUnknown(data['activity_id']!, _activityIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_activityIdMeta);
+    }
+    if (data.containsKey('activity_title')) {
+      context.handle(
+        _activityTitleMeta,
+        activityTitle.isAcceptableOrUnknown(
+          data['activity_title']!,
+          _activityTitleMeta,
+        ),
+      );
+    }
+    if (data.containsKey('project_id')) {
+      context.handle(
+        _projectIdMeta,
+        projectId.isAcceptableOrUnknown(data['project_id']!, _projectIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_projectIdMeta);
+    }
+    if (data.containsKey('from_user_id')) {
+      context.handle(
+        _fromUserIdMeta,
+        fromUserId.isAcceptableOrUnknown(
+          data['from_user_id']!,
+          _fromUserIdMeta,
+        ),
+      );
+    }
+    if (data.containsKey('from_user_name')) {
+      context.handle(
+        _fromUserNameMeta,
+        fromUserName.isAcceptableOrUnknown(
+          data['from_user_name']!,
+          _fromUserNameMeta,
+        ),
+      );
+    }
+    if (data.containsKey('status')) {
+      context.handle(
+        _statusMeta,
+        status.isAcceptableOrUnknown(data['status']!, _statusMeta),
+      );
+    }
+    if (data.containsKey('requires_acceptance')) {
+      context.handle(
+        _requiresAcceptanceMeta,
+        requiresAcceptance.isAcceptableOrUnknown(
+          data['requires_acceptance']!,
+          _requiresAcceptanceMeta,
+        ),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('read_at')) {
+      context.handle(
+        _readAtMeta,
+        readAt.isAcceptableOrUnknown(data['read_at']!, _readAtMeta),
+      );
+    }
+    if (data.containsKey('responded_at')) {
+      context.handle(
+        _respondedAtMeta,
+        respondedAt.isAcceptableOrUnknown(
+          data['responded_at']!,
+          _respondedAtMeta,
+        ),
+      );
+    }
+    if (data.containsKey('synced_at')) {
+      context.handle(
+        _syncedAtMeta,
+        syncedAt.isAcceptableOrUnknown(data['synced_at']!, _syncedAtMeta),
+      );
+    }
+    if (data.containsKey('metadata_json')) {
+      context.handle(
+        _metadataJsonMeta,
+        metadataJson.isAcceptableOrUnknown(
+          data['metadata_json']!,
+          _metadataJsonMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  UserNotification map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return UserNotification(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}id'],
+      )!,
+      type: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}type'],
+      )!,
+      activityId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}activity_id'],
+      )!,
+      activityTitle: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}activity_title'],
+      )!,
+      projectId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}project_id'],
+      )!,
+      fromUserId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}from_user_id'],
+      ),
+      fromUserName: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}from_user_name'],
+      ),
+      status: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}status'],
+      )!,
+      requiresAcceptance: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}requires_acceptance'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}created_at'],
+      )!,
+      readAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}read_at'],
+      ),
+      respondedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}responded_at'],
+      ),
+      syncedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}synced_at'],
+      )!,
+      metadataJson: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}metadata_json'],
+      ),
+    );
+  }
+
+  @override
+  $UserNotificationsTable createAlias(String alias) {
+    return $UserNotificationsTable(attachedDatabase, alias);
+  }
+}
+
+class UserNotification extends DataClass
+    implements Insertable<UserNotification> {
+  final String id;
+  final String type;
+  final String activityId;
+  final String activityTitle;
+  final String projectId;
+  final String? fromUserId;
+  final String? fromUserName;
+  final String status;
+  final bool requiresAcceptance;
+  final DateTime createdAt;
+  final DateTime? readAt;
+  final DateTime? respondedAt;
+  final DateTime syncedAt;
+
+  /// JSON extra enviado por el backend (municipio, frente, etc.).
+  final String? metadataJson;
+  const UserNotification({
+    required this.id,
+    required this.type,
+    required this.activityId,
+    required this.activityTitle,
+    required this.projectId,
+    this.fromUserId,
+    this.fromUserName,
+    required this.status,
+    required this.requiresAcceptance,
+    required this.createdAt,
+    this.readAt,
+    this.respondedAt,
+    required this.syncedAt,
+    this.metadataJson,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<String>(id);
+    map['type'] = Variable<String>(type);
+    map['activity_id'] = Variable<String>(activityId);
+    map['activity_title'] = Variable<String>(activityTitle);
+    map['project_id'] = Variable<String>(projectId);
+    if (!nullToAbsent || fromUserId != null) {
+      map['from_user_id'] = Variable<String>(fromUserId);
+    }
+    if (!nullToAbsent || fromUserName != null) {
+      map['from_user_name'] = Variable<String>(fromUserName);
+    }
+    map['status'] = Variable<String>(status);
+    map['requires_acceptance'] = Variable<bool>(requiresAcceptance);
+    map['created_at'] = Variable<DateTime>(createdAt);
+    if (!nullToAbsent || readAt != null) {
+      map['read_at'] = Variable<DateTime>(readAt);
+    }
+    if (!nullToAbsent || respondedAt != null) {
+      map['responded_at'] = Variable<DateTime>(respondedAt);
+    }
+    map['synced_at'] = Variable<DateTime>(syncedAt);
+    if (!nullToAbsent || metadataJson != null) {
+      map['metadata_json'] = Variable<String>(metadataJson);
+    }
+    return map;
+  }
+
+  UserNotificationsCompanion toCompanion(bool nullToAbsent) {
+    return UserNotificationsCompanion(
+      id: Value(id),
+      type: Value(type),
+      activityId: Value(activityId),
+      activityTitle: Value(activityTitle),
+      projectId: Value(projectId),
+      fromUserId: fromUserId == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fromUserId),
+      fromUserName: fromUserName == null && nullToAbsent
+          ? const Value.absent()
+          : Value(fromUserName),
+      status: Value(status),
+      requiresAcceptance: Value(requiresAcceptance),
+      createdAt: Value(createdAt),
+      readAt: readAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(readAt),
+      respondedAt: respondedAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(respondedAt),
+      syncedAt: Value(syncedAt),
+      metadataJson: metadataJson == null && nullToAbsent
+          ? const Value.absent()
+          : Value(metadataJson),
+    );
+  }
+
+  factory UserNotification.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return UserNotification(
+      id: serializer.fromJson<String>(json['id']),
+      type: serializer.fromJson<String>(json['type']),
+      activityId: serializer.fromJson<String>(json['activityId']),
+      activityTitle: serializer.fromJson<String>(json['activityTitle']),
+      projectId: serializer.fromJson<String>(json['projectId']),
+      fromUserId: serializer.fromJson<String?>(json['fromUserId']),
+      fromUserName: serializer.fromJson<String?>(json['fromUserName']),
+      status: serializer.fromJson<String>(json['status']),
+      requiresAcceptance: serializer.fromJson<bool>(json['requiresAcceptance']),
+      createdAt: serializer.fromJson<DateTime>(json['createdAt']),
+      readAt: serializer.fromJson<DateTime?>(json['readAt']),
+      respondedAt: serializer.fromJson<DateTime?>(json['respondedAt']),
+      syncedAt: serializer.fromJson<DateTime>(json['syncedAt']),
+      metadataJson: serializer.fromJson<String?>(json['metadataJson']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<String>(id),
+      'type': serializer.toJson<String>(type),
+      'activityId': serializer.toJson<String>(activityId),
+      'activityTitle': serializer.toJson<String>(activityTitle),
+      'projectId': serializer.toJson<String>(projectId),
+      'fromUserId': serializer.toJson<String?>(fromUserId),
+      'fromUserName': serializer.toJson<String?>(fromUserName),
+      'status': serializer.toJson<String>(status),
+      'requiresAcceptance': serializer.toJson<bool>(requiresAcceptance),
+      'createdAt': serializer.toJson<DateTime>(createdAt),
+      'readAt': serializer.toJson<DateTime?>(readAt),
+      'respondedAt': serializer.toJson<DateTime?>(respondedAt),
+      'syncedAt': serializer.toJson<DateTime>(syncedAt),
+      'metadataJson': serializer.toJson<String?>(metadataJson),
+    };
+  }
+
+  UserNotification copyWith({
+    String? id,
+    String? type,
+    String? activityId,
+    String? activityTitle,
+    String? projectId,
+    Value<String?> fromUserId = const Value.absent(),
+    Value<String?> fromUserName = const Value.absent(),
+    String? status,
+    bool? requiresAcceptance,
+    DateTime? createdAt,
+    Value<DateTime?> readAt = const Value.absent(),
+    Value<DateTime?> respondedAt = const Value.absent(),
+    DateTime? syncedAt,
+    Value<String?> metadataJson = const Value.absent(),
+  }) => UserNotification(
+    id: id ?? this.id,
+    type: type ?? this.type,
+    activityId: activityId ?? this.activityId,
+    activityTitle: activityTitle ?? this.activityTitle,
+    projectId: projectId ?? this.projectId,
+    fromUserId: fromUserId.present ? fromUserId.value : this.fromUserId,
+    fromUserName: fromUserName.present ? fromUserName.value : this.fromUserName,
+    status: status ?? this.status,
+    requiresAcceptance: requiresAcceptance ?? this.requiresAcceptance,
+    createdAt: createdAt ?? this.createdAt,
+    readAt: readAt.present ? readAt.value : this.readAt,
+    respondedAt: respondedAt.present ? respondedAt.value : this.respondedAt,
+    syncedAt: syncedAt ?? this.syncedAt,
+    metadataJson: metadataJson.present ? metadataJson.value : this.metadataJson,
+  );
+  UserNotification copyWithCompanion(UserNotificationsCompanion data) {
+    return UserNotification(
+      id: data.id.present ? data.id.value : this.id,
+      type: data.type.present ? data.type.value : this.type,
+      activityId: data.activityId.present
+          ? data.activityId.value
+          : this.activityId,
+      activityTitle: data.activityTitle.present
+          ? data.activityTitle.value
+          : this.activityTitle,
+      projectId: data.projectId.present ? data.projectId.value : this.projectId,
+      fromUserId: data.fromUserId.present
+          ? data.fromUserId.value
+          : this.fromUserId,
+      fromUserName: data.fromUserName.present
+          ? data.fromUserName.value
+          : this.fromUserName,
+      status: data.status.present ? data.status.value : this.status,
+      requiresAcceptance: data.requiresAcceptance.present
+          ? data.requiresAcceptance.value
+          : this.requiresAcceptance,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      readAt: data.readAt.present ? data.readAt.value : this.readAt,
+      respondedAt: data.respondedAt.present
+          ? data.respondedAt.value
+          : this.respondedAt,
+      syncedAt: data.syncedAt.present ? data.syncedAt.value : this.syncedAt,
+      metadataJson: data.metadataJson.present
+          ? data.metadataJson.value
+          : this.metadataJson,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('UserNotification(')
+          ..write('id: $id, ')
+          ..write('type: $type, ')
+          ..write('activityId: $activityId, ')
+          ..write('activityTitle: $activityTitle, ')
+          ..write('projectId: $projectId, ')
+          ..write('fromUserId: $fromUserId, ')
+          ..write('fromUserName: $fromUserName, ')
+          ..write('status: $status, ')
+          ..write('requiresAcceptance: $requiresAcceptance, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('readAt: $readAt, ')
+          ..write('respondedAt: $respondedAt, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('metadataJson: $metadataJson')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    type,
+    activityId,
+    activityTitle,
+    projectId,
+    fromUserId,
+    fromUserName,
+    status,
+    requiresAcceptance,
+    createdAt,
+    readAt,
+    respondedAt,
+    syncedAt,
+    metadataJson,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is UserNotification &&
+          other.id == this.id &&
+          other.type == this.type &&
+          other.activityId == this.activityId &&
+          other.activityTitle == this.activityTitle &&
+          other.projectId == this.projectId &&
+          other.fromUserId == this.fromUserId &&
+          other.fromUserName == this.fromUserName &&
+          other.status == this.status &&
+          other.requiresAcceptance == this.requiresAcceptance &&
+          other.createdAt == this.createdAt &&
+          other.readAt == this.readAt &&
+          other.respondedAt == this.respondedAt &&
+          other.syncedAt == this.syncedAt &&
+          other.metadataJson == this.metadataJson);
+}
+
+class UserNotificationsCompanion extends UpdateCompanion<UserNotification> {
+  final Value<String> id;
+  final Value<String> type;
+  final Value<String> activityId;
+  final Value<String> activityTitle;
+  final Value<String> projectId;
+  final Value<String?> fromUserId;
+  final Value<String?> fromUserName;
+  final Value<String> status;
+  final Value<bool> requiresAcceptance;
+  final Value<DateTime> createdAt;
+  final Value<DateTime?> readAt;
+  final Value<DateTime?> respondedAt;
+  final Value<DateTime> syncedAt;
+  final Value<String?> metadataJson;
+  final Value<int> rowid;
+  const UserNotificationsCompanion({
+    this.id = const Value.absent(),
+    this.type = const Value.absent(),
+    this.activityId = const Value.absent(),
+    this.activityTitle = const Value.absent(),
+    this.projectId = const Value.absent(),
+    this.fromUserId = const Value.absent(),
+    this.fromUserName = const Value.absent(),
+    this.status = const Value.absent(),
+    this.requiresAcceptance = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.readAt = const Value.absent(),
+    this.respondedAt = const Value.absent(),
+    this.syncedAt = const Value.absent(),
+    this.metadataJson = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  UserNotificationsCompanion.insert({
+    required String id,
+    required String type,
+    required String activityId,
+    this.activityTitle = const Value.absent(),
+    required String projectId,
+    this.fromUserId = const Value.absent(),
+    this.fromUserName = const Value.absent(),
+    this.status = const Value.absent(),
+    this.requiresAcceptance = const Value.absent(),
+    required DateTime createdAt,
+    this.readAt = const Value.absent(),
+    this.respondedAt = const Value.absent(),
+    this.syncedAt = const Value.absent(),
+    this.metadataJson = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : id = Value(id),
+       type = Value(type),
+       activityId = Value(activityId),
+       projectId = Value(projectId),
+       createdAt = Value(createdAt);
+  static Insertable<UserNotification> custom({
+    Expression<String>? id,
+    Expression<String>? type,
+    Expression<String>? activityId,
+    Expression<String>? activityTitle,
+    Expression<String>? projectId,
+    Expression<String>? fromUserId,
+    Expression<String>? fromUserName,
+    Expression<String>? status,
+    Expression<bool>? requiresAcceptance,
+    Expression<DateTime>? createdAt,
+    Expression<DateTime>? readAt,
+    Expression<DateTime>? respondedAt,
+    Expression<DateTime>? syncedAt,
+    Expression<String>? metadataJson,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (type != null) 'type': type,
+      if (activityId != null) 'activity_id': activityId,
+      if (activityTitle != null) 'activity_title': activityTitle,
+      if (projectId != null) 'project_id': projectId,
+      if (fromUserId != null) 'from_user_id': fromUserId,
+      if (fromUserName != null) 'from_user_name': fromUserName,
+      if (status != null) 'status': status,
+      if (requiresAcceptance != null) 'requires_acceptance': requiresAcceptance,
+      if (createdAt != null) 'created_at': createdAt,
+      if (readAt != null) 'read_at': readAt,
+      if (respondedAt != null) 'responded_at': respondedAt,
+      if (syncedAt != null) 'synced_at': syncedAt,
+      if (metadataJson != null) 'metadata_json': metadataJson,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  UserNotificationsCompanion copyWith({
+    Value<String>? id,
+    Value<String>? type,
+    Value<String>? activityId,
+    Value<String>? activityTitle,
+    Value<String>? projectId,
+    Value<String?>? fromUserId,
+    Value<String?>? fromUserName,
+    Value<String>? status,
+    Value<bool>? requiresAcceptance,
+    Value<DateTime>? createdAt,
+    Value<DateTime?>? readAt,
+    Value<DateTime?>? respondedAt,
+    Value<DateTime>? syncedAt,
+    Value<String?>? metadataJson,
+    Value<int>? rowid,
+  }) {
+    return UserNotificationsCompanion(
+      id: id ?? this.id,
+      type: type ?? this.type,
+      activityId: activityId ?? this.activityId,
+      activityTitle: activityTitle ?? this.activityTitle,
+      projectId: projectId ?? this.projectId,
+      fromUserId: fromUserId ?? this.fromUserId,
+      fromUserName: fromUserName ?? this.fromUserName,
+      status: status ?? this.status,
+      requiresAcceptance: requiresAcceptance ?? this.requiresAcceptance,
+      createdAt: createdAt ?? this.createdAt,
+      readAt: readAt ?? this.readAt,
+      respondedAt: respondedAt ?? this.respondedAt,
+      syncedAt: syncedAt ?? this.syncedAt,
+      metadataJson: metadataJson ?? this.metadataJson,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<String>(id.value);
+    }
+    if (type.present) {
+      map['type'] = Variable<String>(type.value);
+    }
+    if (activityId.present) {
+      map['activity_id'] = Variable<String>(activityId.value);
+    }
+    if (activityTitle.present) {
+      map['activity_title'] = Variable<String>(activityTitle.value);
+    }
+    if (projectId.present) {
+      map['project_id'] = Variable<String>(projectId.value);
+    }
+    if (fromUserId.present) {
+      map['from_user_id'] = Variable<String>(fromUserId.value);
+    }
+    if (fromUserName.present) {
+      map['from_user_name'] = Variable<String>(fromUserName.value);
+    }
+    if (status.present) {
+      map['status'] = Variable<String>(status.value);
+    }
+    if (requiresAcceptance.present) {
+      map['requires_acceptance'] = Variable<bool>(requiresAcceptance.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<DateTime>(createdAt.value);
+    }
+    if (readAt.present) {
+      map['read_at'] = Variable<DateTime>(readAt.value);
+    }
+    if (respondedAt.present) {
+      map['responded_at'] = Variable<DateTime>(respondedAt.value);
+    }
+    if (syncedAt.present) {
+      map['synced_at'] = Variable<DateTime>(syncedAt.value);
+    }
+    if (metadataJson.present) {
+      map['metadata_json'] = Variable<String>(metadataJson.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('UserNotificationsCompanion(')
+          ..write('id: $id, ')
+          ..write('type: $type, ')
+          ..write('activityId: $activityId, ')
+          ..write('activityTitle: $activityTitle, ')
+          ..write('projectId: $projectId, ')
+          ..write('fromUserId: $fromUserId, ')
+          ..write('fromUserName: $fromUserName, ')
+          ..write('status: $status, ')
+          ..write('requiresAcceptance: $requiresAcceptance, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('readAt: $readAt, ')
+          ..write('respondedAt: $respondedAt, ')
+          ..write('syncedAt: $syncedAt, ')
+          ..write('metadataJson: $metadataJson, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDb extends GeneratedDatabase {
   _$AppDb(QueryExecutor e) : super(e);
   $AppDbManager get managers => $AppDbManager(this);
@@ -14971,6 +15803,8 @@ abstract class _$AppDb extends GeneratedDatabase {
   late final $LocalEventsTable localEvents = $LocalEventsTable(this);
   late final $AgendaAssignmentsTable agendaAssignments =
       $AgendaAssignmentsTable(this);
+  late final $UserNotificationsTable userNotifications =
+      $UserNotificationsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -15002,6 +15836,7 @@ abstract class _$AppDb extends GeneratedDatabase {
     syncState,
     localEvents,
     agendaAssignments,
+    userNotifications,
   ];
 }
 
@@ -25466,6 +26301,396 @@ typedef $$AgendaAssignmentsTableProcessedTableManager =
       AgendaAssignment,
       PrefetchHooks Function()
     >;
+typedef $$UserNotificationsTableCreateCompanionBuilder =
+    UserNotificationsCompanion Function({
+      required String id,
+      required String type,
+      required String activityId,
+      Value<String> activityTitle,
+      required String projectId,
+      Value<String?> fromUserId,
+      Value<String?> fromUserName,
+      Value<String> status,
+      Value<bool> requiresAcceptance,
+      required DateTime createdAt,
+      Value<DateTime?> readAt,
+      Value<DateTime?> respondedAt,
+      Value<DateTime> syncedAt,
+      Value<String?> metadataJson,
+      Value<int> rowid,
+    });
+typedef $$UserNotificationsTableUpdateCompanionBuilder =
+    UserNotificationsCompanion Function({
+      Value<String> id,
+      Value<String> type,
+      Value<String> activityId,
+      Value<String> activityTitle,
+      Value<String> projectId,
+      Value<String?> fromUserId,
+      Value<String?> fromUserName,
+      Value<String> status,
+      Value<bool> requiresAcceptance,
+      Value<DateTime> createdAt,
+      Value<DateTime?> readAt,
+      Value<DateTime?> respondedAt,
+      Value<DateTime> syncedAt,
+      Value<String?> metadataJson,
+      Value<int> rowid,
+    });
+
+class $$UserNotificationsTableFilterComposer
+    extends Composer<_$AppDb, $UserNotificationsTable> {
+  $$UserNotificationsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get activityId => $composableBuilder(
+    column: $table.activityId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get activityTitle => $composableBuilder(
+    column: $table.activityTitle,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fromUserId => $composableBuilder(
+    column: $table.fromUserId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get fromUserName => $composableBuilder(
+    column: $table.fromUserName,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get requiresAcceptance => $composableBuilder(
+    column: $table.requiresAcceptance,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get readAt => $composableBuilder(
+    column: $table.readAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get respondedAt => $composableBuilder(
+    column: $table.respondedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get syncedAt => $composableBuilder(
+    column: $table.syncedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get metadataJson => $composableBuilder(
+    column: $table.metadataJson,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$UserNotificationsTableOrderingComposer
+    extends Composer<_$AppDb, $UserNotificationsTable> {
+  $$UserNotificationsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get type => $composableBuilder(
+    column: $table.type,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get activityId => $composableBuilder(
+    column: $table.activityId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get activityTitle => $composableBuilder(
+    column: $table.activityTitle,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get projectId => $composableBuilder(
+    column: $table.projectId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fromUserId => $composableBuilder(
+    column: $table.fromUserId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get fromUserName => $composableBuilder(
+    column: $table.fromUserName,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get status => $composableBuilder(
+    column: $table.status,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get requiresAcceptance => $composableBuilder(
+    column: $table.requiresAcceptance,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get readAt => $composableBuilder(
+    column: $table.readAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get respondedAt => $composableBuilder(
+    column: $table.respondedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get syncedAt => $composableBuilder(
+    column: $table.syncedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get metadataJson => $composableBuilder(
+    column: $table.metadataJson,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$UserNotificationsTableAnnotationComposer
+    extends Composer<_$AppDb, $UserNotificationsTable> {
+  $$UserNotificationsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<String> get type =>
+      $composableBuilder(column: $table.type, builder: (column) => column);
+
+  GeneratedColumn<String> get activityId => $composableBuilder(
+    column: $table.activityId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get activityTitle => $composableBuilder(
+    column: $table.activityTitle,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get projectId =>
+      $composableBuilder(column: $table.projectId, builder: (column) => column);
+
+  GeneratedColumn<String> get fromUserId => $composableBuilder(
+    column: $table.fromUserId,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get fromUserName => $composableBuilder(
+    column: $table.fromUserName,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get status =>
+      $composableBuilder(column: $table.status, builder: (column) => column);
+
+  GeneratedColumn<bool> get requiresAcceptance => $composableBuilder(
+    column: $table.requiresAcceptance,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get readAt =>
+      $composableBuilder(column: $table.readAt, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get respondedAt => $composableBuilder(
+    column: $table.respondedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get syncedAt =>
+      $composableBuilder(column: $table.syncedAt, builder: (column) => column);
+
+  GeneratedColumn<String> get metadataJson => $composableBuilder(
+    column: $table.metadataJson,
+    builder: (column) => column,
+  );
+}
+
+class $$UserNotificationsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDb,
+          $UserNotificationsTable,
+          UserNotification,
+          $$UserNotificationsTableFilterComposer,
+          $$UserNotificationsTableOrderingComposer,
+          $$UserNotificationsTableAnnotationComposer,
+          $$UserNotificationsTableCreateCompanionBuilder,
+          $$UserNotificationsTableUpdateCompanionBuilder,
+          (
+            UserNotification,
+            BaseReferences<_$AppDb, $UserNotificationsTable, UserNotification>,
+          ),
+          UserNotification,
+          PrefetchHooks Function()
+        > {
+  $$UserNotificationsTableTableManager(
+    _$AppDb db,
+    $UserNotificationsTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$UserNotificationsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$UserNotificationsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$UserNotificationsTableAnnotationComposer(
+                $db: db,
+                $table: table,
+              ),
+          updateCompanionCallback:
+              ({
+                Value<String> id = const Value.absent(),
+                Value<String> type = const Value.absent(),
+                Value<String> activityId = const Value.absent(),
+                Value<String> activityTitle = const Value.absent(),
+                Value<String> projectId = const Value.absent(),
+                Value<String?> fromUserId = const Value.absent(),
+                Value<String?> fromUserName = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<bool> requiresAcceptance = const Value.absent(),
+                Value<DateTime> createdAt = const Value.absent(),
+                Value<DateTime?> readAt = const Value.absent(),
+                Value<DateTime?> respondedAt = const Value.absent(),
+                Value<DateTime> syncedAt = const Value.absent(),
+                Value<String?> metadataJson = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => UserNotificationsCompanion(
+                id: id,
+                type: type,
+                activityId: activityId,
+                activityTitle: activityTitle,
+                projectId: projectId,
+                fromUserId: fromUserId,
+                fromUserName: fromUserName,
+                status: status,
+                requiresAcceptance: requiresAcceptance,
+                createdAt: createdAt,
+                readAt: readAt,
+                respondedAt: respondedAt,
+                syncedAt: syncedAt,
+                metadataJson: metadataJson,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String id,
+                required String type,
+                required String activityId,
+                Value<String> activityTitle = const Value.absent(),
+                required String projectId,
+                Value<String?> fromUserId = const Value.absent(),
+                Value<String?> fromUserName = const Value.absent(),
+                Value<String> status = const Value.absent(),
+                Value<bool> requiresAcceptance = const Value.absent(),
+                required DateTime createdAt,
+                Value<DateTime?> readAt = const Value.absent(),
+                Value<DateTime?> respondedAt = const Value.absent(),
+                Value<DateTime> syncedAt = const Value.absent(),
+                Value<String?> metadataJson = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => UserNotificationsCompanion.insert(
+                id: id,
+                type: type,
+                activityId: activityId,
+                activityTitle: activityTitle,
+                projectId: projectId,
+                fromUserId: fromUserId,
+                fromUserName: fromUserName,
+                status: status,
+                requiresAcceptance: requiresAcceptance,
+                createdAt: createdAt,
+                readAt: readAt,
+                respondedAt: respondedAt,
+                syncedAt: syncedAt,
+                metadataJson: metadataJson,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$UserNotificationsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDb,
+      $UserNotificationsTable,
+      UserNotification,
+      $$UserNotificationsTableFilterComposer,
+      $$UserNotificationsTableOrderingComposer,
+      $$UserNotificationsTableAnnotationComposer,
+      $$UserNotificationsTableCreateCompanionBuilder,
+      $$UserNotificationsTableUpdateCompanionBuilder,
+      (
+        UserNotification,
+        BaseReferences<_$AppDb, $UserNotificationsTable, UserNotification>,
+      ),
+      UserNotification,
+      PrefetchHooks Function()
+    >;
 
 class $AppDbManager {
   final _$AppDb _db;
@@ -25522,4 +26747,6 @@ class $AppDbManager {
       $$LocalEventsTableTableManager(_db, _db.localEvents);
   $$AgendaAssignmentsTableTableManager get agendaAssignments =>
       $$AgendaAssignmentsTableTableManager(_db, _db.agendaAssignments);
+  $$UserNotificationsTableTableManager get userNotifications =>
+      $$UserNotificationsTableTableManager(_db, _db.userNotifications);
 }

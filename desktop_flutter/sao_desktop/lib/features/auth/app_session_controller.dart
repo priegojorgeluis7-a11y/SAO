@@ -1,8 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 
 import '../../core/auth/token_store.dart';
 import '../../core/config/data_mode.dart';
@@ -349,6 +349,14 @@ class _AuthHttp implements AuthHttp {
 
   _AuthHttp(this.baseUrl);
 
+  Map<String, String> _headers({String? token}) {
+    final headers = <String, String>{'Content-Type': 'application/json'};
+    if (token != null && token.isNotEmpty) {
+      headers['Authorization'] = 'Bearer $token';
+    }
+    return headers;
+  }
+
   @override
   Future<Map<String, dynamic>> post(
     String path,
@@ -356,28 +364,17 @@ class _AuthHttp implements AuthHttp {
     String? token,
   }) async {
     final uri = Uri.parse('$baseUrl$path');
-    final client = HttpClient();
-    client.connectionTimeout = _requestTimeout;
-    try {
-      final req = await client.postUrl(uri).timeout(_requestTimeout);
-      req.headers.contentType = ContentType.json;
-      if (token != null) {
-        req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      }
-      req.write(jsonEncode(body));
-      final res = await req.close().timeout(_requestTimeout);
-      final raw = await res.transform(utf8.decoder).join().timeout(_requestTimeout);
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw AuthApiException(
-          statusCode: res.statusCode,
-          message: raw,
-          uri: uri,
-        );
-      }
-      return jsonDecode(raw) as Map<String, dynamic>;
-    } finally {
-      client.close(force: true);
+    final response = await http
+        .post(uri, headers: _headers(token: token), body: jsonEncode(body))
+        .timeout(_requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthApiException(
+        statusCode: response.statusCode,
+        message: response.body,
+        uri: uri,
+      );
     }
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   @override
@@ -392,25 +389,17 @@ class _AuthHttp implements AuthHttp {
   @override
   Future<dynamic> getAny(String path, String token) async {
     final uri = Uri.parse('$baseUrl$path');
-    final client = HttpClient();
-    client.connectionTimeout = _requestTimeout;
-    try {
-      final req = await client.getUrl(uri).timeout(_requestTimeout);
-      req.headers.contentType = ContentType.json;
-      req.headers.set(HttpHeaders.authorizationHeader, 'Bearer $token');
-      final res = await req.close().timeout(_requestTimeout);
-      final raw = await res.transform(utf8.decoder).join().timeout(_requestTimeout);
-      if (res.statusCode < 200 || res.statusCode >= 300) {
-        throw AuthApiException(
-          statusCode: res.statusCode,
-          message: raw,
-          uri: uri,
-        );
-      }
-      return jsonDecode(raw);
-    } finally {
-      client.close(force: true);
+    final response = await http
+        .get(uri, headers: _headers(token: token))
+        .timeout(_requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw AuthApiException(
+        statusCode: response.statusCode,
+        message: response.body,
+        uri: uri,
+      );
     }
+    return jsonDecode(response.body);
   }
 }
 
@@ -506,16 +495,12 @@ class AppSessionController extends StateNotifier<AppSessionState> {
       return 'No se pudo iniciar sesión (${error.statusCode}).';
     }
 
-    if (error is SocketException) {
-      return 'No se pudo conectar con el backend. Verifica tu red.';
-    }
-
     if (error is TimeoutException) {
       return 'El backend tardó demasiado en responder.';
     }
 
-    if (error is HttpException) {
-      return 'No se pudo iniciar sesión: ${error.message}';
+    if (error is http.ClientException) {
+      return 'No se pudo conectar con el backend. Verifica tu red.';
     }
 
     return 'No se pudo iniciar sesión: $error';

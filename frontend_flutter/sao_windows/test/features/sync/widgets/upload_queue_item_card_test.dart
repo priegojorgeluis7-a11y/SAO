@@ -67,7 +67,7 @@ void main() {
 
     final button = tester.widget<IconButton>(find.byType(IconButton));
     expect(button.onPressed, isNull);
-    expect(button.tooltip, 'No reintentable');
-    expect(find.byIcon(Icons.sync_disabled_rounded), findsOneWidget);
+    expect(button.tooltip, 'Descartar de la cola');
+    expect(find.byIcon(Icons.delete_outline_rounded), findsOneWidget);
   });
 }

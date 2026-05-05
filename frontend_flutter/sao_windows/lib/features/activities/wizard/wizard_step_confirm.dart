@@ -1,6 +1,7 @@
 // lib/features/activities/wizard/wizard_step_confirm.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../../core/utils/snackbar.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
@@ -22,6 +23,7 @@ class WizardStepConfirm extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final a = controller.activity;
+    final frontLabel = frontTerminology(controller.projectCode, capitalize: true);
 
     final riskText = switch (controller.risk) {
       RiskLevel.bajo => 'Bajo',
@@ -108,7 +110,7 @@ class WizardStepConfirm extends StatelessWidget {
                         style: const TextStyle(color: SaoColors.gray500),
                       ),
                       Text(
-                        'Frente: ${a.frente}',
+                        '$frontLabel: ${a.frente}',
                         style: const TextStyle(color: SaoColors.gray500),
                       ),
                       Text(
@@ -240,6 +242,8 @@ class WizardStepConfirm extends StatelessWidget {
                     ),
                   ),
                 ],
+                const SizedBox(height: 12),
+                _readinessChecklist(context),
               ],
             ),
           ),
@@ -618,5 +622,131 @@ class WizardStepConfirm extends StatelessWidget {
         ),
       );
     }
+  }
+
+  Widget _readinessChecklist(BuildContext context) {
+    final items = _readinessItems();
+    final allPassed = items.every((item) => item.ok);
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: allPassed ? SaoColors.successBg : SaoColors.alertBg,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: allPassed
+              ? SaoColors.success.withValues(alpha: 0.3)
+              : SaoColors.warning.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                allPassed
+                    ? Icons.check_circle_rounded
+                    : Icons.pending_actions_rounded,
+                size: 16,
+                color: allPassed ? SaoColors.success : SaoColors.warning,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                allPassed
+                    ? 'Listo para guardar'
+                    : 'Completar antes de guardar',
+                style: SaoTypography.bodyTextSmall.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: allPassed ? SaoColors.success : SaoColors.warning,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...items.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: GestureDetector(
+                onTap: item.ok ? null : () => onJumpToStep(item.step),
+                child: Row(
+                  children: [
+                    Icon(
+                      item.ok
+                          ? Icons.check_circle_outline
+                          : Icons.radio_button_unchecked,
+                      size: 15,
+                      color: item.ok ? SaoColors.success : SaoColors.gray400,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        item.label,
+                        style: SaoTypography.bodyTextSmall.copyWith(
+                          color: item.ok ? SaoColors.gray500 : SaoColors.gray800,
+                          fontWeight:
+                              item.ok ? FontWeight.w400 : FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    if (!item.ok)
+                      Text(
+                        'Corregir →',
+                        style: SaoTypography.bodyTextSmall.copyWith(
+                          color: SaoColors.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  List<({String label, bool ok, int step})> _readinessItems() {
+    final evidCount = controller.evidencias.length;
+    final evidRequired = controller.minimumEvidencePhotosRequired;
+    final evidenciaOk = evidCount >= evidRequired;
+    final evidenciaLabel = evidRequired == 0
+        ? 'Evidencia ($evidCount foto${evidCount == 1 ? '' : 's'})'
+        : 'Evidencia ($evidCount/$evidRequired requerida${evidRequired == 1 ? '' : 's'})';
+
+    return [
+      (
+        label: 'Horario de inicio y fin',
+        ok: controller.horaInicio != null && controller.horaFin != null,
+        step: 0,
+      ),
+      (
+        label: 'Ubicación (municipio y colonia)',
+        ok: (controller.municipioId ?? '').trim().isNotEmpty &&
+            controller.colonia.trim().isNotEmpty,
+        step: 0,
+      ),
+      if (controller.selectedActivityRequiresGeo)
+        (
+          label: 'GPS activo',
+          ok: controller.hasValidGpsCoordinates,
+          step: 0,
+        ),
+      (
+        label: 'Nivel de riesgo',
+        ok: controller.risk != null,
+        step: 0,
+      ),
+      (
+        label: 'Clasificación (subcategoría)',
+        ok: controller.selectedSubcategory != null,
+        step: 1,
+      ),
+      (
+        label: evidenciaLabel,
+        ok: evidenciaOk,
+        step: 2,
+      ),
+    ];
   }
 }

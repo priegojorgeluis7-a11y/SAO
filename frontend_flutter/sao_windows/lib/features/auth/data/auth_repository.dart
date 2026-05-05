@@ -321,7 +321,15 @@ class AuthRepository {
           appLogger.i('Bootstrap: offline PIN available → pinLocked');
           return BootstrapResult.pinLocked;
         }
-        appLogger.w('Bootstrap: no PIN configured, staying unauthenticated');
+        // Sin PIN configurado: si el token es localmente válido y hay usuario
+        // cacheado, restaurar sesión offline sin requerir autenticación adicional.
+        final tokenValid = await _tokenStorage.hasValidToken();
+        final cachedUser = await _pinStorage?.getCachedUser();
+        if (tokenValid && cachedUser != null) {
+          appLogger.i('Bootstrap: token válido + usuario cacheado → sesión offline');
+          return BootstrapResult.authenticated;
+        }
+        appLogger.w('Bootstrap: sin PIN ni token válido, redirigiendo a login');
         return BootstrapResult.unauthenticated;
       }
     } catch (e) {

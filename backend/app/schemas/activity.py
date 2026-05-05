@@ -213,6 +213,10 @@ class ActivityDTO(BaseModel):
         description="Human-readable coordinator comment explaining what to correct",
     )
     assigned_to_user_id: UUID | None = None
+    participant_user_ids: list[UUID] = Field(default_factory=list)
+    participant_user_names: list[str] = Field(default_factory=list)
+    completed_by_user_id: UUID | None = None
+    completed_at: datetime | None = None
     assigned_to_user_name: str | None = None
     created_by_user_id: UUID
     catalog_version_id: UUID | str | None = None

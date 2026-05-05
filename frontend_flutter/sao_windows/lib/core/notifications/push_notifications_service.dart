@@ -3,9 +3,20 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../network/api_client.dart';
 import '../utils/logger.dart';
+
+/// Channel used for assignment push notifications on Android.
+const AndroidNotificationChannel _assignmentChannel = AndroidNotificationChannel(
+  'sao_assignments',
+  'Actividades asignadas',
+  description: 'Notificaciones de nuevas actividades y transferencias.',
+  importance: Importance.high,
+);
+
+final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
 
 class PushNotificationsService {
   PushNotificationsService({required ApiClient apiClient})
@@ -33,15 +44,28 @@ class PushNotificationsService {
     _initialized = true;
 
     final options = _firebaseOptionsFromEnv();
-    if (options == null) {
-      appLogger.i(
-        'PushNotificationsService disabled: Firebase env not configured.',
-      );
-      return;
-    }
 
     try {
-      await Firebase.initializeApp(options: options);
+      // If dart-define vars are present use them explicitly; otherwise let
+      // google-services.json (Android) / GoogleService-Info.plist (iOS) handle
+      // auto-configuration.
+      if (options != null) {
+        await Firebase.initializeApp(options: options);
+      } else {
+        await Firebase.initializeApp();
+      }
+
+      // Initialise flutter_local_notifications for foreground messages (Android only).
+      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+        const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+        await _localNotifications.initialize(
+          const InitializationSettings(android: androidInit),
+        );
+        await _localNotifications
+            .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin>()
+            ?.createNotificationChannel(_assignmentChannel);
+      }
 
       final messaging = FirebaseMessaging.instance;
       await messaging.requestPermission(alert: true, badge: true, sound: true);
@@ -60,9 +84,10 @@ class PushNotificationsService {
         scheduleMicrotask(() => _messagesController.add(initialMessage));
       }
 
-      _foregroundMessageSub = FirebaseMessaging.onMessage.listen(
-        _messagesController.add,
-      );
+      _foregroundMessageSub = FirebaseMessaging.onMessage.listen((message) {
+        _messagesController.add(message);
+        _showForegroundLocalNotification(message);
+      });
       _openedAppMessageSub = FirebaseMessaging.onMessageOpenedApp.listen(
         _messagesController.add,
       );
@@ -122,6 +147,38 @@ class PushNotificationsService {
     await _foregroundMessageSub?.cancel();
     await _openedAppMessageSub?.cancel();
     await _messagesController.close();
+  }
+
+  /// Shows a local notification banner when an assignment message arrives while
+  /// the app is in the foreground. Only runs on Android (not web/iOS/desktop).
+  void _showForegroundLocalNotification(RemoteMessage message) {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+
+    final notification = message.notification;
+    final data = message.data;
+    final type = data['type'] as String? ?? '';
+
+    // Only show banner for assignment events; other events can be added here.
+    if (type != 'new_assignment' && type != 'assignment_transferred') return;
+
+    final title = notification?.title ?? (type == 'assignment_transferred' ? 'Actividad transferida' : 'Nueva actividad asignada');
+    final body = notification?.body ?? '';
+
+    _localNotifications.show(
+      message.hashCode,
+      title,
+      body,
+      NotificationDetails(
+        android: AndroidNotificationDetails(
+          _assignmentChannel.id,
+          _assignmentChannel.name,
+          channelDescription: _assignmentChannel.description,
+          importance: Importance.high,
+          priority: Priority.high,
+          icon: '@mipmap/ic_launcher',
+        ),
+      ),
+    );
   }
 
   FirebaseOptions? _firebaseOptionsFromEnv() {

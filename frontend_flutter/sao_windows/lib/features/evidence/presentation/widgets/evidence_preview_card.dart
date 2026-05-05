@@ -2,6 +2,7 @@
 // Widget to display a preview of captured evidence (image/video).
 
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import '../../../../ui/theme/sao_colors.dart';
 import '../../../../ui/theme/sao_typography.dart';
@@ -35,15 +36,7 @@ class EvidencePreviewCard extends StatelessWidget {
               height: maxHeight ?? 300,
               color: Colors.grey[300],
               child: evidence.mimeType.startsWith('image/')
-                  ? Image.file(
-                      File(evidence.localPath),
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return const Center(
-                          child: Icon(Icons.broken_image, size: 48, color: Colors.grey),
-                        );
-                      },
-                    )
+                  ? _buildImagePreview(evidence)
                   : Stack(
                       alignment: Alignment.center,
                       children: [
@@ -105,6 +98,27 @@ class EvidencePreviewCard extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  /// Builds the image preview, using cached bytes on web (dart:io File is
+  /// unavailable there) and File on native.
+  Widget _buildImagePreview(CapturedEvidence evidence) {
+    final cached = evidence.cachedBytes;
+    if (kIsWeb && cached != null) {
+      return Image.memory(
+        cached,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        errorBuilder: (_, __, ___) =>
+            const Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
+      );
+    }
+    return Image.file(
+      File(evidence.localPath),
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) =>
+          const Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
     );
   }
 

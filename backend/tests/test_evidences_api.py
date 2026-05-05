@@ -152,6 +152,10 @@ def test_generate_signed_upload_url_uses_service_account_fallback_on_cloud_run(m
     assert fake_storage.blobs[-1].calls[-1]["access_token"] == "refreshed-access-token"
 
 
+def test_allowed_mime_types_include_webp():
+    assert "image/webp" in evidences_api._ALLOWED_MIME_TYPES
+
+
 def test_get_download_url_allows_operativo_same_project_for_legacy_evidence(monkeypatch):
     fake_client = _FakeFirestoreClient(
         {

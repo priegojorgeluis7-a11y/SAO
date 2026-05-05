@@ -8,6 +8,12 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # Python < 3.9 fallback (shouldn't happen on 3.11)
+    from backports.zoneinfo import ZoneInfo  # type: ignore[no-redef]
+
+_TZ_MEXICO = ZoneInfo("America/Mexico_City")
 from threading import Lock
 from typing import Any
 
@@ -177,6 +183,11 @@ def notify_catalog_update(*, project_id: str, version_id: str) -> dict[str, int]
             token_rows.append((doc.id, token))
 
     if not token_rows:
+        logger.warning(
+            "CATALOG_PUSH_NO_TOKENS project_id=%s version_id=%s (no registered device tokens)",
+            normalized_project,
+            normalized_version,
+        )
         return {"sent": 0, "failed": 0, "invalidated": 0}
 
     sent = 0
@@ -287,6 +298,13 @@ def notify_review_decision(
             token_rows.append((doc.id, token))
 
     if not token_rows:
+        logger.warning(
+            "REVIEW_PUSH_NO_TOKENS project_id=%s activity_id=%s assignee=%s decision=%s (no registered device tokens)",
+            normalized_project,
+            normalized_activity,
+            normalized_assignee,
+            normalized_decision,
+        )
         return {"sent": 0, "failed": 0, "invalidated": 0}
 
     if normalized_decision in {"REJECT", "CHANGES_REQUIRED"}:
@@ -364,3 +382,331 @@ def notify_review_decision(
     )
 
     return {"sent": sent, "failed": failed, "invalidated": invalidated}
+
+
+def _fmt_local_time(iso_str: str | None) -> str:
+    """Return a human-readable time string in Mexico City timezone, e.g. '24/04 9:30 AM'."""
+    if not iso_str:
+        return ""
+    try:
+        dt = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        dt_mx = dt.astimezone(_TZ_MEXICO)
+        return dt_mx.strftime("%d/%m %-I:%M %p")
+    except Exception:
+        return ""
+
+
+def notify_new_assignment(
+    *,
+    project_id: str,
+    activity_id: str,
+    activity_title: str,
+    assignee_user_id: str,
+    assigned_by_name: str | None = None,
+    is_transfer: bool = False,
+    municipio: str | None = None,
+    estado: str | None = None,
+    frente: str | None = None,
+    start_at: str | None = None,
+) -> dict[str, int]:
+    """Send an FCM push notification to the newly assigned operative/user.
+
+    Filters device tokens by user_id so only the recipient is notified.
+    Non-blocking: logs errors and returns counters. Safe to call without
+    awaiting; callers should run it in a background thread if needed.
+    """
+    normalized_project = _normalize_project_id(project_id)
+    normalized_activity = str(activity_id or "").strip()
+    normalized_assignee = str(assignee_user_id or "").strip()
+    normalized_title = str(activity_title or "").strip() or "Actividad"
+    normalized_by = str(assigned_by_name or "").strip()
+
+    if not normalized_project or not normalized_activity or not normalized_assignee:
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    if not _is_fcm_enabled():
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    app = _initialize_firebase_app()
+    if app is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    modules = _firebase_modules()
+    if modules is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+    _, _, messaging = modules
+
+    client = get_firestore_client()
+    docs = (
+        client.collection(_COLLECTION)
+        .where("enabled", "==", True)
+        .where("project_id", "==", normalized_project)
+        .where("user_id", "==", normalized_assignee)
+        .stream()
+    )
+
+    token_rows: list[tuple[str, str]] = []
+    for doc in docs:
+        payload = doc.to_dict() or {}
+        token = str(payload.get("token") or "").strip()
+        if token:
+            token_rows.append((doc.id, token))
+
+    if not token_rows:
+        logger.warning(
+            "ASSIGNMENT_PUSH_NO_TOKENS project_id=%s activity_id=%s assignee=%s is_transfer=%s (no registered device tokens)",
+            normalized_project,
+            normalized_activity,
+            normalized_assignee,
+            is_transfer,
+        )
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    if is_transfer:
+        title = "Actividad transferida a ti"
+        body = f'"{normalized_title}" fue transferida a tu cargo.'
+    else:
+        title = "Nueva actividad asignada"
+        body = f'Se te asignó "{normalized_title}".'
+
+    time_str = _fmt_local_time(start_at)
+    if time_str:
+        body += f" {time_str}."
+
+    location_parts = [p for p in [frente, municipio, estado] if p and str(p).strip()]
+    if location_parts:
+        body += " " + ", ".join(str(p).strip() for p in location_parts) + "."
+
+    if normalized_by:
+        body += f" Por: {normalized_by}."
+
+    sent = 0
+    failed = 0
+    invalidated = 0
+
+    for index in range(0, len(token_rows), 500):
+        chunk = token_rows[index:index + 500]
+        tokens = [token for _, token in chunk]
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            notification=messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            data={
+                "type": "new_assignment" if not is_transfer else "assignment_transferred",
+                "project_id": normalized_project,
+                "activity_id": normalized_activity,
+            },
+            android=messaging.AndroidConfig(priority="high"),
+        )
+
+        response = messaging.send_each_for_multicast(message, app=app)
+        sent += response.success_count
+        failed += response.failure_count
+
+        now = datetime.now(timezone.utc)
+        for i, item in enumerate(response.responses):
+            if item.success:
+                continue
+            err = item.exception
+            if err is None:
+                continue
+            if not _is_invalid_token_error(err):
+                continue
+
+            invalidated += 1
+            doc_id = chunk[i][0]
+            client.collection(_COLLECTION).document(doc_id).set(
+                {
+                    "enabled": False,
+                    "updated_at": now,
+                    "disabled_reason": "invalid_or_unregistered",
+                },
+                merge=True,
+            )
+
+    logger.info(
+        "ASSIGNMENT_PUSH project_id=%s activity_id=%s assignee=%s is_transfer=%s sent=%s failed=%s invalidated=%s",
+        normalized_project,
+        normalized_activity,
+        normalized_assignee,
+        is_transfer,
+        sent,
+        failed,
+        invalidated,
+    )
+
+    return {"sent": sent, "failed": failed, "invalidated": invalidated}
+
+
+def notify_daily_agenda(*, project_id: str | None = None) -> dict[str, int]:
+    """Send a morning agenda push to every user who has activities scheduled for today.
+
+    Designed to be triggered at 09:00 America/Mexico_City by Cloud Scheduler.
+    Queries activities where assignment_start_at falls within today's local date,
+    groups by assignee, and sends one summary message per user per project.
+    """
+    if not _is_fcm_enabled():
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    app = _initialize_firebase_app()
+    if app is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    modules = _firebase_modules()
+    if modules is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+    _, _, messaging = modules
+
+    # Today's bounds in Mexico City time, converted to UTC for ISO comparison.
+    now_mx = datetime.now(_TZ_MEXICO)
+    today_start_utc = now_mx.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(timezone.utc)
+    today_end_utc = now_mx.replace(hour=23, minute=59, second=59, microsecond=999999).astimezone(timezone.utc)
+    today_start_iso = today_start_utc.isoformat()
+    today_end_iso = today_end_utc.isoformat()
+
+    client = get_firestore_client()
+
+    # --- Collect all active device tokens ---
+    filter_project = _normalize_project_id(project_id) if project_id else None
+    token_query = client.collection(_COLLECTION).where("enabled", "==", True)
+    token_docs = list(token_query.stream())
+
+    # user_id → project_id → [token, ...]
+    user_project_tokens: dict[str, dict[str, list[str]]] = {}
+    for doc in token_docs:
+        payload = doc.to_dict() or {}
+        uid = str(payload.get("user_id") or "").strip()
+        pid = str(payload.get("project_id") or "").strip()
+        token = str(payload.get("token") or "").strip()
+        if not uid or not pid or not token:
+            continue
+        if filter_project and pid != filter_project:
+            continue
+        user_project_tokens.setdefault(uid, {}).setdefault(pid, []).append(token)
+
+    if not user_project_tokens:
+        logger.info("DAILY_AGENDA_PUSH no active device tokens found")
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    unique_pids = {pid for pids in user_project_tokens.values() for pid in pids}
+
+    # --- Load today's pending activities per project (filter in Python) ---
+    _active_states = {"PENDIENTE", "EN_PROCESO", "EN_REVISION"}
+    # project_id → list of activity dicts
+    project_activities: dict[str, list[dict]] = {pid: [] for pid in unique_pids}
+
+    for pid in unique_pids:
+        for doc in client.collection("activities").where("project_id", "==", pid).stream():
+            d = doc.to_dict() or {}
+            if d.get("deleted_at") is not None:
+                continue
+            state = str(d.get("execution_state") or "").strip()
+            if state not in _active_states:
+                continue
+            start_raw = str(d.get("assignment_start_at") or d.get("start_at") or "").strip()
+            if not start_raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+                if not (today_start_utc <= dt <= today_end_utc):
+                    continue
+            except Exception:
+                continue
+            project_activities[pid].append(d)
+
+    # --- Send one summary notification per user per project ---
+    sent = failed = invalidated = users_notified = 0
+
+    for uid, pids in user_project_tokens.items():
+        for pid, tokens in pids.items():
+            user_acts = sorted(
+                [
+                    a for a in project_activities.get(pid, [])
+                    if str(a.get("assigned_to_user_id") or "").strip() == uid
+                ],
+                key=lambda a: a.get("assignment_start_at", ""),
+            )
+            if not user_acts:
+                continue
+
+            count = len(user_acts)
+            title = f"Tienes {count} actividad{'es' if count > 1 else ''} hoy"
+
+            snippets: list[str] = []
+            for act in user_acts[:3]:
+                act_title = str(act.get("title") or act.get("activity_type_code") or "Actividad")[:35]
+                time_str = _fmt_local_time(str(act.get("assignment_start_at") or ""))
+                location_parts = [
+                    str(act.get("frente") or "").strip(),
+                    str(act.get("municipio") or "").strip(),
+                ]
+                loc = next((p for p in location_parts if p), "")
+                snippet = act_title
+                if time_str:
+                    snippet += f" {time_str}"
+                if loc:
+                    snippet += f" ({loc})"
+                snippets.append(snippet)
+
+            body = " · ".join(snippets)
+            if count > 3:
+                body += f" · +{count - 3} más"
+
+            for index in range(0, len(tokens), 500):
+                chunk_tokens = tokens[index : index + 500]
+                message = messaging.MulticastMessage(
+                    tokens=chunk_tokens,
+                    notification=messaging.Notification(title=title, body=body),
+                    data={
+                        "type": "daily_agenda",
+                        "project_id": pid,
+                        "count": str(count),
+                    },
+                    android=messaging.AndroidConfig(priority="normal"),
+                )
+                response = messaging.send_each_for_multicast(message, app=app)
+                sent += response.success_count
+                failed += response.failure_count
+
+                now = datetime.now(timezone.utc)
+                for i, item in enumerate(response.responses):
+                    if item.success:
+                        continue
+                    err = item.exception
+                    if err is None or not _is_invalid_token_error(err):
+                        continue
+                    invalidated += 1
+                    # Mark token as invalid — need the doc_id for this chunk
+                    # Since we only have raw tokens here (not doc IDs), disable via a fresh query
+                    bad_token = chunk_tokens[i]
+                    _disable_token_by_value(client, bad_token, now)
+
+            users_notified += 1
+
+    logger.info(
+        "DAILY_AGENDA_PUSH date=%s sent=%s failed=%s invalidated=%s users_notified=%s",
+        now_mx.strftime("%Y-%m-%d"),
+        sent,
+        failed,
+        invalidated,
+        users_notified,
+    )
+    return {"sent": sent, "failed": failed, "invalidated": invalidated, "users_notified": users_notified}
+
+
+def _disable_token_by_value(client: Any, token: str, now: datetime) -> None:
+    """Mark a specific FCM token as disabled when we only know its value (not doc ID)."""
+    docs = (
+        client.collection(_COLLECTION)
+        .where("token", "==", token)
+        .limit(5)
+        .stream()
+    )
+    for doc in docs:
+        doc.reference.set(
+            {"enabled": False, "updated_at": now, "disabled_reason": "invalid_or_unregistered"},
+            merge=True,
+        )

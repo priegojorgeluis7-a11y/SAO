@@ -1,5 +1,6 @@
 // lib/features/agenda/agenda_equipo_page.dart
 
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -8,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:drift/drift.dart' as drift;
 
 import '../../core/connectivity/offline_mode_controller.dart';
+import '../../core/constants.dart';
 import '../../core/utils/logger.dart';
 import '../../core/utils/snackbar.dart';
 import '../../data/local/app_db.dart' show AppDb, ActivitiesCompanion;
@@ -38,15 +40,39 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
   void initState() {
     super.initState();
     _activityDao = ActivityDao(GetIt.I<AppDb>());
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       final uri = GoRouterState.of(context).uri;
-      final projectId = uri.queryParameters['project'];
+      final rawProjectId = uri.queryParameters['project'];
+      final isAllProjects =
+          rawProjectId == null || rawProjectId.trim().toUpperCase() == kAllProjects;
+
+      String? effectiveProjectId;
+      List<String>? allProjectIds;
+
+      if (isAllProjects) {
+        // Fan-out: load assignments from every active local project
+        try {
+          final projects = await _activityDao.listActiveProjects();
+          allProjectIds = projects
+              .map((p) => p.code.trim())
+              .where((c) => c.isNotEmpty)
+              .toList();
+        } catch (_) {
+          allProjectIds = const [];
+        }
+        effectiveProjectId = null;
+      } else {
+        effectiveProjectId = rawProjectId;
+      }
+
+      if (!mounted) return;
       final isOffline = ref.read(offlineModeProvider);
       final authUser = ref.read(currentUserProvider);
       final selfResource = _toSelfResource(authUser);
       final preferSelfFilter = _shouldPreferSelfFilter(authUser);
-      ref.read(agendaControllerProvider.notifier).initialize(
-            projectId: projectId,
+      await ref.read(agendaControllerProvider.notifier).initialize(
+            projectId: effectiveProjectId,
+            allProjectIds: allProjectIds,
             isOffline: isOffline,
             selfResource: selfResource,
             preferSelfFilter: preferSelfFilter,
@@ -79,6 +105,12 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     ref.listen<User?>(currentUserProvider, (previous, next) {
       final selfResource = _toSelfResource(next);
       ref.read(agendaControllerProvider.notifier).ensureSelfResource(selfResource);
+    });
+
+    // Propagate connectivity changes to the controller so it can update
+    // _isOffline and auto-refresh when reconnecting.
+    ref.listen<bool>(offlineModeProvider, (_, isOffline) {
+      ref.read(agendaControllerProvider.notifier).updateConnectivity(isOffline);
     });
 
     final state = ref.watch(agendaControllerProvider);
@@ -234,13 +266,38 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
               onOpenItem: _openAgendaItemDetails,
               onAdvanceState: _advanceActivityStateFromAgenda,
               onCancelItem: (item) async {
-                await controller.cancelAssignment(item);
-                if (context.mounted) {
+                try {
+                  final queuedOffline = await controller.cancelAssignment(item);
+                  if (context.mounted) {
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: queuedOffline
+                            ? 'Actividad eliminada localmente. Se sincronizara al reconectar.'
+                            : 'Actividad eliminada',
+                        backgroundColor: SaoColors.success,
+                      ),
+                    );
+                  }
+                } on DioException catch (e) {
+                  if (!context.mounted) return;
+                  final message = e.response?.statusCode == 403
+                      ? 'No tienes permisos para eliminar esta actividad'
+                      : 'No se pudo eliminar la actividad';
                   showTransientSnackBar(
                     context,
                     appSnackBar(
-                      message: 'Asignación cancelada',
-                      backgroundColor: SaoColors.success,
+                      message: message,
+                      backgroundColor: SaoColors.error,
+                    ),
+                  );
+                } catch (_) {
+                  if (!context.mounted) return;
+                  showTransientSnackBar(
+                    context,
+                    appSnackBar(
+                      message: 'No se pudo eliminar la actividad',
+                      backgroundColor: SaoColors.error,
                     ),
                   );
                 }
@@ -451,7 +508,7 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
     if (!mounted || selection == null) return;
 
     try {
-      await controller.transferAssignment(
+      final queuedOffline = await controller.transferAssignment(
         item: item,
         assignee: selection.resource,
         reason: selection.reason,
@@ -460,7 +517,9 @@ class _AgendaEquipoPageState extends ConsumerState<AgendaEquipoPage> {
       showTransientSnackBar(
         context,
         appSnackBar(
-          message: 'Actividad transferida a ${selection.resource.name}',
+          message: queuedOffline
+              ? 'Transferencia guardada. Se enviara al reconectar a ${selection.resource.name}'
+              : 'Actividad transferida a ${selection.resource.name}',
           backgroundColor: SaoColors.success,
         ),
       );

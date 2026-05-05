@@ -9,7 +9,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from typing import Any
-from app.api.deps import require_any_role
+from app.api.deps import get_current_user, require_any_role, resolve_user_project_access
 from app.core.enums import ProjectStatus
 from app.core.config import settings
 from app.core.firestore import get_firestore_client
@@ -499,14 +499,17 @@ def _bootstrap_firestore_catalog(
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(
-    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD"])),
+    _current_user: Any = Depends(get_current_user),
 ):
     client = get_firestore_client()
+    has_global_scope, allowed_project_ids = resolve_user_project_access(_current_user)
     result: list[ProjectOut] = []
     for doc in client.collection("projects").stream():
         p = doc.to_dict() or {}
         project_id = str(p.get("id") or doc.id)
         if _is_hidden_template_project(project_id):
+            continue
+        if not has_global_scope and project_id.strip().upper() not in allowed_project_ids:
             continue
         try:
             raw_start = p.get("start_date")
@@ -538,7 +541,7 @@ def list_projects(
 @router.post("", response_model=ProjectOut, status_code=status.HTTP_201_CREATED)
 def create_project(
     payload: ProjectCreate,
-    current_user: Any = Depends(require_any_role(["ADMIN"])),
+    current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR"])),
 ):
     client = get_firestore_client()
     code = payload.id.strip().upper()
@@ -631,7 +634,7 @@ def create_project(
 def update_project(
     project_id: str,
     payload: ProjectUpdate,
-    current_user: Any = Depends(require_any_role(["ADMIN"])),
+    current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR"])),
 ):
     provided_fields = payload.model_fields_set
     client = get_firestore_client()

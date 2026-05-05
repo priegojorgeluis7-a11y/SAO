@@ -4,16 +4,22 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
 from app.core.api_errors import api_error
 
-from app.api.deps import get_current_user, require_any_role, user_has_any_role
+from app.api.deps import get_current_user, require_any_role, resolve_user_project_access, user_has_any_role
 from app.core.config import settings
 from app.core.firestore import get_firestore_client
 from typing import Any
 from app.core.enums import UserStatus
 from app.services.audit_service import canonicalize_role_name, write_firestore_audit_log
 from app.services.firestore_identity_service import get_firestore_user_by_id, list_firestore_users
+from app.services.push_notification_service import notify_new_assignment
+from app.services.notification_service import (
+    create_user_notification,
+    update_notification_response,
+)
 from app.core.utils import parse_firestore_dt
 from app.schemas.assignment import (
     AssignmentAssigneeOption,
@@ -151,17 +157,145 @@ def _principal_role_name(principal: Any | None) -> str | None:
 def _assignment_assignee_projection(
     assignee_user_id: str | None,
     assignee_principal: Any | None,
+    *,
+    participant_principals: list[Any] | None = None,
 ) -> dict[str, Any]:
     normalized_assignee_user_id = _safe_uuid_str(assignee_user_id)
     full_name = getattr(assignee_principal, "full_name", None) if assignee_principal else None
     email = getattr(assignee_principal, "email", None) if assignee_principal else None
+    participant_ids: list[str] = []
+    participant_names: list[str] = []
+    for principal in participant_principals or []:
+        principal_id = _safe_uuid_str(getattr(principal, "id", None))
+        if not principal_id or principal_id in participant_ids:
+            continue
+        participant_ids.append(principal_id)
+        display_name = str(getattr(principal, "full_name", "") or "").strip()
+        if display_name:
+            participant_names.append(display_name)
+    if normalized_assignee_user_id and normalized_assignee_user_id not in participant_ids:
+        participant_ids.insert(0, normalized_assignee_user_id)
+    if full_name and full_name not in participant_names:
+        participant_names.insert(0, full_name)
     return {
         "assigned_to_user_id": normalized_assignee_user_id or None,
         "assigned_to_user_name": full_name,
         "assigned_to_user_email": email,
         "assigned_to_name": full_name,
         "assigned_to_role": _principal_role_name(assignee_principal),
+        "participant_user_ids": participant_ids,
+        "participant_user_names": participant_names,
     }
+
+
+def _normalized_participant_ids(payload: dict[str, Any]) -> list[str]:
+    values = payload.get("participant_user_ids")
+    if isinstance(values, list):
+        normalized: list[str] = []
+        for value in values:
+            candidate = _safe_uuid_str(value)
+            if candidate and candidate not in normalized:
+                normalized.append(candidate)
+        if normalized:
+            return normalized
+
+    fallback_assignee = _safe_uuid_str(payload.get("assigned_to_user_id"))
+    fallback_creator = _safe_uuid_str(payload.get("created_by_user_id"))
+    normalized = []
+    if fallback_assignee:
+        normalized.append(fallback_assignee)
+    if fallback_creator and fallback_creator not in normalized:
+        normalized.append(fallback_creator)
+    return normalized
+
+
+_HIDDEN_TEMPLATE_PROJECT_IDS = {"PROJECT_0", "P0"}
+
+
+def _is_hidden_template_project(project_id: str | None) -> bool:
+    return (project_id or "").strip().upper() in _HIDDEN_TEMPLATE_PROJECT_IDS
+
+
+def _normalize_project_id(project_id: str | None) -> str:
+    return (project_id or "").strip().upper()
+
+
+def _project_aliases(payload: dict[str, Any], doc_id: str) -> set[str]:
+    aliases = {
+        _normalize_project_id(doc_id),
+        _normalize_project_id(payload.get("id")),
+        _normalize_project_id(payload.get("code")),
+        _normalize_project_id(payload.get("project_id")),
+    }
+    return {alias for alias in aliases if alias}
+
+
+def _catalog_activity_codes_from_payload(payload: dict[str, Any]) -> set[str]:
+    activity_codes: set[str] = set()
+
+    activities = payload.get("activities")
+    if isinstance(activities, dict):
+        activity_codes.update(
+            str(code or "").strip().upper()
+            for code in activities.keys()
+            if str(code or "").strip()
+        )
+    elif isinstance(activities, list):
+        activity_codes.update(
+            str(row.get("id") or "").strip().upper()
+            for row in activities
+            if isinstance(row, dict) and str(row.get("id") or "").strip()
+        )
+
+    effective = payload.get("effective") if isinstance(payload, dict) else None
+    entities = effective.get("entities") if isinstance(effective, dict) else None
+    nested_activities = entities.get("activities") if isinstance(entities, dict) else None
+    if isinstance(nested_activities, list):
+        activity_codes.update(
+            str(row.get("id") or "").strip().upper()
+            for row in nested_activities
+            if isinstance(row, dict) and str(row.get("id") or "").strip()
+        )
+
+    return activity_codes
+
+
+def _resolve_catalog_activity_codes(
+    client: Any,
+    *,
+    project_id: str,
+    catalog_version_id: str | None,
+) -> set[str]:
+    normalized_project = project_id.strip().upper()
+    resolved_version = str(catalog_version_id or "").strip()
+
+    snapshots = []
+    if resolved_version:
+        snapshots.extend(
+            [
+                client.collection("catalog_effective").document(f"{normalized_project}:{resolved_version}").get(),
+                client.collection("catalog_effective").document(normalized_project).collection("versions").document(resolved_version).get(),
+                client.collection("catalog_versions").document(resolved_version).get(),
+                client.collection("catalog_bundles").document(f"{normalized_project}:{resolved_version}").get(),
+            ]
+        )
+
+    snapshots.extend(
+        [
+            client.collection("catalog_effective").document(normalized_project).get(),
+            client.collection("catalog_bundles").document(normalized_project).get(),
+        ]
+    )
+
+    for snap in snapshots:
+        if not snap.exists:
+            continue
+        payload = snap.to_dict() or {}
+        codes = _catalog_activity_codes_from_payload(payload)
+        if codes:
+            return codes
+
+    return set()
 
 
 def _validate_transfer_target(
@@ -277,22 +411,53 @@ def list_assignments(
         None,
     )
     current_user_id = str(getattr(current_user, "id", ""))
+    has_global_scope, accessible_project_ids = resolve_user_project_access(current_user)
 
     client = get_firestore_client()
     principals = list_firestore_users()
     principal_by_id = {str(p.id): p for p in principals}
-    docs = client.collection("activities").where("project_id", "==", normalized_project_id).stream()
+
+    _ALL_PROJECTS_SENTINEL = "TODOS"
+    if normalized_project_id == _ALL_PROJECTS_SENTINEL:
+        if has_global_scope:
+            project_ids_to_query = sorted({
+                str((doc.to_dict() or {}).get("id") or doc.id).strip().upper()
+                for doc in client.collection("projects").stream()
+                if str((doc.to_dict() or {}).get("id") or doc.id).strip()
+            })
+        else:
+            project_ids_to_query = sorted({pid for pid in accessible_project_ids if pid})
+        raw_docs: list[Any] = []
+        for pid in project_ids_to_query:
+            raw_docs.extend(client.collection("activities").where("project_id", "==", pid).stream())
+        docs = iter(raw_docs)
+    else:
+        if not has_global_scope and normalized_project_id not in accessible_project_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No access to this project",
+            )
+        docs = client.collection("activities").where("project_id", "==", normalized_project_id).stream()
+
     items: list[AssignmentListItem] = []
+    seeded_project_ids: set[str] = set()
     for doc in docs:
         payload = doc.to_dict() or {}
-        if payload.get("deleted_at") is not None:
+        is_canceled = payload.get("deleted_at") is not None
+        # Keep canceled assignments visible for planning views (include_all=true)
+        # while preserving legacy personal-agenda behavior.
+        if is_canceled and not include_all:
             continue
+        payload_project_id = str(payload.get("project_id") or normalized_project_id).strip().upper()
+        if payload_project_id:
+            seeded_project_ids.add(payload_project_id)
         assignee_user_id = _safe_uuid_str(payload.get("assigned_to_user_id"))
+        participant_user_ids = _normalized_participant_ids(payload)
         created_by_user_id = _safe_uuid_str(payload.get("created_by_user_id"))
         effective_assignee_user_id = assignee_user_id or created_by_user_id
         if not effective_assignee_user_id:
             continue
-        if not can_view_all and current_user_id and effective_assignee_user_id != current_user_id:
+        if not can_view_all and current_user_id and current_user_id not in participant_user_ids:
             continue
 
         start_at, end_at = _assignment_window(payload)
@@ -331,11 +496,12 @@ def list_assignments(
                 start_at=start_at,
                 end_at=end_at,
                 risk="bajo",
-                status=("PROGRAMADA" if state == "PENDIENTE" else state),
+                status=("CANCELADA" if is_canceled else ("PROGRAMADA" if state == "PENDIENTE" else state)),
                 latitude=_safe_float(payload.get("latitude")),
                 longitude=_safe_float(payload.get("longitude")),
             )
         )
+
     return items
 
 
@@ -349,8 +515,9 @@ def list_transfer_candidates(
     Unlike /assignees, this endpoint does NOT restrict OPERATIVO callers to
     seeing only themselves — OPERATIVO needs the full list so they can pick a
     recipient when transferring one of their activities.
+    ADMIN users are excluded: they are system administrators, not field workers.
     """
-    _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD", "ADMIN"}
+    _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD"}
     normalized_project_id = project_id.strip().upper()
 
     principals = list_firestore_users()
@@ -447,16 +614,29 @@ def create_assignment(
     current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
     project_id = payload.project_id.strip().upper()
+    participant_candidates = [str(payload.assignee_user_id)] + [str(v) for v in (payload.assignee_user_ids or [])]
+    participant_user_ids: list[str] = []
+    for candidate in participant_candidates:
+        normalized_candidate = _safe_uuid_str(candidate)
+        if normalized_candidate and normalized_candidate not in participant_user_ids:
+            participant_user_ids.append(normalized_candidate)
+    if not participant_user_ids:
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="ASSIGNMENT_PARTICIPANTS_REQUIRED",
+            message="At least one assignee is required",
+        )
+    primary_assignee_user_id = participant_user_ids[0]
 
     # OPERATIVO can only create assignments for themselves.
     if user_has_any_role(current_user, ["OPERATIVO"], None) and not user_has_any_role(
         current_user, ["ADMIN", "COORD", "SUPERVISOR"], None
     ):
-        if str(payload.assignee_user_id).strip() != str(current_user.id).strip():
+        if str(current_user.id).strip() not in participant_user_ids:
             raise api_error(
                 status_code=status.HTTP_403_FORBIDDEN,
                 code="ASSIGNMENT_SELF_ONLY",
-                message="Operativo users can only create assignments for themselves.",
+                message="Operativo users can only create assignments that include themselves.",
             )
 
     if payload.end_at <= payload.start_at:
@@ -476,37 +656,107 @@ def create_assignment(
     activity_uuid = uuid4()
     type_code = payload.activity_type_code.strip().upper()
     title = payload.title.strip() if payload.title and payload.title.strip() else type_code
-    assignee_principal = get_firestore_user_by_id(payload.assignee_user_id)
-    doc_payload = {
-        "uuid": str(activity_uuid),
-        "server_id": None,
-        "project_id": project_id,
-        "front_id": str(payload.front_id) if payload.front_id else None,
-        "frente": front_ref,
-        "estado": estado or None,
-        "municipio": municipio or None,
-        "colonia": (payload.colonia or "").strip() or None,
-        "pk_start": payload.pk,
-        "pk_end": None,
-        "execution_state": "PENDIENTE",
-        **_assignment_assignee_projection(str(payload.assignee_user_id), assignee_principal),
-        "created_by_user_id": str(current_user.id),
-        "catalog_version_id": None,
-        "activity_type_code": type_code,
-        "title": title,
-        "description": description_value,
-        "gps_mismatch": False,
-        "catalog_changed": False,
-        "latitude": str(payload.latitude) if payload.latitude is not None else None,
-        "longitude": str(payload.longitude) if payload.longitude is not None else None,
-        "assignment_start_at": payload.start_at.isoformat(),
-        "assignment_end_at": payload.end_at.isoformat(),
-        "created_at": payload.start_at.isoformat(),
-        "updated_at": payload.end_at.isoformat(),
-        "deleted_at": None,
-        "sync_version": _next_project_sync_version(client, project_id),
-    }
-    client.collection("activities").document(str(activity_uuid)).set(doc_payload)
+    assignee_principal = get_firestore_user_by_id(primary_assignee_user_id)
+    participant_principals: list[Any] = []
+    for participant_id in participant_user_ids:
+        principal = get_firestore_user_by_id(participant_id)
+        if principal is not None:
+            participant_principals.append(principal)
+    
+    # Resolve current catalog version for the project
+    normalized_project = project_id.strip().upper()
+    catalog_version_id = None
+    
+    # Try to get catalog_current first
+    current_snap = client.collection("catalog_current").document(normalized_project).get()
+    if current_snap.exists:
+        payload_snap = current_snap.to_dict() or {}
+        catalog_version_id = str(payload_snap.get("version_id") or "").strip() or None
+    
+    # Fallback: look for is_current=True in catalog_versions
+    if not catalog_version_id:
+        catalog_docs = (
+            client.collection("catalog_versions")
+            .where("project_id", "==", normalized_project)
+            .where("is_current", "==", True)
+            .limit(1)
+            .stream()
+        )
+        for doc in catalog_docs:
+            doc_data = doc.to_dict() or {}
+            catalog_version_id = str(doc_data.get("version_id") or doc_data.get("id") or doc.id).strip() or None
+            if catalog_version_id:
+                break
+    
+    # Validate activity_type_code against catalog if we have a catalog version
+    if catalog_version_id:
+        try:
+            activities_in_catalog = _resolve_catalog_activity_codes(
+                client,
+                project_id=normalized_project,
+                catalog_version_id=catalog_version_id,
+            )
+            if activities_in_catalog and type_code not in activities_in_catalog:
+                logger.warning(
+                    "Assignment activity_type_code not present in resolved catalog; continuing "
+                    "project=%s type_code=%s version=%s candidates=%s",
+                    normalized_project,
+                    type_code,
+                    catalog_version_id,
+                    sorted(activities_in_catalog),
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Failed to validate activity type against catalog: {e}")
+            # Continue anyway with the assignment
+    
+    # When multiple participants, create one activity per participant linked by activity_group_id.
+    # Each participant gets their own activity document so they can independently register
+    # and the completion of any one propagates to the rest.
+    activity_group_id = str(uuid4()) if len(participant_user_ids) > 1 else None
+    base_sync_version = _next_project_sync_version(client, project_id)
+
+    created_uuids: list[tuple[str, str, Any]] = []  # (uuid, user_id, principal)
+    for idx, participant_id in enumerate(participant_user_ids):
+        participant_uuid = uuid4() if idx > 0 else activity_uuid
+        participant_principal_obj = participant_principals[idx] if idx < len(participant_principals) else None
+        doc_payload = {
+            "uuid": str(participant_uuid),
+            "server_id": None,
+            "project_id": project_id,
+            "front_id": str(payload.front_id) if payload.front_id else None,
+            "frente": front_ref,
+            "estado": estado or None,
+            "municipio": municipio or None,
+            "colonia": (payload.colonia or "").strip() or None,
+            "pk_start": payload.pk,
+            "pk_end": None,
+            "execution_state": "PENDIENTE",
+            **_assignment_assignee_projection(
+                participant_id,
+                participant_principal_obj,
+                participant_principals=[participant_principal_obj] if participant_principal_obj else [],
+            ),
+            "created_by_user_id": str(current_user.id),
+            "catalog_version_id": catalog_version_id,
+            "activity_type_code": type_code,
+            "title": title,
+            "description": description_value,
+            "gps_mismatch": False,
+            "catalog_changed": False,
+            "latitude": str(payload.latitude) if payload.latitude is not None else None,
+            "longitude": str(payload.longitude) if payload.longitude is not None else None,
+            "assignment_start_at": payload.start_at.isoformat(),
+            "assignment_end_at": payload.end_at.isoformat(),
+            "created_at": payload.start_at.isoformat(),
+            "updated_at": payload.end_at.isoformat(),
+            "deleted_at": None,
+            "sync_version": base_sync_version + idx,
+            "activity_group_id": activity_group_id,
+        }
+        client.collection("activities").document(str(participant_uuid)).set(doc_payload)
+        created_uuids.append((str(participant_uuid), participant_id, participant_principal_obj))
 
     write_firestore_audit_log(
         action="ASSIGNMENT_CREATED",
@@ -516,7 +766,9 @@ def create_assignment(
         details={
             "project_id": project_id,
             "title": title,
-            "assigned_to_user_id": str(payload.assignee_user_id),
+            "assigned_to_user_id": primary_assignee_user_id,
+            "participant_user_ids": participant_user_ids,
+            "activity_group_id": activity_group_id,
             "assigned_to_name": assignee_principal.full_name if assignee_principal else None,
             "assigned_to_role": _principal_role_name(assignee_principal),
             "start_at": payload.start_at.isoformat(),
@@ -525,10 +777,53 @@ def create_assignment(
         },
     )
 
+    # Fire-and-forget push notification + in-app notification to all participants.
+    is_multi_participant = len(created_uuids) > 1
+    actor_name = getattr(current_user, "full_name", None)
+    for p_uuid, p_user_id, _p_principal in created_uuids:
+        try:
+            notify_new_assignment(
+                project_id=project_id,
+                activity_id=p_uuid,
+                activity_title=title,
+                assignee_user_id=p_user_id,
+                assigned_by_name=actor_name,
+                is_transfer=False,
+                municipio=municipio or None,
+                estado=estado or None,
+                frente=front_ref or None,
+                start_at=payload.start_at.isoformat(),
+            )
+        except Exception:
+            logger.exception("notify_new_assignment failed for activity %s", p_uuid)
+
+        try:
+            notif_type = "co_responsable_added" if (is_multi_participant and p_user_id != primary_assignee_user_id) else "new_assignment"
+            create_user_notification(
+                recipient_user_id=p_user_id,
+                notification_type=notif_type,
+                activity_id=p_uuid,
+                activity_title=title,
+                project_id=project_id,
+                from_user_id=str(current_user.id),
+                from_user_name=actor_name,
+                requires_acceptance=True,
+                metadata={
+                    "activity_group_id": activity_group_id,
+                    "municipio": municipio or None,
+                    "estado": estado or None,
+                    "frente": front_ref or None,
+                    "start_at": payload.start_at.isoformat(),
+                    "end_at": payload.end_at.isoformat(),
+                },
+            )
+        except Exception:
+            logger.exception("create_user_notification failed for activity %s", p_uuid)
+
     return AssignmentListItem(
         id=str(activity_uuid),
         project_id=project_id,
-        assignee_user_id=payload.assignee_user_id,
+        assignee_user_id=UUID(primary_assignee_user_id),
         assignee_name=(assignee_principal.full_name if assignee_principal else "Sin responsable"),
         assignee_email=(assignee_principal.email if assignee_principal else None),
         activity_id=str(activity_uuid),
@@ -646,11 +941,12 @@ def transfer_assignment(
         )
 
     actor_user_id = _safe_uuid_str(getattr(current_user, "id", None))
-    if not _is_privileged_assignment_manager(current_user) and actor_user_id != current_assignee_user_id:
+    existing_participant_user_ids = _normalized_participant_ids(doc)
+    if not _is_privileged_assignment_manager(current_user) and actor_user_id not in existing_participant_user_ids:
         raise api_error(
             status_code=status.HTTP_403_FORBIDDEN,
             code="ASSIGNMENT_TRANSFER_FORBIDDEN",
-            message="Operative can only transfer activities currently assigned to them",
+            message="Operative can only transfer activities where they are participants",
         )
 
     next_assignee_user_id = str(payload.assignee_user_id)
@@ -665,12 +961,25 @@ def transfer_assignment(
         project_id=project_id,
         assignee_user_id=next_assignee_user_id,
     )
+    participant_user_ids = [next_assignee_user_id]
+    for participant_user_id in existing_participant_user_ids:
+        if participant_user_id not in participant_user_ids:
+            participant_user_ids.append(participant_user_id)
+    participant_principals: list[Any] = [next_assignee_principal]
+    for participant_user_id in participant_user_ids[1:]:
+        principal = get_firestore_user_by_id(participant_user_id)
+        if principal is not None:
+            participant_principals.append(principal)
     previous_assignee_principal = get_firestore_user_by_id(current_assignee_user_id)
     transfer_at = datetime.now(timezone.utc)
     next_sync_version = _next_project_sync_version(client, project_id)
     ref.set(
         {
-            **_assignment_assignee_projection(next_assignee_user_id, next_assignee_principal),
+            **_assignment_assignee_projection(
+                next_assignee_user_id,
+                next_assignee_principal,
+                participant_principals=participant_principals,
+            ),
             "updated_at": transfer_at.isoformat(),
             "sync_version": next_sync_version,
         },
@@ -679,7 +988,11 @@ def transfer_assignment(
 
     updated_payload = dict(doc)
     updated_payload.update(
-        _assignment_assignee_projection(next_assignee_user_id, next_assignee_principal)
+        _assignment_assignee_projection(
+            next_assignee_user_id,
+            next_assignee_principal,
+            participant_principals=participant_principals,
+        )
     )
     updated_payload["updated_at"] = transfer_at.isoformat()
     updated_payload["sync_version"] = next_sync_version
@@ -695,16 +1008,242 @@ def transfer_assignment(
             "from_assignee_name": previous_assignee_principal.full_name if previous_assignee_principal else None,
             "from_assignee_role": _principal_role_name(previous_assignee_principal),
             "to_assignee_user_id": next_assignee_user_id,
+            "participant_user_ids": participant_user_ids,
             "to_assignee_name": next_assignee_principal.full_name,
             "to_assignee_role": _principal_role_name(next_assignee_principal),
             "reason": payload.reason,
         },
     )
 
+    # Fire-and-forget push notification to the new assignee.
+    try:
+        notify_new_assignment(
+            project_id=project_id,
+            activity_id=str(assignment_id),
+            activity_title=str(doc.get("title") or doc.get("activity_type_code") or "Actividad"),
+            assignee_user_id=next_assignee_user_id,
+            assigned_by_name=getattr(current_user, "full_name", None),
+            is_transfer=True,
+            municipio=str(doc.get("municipio") or "").strip() or None,
+            estado=str(doc.get("estado") or "").strip() or None,
+            frente=str(doc.get("frente") or "").strip() or None,
+            start_at=str(doc.get("assignment_start_at") or "").strip() or None,
+        )
+    except Exception:
+        logger.exception("notify_new_assignment (transfer) failed for activity %s", assignment_id)
+
+    # In-app notification for the new assignee.
+    try:
+        create_user_notification(
+            recipient_user_id=next_assignee_user_id,
+            notification_type="assignment_transferred",
+            activity_id=str(assignment_id),
+            activity_title=str(doc.get("title") or doc.get("activity_type_code") or "Actividad"),
+            project_id=project_id,
+            from_user_id=str(getattr(current_user, "id", "")),
+            from_user_name=getattr(current_user, "full_name", None),
+            requires_acceptance=True,
+            metadata={
+                "reason": payload.reason,
+                "previous_assignee_user_id": current_assignee_user_id,
+                "previous_assignee_name": previous_assignee_principal.full_name if previous_assignee_principal else None,
+                "municipio": str(doc.get("municipio") or "").strip() or None,
+                "estado": str(doc.get("estado") or "").strip() or None,
+                "frente": str(doc.get("frente") or "").strip() or None,
+            },
+        )
+    except Exception:
+        logger.exception("create_user_notification (transfer) failed for activity %s", assignment_id)
+
     return _build_assignment_list_item(
         doc_id=str(assignment_id),
         payload=updated_payload,
         project_id=project_id,
         assignee_principal=next_assignee_principal,
+    )
+
+
+class AssignmentRespondRequest(BaseModel):
+    notification_id: str | None = None
+
+
+@router.post("/{assignment_id}/accept", status_code=status.HTTP_204_NO_CONTENT)
+def accept_assignment(
+    assignment_id: UUID,
+    payload: AssignmentRespondRequest | None = None,
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
+):
+    """Accept a pending assignment, transfer, or co-responsable notification.
+
+    Marks the activity as explicitly accepted by the recipient.  If a
+    ``notification_id`` is provided the corresponding notification record is
+    updated to status ``accepted``; otherwise all unresponded notifications for
+    this user / activity are accepted.
+    """
+    client = get_firestore_client()
+    activity_ref = client.collection("activities").document(str(assignment_id))
+    snap = activity_ref.get()
+    if not snap.exists:
+        raise api_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="ASSIGNMENT_NOT_FOUND",
+            message="Assignment not found",
+        )
+
+    doc = snap.to_dict() or {}
+    current_user_id = str(getattr(current_user, "id", "")).strip()
+    participant_user_ids = _normalized_participant_ids(doc)
+
+    if current_user_id not in participant_user_ids and not _is_privileged_assignment_manager(current_user):
+        raise api_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ASSIGNMENT_NOT_PARTICIPANT",
+            message="You are not a participant of this activity",
+        )
+
+    # Mark acceptance on the activity document.
+    now = datetime.now(timezone.utc)
+    activity_ref.set(
+        {
+            f"acceptance_by_{current_user_id}": "accepted",
+            "updated_at": now.isoformat(),
+        },
+        merge=True,
+    )
+
+    # Update the notification record if a notification_id is provided.
+    notif_id = (payload.notification_id or "").strip() if payload else ""
+    if notif_id:
+        update_notification_response(
+            notification_id=notif_id,
+            user_id=current_user_id,
+            response="accepted",
+        )
+    else:
+        # Try to auto-resolve the pending notification for this activity+user.
+        try:
+            pending_notifs = list(
+                client.collection("user_notifications")
+                .where("recipient_user_id", "==", current_user_id)
+                .where("activity_id", "==", str(assignment_id))
+                .where("status", "==", "unread")
+                .limit(5)
+                .stream()
+            )
+            for n in pending_notifs:
+                n.reference.set(
+                    {"status": "accepted", "responded_at": now.isoformat(), "read_at": now.isoformat()},
+                    merge=True,
+                )
+        except Exception:
+            logger.warning("Could not auto-resolve notifications for activity %s", assignment_id)
+
+    write_firestore_audit_log(
+        action="ASSIGNMENT_ACCEPTED",
+        entity="activity",
+        entity_id=str(assignment_id),
+        actor=current_user,
+        details={"project_id": str(doc.get("project_id") or "").strip().upper()},
+    )
+
+
+@router.post("/{assignment_id}/decline", status_code=status.HTTP_204_NO_CONTENT)
+def decline_assignment(
+    assignment_id: UUID,
+    payload: AssignmentRespondRequest | None = None,
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
+):
+    """Decline a pending assignment, transfer, or co-responsable notification.
+
+    Removes the current user from the activity's participant list and marks the
+    notification as ``declined``.
+    """
+    client = get_firestore_client()
+    activity_ref = client.collection("activities").document(str(assignment_id))
+    snap = activity_ref.get()
+    if not snap.exists:
+        raise api_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="ASSIGNMENT_NOT_FOUND",
+            message="Assignment not found",
+        )
+
+    doc = snap.to_dict() or {}
+    current_user_id = str(getattr(current_user, "id", "")).strip()
+    participant_user_ids = _normalized_participant_ids(doc)
+
+    if current_user_id not in participant_user_ids:
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
+            code="ASSIGNMENT_NOT_PARTICIPANT",
+            message="You are not a participant of this activity",
+        )
+
+    is_primary_assignee = _safe_uuid_str(doc.get("assigned_to_user_id")) == current_user_id
+
+    now = datetime.now(timezone.utc)
+    next_sync_version = _next_project_sync_version(client, str(doc.get("project_id") or "").strip().upper())
+
+    if is_primary_assignee:
+        # Primary declining: soft-remove them, leave activity unassigned.
+        updated_participant_ids = [uid for uid in participant_user_ids if uid != current_user_id]
+        activity_ref.set(
+            {
+                "assigned_to_user_id": updated_participant_ids[0] if updated_participant_ids else None,
+                "participant_user_ids": updated_participant_ids,
+                "updated_at": now.isoformat(),
+                "sync_version": next_sync_version,
+                f"acceptance_by_{current_user_id}": "declined",
+            },
+            merge=True,
+        )
+    else:
+        # Co-responsable declining: just remove from participant list.
+        updated_participant_ids = [uid for uid in participant_user_ids if uid != current_user_id]
+        activity_ref.set(
+            {
+                "participant_user_ids": updated_participant_ids,
+                "updated_at": now.isoformat(),
+                "sync_version": next_sync_version,
+                f"acceptance_by_{current_user_id}": "declined",
+            },
+            merge=True,
+        )
+
+    # Update notification record.
+    notif_id = (payload.notification_id or "").strip() if payload else ""
+    if notif_id:
+        update_notification_response(
+            notification_id=notif_id,
+            user_id=current_user_id,
+            response="declined",
+        )
+    else:
+        try:
+            pending_notifs = list(
+                client.collection("user_notifications")
+                .where("recipient_user_id", "==", current_user_id)
+                .where("activity_id", "==", str(assignment_id))
+                .where("status", "==", "unread")
+                .limit(5)
+                .stream()
+            )
+            for n in pending_notifs:
+                n.reference.set(
+                    {"status": "declined", "responded_at": now.isoformat(), "read_at": now.isoformat()},
+                    merge=True,
+                )
+        except Exception:
+            logger.warning("Could not auto-resolve notifications for activity %s", assignment_id)
+
+    write_firestore_audit_log(
+        action="ASSIGNMENT_DECLINED",
+        entity="activity",
+        entity_id=str(assignment_id),
+        actor=current_user,
+        details={
+            "project_id": str(doc.get("project_id") or "").strip().upper(),
+            "was_primary_assignee": is_primary_assignee,
+        },
     )
 

@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 
+from app.api.v1 import sync as sync_api
 from app.core.config import settings
 
 
@@ -205,3 +206,15 @@ def test_firestore_sync_version_increments(force_firestore_backend):
     updated = fake_client.collection("activities").document(activity_uuid).get().to_dict()
     assert updated["sync_version"] == 6
     assert updated["status"] == "completed"
+
+
+@pytest.mark.integration
+def test_sync_participant_fallback_uses_assignee_when_list_missing(force_firestore_backend):
+    participants = sync_api._normalized_participant_user_ids(
+        {
+            "assigned_to_user_id": "user-123",
+            "created_by_user_id": "creator-1",
+        }
+    )
+
+    assert participants == ["user-123"]

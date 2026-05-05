@@ -8,6 +8,7 @@ import '../auth/data/auth_service.dart';
 import '../sync/data/sync_api_repository.dart';
 import '../catalog/data/catalog_api_repository.dart';
 import '../catalog/data/catalog_local_repository.dart';
+import '../../data/repositories/projects_repository.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/network/api_client.dart';
 import '../../core/network/api_config.dart';
@@ -28,6 +29,12 @@ final _biometricStateProvider =
   if (!canUse) return (canUse: false, enabled: false);
   final enabled = await notifier.isBiometricEnabled();
   return (canUse: canUse, enabled: enabled);
+});
+
+final _scopedProjectsProvider =
+    FutureProvider.autoDispose<List<ProjectDto>>((ref) async {
+  final repository = ref.watch(projectsRepositoryProvider);
+  return repository.getMyProjects();
 });
 
 // ---------------------------------------------------------------------------
@@ -748,105 +755,163 @@ class _CatalogVersionTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final projectAsync = ref.watch(selectedProjectIdProvider);
+    final projectsAsync = ref.watch(_scopedProjectsProvider);
 
-    return projectAsync.when(
+    return projectsAsync.when(
       loading: () => const ListTile(
         leading: Icon(Icons.menu_book_outlined),
-        title: Text('Catálogo'),
-        subtitle: Text('Cargando...'),
+        title: Text('Catálogos por proyecto'),
+        subtitle: Text('Cargando proyectos...'),
       ),
       error: (_, _) => ListTile(
         leading: const Icon(Icons.menu_book_outlined, color: SaoColors.warning),
-        title: const Text('Catálogo'),
-        subtitle: const Text('No se pudo cargar el proyecto seleccionado'),
+        title: const Text('Catálogos por proyecto'),
+        subtitle: const Text('No se pudieron cargar tus proyectos'),
         trailing: TextButton(
-          onPressed: () => ref.invalidate(selectedProjectIdProvider),
+          onPressed: () => ref.invalidate(_scopedProjectsProvider),
           child: const Text('Reintentar'),
         ),
       ),
-      data: (projectId) {
-        if (projectId == null || projectId.isEmpty) {
+      data: (projects) {
+        final scopedProjects = projects
+            .where((project) => project.isActive)
+            .map((project) => project.code.trim().toUpperCase())
+            .where((code) => code.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+
+        if (scopedProjects.isEmpty) {
           return const ListTile(
             leading: Icon(Icons.menu_book_outlined),
-            title: Text('Catálogo'),
-            subtitle: Text('Sin proyecto seleccionado'),
+            title: Text('Catálogos por proyecto'),
+            subtitle: Text('No tienes proyectos activos asignados'),
           );
         }
-        final versionAsync =
-            ref.watch(catalogActiveVersionProvider(projectId));
-        return versionAsync.when(
-          loading: () => const ListTile(
-            leading: Icon(Icons.menu_book_outlined),
-            title: Text('Catálogo'),
-            subtitle: Text('Cargando versión...'),
-          ),
-          error: (_, _) => ListTile(
-            leading: const Icon(Icons.menu_book_outlined, color: SaoColors.warning),
-            title: Text('Catálogo · $projectId'),
-            subtitle: const Text('No se pudo cargar la versión local'),
-            trailing: TextButton(
-              onPressed: () => ref.invalidate(catalogActiveVersionProvider(projectId)),
-              child: const Text('Reintentar'),
-            ),
-          ),
-          data: (versionId) {
-            final hasVersion = versionId != null && versionId.isNotEmpty;
-            final label = hasVersion
-                ? versionId.length > 16
-                    ? '${versionId.substring(0, 8)}…'
-                    : versionId
-                : 'Sin catálogo local';
-            final statusColor =
-                hasVersion ? SaoColors.success : SaoColors.warning;
-            final statusText = hasVersion ? 'actualizado' : 'pendiente';
 
-            return ListTile(
+        return Column(
+          children: [
+            ListTile(
               leading: const Icon(Icons.menu_book_outlined),
-              title: Text('Catálogo · $projectId'),
-              subtitle: Row(
-                children: [
-                  Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: statusColor,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Text('$label · $statusText'),
-                ],
+              title: const Text('Catálogos por proyecto'),
+              subtitle: Text('Proyectos disponibles: ${scopedProjects.length}'),
+              trailing: TextButton.icon(
+                onPressed: () async {
+                  int updated = 0;
+                  for (final projectId in scopedProjects) {
+                    try {
+                      await ref
+                          .read(catalogSyncServiceProvider)
+                          .ensureCatalogUpToDate(projectId);
+                      ref.invalidate(catalogActiveVersionProvider(projectId));
+                      updated += 1;
+                    } catch (_) {
+                      // Continue with next project so one failure does not block the full batch.
+                    }
+                  }
+                  if (context.mounted) {
+                    showTransientSnackBar(
+                      context,
+                      appSnackBar(
+                        message: 'Sincronizacion de catalogos completada en $updated/${scopedProjects.length} proyectos.',
+                        backgroundColor:
+                            updated > 0 ? SaoColors.success : SaoColors.warning,
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.sync),
+                label: const Text('Sincronizar todo'),
               ),
-              trailing: const Icon(Icons.refresh),
-              onTap: () async {
-                try {
-                  await ref
-                      .read(catalogSyncServiceProvider)
-                      .ensureCatalogUpToDate(projectId);
-                  ref.invalidate(catalogActiveVersionProvider(projectId));
-                  if (context.mounted) {
-                    showTransientSnackBar(
-                      context,
-                      appSnackBar(
-                        message: 'Catálogo sincronizado',
-                        backgroundColor: SaoColors.success,
-                      ),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    showTransientSnackBar(
-                      context,
-                      appSnackBar(
-                        message: 'Error al sincronizar catálogo',
-                        backgroundColor: SaoColors.error,
-                      ),
-                    );
-                  }
-                }
-              },
-            );
+            ),
+            ...scopedProjects.map(
+              (projectId) => _CatalogProjectVersionRow(projectId: projectId),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CatalogProjectVersionRow extends ConsumerWidget {
+  const _CatalogProjectVersionRow({required this.projectId});
+
+  final String projectId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final versionAsync = ref.watch(catalogActiveVersionProvider(projectId));
+
+    return versionAsync.when(
+      loading: () => ListTile(
+        leading: const Icon(Icons.folder_outlined),
+        title: Text('Catálogo · $projectId'),
+        subtitle: const Text('Cargando versión local...'),
+      ),
+      error: (_, _) => ListTile(
+        leading: const Icon(Icons.folder_outlined, color: SaoColors.warning),
+        title: Text('Catálogo · $projectId'),
+        subtitle: const Text('No se pudo leer la versión local'),
+        trailing: TextButton(
+          onPressed: () => ref.invalidate(catalogActiveVersionProvider(projectId)),
+          child: const Text('Reintentar'),
+        ),
+      ),
+      data: (versionId) {
+        final hasVersion = versionId != null && versionId.isNotEmpty;
+        final label = hasVersion
+            ? versionId.length > 16
+                ? '${versionId.substring(0, 8)}…'
+                : versionId
+            : 'Sin catálogo local';
+        final statusColor = hasVersion ? SaoColors.success : SaoColors.warning;
+        final statusText = hasVersion ? 'actualizado' : 'pendiente';
+
+        return ListTile(
+          leading: const Icon(Icons.folder_outlined),
+          title: Text('Catálogo · $projectId'),
+          subtitle: Row(
+            children: [
+              Container(
+                width: 8,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  shape: BoxShape.circle,
+                ),
+              ),
+              const SizedBox(width: 6),
+              Text('$label · $statusText'),
+            ],
+          ),
+          trailing: const Icon(Icons.refresh),
+          onTap: () async {
+            try {
+              await ref
+                  .read(catalogSyncServiceProvider)
+                  .ensureCatalogUpToDate(projectId);
+              ref.invalidate(catalogActiveVersionProvider(projectId));
+              if (context.mounted) {
+                showTransientSnackBar(
+                  context,
+                  appSnackBar(
+                    message: 'Catálogo sincronizado para $projectId',
+                    backgroundColor: SaoColors.success,
+                  ),
+                );
+              }
+            } catch (_) {
+              if (context.mounted) {
+                showTransientSnackBar(
+                  context,
+                  appSnackBar(
+                    message: 'Error al sincronizar catálogo de $projectId',
+                    backgroundColor: SaoColors.error,
+                  ),
+                );
+              }
+            }
           },
         );
       },

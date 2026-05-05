@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';

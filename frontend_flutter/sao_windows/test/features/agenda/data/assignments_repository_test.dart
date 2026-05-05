@@ -135,10 +135,7 @@ void main() {
   setUpAll(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(pathProviderChannel, (call) async {
-      if (call.method == 'getApplicationDocumentsDirectory') {
-        return Directory.systemTemp.createTempSync('sao_windows_test').path;
-      }
-      return null;
+      return Directory.systemTemp.createTempSync('sao_windows_test').path;
     });
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(secureStorageChannel, (call) async {
@@ -369,6 +366,205 @@ void main() {
       expect(capturedData?['front_ref'], 'Frente Norte');
       expect(capturedData?['estado'], 'EDOMEX');
       expect(capturedData?['municipio'], 'Toluca');
+    });
+
+    test('cancelAssignment encola cancelacion offline y oculta la asignacion', () async {
+      final local = _FakeAssignmentsLocalStore();
+      final database = AppDb();
+      addTearDown(database.close);
+      final now = DateTime.now();
+
+      await local.seed([
+        AgendaAssignmentRecord(
+          id: 'a-cancel',
+          projectId: 'TMQ',
+          resourceId: 'u1',
+          resourceName: 'Usuario Uno',
+          activityId: 'act-cancel',
+          title: 'Cancelar offline',
+          frente: 'Frente A',
+          municipio: 'Celaya',
+          estado: 'Guanajuato',
+          pk: 12000,
+          startAt: now,
+          endAt: now.add(const Duration(hours: 1)),
+          risk: RiskLevel.bajo,
+          syncStatus: SyncStatus.synced,
+        ),
+      ]);
+
+      final tokenStorage = TokenStorage(const FlutterSecureStorage());
+      await tokenStorage.saveTokens(accessToken: 'test-token');
+      final apiClient = ApiClient(tokenStorage: tokenStorage);
+      apiClient.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.connectionError,
+                error: 'offline',
+              ),
+            );
+          },
+        ),
+      );
+
+      final repo = AssignmentsRepository(
+        apiClient: apiClient,
+        localStore: local,
+        database: database,
+        fetchAssignments: ({required String projectId, required DateTime from, required DateTime to}) async {
+          return [
+            {
+              'id': 'a-cancel',
+              'project_id': 'TMQ',
+              'assignee_user_id': 'u1',
+              'activity_id': 'act-cancel',
+              'title': 'Cancelar offline',
+              'frente': 'Frente A',
+              'municipio': 'Celaya',
+              'estado': 'Guanajuato',
+              'pk': 12000,
+              'start_at': now.toIso8601String(),
+              'end_at': now.add(const Duration(hours: 1)).toIso8601String(),
+              'risk': 'bajo',
+            },
+          ];
+        },
+      );
+
+      final queued = await repo.cancelAssignment(
+        item: AgendaItem(
+          id: 'a-cancel',
+          resourceId: 'u1',
+          title: 'Cancelar offline',
+          activityId: 'act-cancel',
+          projectCode: 'TMQ',
+          frente: 'Frente A',
+          municipio: 'Celaya',
+          estado: 'Guanajuato',
+          pk: 12000,
+          start: now,
+          end: now.add(const Duration(hours: 1)),
+          risk: RiskLevel.bajo,
+          syncStatus: SyncStatus.synced,
+        ),
+      );
+
+      expect(queued, isTrue);
+      final queuedRows = await (database.select(database.syncQueue)
+            ..where((t) => t.entity.equals('AGENDA_ASSIGNMENT')))
+          .get();
+      expect(queuedRows, hasLength(1));
+
+      final result = await repo.loadRange(
+        projectId: 'TMQ',
+        from: now.subtract(const Duration(days: 1)),
+        to: now.add(const Duration(days: 1)),
+        isOffline: false,
+      );
+
+      expect(result, isEmpty);
+    });
+
+    test('transferAssignment encola transferencia offline y la refleja localmente', () async {
+      final local = _FakeAssignmentsLocalStore();
+      final database = AppDb();
+      addTearDown(database.close);
+      final now = DateTime.now();
+
+      await local.seed([
+        AgendaAssignmentRecord(
+          id: 'a-transfer',
+          projectId: 'TMQ',
+          resourceId: 'u1',
+          resourceName: 'Usuario Uno',
+          activityId: 'act-transfer',
+          title: 'Transferir offline',
+          frente: 'Frente B',
+          municipio: 'Apaseo',
+          estado: 'Guanajuato',
+          pk: 34000,
+          startAt: now,
+          endAt: now.add(const Duration(hours: 2)),
+          risk: RiskLevel.medio,
+          syncStatus: SyncStatus.synced,
+        ),
+      ]);
+
+      final tokenStorage = TokenStorage(const FlutterSecureStorage());
+      await tokenStorage.saveTokens(accessToken: 'test-token');
+      final apiClient = ApiClient(tokenStorage: tokenStorage);
+      apiClient.dio.interceptors.add(
+        InterceptorsWrapper(
+          onRequest: (options, handler) {
+            handler.reject(
+              DioException(
+                requestOptions: options,
+                type: DioExceptionType.connectionError,
+                error: 'offline',
+              ),
+            );
+          },
+        ),
+      );
+
+      final repo = AssignmentsRepository(
+        apiClient: apiClient,
+        localStore: local,
+        database: database,
+        fetchAssignments: ({required String projectId, required DateTime from, required DateTime to}) async {
+          return [
+            {
+              'id': 'a-transfer',
+              'project_id': 'TMQ',
+              'assignee_user_id': 'u1',
+              'activity_id': 'act-transfer',
+              'title': 'Transferir offline',
+              'frente': 'Frente B',
+              'municipio': 'Apaseo',
+              'estado': 'Guanajuato',
+              'pk': 34000,
+              'start_at': now.toIso8601String(),
+              'end_at': now.add(const Duration(hours: 2)).toIso8601String(),
+              'risk': 'medio',
+            },
+          ];
+        },
+      );
+
+      final queued = await repo.transferAssignment(
+        assignmentId: 'a-transfer',
+        projectId: 'TMQ',
+        assigneeUserId: 'u2',
+        assigneeName: 'Usuario Dos',
+        reason: 'Sin red',
+      );
+
+      expect(queued, isTrue);
+
+      final offlineResult = await repo.loadRange(
+        projectId: 'TMQ',
+        from: now.subtract(const Duration(days: 1)),
+        to: now.add(const Duration(days: 1)),
+        isOffline: true,
+      );
+
+      expect(offlineResult, hasLength(1));
+      expect(offlineResult.first.resourceId, 'u2');
+      expect(offlineResult.first.syncStatus, SyncStatus.pending);
+
+      final onlineResult = await repo.loadRange(
+        projectId: 'TMQ',
+        from: now.subtract(const Duration(days: 1)),
+        to: now.add(const Duration(days: 1)),
+        isOffline: false,
+      );
+
+      expect(onlineResult, hasLength(1));
+      expect(onlineResult.first.resourceId, 'u2');
+      expect(onlineResult.first.syncStatus, SyncStatus.pending);
     });
   });
 }

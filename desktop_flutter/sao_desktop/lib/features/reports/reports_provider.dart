@@ -1,6 +1,7 @@
 import 'dart:convert';
-import 'dart:io';
 import 'dart:typed_data';
+import 'package:http/http.dart' as http;
+import '../../core/compat/io_compat.dart';
 
 import 'package:drift/drift.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -1163,6 +1164,20 @@ Future<List<ReportActivityItem>> _loadFromLocalDb(
 // PDF Generation
 // ---------------------------------------------------------------------------
 
+/// Converts front labels like "F1", "F2", "F3" → "S1", "S2", "S3".
+/// Handles uppercase and lowercase prefixes. Other values are returned as-is.
+String _toSegmentName(String value) {
+  final trimmed = value.trim();
+  // Match patterns like F1, F2, F10, f1, FRENTE 1, Frente 2, etc.
+  final byPrefix = RegExp(r'^[Ff]([0-9]+)$');
+  final byWord = RegExp(r'^[Ff]rente\s+([0-9]+)$', caseSensitive: false);
+  final matchPrefix = byPrefix.firstMatch(trimmed);
+  if (matchPrefix != null) return 'S${matchPrefix.group(1)}';
+  final matchWord = byWord.firstMatch(trimmed);
+  if (matchWord != null) return 'S${matchWord.group(1)}';
+  return trimmed;
+}
+
 const _guinda = PdfColor.fromInt(0xFF9F2241);
 const _textDark = PdfColor.fromInt(0xFF1F2937);
 const _textGray = PdfColor.fromInt(0xFF6B7280);
@@ -1676,7 +1691,7 @@ pw.Widget _buildGeneralData(ReportActivityItem item) {
       children: [
         pw.Row(
           children: [
-            _dataCell('1. Proyecto / Frente', '${item.projectId ?? '-'} / ${item.frontName}'),
+            _dataCell('1. Proyecto / Segmento', '${item.projectId ?? '-'} / ${_toSegmentName(item.frontName)}'),
             _dataCell('Ubicación administrativa', location.isEmpty ? 'Sin ubicación' : location),
           ],
         ),
@@ -1978,7 +1993,7 @@ String _buildNaturalDevelopmentNarrative(
   ]);
   final frontLabel = _joinNonEmpty([
     item.projectId?.trim(),
-    item.frontName.trim().isEmpty ? null : item.frontName.trim(),
+    item.frontName.trim().isEmpty ? null : _toSegmentName(item.frontName.trim()),
   ], separator: ' / ');
   final purpose = item.purpose?.trim();
   final topics = item.topics.where((topic) => topic.trim().isNotEmpty).toList(growable: false);
@@ -2140,19 +2155,10 @@ Future<Uint8List?> _loadEvidenceBytes(ReportEvidenceItem evidence) async {
 
   try {
     if (path.startsWith('http://') || path.startsWith('https://')) {
-      final client = HttpClient();
-      final request = await client.getUrl(Uri.parse(path));
-      final response = await request.close();
+      final response = await http.get(Uri.parse(path));
       if (response.statusCode >= 200 && response.statusCode < 300) {
-        final builder = BytesBuilder(copy: false);
-        await for (final chunk in response) {
-          builder.add(chunk);
-        }
-        final bytes = builder.toBytes();
-        client.close(force: true);
-        return bytes;
+        return response.bodyBytes;
       }
-      client.close(force: true);
       return null;
     }
 

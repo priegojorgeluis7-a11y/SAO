@@ -11,10 +11,6 @@ String _normalizedPlanningStatus(String status) {
 bool _isVisiblePlanningAssignment(AssignmentItem item) {
   final normalized = _normalizedPlanningStatus(item.status);
   const hiddenStatuses = <String>{
-    'cancelada',
-    'cancelado',
-    'cancelled',
-    'canceled',
     'rechazada',
     'rechazado',
     'rejected',
@@ -28,6 +24,35 @@ bool _isVisiblePlanningAssignment(AssignmentItem item) {
   return !hiddenStatuses.contains(normalized);
 }
 
+Future<List<String>> _resolveAgendaProjectScope(Ref ref) async {
+  final activeProject = ref.watch(activeProjectIdProvider).trim().toUpperCase();
+  if (activeProject.isNotEmpty) {
+    return <String>[activeProject];
+  }
+
+  try {
+    final available = await ref.watch(availableProjectsProvider.future);
+    final normalized = available
+        .map((project) => project.trim().toUpperCase())
+        .where((project) => project.isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    return normalized;
+  } catch (_) {
+    return const <String>[];
+  }
+}
+
+List<AssignmentItem> _mergeUniqueAssignments(List<AssignmentItem> items) {
+  final byKey = <String, AssignmentItem>{};
+  for (final item in items) {
+    final key = '${item.projectId.trim().toUpperCase()}::${item.id.trim()}';
+    byKey[key] = item;
+  }
+  return byKey.values.toList(growable: false);
+}
+
 /// Provides today's assignments for the currently selected project.
 final selectedPlanningDateProvider = StateProvider<DateTime>((ref) {
   return DateTime.now();
@@ -36,26 +61,39 @@ final selectedPlanningDateProvider = StateProvider<DateTime>((ref) {
 final planningAssignmentsProvider =
     FutureProvider.autoDispose<List<AssignmentItem>>((ref) async {
   final repo = ref.watch(assignmentsRepositoryProvider);
-  final projectId = ref.watch(activeProjectIdProvider);
   final date = ref.watch(selectedPlanningDateProvider);
+  final projectScope = await _resolveAgendaProjectScope(ref);
+  if (projectScope.isEmpty) return const [];
 
-  if (projectId.isEmpty) return const [];
-  final items = await repo.getForDate(projectId: projectId, date: date);
-  return items.where(_isVisiblePlanningAssignment).toList(growable: false);
+  final allItems = <AssignmentItem>[];
+  for (final projectId in projectScope) {
+    final items = await repo.getForDate(projectId: projectId, date: date);
+    allItems.addAll(items);
+  }
+
+  return _mergeUniqueAssignments(allItems)
+      .where(_isVisiblePlanningAssignment)
+      .toList(growable: false);
 });
 
 final planningMonthlyAssignmentsProvider =
     FutureProvider.autoDispose<List<AssignmentItem>>((ref) async {
   final repo = ref.watch(assignmentsRepositoryProvider);
-  final projectId = ref.watch(activeProjectIdProvider);
   final date = ref.watch(selectedPlanningDateProvider);
-
-  if (projectId.isEmpty) return const [];
+  final projectScope = await _resolveAgendaProjectScope(ref);
+  if (projectScope.isEmpty) return const [];
 
   final start = DateTime(date.year, date.month, 1);
   final end = DateTime(date.year, date.month + 1, 0);
-  final items = await repo.getForRange(projectId: projectId, from: start, to: end);
-  return items.where(_isVisiblePlanningAssignment).toList(growable: false);
+  final allItems = <AssignmentItem>[];
+  for (final projectId in projectScope) {
+    final items = await repo.getForRange(projectId: projectId, from: start, to: end);
+    allItems.addAll(items);
+  }
+
+  return _mergeUniqueAssignments(allItems)
+      .where(_isVisiblePlanningAssignment)
+      .toList(growable: false);
 });
 
 final planningReportActivityIdsProvider =

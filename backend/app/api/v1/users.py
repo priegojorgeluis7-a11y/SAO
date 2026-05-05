@@ -1,10 +1,11 @@
-﻿from typing import Any, Optional
+﻿from datetime import datetime, timedelta, timezone
+from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, status
 from app.core.api_errors import api_error
 
-from app.api.deps import get_current_user, require_any_role, user_has_any_role
+from app.api.deps import get_current_user, require_any_role, user_has_any_role, resolve_user_project_access
 from app.core.permission_catalog import CANONICAL_PERMISSION_CODES
 from app.core.security import get_password_hash
 from app.core.enums import UserStatus
@@ -19,6 +20,7 @@ from app.schemas.user import (
     AdminUserScopeInput,
     AdminUserScopeItem,
     AdminUserUpdate,
+    OnlineUserListItem,
     UserAgendaListItem,
 )
 from app.services.audit_service import canonicalize_role_name, write_firestore_audit_log
@@ -29,6 +31,7 @@ from app.services.firestore_identity_service import (
     get_firestore_user_by_email,
     delete_firestore_user,
     reset_firestore_user_password,
+    update_last_logout,
     update_firestore_user,
 )
 from app.services.role_permission_service import (
@@ -40,6 +43,7 @@ from app.services.role_permission_service import (
 router = APIRouter(prefix="/users", tags=["users"])
 
 _PROTECTED_ADMIN_EMAIL = "admin@sao.mx"
+_ONLINE_WINDOW = timedelta(minutes=5)
 
 
 def _normalized_email(value: Any) -> str:
@@ -228,12 +232,19 @@ def list_users(
     principals = list_firestore_users(role=role)
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
 
+    has_global_scope, caller_project_ids = resolve_user_project_access(current_user)
+
     items: list[UserAgendaListItem] = []
     for principal in principals:
         if principal.status != UserStatus.ACTIVE:
             continue
         if project_filter and principal.project_ids and project_filter not in principal.project_ids:
             continue
+        # Non-admin users only see users that share at least one project with them
+        if not has_global_scope:
+            other_project_ids = {str(pid).strip().upper() for pid in (principal.project_ids or []) if str(pid).strip()}
+            if not caller_project_ids.intersection(other_project_ids):
+                continue
         items.append(
             UserAgendaListItem(
                 id=principal.id,
@@ -249,6 +260,63 @@ def list_users(
     return items
 
 
+@router.get("/online", response_model=list[OnlineUserListItem])
+def list_online_users(
+    project_id: Optional[str] = Query(None, description="Project scope filter"),
+    current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR"])),
+):
+    project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
+    has_global_scope, caller_project_ids = resolve_user_project_access(current_user)
+    now = datetime.now(timezone.utc)
+
+    items: list[OnlineUserListItem] = []
+    for principal in list_firestore_users():
+        if principal.status != UserStatus.ACTIVE:
+            continue
+
+        other_project_ids = {
+            str(pid).strip().upper()
+            for pid in (principal.project_ids or [])
+            if str(pid).strip()
+        }
+        if project_filter and project_filter not in other_project_ids:
+            continue
+        if not has_global_scope and not caller_project_ids.intersection(other_project_ids):
+            continue
+
+        last_activity_at = getattr(principal, "last_activity_at", None)
+        last_logout_at = getattr(principal, "last_logout_at", None)
+        is_online = bool(
+            last_activity_at
+            and now - last_activity_at <= _ONLINE_WINDOW
+            and (last_logout_at is None or last_activity_at >= last_logout_at)
+        )
+
+        items.append(
+            OnlineUserListItem(
+                id=principal.id,
+                full_name=principal.full_name,
+                email=principal.email,
+                role_name=canonicalize_role_name(principal.roles[0] if principal.roles else "") or "",
+                project_id=(principal.project_ids[0] if principal.project_ids else None),
+                project_ids=list(principal.project_ids or []),
+                is_active=principal.status == UserStatus.ACTIVE,
+                is_online=is_online,
+                last_activity_at=last_activity_at,
+                last_login_at=principal.last_login_at,
+            )
+        )
+
+    items.sort(
+        key=lambda item: (
+            not item.is_online,
+            -(item.last_activity_at.timestamp() if item.last_activity_at else 0.0),
+            item.full_name.lower(),
+        )
+    )
+    return items
+
+
 @router.get("/admin", response_model=list[AdminUserListItem])
 def list_admin_users(
     role: Optional[str] = Query(None),
@@ -256,6 +324,14 @@ def list_admin_users(
 ):
     principals = list_firestore_users(role=role)
     role_permissions_map = get_role_permission_map()
+    has_global_scope, caller_project_ids = resolve_user_project_access(_current_user)
+    filtered: list[Any] = []
+    for p in principals:
+        if not has_global_scope:
+            other_project_ids = {str(pid).strip().upper() for pid in (p.project_ids or []) if str(pid).strip()}
+            if not caller_project_ids.intersection(other_project_ids):
+                continue
+        filtered.append(p)
     return [
         AdminUserListItem(
             id=p.id,
@@ -274,7 +350,7 @@ def list_admin_users(
             ),
             permission_scopes=_build_firestore_permission_scope_items(p.permission_scopes),
         )
-        for p in principals
+        for p in filtered
     ]
 
 
@@ -434,6 +510,28 @@ def update_admin_user(
                 message="El usuario admin@sao.mx debe conservar el rol ADMIN",
             )
 
+    existing_roles = [str(role).strip().upper() for role in (existing.roles or []) if str(role).strip()]
+    existing_project_ids = [
+        str(project_id).strip().upper()
+        for project_id in (existing.project_ids or [])
+        if str(project_id).strip()
+    ]
+    existing_permission_scopes = [
+        {
+            "permission_code": str(item.get("permission_code") or "").strip(),
+            "project_id": (
+                str(item.get("project_id") or "").strip().upper() or None
+            ),
+            "effect": (
+                "deny"
+                if str(item.get("effect") or "allow").strip().lower() == "deny"
+                else "allow"
+            ),
+        }
+        for item in (existing.permission_scopes or [])
+        if str(item.get("permission_code") or "").strip()
+    ]
+
     updated = update_firestore_user(
         user_id=user_uuid,
         full_name=payload.full_name,
@@ -449,6 +547,38 @@ def update_admin_user(
     )
     if updated is None:
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="USER_NOT_FOUND", message="User not found")
+
+    updated_roles = [str(role).strip().upper() for role in (updated.roles or []) if str(role).strip()]
+    updated_project_ids = [
+        str(project_id).strip().upper()
+        for project_id in (updated.project_ids or [])
+        if str(project_id).strip()
+    ]
+    updated_permission_scopes = [
+        {
+            "permission_code": str(item.get("permission_code") or "").strip(),
+            "project_id": (
+                str(item.get("project_id") or "").strip().upper() or None
+            ),
+            "effect": (
+                "deny"
+                if str(item.get("effect") or "allow").strip().lower() == "deny"
+                else "allow"
+            ),
+        }
+        for item in (updated.permission_scopes or [])
+        if str(item.get("permission_code") or "").strip()
+    ]
+
+    auth_scope_changed = (
+        (status_value is not None and existing.status != updated.status)
+        or existing_roles != updated_roles
+        or existing_project_ids != updated_project_ids
+        or existing_permission_scopes != updated_permission_scopes
+    )
+    if auth_scope_changed:
+        update_last_logout(updated.id)
+
     write_firestore_audit_log(
         action="USER_UPDATED",
         entity="user",

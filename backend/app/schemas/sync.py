@@ -46,6 +46,7 @@ class SyncPushActivityItem(BaseModel):
     pk_end: int | None = Field(None, description="PK end in METERS, nullable")
     execution_state: str = Field(..., description="PENDIENTE | EN_CURSO | REVISION_PENDIENTE | COMPLETADA")
     assigned_to_user_id: UUID | None = Field(None, description="User ID (UUID) assigned")
+    participant_user_ids: list[UUID] = Field(default_factory=list, description="All participant user IDs assigned to this activity")
     created_by_user_id: UUID = Field(..., description="User ID (UUID) who created")
     catalog_version_id: Union[UUID, str] = Field(..., description="Catalog version ID (UUID or semantic string such as 'tmq-v1.0.0' for Firestore mode)")
 

@@ -3,7 +3,9 @@
 // Integrates camera, GPS tagging, and file compression.
 
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:image_picker/image_picker.dart';
 import '../../../core/utils/logger.dart';
 import 'gps_tagging_service.dart';
@@ -38,6 +40,9 @@ class CapturedEvidence {
   /// User description/notes for the evidence
   final String description;
 
+  /// Pre-read bytes (populated on web where dart:io File is unavailable)
+  final Uint8List? cachedBytes;
+
   /// Whether this has been compressed
   final bool isCompressed;
 
@@ -62,6 +67,7 @@ class CapturedEvidence {
     required this.sizeBytes,
     this.gpsLocation,
     this.description = '',
+    this.cachedBytes,
     this.isCompressed = false,
     this.compressionStats,
     this.capturedAtEpochMs,
@@ -89,6 +95,7 @@ class CapturedEvidence {
     int? sizeBytes,
     GpsLocation? gpsLocation,
     String? description,
+    Uint8List? cachedBytes,
     bool? isCompressed,
     CompressionStats? compressionStats,
     DateTime? capturedAt,
@@ -101,6 +108,7 @@ class CapturedEvidence {
       sizeBytes: sizeBytes ?? this.sizeBytes,
       gpsLocation: gpsLocation ?? this.gpsLocation,
       description: description ?? this.description,
+      cachedBytes: cachedBytes ?? this.cachedBytes,
       isCompressed: isCompressed ?? this.isCompressed,
       compressionStats: compressionStats ?? this.compressionStats,
       capturedAtEpochMs: capturedAtEpochMs ?? capturedAt?.millisecondsSinceEpoch ?? this.capturedAtEpochMs,
@@ -255,21 +263,31 @@ class CameraCaptureService {
         return null;
       }
 
-      final file = File(image.path);
-      final bytes = await file.readAsBytes();
+      // Use XFile.readAsBytes() which works on both web and native.
+      // On web, dart:io File cannot read blob URLs.
+      final bytes = await image.readAsBytes();
       final sizeBytes = bytes.length;
+
+      // Detect MIME: prefer the reported MIME type from the XFile (web sets
+      // this from the browser's file input), fall back to extension.
+      final reportedMime = (image.mimeType ?? '').trim().toLowerCase();
+      final detectedMime = reportedMime.isNotEmpty
+          ? reportedMime
+          : _getMimeType(image.name);
 
       var evidence = CapturedEvidence(
         localPath: image.path,
         fileName: image.name,
-        mimeType: _getMimeType(image.path),
+        mimeType: detectedMime,
         sizeBytes: sizeBytes,
+        cachedBytes: bytes,
         capturedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
       );
 
       appLogger.i('✅ Image picked from gallery: ${evidence.fileSizeDisplay}');
 
-      if (autoCompress) {
+      // Compression uses dart:io, skip on web.
+      if (autoCompress && !kIsWeb) {
         evidence = await _compressEvidence(evidence);
       }
 
@@ -357,9 +375,11 @@ class CameraCaptureService {
       'png' => 'image/png',
       'gif' => 'image/gif',
       'webp' => 'image/webp',
+      'heic' => 'image/heic',
+      'heif' => 'image/heif',
       'mp4' => 'video/mp4',
       'mov' => 'video/quicktime',
-      _ => 'application/octet-stream',
+      _ => 'image/jpeg', // Safari/iOS often strips extension; assume JPEG
     };
   }
 }

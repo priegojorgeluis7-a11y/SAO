@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../../core/constants.dart';
 import '../../core/network/api_client.dart';
 import '../../core/storage/kv_store.dart';
 import '../../data/local/app_db.dart';
@@ -28,7 +29,7 @@ class ProjectFrontOption {
 class CatalogRepository {
   CatalogRepository();
 
-  String _projectId = 'TMQ';
+  String _projectId = '';
 
   bool _ready = false;
   bool get isReady => _ready;
@@ -47,8 +48,8 @@ class CatalogRepository {
 
   /// Carga catálogo efectivo desde bundle (API) con fallback local.
   /// También carga items personalizados desde archivo local.
-  Future<void> init({String projectId = 'TMQ', bool forceReload = false}) async {
-    final normalized = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
+  Future<void> init({String projectId = '', bool forceReload = false}) async {
+    final normalized = _normalizeProjectId(projectId);
     final hasCatalogData = _data.actividades.isNotEmpty;
     if (!forceReload && _ready && _projectId == normalized && hasCatalogData) return;
 
@@ -64,7 +65,14 @@ class CatalogRepository {
   }
 
   Future<void> loadProjectBundle(String projectId) async {
-    _projectId = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
+    _projectId = _normalizeProjectId(projectId);
+
+    if (_projectId.isEmpty) {
+      final seeded = await _loadBundledSeedCatalog();
+      _data = seeded ?? CatalogData.fromJson({});
+      _ready = true;
+      return;
+    }
 
     final cachedBundle = await _readCachedBundle(_projectId);
     if (cachedBundle != null) {
@@ -178,7 +186,12 @@ class CatalogRepository {
     String projectId, {
     bool purgeLocalCustom = false,
   }) async {
-    _projectId = projectId.trim().isEmpty ? 'TMQ' : projectId.trim().toUpperCase();
+    _projectId = _normalizeProjectId(projectId);
+
+    if (_projectId.isEmpty) {
+      await loadProjectBundle(_projectId);
+      return;
+    }
 
     final endpoints = <String>[
       '/catalog/bundle',
@@ -220,6 +233,14 @@ class CatalogRepository {
 
     // Fallback: mantener comportamiento anterior (cache/local seed) si red falla.
     await loadProjectBundle(_projectId);
+  }
+
+  String _normalizeProjectId(String projectId) {
+    final normalized = projectId.trim().toUpperCase();
+    if (normalized.isEmpty || normalized == kAllProjects) {
+      return '';
+    }
+    return normalized;
   }
 
   Map<String, dynamic>? _normalizeCatalogPayload(dynamic payload) {

@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../../../../core/compat/io_compat.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:path/path.dart' as p;

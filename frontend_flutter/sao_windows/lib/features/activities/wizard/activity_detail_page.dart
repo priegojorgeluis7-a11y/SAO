@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
 
 import '../../../core/utils/format_utils.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
 import '../../home/models/today_activity.dart';
@@ -119,10 +120,11 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   String _formatPk(int? pk) => pk == null ? 'S/PK' : formatPk(pk);
 
   String _canonicalFrente(String raw) {
+    final frontLabel = frontTerminology(widget.projectCode, capitalize: true);
     final value = raw.trim();
     if (value.isEmpty) return '—';
     final abbrev = RegExp(r'^[Ff]\s*(\d+)$').firstMatch(value);
-    if (abbrev != null) return 'Frente ${abbrev.group(1)}';
+    if (abbrev != null) return '$frontLabel ${abbrev.group(1)}';
     return value;
   }
 
@@ -537,7 +539,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                   child: Column(
                     children: [
                       _kvRow('Proyecto', widget.projectCode, icon: Icons.business_center_outlined),
-                      _kvRow('Frente', _canonicalFrente(a.frente), icon: Icons.alt_route_rounded),
+                      _kvRow(frontTerminology(widget.projectCode, capitalize: true), _canonicalFrente(a.frente), icon: Icons.alt_route_rounded),
                       _kvRow('PK', _formatPk(db?.pk ?? a.pk), icon: Icons.add_road_rounded),
                       if ((a.municipio).isNotEmpty)
                         _kvRow('Municipio', a.municipio, icon: Icons.location_on_outlined),

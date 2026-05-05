@@ -4,6 +4,7 @@ import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/format_utils.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
 import '../../../ui/theme/sao_colors.dart';
@@ -285,7 +286,7 @@ class _AdminActivityHistoryPageState extends State<AdminActivityHistoryPage> {
             const SizedBox(width: 8),
             _filterDropdown(
               icon: Icons.terrain_outlined,
-              label: 'Frente',
+              label: frontTerminology(_selectedProject, capitalize: true),
               value: _selectedFrente,
               options: _frentes,
               onChanged: (v) {

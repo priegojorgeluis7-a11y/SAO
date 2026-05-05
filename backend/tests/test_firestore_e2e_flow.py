@@ -1245,6 +1245,115 @@ def test_firestore_pull_handles_malformed_dates(client, monkeypatch, force_fires
     assert any(a["uuid"] == doc_uuid for a in activities)
 
 
+def test_firestore_pull_excludes_canceled_activities(monkeypatch, force_firestore_backend):
+    from app.schemas.sync import SyncPullRequest
+
+    fake_client = _FakeFirestoreClient()
+    project_id = "TMQ"
+    active_uuid = str(uuid4())
+    canceled_uuid = str(uuid4())
+    now = datetime.now(timezone.utc)
+
+    fake_client.collection("activities").document(active_uuid).set(
+        {
+            "uuid": active_uuid,
+            "project_id": project_id,
+            "activity_type_code": "INSP_CIVIL",
+            "execution_state": "PENDIENTE",
+            "assigned_to_user_id": str(uuid4()),
+            "created_by_user_id": str(uuid4()),
+            "catalog_version_id": str(uuid4()),
+            "pk_start": 10,
+            "pk_end": 20,
+            "title": "Activa",
+            "description": None,
+            "created_at": now,
+            "updated_at": now,
+            "deleted_at": None,
+            "sync_version": 1,
+        }
+    )
+    fake_client.collection("activities").document(canceled_uuid).set(
+        {
+            "uuid": canceled_uuid,
+            "project_id": project_id,
+            "activity_type_code": "INSP_CIVIL",
+            "execution_state": "CANCELED",
+            "assigned_to_user_id": str(uuid4()),
+            "created_by_user_id": str(uuid4()),
+            "catalog_version_id": str(uuid4()),
+            "pk_start": 30,
+            "pk_end": 40,
+            "title": "Cancelada",
+            "description": None,
+            "created_at": now,
+            "updated_at": now,
+            "deleted_at": now,
+            "sync_version": 2,
+        }
+    )
+
+    monkeypatch.setattr(sync_api, "get_firestore_client", lambda: fake_client)
+
+    response = sync_api._firestore_pull(
+        SyncPullRequest(project_id=project_id, since_version=0, limit=100)
+    )
+
+    pulled_uuids = {str(activity.uuid) for activity in response.activities}
+    assert active_uuid in pulled_uuids
+    assert canceled_uuid not in pulled_uuids
+
+
+def test_firestore_push_does_not_create_canceled_activity(monkeypatch, force_firestore_backend):
+    from app.api.v1.sync import _firestore_push
+    from app.schemas.sync import SyncPushActivityItem, SyncPushRequest
+
+    fake_client = _FakeFirestoreClient()
+    project_id = "TMQ"
+    catalog_version_id = str(uuid4())
+    canceled_uuid = str(uuid4())
+    now = datetime.now(timezone.utc)
+
+    _seed_catalog(fake_client, project_id, catalog_version_id)
+
+    monkeypatch.setattr(sync_api, "get_firestore_client", lambda: fake_client)
+    monkeypatch.setattr(
+        sync_api,
+        "_firestore_catalog_activity_codes",
+        lambda project_id, catalog_version_id: {"INSP_CIVIL"},
+    )
+
+    response = _firestore_push(
+        SyncPushRequest(
+            project_id=project_id,
+            activities=[
+                SyncPushActivityItem(
+                    uuid=canceled_uuid,
+                    server_id=None,
+                    project_id=project_id,
+                    front_id=None,
+                    pk_start=10,
+                    pk_end=20,
+                    execution_state="CANCELED",
+                    assigned_to_user_id=None,
+                    created_by_user_id=str(uuid4()),
+                    catalog_version_id=catalog_version_id,
+                    activity_type_code="INSP_CIVIL",
+                    title="Cancelada antes de crear",
+                    description=None,
+                    latitude=None,
+                    longitude=None,
+                    deleted_at=now,
+                    sync_version=None,
+                ),
+            ],
+        )
+    )
+
+    assert response.results[0].status == "UNCHANGED"
+    assert not fake_client.collection("activities").document(canceled_uuid).get().exists
+
+
 def test_firestore_push_handles_per_item_server_error(monkeypatch, force_firestore_backend):
     """A crash inside one push item must not fail remaining items."""
     from app.api.v1.sync import _firestore_push

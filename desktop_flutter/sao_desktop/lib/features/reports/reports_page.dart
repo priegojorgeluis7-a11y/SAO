@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/project_providers.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../ui/theme/sao_colors.dart';
 import '../../ui/theme/sao_spacing.dart';
 import '../../ui/theme/sao_typography.dart';
@@ -92,7 +93,7 @@ String _resolvedDraftDetail(ReportActivityItem item) {
     return buildReportNaturalNarrative(
       item,
       fallbackText:
-          'Actividad realizada en ${_previewLocation(item)} para seguimiento operativo del frente ${item.frontName}.',
+          'Actividad realizada en ${_previewLocation(item)} para seguimiento operativo del ${frontTerminology(item.projectId)} ${toSegmentName(item.frontName)}.',
     );
   }
   return detail;
@@ -966,7 +967,7 @@ class _TopBar extends ConsumerWidget {
 
           // Front filter
           _CompactDropdown(
-            label: 'Frente',
+            label: frontTerminology(filters.projectId, capitalize: true),
             value: fronts.contains(filters.frontName)
                 ? filters.frontName
                 : fronts.first,

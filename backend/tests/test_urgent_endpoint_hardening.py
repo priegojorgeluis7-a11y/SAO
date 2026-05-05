@@ -161,6 +161,7 @@ def test_reports_activities_paginates_and_preserves_meta(monkeypatch):
     )
 
     monkeypatch.setattr(reports_api, "get_firestore_client", lambda: fake_client)
+    monkeypatch.setattr(reports_api, "resolve_user_project_access", lambda *_args, **_kwargs: (False, {project_id}))
 
     payload = reports_api.list_report_activities(
         project_id=project_id,
@@ -179,6 +180,46 @@ def test_reports_activities_paginates_and_preserves_meta(monkeypatch):
     assert payload["meta"]["has_next"] is False
     assert len(payload["items"]) == 1
     assert payload["items"][0]["id"] == older_id
+
+
+def test_reports_operativo_can_view_when_is_secondary_participant(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    project_id = 'TMQ'
+    primary_user_id = str(uuid4())
+    secondary_user_id = str(uuid4())
+    now = datetime.now(timezone.utc)
+
+    activity_id = str(uuid4())
+    fake_client.collection('activities').document(activity_id).set(
+        {
+            'uuid': activity_id,
+            'project_id': project_id,
+            'front_id': 'front-1',
+            'assigned_to_user_id': primary_user_id,
+            'participant_user_ids': [primary_user_id, secondary_user_id],
+            'activity_type_code': 'INSP_CIVIL',
+            'execution_state': 'COMPLETADA',
+            'review_decision': 'APPROVED',
+            'created_at': now,
+        }
+    )
+
+    monkeypatch.setattr(reports_api, 'get_firestore_client', lambda: fake_client)
+    monkeypatch.setattr(reports_api, 'resolve_user_project_access', lambda *_args, **_kwargs: (False, {project_id}))
+
+    payload = reports_api.list_report_activities(
+        project_id=project_id,
+        front=None,
+        date_from=None,
+        date_to=None,
+        status=None,
+        page=1,
+        page_size=50,
+        _current_user=SimpleNamespace(id=secondary_user_id, roles=['OPERATIVO']),
+    )
+
+    assert payload['meta']['total'] == 1
+    assert payload['items'][0]['id'] == activity_id
 
 
 def test_reports_activities_ignores_front_todos_and_recent_review_date(monkeypatch):
@@ -208,6 +249,7 @@ def test_reports_activities_ignores_front_todos_and_recent_review_date(monkeypat
     )
 
     monkeypatch.setattr(reports_api, "get_firestore_client", lambda: fake_client)
+    monkeypatch.setattr(reports_api, "resolve_user_project_access", lambda *_args, **_kwargs: (False, {project_id}))
 
     payload = reports_api.list_report_activities(
         project_id=project_id,

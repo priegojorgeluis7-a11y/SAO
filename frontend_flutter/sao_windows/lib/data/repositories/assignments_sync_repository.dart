@@ -86,6 +86,27 @@ class AssignmentsSyncRepository {
 
     for (final assignment in pending) {
       try {
+        if (assignment.syncStatus == 'CANCELED') {
+          if (assignment.backendActivityId == null || assignment.backendActivityId!.isEmpty) {
+            // Never reached backend; local cancel means remove local draft.
+            await _dao.deleteAssignment(assignment.id);
+            synced++;
+            continue;
+          }
+
+          // Synced assignment canceled offline: reconcile with backend.
+          await _apiClient.post<Map<String, dynamic>>(
+            '/activities/${assignment.backendActivityId}/cancel',
+            data: {'reason': 'Canceled from mobile'},
+          );
+          await _dao.deleteAssignment(assignment.id);
+          appLogger.i(
+            'Synced canceled assignment ${assignment.id} → backend activity ${assignment.backendActivityId}',
+          );
+          synced++;
+          continue;
+        }
+
         if (assignment.syncRetryCount >= 3) {
           appLogger.w('Skipping assignment ${assignment.id}: retry limit exceeded');
           skipped++;
@@ -156,22 +177,16 @@ class AssignmentsSyncRepository {
       throw Exception('Assignment not found: $assignmentId');
     }
 
-    if (assignment.syncStatus == 'SYNCED' && assignment.backendActivityId != null) {
-      // If already synced to backend, call cancel endpoint
-      // (requires POST /activities/{uuid}/cancel on backend)
-      try {
-        await _apiClient.post<Map<String, dynamic>>(
-          '/activities/${assignment.backendActivityId}/cancel',
-          data: {'reason': 'Canceled from mobile'},
-        );
-        appLogger.i('Canceled assignment ${assignment.id} on backend (activity=${assignment.backendActivityId})');
-      } catch (e) {
-        appLogger.e('Error canceling assignment on backend: $e');
-      }
+    // Local-first behavior:
+    // - DRAFT/READY_TO_SYNC/ERROR: remove locally (never reached backend).
+    // - SYNCED: mark as CANCELED so sync can reconcile when online.
+    if (assignment.syncStatus == 'SYNCED') {
+      await _dao.markAsCanceled(assignmentId);
+      appLogger.i('Marked assignment as CANCELED for sync: $assignmentId');
+      return;
     }
 
-    // Delete locally
     await _dao.deleteAssignment(assignmentId);
-    appLogger.i('Deleted assignment: $assignmentId');
+    appLogger.i('Deleted local-only assignment: $assignmentId');
   }
 }

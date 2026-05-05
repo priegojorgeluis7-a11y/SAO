@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import '../../../core/compat/io_compat.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -115,8 +115,8 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   Future<File> _notesStoreFile() async {
     final supportDir = await getApplicationSupportDirectory();
     final notesDir = Directory('${supportDir.path}/review_notes');
-    if (!notesDir.existsSync()) {
-      notesDir.createSync(recursive: true);
+    if (!await notesDir.exists()) {
+      await notesDir.create(recursive: true);
     }
     return File('${notesDir.path}/evidence_internal_notes.json');
   }
@@ -124,7 +124,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   Future<Map<String, String>> _readStoredNotes() async {
     try {
       final file = await _notesStoreFile();
-      if (!file.existsSync()) {
+      if (!await file.exists()) {
         return <String, String>{};
       }
       final raw = await file.readAsString();
@@ -437,7 +437,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
       final rawPath = evidence.filePath.trim();
       final imageUrl = rawPath.startsWith('http') || rawPath.startsWith('file://')
           ? rawPath
-          : File(rawPath).uri.toString();
+          : Uri.file(rawPath).toString();
 
       if (_isPdfEvidence(evidence, imageUrl)) {
         return Center(

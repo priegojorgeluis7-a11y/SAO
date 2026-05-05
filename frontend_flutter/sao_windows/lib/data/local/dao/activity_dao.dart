@@ -886,6 +886,83 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     );
   }
 
+  /// Mark an activity as CANCELED locally and queue it for sync.
+  /// The activity will disappear from home on next reload because
+  /// [listHomeActivitiesByProject] excludes CANCELED rows.
+  Future<void> markActivityCanceled({
+    required String activityId,
+    required String userId,
+    String? reason,
+  }) async {
+    await transaction(() async {
+      final row = await (select(activities)
+            ..where((t) => t.id.equals(activityId)))
+          .getSingleOrNull();
+      if (row == null) return;
+
+      final now = DateTime.now().toUtc();
+
+      // 1. Update local status
+      await (update(activities)..where((t) => t.id.equals(activityId)))
+          .write(const ActivitiesCompanion(status: Value('CANCELED')));
+
+      // 2. Resolve activity type code
+      final typeRow = await (select(catalogActivityTypes)
+            ..where((t) => t.id.equals(row.activityTypeId)))
+          .getSingleOrNull();
+      final typeCode = typeRow?.code.trim().isNotEmpty == true
+          ? typeRow!.code.trim()
+          : 'UNKNOWN';
+
+      // 3. Build sync payload (ActivityDTO-compatible JSON)
+      final payload = <String, dynamic>{
+        'uuid': activityId,
+        'project_id': row.projectId,
+        'pk_start': row.pk ?? 0,
+        'execution_state': 'CANCELED',
+        'created_by_user_id': row.createdByUserId,
+        'catalog_version_id': row.catalogVersionId ?? '',
+        'activity_type_code': typeCode,
+        'title': row.title,
+        'description': row.description,
+        'operational_state': 'CANCELADA',
+        'sync_state': 'SYNCED',
+        'review_state': 'NOT_APPLICABLE',
+        'next_action': 'CERRADA_CANCELADA',
+        'created_at': row.createdAt.toUtc().toIso8601String(),
+        'updated_at': now.toIso8601String(),
+        'deleted_at': now.toIso8601String(),
+        'sync_version': 0,
+        if (reason != null)
+          'wizard_payload': {'cancel_reason': reason},
+      };
+
+      // 4. Insert into sync queue
+      await into(syncQueue).insert(
+        SyncQueueCompanion.insert(
+          id: _uuid.v4(),
+          entity: 'ACTIVITY',
+          entityId: activityId,
+          action: 'UPSERT',
+          payloadJson: jsonEncode(payload),
+          priority: const Value(80),
+        ),
+      );
+
+      // 5. Activity log entry
+      await into(activityLog).insert(
+        ActivityLogCompanion.insert(
+          id: _uuid.v4(),
+          activityId: activityId,
+          eventType: 'CANCELLED',
+          at: now.toLocal(),
+          userId: userId,
+          note: Value('incidencia: ${reason ?? "Cancelada"}'),
+        ),
+      );
+    });
+  }
+
   Future<List<Evidence>> getEvidencesForActivity(String activityId) {
     return (select(evidences)
           ..where((t) => t.activityId.equals(activityId))

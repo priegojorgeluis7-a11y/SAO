@@ -1,7 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'core/di/service_locator.dart';
 import 'features/auth/data/auth_provider.dart';
 import 'features/evidence/data/evidence_upload_retry_worker.dart';
@@ -9,6 +12,14 @@ import 'features/sync/services/auto_sync_service.dart';
 import 'core/notifications/push_notifications_service.dart';
 import 'ui/theme/sao_colors.dart';
 import 'app.dart';
+
+/// Top-level handler for background FCM messages (required by firebase_messaging).
+/// Must be a top-level function annotated with @pragma('vm:entry-point').
+@pragma('vm:entry-point')
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // No-op: Android shows the notification automatically from the FCM payload.
+  // If additional local processing is needed, initialize Firebase here first.
+}
 
 Future<void> _bootstrapDependencies() async {
   await setupServiceLocator(prewarmCatalog: false);
@@ -34,6 +45,16 @@ List<Override> _buildProviderOverrides() {
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Register background FCM handler before Firebase is initialized.
+  if (!kIsWeb) {
+    FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
+  // Use hash URL strategy on web so that static hosting (GCS) works correctly
+  // regardless of whether the URL includes "index.html" or not.
+  // Routes become /#/route instead of /route.
+  if (kIsWeb) {
+    setUrlStrategy(HashUrlStrategy());
+  }
   runApp(const _BootstrapHost());
 }
 

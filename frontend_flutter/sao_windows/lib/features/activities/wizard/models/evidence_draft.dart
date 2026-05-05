@@ -1,4 +1,5 @@
 // lib/features/activities/wizard/models/evidence_draft.dart
+import 'dart:typed_data';
 
 /// Modelo de evidencia en borrador (offline)
 /// Cada foto debe tener una descripción obligatoria
@@ -16,12 +17,17 @@ class EvidenceDraft {
   final double? lat;
   final double? lng;
 
+  /// Bytes pre-leídos de la imagen (obligatorio en Flutter Web donde
+  /// dart:io File no puede leer blob URLs).
+  final Uint8List? cachedBytes;
+
   EvidenceDraft({
     required this.localPath,
     this.descripcion = '',
     DateTime? createdAt,
     this.lat,
     this.lng,
+    this.cachedBytes,
   }) : createdAt = createdAt ?? DateTime.now();
 
   /// Valida si la evidencia tiene descripción

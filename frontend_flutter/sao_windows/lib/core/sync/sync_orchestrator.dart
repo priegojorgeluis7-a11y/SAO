@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:dio/dio.dart';
 
+import '../constants.dart';
 import '../catalog/state/catalog_providers.dart';
 import '../catalog/sync/catalog_sync_service.dart';
 import 'pending_sync_services.dart';
@@ -80,7 +81,12 @@ class SyncOrchestrator extends StateNotifier<SyncOrchestratorState> {
           rethrow;
         }
       }
-      await _activitySyncService.syncProject(projectId);
+      final normalizedProjectId = projectId.trim().toUpperCase();
+      final shouldSyncActivities =
+          normalizedProjectId.isNotEmpty && normalizedProjectId != kAllProjects;
+      if (shouldSyncActivities) {
+        await _activitySyncService.syncProject(projectId);
+      }
       await _assignmentSyncService.syncPending();
       await _evidenceSyncService.syncPending();
 

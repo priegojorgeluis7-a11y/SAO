@@ -1,5 +1,4 @@
 // lib/ui/helpers/sao_platform.dart
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 /// Helper para detectar plataforma y ajustar comportamiento
@@ -13,43 +12,46 @@ class SaoPlatform {
   /// Es plataforma desktop (Windows, macOS, Linux)
   static bool get isDesktop {
     if (kIsWeb) return false;
-    return Platform.isWindows || Platform.isMacOS || Platform.isLinux;
+    return defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.linux;
   }
 
   /// Es plataforma mobile (Android, iOS)
   static bool get isMobile {
     if (kIsWeb) return false;
-    return Platform.isAndroid || Platform.isIOS;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
   }
 
   /// Es Windows
   static bool get isWindows {
     if (kIsWeb) return false;
-    return Platform.isWindows;
+    return defaultTargetPlatform == TargetPlatform.windows;
   }
 
   /// Es macOS
   static bool get isMacOS {
     if (kIsWeb) return false;
-    return Platform.isMacOS;
+    return defaultTargetPlatform == TargetPlatform.macOS;
   }
 
   /// Es Linux
   static bool get isLinux {
     if (kIsWeb) return false;
-    return Platform.isLinux;
+    return defaultTargetPlatform == TargetPlatform.linux;
   }
 
   /// Es Android
   static bool get isAndroid {
     if (kIsWeb) return false;
-    return Platform.isAndroid;
+    return defaultTargetPlatform == TargetPlatform.android;
   }
 
   /// Es iOS
   static bool get isIOS {
     if (kIsWeb) return false;
-    return Platform.isIOS;
+    return defaultTargetPlatform == TargetPlatform.iOS;
   }
 
   /// Es Web

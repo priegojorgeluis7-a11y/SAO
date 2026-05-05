@@ -3,6 +3,7 @@
 import logging
 from datetime import datetime, timezone
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request, status
 from fastapi import HTTPException
@@ -60,6 +61,36 @@ def _coerce_sync_version(value: object | None) -> int | None:
         return None
 
 
+def _is_canceled_execution_state(value: object | None) -> bool:
+    return str(value or "").strip().upper() == "CANCELED"
+
+
+def _is_canceled_activity_payload(payload: dict[str, Any]) -> bool:
+    return (
+        _coerce_firestore_datetime(payload.get("deleted_at")) is not None
+        or _is_canceled_execution_state(payload.get("execution_state"))
+    )
+
+
+def _is_canceled_push_item(item: "SyncPushActivityItem") -> bool:
+    return item.deleted_at is not None or _is_canceled_execution_state(item.execution_state)
+
+
+def _normalized_participant_user_ids(payload: dict[str, Any]) -> list[str]:
+    values = payload.get("participant_user_ids")
+    if isinstance(values, list):
+        normalized: list[str] = []
+        for value in values:
+            candidate = str(value or "").strip()
+            if candidate and candidate not in normalized:
+                normalized.append(candidate)
+        if normalized:
+            return normalized
+
+    fallback = str(payload.get("assigned_to_user_id") or payload.get("created_by_user_id") or "").strip()
+    return [fallback] if fallback else []
+
+
 def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
     """Convert a raw Firestore activity document to ActivityDTO.
 
@@ -90,6 +121,7 @@ def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
     # This ensures every activity has a responsible user for mobile Home filtering
     if not normalized.get("assigned_to_user_id"):
         normalized["assigned_to_user_id"] = normalized.get("created_by_user_id")
+    normalized["participant_user_ids"] = _normalized_participant_user_ids(normalized)
     
     sync_version = _coerce_sync_version(normalized.get("sync_version"))
     if sync_version is None:
@@ -98,7 +130,7 @@ def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
     return ActivityDTO.model_validate(normalized)
 
 
-def _firestore_pull(request: SyncPullRequest) -> SyncPullResponse:
+def _firestore_pull(request: SyncPullRequest, operative_user_id: str | None = None) -> SyncPullResponse:
     client = get_firestore_client()
     # Use indexed cursor-based query to avoid full project scans.
     # Required index already exists: (project_id ASC, sync_version ASC, uuid ASC).
@@ -152,6 +184,13 @@ def _firestore_pull(request: SyncPullRequest) -> SyncPullResponse:
             item = snap.to_dict() or {}
         else:
             item = dict(snap or {})
+        if _is_canceled_activity_payload(item):
+            continue
+        # OPERATIVO filter: only sync activities assigned to (or created by) them.
+        if operative_user_id:
+            participant_user_ids = _normalized_participant_user_ids(item)
+            if operative_user_id not in participant_user_ids:
+                continue
         try:
             activity_dtos.append(_activity_dto_from_firestore_payload(item))
         except Exception as exc:
@@ -283,9 +322,12 @@ def _firestore_push(request: SyncPushRequest) -> SyncPushResponse:
                 _commit_pending_batch()
         except Exception as exc:
             logger.exception(
-                "PUSH_ITEM_UNEXPECTED_ERROR uuid=%s project_id=%s error=%s",
+                "PUSH_ITEM_UNEXPECTED_ERROR uuid=%s project_id=%s sync_version=%s activity_type_code=%s execution_state=%s error=%s",
                 item.uuid,
                 item.project_id,
+                item.sync_version,
+                item.activity_type_code,
+                item.execution_state,
                 exc,
             )
             results.append(
@@ -301,6 +343,18 @@ def _firestore_push(request: SyncPushRequest) -> SyncPushResponse:
 
     _commit_pending_batch()
 
+    # Log summary of push results for diagnostics
+    failed_count = len([r for r in results if r.status in {"INVALID", "CONFLICT"}])
+    if failed_count > 0:
+        logger.warning(
+            "SYNC_PUSH_SUMMARY project_id=%s total_items=%d created=%d updated=%d failed=%d",
+            request.project_id,
+            len(request.activities),
+            len([r for r in results if r.status == "CREATED"]),
+            len([r for r in results if r.status == "UPDATED"]),
+            failed_count,
+        )
+
     return SyncPushResponse(results=results)
 
 
@@ -312,6 +366,11 @@ def _mutable_activity_fields(
     wizard_payload: dict[str, object] | None,
 ) -> dict:
     """Return the mutable activity fields shared across create/update/undelete branches."""
+    participant_user_ids = [str(user_id) for user_id in (item.participant_user_ids or [])]
+    if item.assigned_to_user_id:
+        assignee = str(item.assigned_to_user_id)
+        if assignee not in participant_user_ids:
+            participant_user_ids.insert(0, assignee)
     return {
         "project_id": item.project_id,
         "front_id": str(item.front_id) if item.front_id else None,
@@ -319,6 +378,7 @@ def _mutable_activity_fields(
         "pk_end": item.pk_end,
         "execution_state": item.execution_state,
         "assigned_to_user_id": str(item.assigned_to_user_id) if item.assigned_to_user_id else None,
+        "participant_user_ids": participant_user_ids,
         "catalog_version_id": str(item.catalog_version_id),
         "activity_type_code": item.activity_type_code,
         "latitude": item.latitude,
@@ -431,8 +491,28 @@ def _firestore_push_item(
     doc_ref = client.collection("activities").document(str(item.uuid))
     snap = doc_ref.get()
 
+    participant_user_ids = [str(user_id) for user_id in (item.participant_user_ids or [])]
+    if item.assigned_to_user_id:
+        assignee = str(item.assigned_to_user_id)
+        if assignee not in participant_user_ids:
+            participant_user_ids.insert(0, assignee)
+    incoming_canceled = _is_canceled_push_item(item)
+
     if not snap.exists:
+        if incoming_canceled:
+            results.append(_result_item(item.uuid, "UNCHANGED", None, item.sync_version or 0))
+            return None, 0
         has_custom_values = is_custom_activity or _wizard_payload_has_custom_ids(item.wizard_payload)
+        # Determine whether this is a multi-responsible activity.
+        primary_assignee = str(item.assigned_to_user_id) if item.assigned_to_user_id else None
+        multi_assign = len(participant_user_ids) > 1
+        # All participants except the primary assignee get sibling activities.
+        sibling_participant_ids = [
+            pid for pid in participant_user_ids if pid != primary_assignee
+        ] if multi_assign else []
+
+        activity_group_id = str(uuid4()) if multi_assign else None
+
         payload = {
             "uuid": str(item.uuid),
             "server_id": None,
@@ -440,7 +520,8 @@ def _firestore_push_item(
             "gps_mismatch": False,
             "catalog_changed": has_custom_values,
             "created_at": now,
-            "deleted_at": item.deleted_at,
+            "deleted_at": None,
+            **({"activity_group_id": activity_group_id} if activity_group_id else {}),
             **_mutable_activity_fields(item, now, 1, wizard_payload=item.wizard_payload),
         }
         if batch is None:
@@ -448,36 +529,83 @@ def _firestore_push_item(
         else:
             batch.set(doc_ref, payload, merge=True)
         results.append(_result_item(item.uuid, "CREATED", None, 1))
+
+        # Create sibling activities for each co-responsible (not the primary assignee).
+        for sibling_uid in sibling_participant_ids:
+            sibling_uuid = str(uuid4())
+            sibling_ref = client.collection("activities").document(sibling_uuid)
+            sibling_payload = {
+                **payload,
+                "uuid": sibling_uuid,
+                "assigned_to_user_id": sibling_uid,
+                "execution_state": "PENDIENTE",
+                "wizard_payload": None,
+                "group_completion_propagated": False,
+                "sync_version": 1,
+                "created_at": now,
+                "updated_at": now,
+            }
+            if batch is None:
+                sibling_ref.set(sibling_payload)
+            else:
+                batch.set(sibling_ref, sibling_payload)
+
         return len(results) - 1, 1
 
     existing = snap.to_dict() or {}
+    existing_participant_user_ids = _normalized_participant_user_ids(existing)
+    if participant_user_ids:
+        for participant_user_id in existing_participant_user_ids:
+            if participant_user_id not in participant_user_ids:
+                participant_user_ids.append(participant_user_id)
+    else:
+        participant_user_ids = list(existing_participant_user_ids)
     existing_sync_version = int(existing.get("sync_version") or 0)
     existing_deleted_at = _coerce_firestore_datetime(existing.get("deleted_at"))
+    existing_canceled = existing_deleted_at is not None or _is_canceled_execution_state(existing.get("execution_state"))
 
-    if existing_deleted_at is not None:
-        if item.deleted_at is not None:
-            results.append(_result_item(item.uuid, "UNCHANGED", existing.get("server_id"), existing_sync_version))
+    if existing_canceled:
+        results.append(_result_item(item.uuid, "UNCHANGED", existing.get("server_id"), existing_sync_version))
+        return None, 0
+
+    # Guard: if this activity was already completed by propagation from a sibling,
+    # do not allow the secondary responsible to overwrite it with their local data.
+    existing_state = str(existing.get("execution_state") or "").upper()
+    if (
+        existing.get("group_completion_propagated")
+        and existing_state in {"REVISION_PENDIENTE", "COMPLETADA"}
+    ):
+        incoming_state_check = str(item.execution_state or "").strip().upper()
+        if incoming_state_check not in {"REVISION_PENDIENTE", "COMPLETADA"}:
+            # Incoming is still pending/in-progress — reject silently so the mobile
+            # pull will overwrite the local copy with the already-completed state.
+            results.append(_result_item(
+                item.uuid,
+                "CONFLICT",
+                existing.get("server_id"),
+                existing_sync_version,
+                error_code="GROUP_ALREADY_COMPLETED",
+                message="Esta actividad ya fue completada por otro responsable del grupo.",
+            ))
             return None, 0
-        elif request.force_override:
-            next_sync = existing_sync_version + 1
-            payload = {
-                **_mutable_activity_fields(
-                    item,
-                    now,
-                    next_sync,
-                    wizard_payload=item.wizard_payload,
-                ),
-                "deleted_at": None,
-            }
-            if batch is None:
-                doc_ref.set(payload, merge=True)
-            else:
-                batch.set(doc_ref, payload, merge=True)
-            results.append(_result_item(item.uuid, "UPDATED", existing.get("server_id"), next_sync))
-            return len(results) - 1, 1
+        # Both are completed: allow — the second responsible is confirming their own
+        # registration. The wizard_payload of their own activity gets updated.
+
+
+        next_sync = existing_sync_version + 1
+        canceled_at = item.deleted_at or now
+        payload = {
+            "execution_state": "CANCELED",
+            "deleted_at": canceled_at,
+            "updated_at": now,
+            "sync_version": next_sync,
+        }
+        if batch is None:
+            doc_ref.set(payload, merge=True)
         else:
-            results.append(_result_item(item.uuid, "CONFLICT", existing.get("server_id"), existing_sync_version))
-            return None, 0
+            batch.set(doc_ref, payload, merge=True)
+        results.append(_result_item(item.uuid, "UPDATED", existing.get("server_id"), next_sync))
+        return len(results) - 1, 1
 
     incoming_sync = item.sync_version
     can_apply = request.force_override or incoming_sync is None or incoming_sync >= existing_sync_version
@@ -496,6 +624,7 @@ def _firestore_push_item(
         or existing.get("execution_state") != item.execution_state
         or str(existing.get("assigned_to_user_id") or "")
         != (str(item.assigned_to_user_id) if item.assigned_to_user_id else "")
+        or existing_participant_user_ids != participant_user_ids
         or str(existing.get("catalog_version_id") or "") != str(item.catalog_version_id)
         or existing.get("activity_type_code") != item.activity_type_code
         or existing.get("latitude") != item.latitude
@@ -520,6 +649,17 @@ def _firestore_push_item(
         next_sync,
         wizard_payload=effective_wizard_payload,
     )
+    payload["participant_user_ids"] = participant_user_ids
+    incoming_state = str(item.execution_state or "").strip().upper()
+    previous_state = str(existing.get("execution_state") or "").strip().upper()
+    completed_like_states = {"REVISION_PENDIENTE", "COMPLETADA"}
+    if incoming_state in completed_like_states and previous_state not in completed_like_states:
+        if item.assigned_to_user_id:
+            payload["completed_by_user_id"] = str(item.assigned_to_user_id)
+        payload["completed_at"] = now
+        # Propagate completion to co-responsible siblings in the same group.
+        if activity_group_id := existing.get("activity_group_id"):
+            _propagate_group_completion(client, activity_group_id, str(item.uuid), payload, now)
     if _should_reset_review_metadata(existing, item):
         payload.update(
             {
@@ -534,6 +674,61 @@ def _firestore_push_item(
         batch.set(doc_ref, payload, merge=True)
     results.append(_result_item(item.uuid, "UPDATED", existing.get("server_id"), next_sync))
     return len(results) - 1, 1
+
+
+def _propagate_group_completion(
+    client: Any,
+    activity_group_id: str,
+    completed_uuid: str,
+    completion_payload: dict,
+    now: datetime,
+) -> None:
+    """When one activity in a group is completed, propagate the same completion data
+    to all sibling activities so every co-responsible is registered as completed."""
+    try:
+        siblings = list(
+            client.collection("activities")
+            .where("activity_group_id", "==", activity_group_id)
+            .stream()
+        )
+        for snap in siblings:
+            sibling = snap.to_dict() or {}
+            sibling_uuid = str(sibling.get("uuid") or snap.id)
+            if sibling_uuid == completed_uuid:
+                continue
+            if sibling.get("deleted_at") or _is_canceled_execution_state(sibling.get("execution_state")):
+                continue
+            sibling_state = str(sibling.get("execution_state") or "").upper()
+            if sibling_state in {"REVISION_PENDIENTE", "COMPLETADA"}:
+                continue
+            sibling_sync = int(sibling.get("sync_version") or 0) + 1
+            propagated: dict = {
+                "execution_state": completion_payload.get("execution_state", "COMPLETADA"),
+                "wizard_payload": completion_payload.get("wizard_payload"),
+                "latitude": completion_payload.get("latitude"),
+                "longitude": completion_payload.get("longitude"),
+                "completed_at": now,
+                "completed_by_user_id": completion_payload.get("completed_by_user_id"),
+                "group_completed_by_user_id": completion_payload.get("completed_by_user_id"),
+                "group_completion_propagated": True,
+                "group_source_activity_id": completed_uuid,
+                "updated_at": now,
+                "sync_version": sibling_sync,
+            }
+            client.collection("activities").document(snap.id).set(propagated, merge=True)
+            logger.info(
+                "GROUP_COMPLETION_PROPAGATED group=%s source=%s target=%s",
+                activity_group_id,
+                completed_uuid,
+                sibling_uuid,
+            )
+    except Exception as exc:
+        logger.warning(
+            "GROUP_PROPAGATION_FAILED group=%s source=%s error=%s",
+            activity_group_id,
+            completed_uuid,
+            exc,
+        )
 
 
 def _utc_now() -> datetime:
@@ -603,7 +798,20 @@ async def sync_pull(
     """Return activities updated since client's known sync_version for a project."""
     _enforce_sync_permission(current_user, "activity.view", request.project_id, None)
     verify_project_access(current_user, request.project_id, None)
-    return _firestore_pull(request)
+
+    # OPERATIVO-only users receive only their own activities to prevent data leakage.
+    from app.api.deps import user_has_any_role
+    from app.services.audit_service import canonicalize_role_name
+    caller_roles = {
+        canonicalize_role_name(str(r).strip()) or str(r).strip().upper()
+        for r in (getattr(current_user, "roles", []) or [])
+        if str(r).strip()
+    }
+    privileged_roles = {"ADMIN", "COORD", "SUPERVISOR", "DESARROLLADOR", "DEVELOPER", "DEV"}
+    is_operativo_only = bool(caller_roles) and not caller_roles.intersection(privileged_roles)
+    operative_user_id = str(current_user.id).strip() if is_operativo_only else None
+
+    return _firestore_pull(request, operative_user_id=operative_user_id)
 
 
 @router.post("/push", response_model=SyncPushResponse, status_code=status.HTTP_200_OK)
@@ -623,3 +831,81 @@ async def sync_push(
     _enforce_sync_permission(current_user, "activity.edit", request.project_id, None)
     verify_project_access(current_user, request.project_id, None)
     return _firestore_push(request)
+
+
+@router.post("/admin/diagnostics")
+async def sync_admin_diagnostics(
+    project_id: str,
+    activity_uuid: str,
+    current_user: Any = Depends(get_current_user),
+):
+    """
+    [ADMIN/OPERATORS ONLY] Diagnose sync issues for a specific activity.
+    
+    Returns current state of activity in Firestore and instructions for retry.
+    Useful for cases where user cannot access device to manually retry sync.
+    
+    Args:
+        project_id: Project ID containing the activity
+        activity_uuid: UUID of the activity to diagnose
+        
+    Returns:
+        Diagnostic info with current activity state and retry instructions
+    """
+    # Basic permission check: user must have project access
+    verify_project_access(current_user, project_id, None)
+    
+    db = get_firestore_client()
+    doc_ref = (
+        db.collection("projects")
+        .document(project_id)
+        .collection("activities")
+        .document(str(activity_uuid))
+    )
+    snap = doc_ref.get()
+    
+    if not snap.exists:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Activity {activity_uuid} not found in project {project_id}",
+        )
+    
+    data = snap.to_dict() or {}
+    sync_version = data.get("sync_version", 0)
+    execution_state = data.get("execution_state", "UNKNOWN")
+    deleted_at = data.get("deleted_at")
+    created_at = data.get("created_at")
+    updated_at = data.get("updated_at")
+    status_val = data.get("status", "UNKNOWN")
+    
+    # Determine if activity is soft-deleted
+    is_canceled = deleted_at is not None or execution_state == "CANCELED"
+    
+    logger.info(
+        "SYNC_ADMIN_DIAGNOSTICS activity_uuid=%s project_id=%s sync_version=%d "
+        "execution_state=%s is_canceled=%s requested_by=%s",
+        activity_uuid,
+        project_id,
+        sync_version,
+        execution_state,
+        is_canceled,
+        current_user.id,
+    )
+    
+    return {
+        "activity_uuid": str(activity_uuid),
+        "project_id": project_id,
+        "sync_version": sync_version,
+        "execution_state": execution_state,
+        "status": status_val,
+        "is_canceled": is_canceled,
+        "deleted_at": str(deleted_at) if deleted_at else None,
+        "created_at": str(created_at) if created_at else None,
+        "updated_at": str(updated_at) if updated_at else None,
+        "instructions": (
+            "User must open the mobile app and manually sync to retry. "
+            "Backend will process the sync push with the current state. "
+            "If sync fails repeatedly, check activity_type_code and "
+            "participant_user_ids are valid in the catalog."
+        ),
+    }

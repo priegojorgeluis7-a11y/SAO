@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "97150883570",
+    "project_id": "sao-prod-488416",
+    "storage_bucket": "sao-prod-488416.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:97150883570:android:c4d058e2952b37e3b5e26b",
+        "android_client_info": {
+          "package_name": "com.tmq.sao"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "97150883570-0llpl9l7rg190qt82l88fjvgsocah8eo.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcp6XgRtdelj-BH-gV8A6WASAjXX0Uu_I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "97150883570-0llpl9l7rg190qt82l88fjvgsocah8eo.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "97150883570-73lbsbv88r0bnn4knuuu9hu3s9qm9htb.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.tmq.sao"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

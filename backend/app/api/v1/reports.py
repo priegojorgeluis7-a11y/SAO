@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, Depends, Query, status
 
-from app.api.deps import require_any_role
+from app.api.deps import get_current_user, require_any_role, resolve_user_project_access
 from app.core.firestore import get_firestore_client
 from app.core.utils import parse_firestore_dt
 from typing import Any
@@ -94,6 +94,20 @@ def _load_user_names(client, user_ids: set[str]) -> dict[str, str]:
     return result
 
 
+def _participant_user_ids(doc: dict[str, Any]) -> list[str]:
+    values = doc.get("participant_user_ids")
+    if isinstance(values, list):
+        normalized: list[str] = []
+        for value in values:
+            candidate = str(value or "").strip()
+            if candidate and candidate not in normalized:
+                normalized.append(candidate)
+        if normalized:
+            return normalized
+    fallback = str(doc.get("assigned_to_user_id") or "").strip()
+    return [fallback] if fallback else []
+
+
 @router.get("/activities")
 def list_report_activities(
     project_id: str | None = Query(None),
@@ -113,22 +127,35 @@ def list_report_activities(
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
     status_filter = status.strip().upper() if status and status.strip() else None
 
+    # Resolve which projects this user can see
+    has_global_scope, allowed_project_ids = resolve_user_project_access(_current_user)
+
     # OPERATIVO can only see activities assigned to them
-    is_operativo = (getattr(_current_user, "role", None) or "").upper() == "OPERATIVO"
+    caller_roles = {str(r).strip().upper() for r in (getattr(_current_user, "roles", []) or [])}
+    is_operativo = caller_roles == {"OPERATIVO"} or ("OPERATIVO" in caller_roles and "SUPERVISOR" not in caller_roles and "ADMIN" not in caller_roles)
     caller_user_id = str(_current_user.id)
 
     query = client.collection("activities")
     if project_filter:
+        # Verify the requesting user has access to this specific project
+        if not has_global_scope and project_filter not in allowed_project_ids:
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
         query = query.where("project_id", "==", project_filter)
+
     docs = [d.to_dict() or {} for d in query.stream()]
+
+    # If no specific project requested, restrict to allowed projects for non-global users
+    if not project_filter and not has_global_scope:
+        docs = [d for d in docs if str(d.get("project_id") or "").upper() in allowed_project_ids]
 
     candidate_docs: list[dict[str, Any]] = []
     front_ids: set[str] = set()
     user_ids: set[str] = set()
     for doc in docs:
-        # OPERATIVO ownership guard: only their own assigned, approved activities
+        # OPERATIVO ownership guard: must be a participant and approved.
         if is_operativo:
-            if str(doc.get("assigned_to_user_id") or "") != caller_user_id:
+            participant_user_ids = _participant_user_ids(doc)
+            if caller_user_id not in participant_user_ids:
                 continue
             if str(doc.get("review_decision") or "").upper() != "APPROVED":
                 continue

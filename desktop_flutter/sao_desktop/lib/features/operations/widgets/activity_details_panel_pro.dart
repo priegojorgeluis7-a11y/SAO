@@ -10,6 +10,7 @@ import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
 import '../../../ui/theme/sao_radii.dart';
 import '../../../ui/theme/sao_typography.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../activity_queue_projection.dart';
 import 'catalog_resolution_dialog.dart';
 import 'catalog_substitution_modal.dart';
@@ -693,7 +694,7 @@ class _ActivityDetailsPanelProState
                       accentColor: SaoColors.success,
                       children: [
                         _buildReadOnlyField(
-                          'Frente',
+                          frontTerminology(activity.activity.projectId, capitalize: true),
                           activity.front?.name ?? 'N/A',
                           Icons.account_tree_rounded,
                           dense: true,

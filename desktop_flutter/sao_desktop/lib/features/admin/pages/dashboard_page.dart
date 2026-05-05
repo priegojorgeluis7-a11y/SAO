@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -57,6 +58,22 @@ final _adminDashboardProvider =
         projects.where((p) => p.status.toLowerCase() == 'active').length,
     recentAudit: audit.take(20).toList(),
   );
+});
+
+// Provider de presencia online — refresca cada 30 segundos
+final _onlineUsersProvider =
+    StreamProvider.autoDispose<List<OnlineUserItem>>((ref) async* {
+  final token = ref.watch(sessionControllerProvider).accessToken ?? '';
+  final usersRepo = ref.read(usersRepositoryProvider);
+
+  Future<List<OnlineUserItem>> fetch() =>
+      usersRepo.listOnline(token).catchError((_) => <OnlineUserItem>[]);
+
+  yield await fetch();
+  while (true) {
+    await Future.delayed(const Duration(seconds: 30));
+    yield await fetch();
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -149,66 +166,87 @@ class AdminDashboardPage extends ConsumerWidget {
             ),
             const SizedBox(height: 24),
 
-            // Recent audit
-            const Text(
-              'Actividad reciente',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 10),
+            // Audit + Online panel side by side
             Expanded(
-              child: data.recentAudit.isEmpty
-                  ? const Center(
-                      child: Text(
-                        'Sin eventos de auditoría registrados.',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    )
-                  : Container(
-                      decoration: BoxDecoration(
-                        color: AppColors.surfaceFor(context),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: AppColors.borderFor(context)),
-                      ),
-                      child: SingleChildScrollView(
-                        child: DataTable(
-                          headingRowColor: WidgetStatePropertyAll(AppColors.surfaceMutedFor(context)),
-                          columnSpacing: 20,
-                          columns: const [
-                            DataColumn(label: Text('Fecha')),
-                            DataColumn(label: Text('Actor')),
-                            DataColumn(label: Text('Acción')),
-                            DataColumn(label: Text('Entidad')),
-                            DataColumn(label: Text('ID')),
-                          ],
-                          rows: data.recentAudit
-                              .map(
-                                (item) => DataRow(cells: [
-                                  DataCell(
-                                      Text(_formatDate(item.createdAt))),
-                                  DataCell(Text(
-                                    item.actorEmail ?? '—',
-                                    style: const TextStyle(fontSize: 12),
-                                  )),
-                                  DataCell(_ActionChip(item.action)),
-                                  DataCell(Text(item.entity)),
-                                  DataCell(
-                                    Text(
-                                      item.entityId.length > 12
-                                          ? '${item.entityId.substring(0, 8)}…'
-                                          : item.entityId,
-                                      style: const TextStyle(
-                                        fontSize: 11,
-                                        fontFamily: 'monospace',
-                                        color: Colors.grey,
-                                      ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ── Audit ────────────────────────────────────────
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Actividad reciente',
+                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 10),
+                        Expanded(
+                          child: data.recentAudit.isEmpty
+                              ? const Center(
+                                  child: Text(
+                                    'Sin eventos de auditoría registrados.',
+                                    style: TextStyle(color: Colors.grey),
+                                  ),
+                                )
+                              : Container(
+                                  decoration: BoxDecoration(
+                                    color: AppColors.surfaceFor(context),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: AppColors.borderFor(context)),
+                                  ),
+                                  child: SingleChildScrollView(
+                                    child: DataTable(
+                                      headingRowColor: WidgetStatePropertyAll(AppColors.surfaceMutedFor(context)),
+                                      columnSpacing: 20,
+                                      columns: const [
+                                        DataColumn(label: Text('Fecha')),
+                                        DataColumn(label: Text('Actor')),
+                                        DataColumn(label: Text('Acción')),
+                                        DataColumn(label: Text('Entidad')),
+                                        DataColumn(label: Text('ID')),
+                                      ],
+                                      rows: data.recentAudit
+                                          .map(
+                                            (item) => DataRow(cells: [
+                                              DataCell(Text(_formatDate(item.createdAt))),
+                                              DataCell(Text(
+                                                item.actorEmail ?? '—',
+                                                style: const TextStyle(fontSize: 12),
+                                              )),
+                                              DataCell(_ActionChip(item.action)),
+                                              DataCell(Text(item.entity)),
+                                              DataCell(
+                                                Text(
+                                                  item.entityId.length > 12
+                                                      ? '${item.entityId.substring(0, 8)}…'
+                                                      : item.entityId,
+                                                  style: const TextStyle(
+                                                    fontSize: 11,
+                                                    fontFamily: 'monospace',
+                                                    color: Colors.grey,
+                                                  ),
+                                                ),
+                                              ),
+                                            ]),
+                                          )
+                                          .toList(),
                                     ),
                                   ),
-                                ]),
-                              )
-                              .toList(),
+                                ),
                         ),
-                      ),
+                      ],
                     ),
+                  ),
+                  const SizedBox(width: 20),
+                  // ── Usuarios activos ─────────────────────────────
+                  SizedBox(
+                    width: 300,
+                    child: _OnlineUsersPanel(),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -342,5 +380,168 @@ class _ActionChip extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Panel de presencia — quién está activo ahora
+// ---------------------------------------------------------------------------
+
+class _OnlineUsersPanel extends ConsumerWidget {
+  const _OnlineUsersPanel();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final onlineAsync = ref.watch(_onlineUsersProvider);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.circle, color: Colors.green, size: 10),
+            const SizedBox(width: 6),
+            const Text(
+              'Quién está activo',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            const Spacer(),
+            onlineAsync.whenOrNull(
+              data: (items) {
+                final count = items.where((u) => u.isOnline).length;
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    '$count en línea',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: Colors.green,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                );
+              },
+            ) ?? const SizedBox.shrink(),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: Container(
+            decoration: BoxDecoration(
+              color: AppColors.surfaceFor(context),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.borderFor(context)),
+            ),
+            child: onlineAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (e, _) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Text(
+                    'No se pudo cargar: $e',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
+              data: (items) {
+                if (items.isEmpty) {
+                  return const Center(
+                    child: Text(
+                      'Sin usuarios registrados.',
+                      style: TextStyle(color: Colors.grey, fontSize: 12),
+                    ),
+                  );
+                }
+                return ListView.separated(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  itemCount: items.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1, indent: 56),
+                  itemBuilder: (context, i) {
+                    final user = items[i];
+                    final initials = user.fullName.trim().isNotEmpty
+                        ? user.fullName.trim().split(' ').take(2).map((w) => w[0].toUpperCase()).join()
+                        : '?';
+                    final lastSeen = user.lastActivityAt != null
+                        ? _timeAgo(user.lastActivityAt!)
+                        : 'Sin actividad';
+                    return ListTile(
+                      dense: true,
+                      leading: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          CircleAvatar(
+                            radius: 18,
+                            backgroundColor: user.isOnline
+                                ? Colors.green.withValues(alpha: 0.15)
+                                : AppColors.surfaceMutedFor(context),
+                            child: Text(
+                              initials,
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: user.isOnline ? Colors.green : Colors.grey,
+                              ),
+                            ),
+                          ),
+                          if (user.isOnline)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: Colors.green,
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: AppColors.surfaceFor(context),
+                                    width: 1.5,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      title: Text(
+                        user.fullName,
+                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        '${user.roleName}${user.projectId != null ? " · ${user.projectId}" : ""}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMutedFor(context),
+                        ),
+                      ),
+                      trailing: Text(
+                        lastSeen,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: user.isOnline ? Colors.green : Colors.grey,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _timeAgo(DateTime dt) {
+    final diff = DateTime.now().difference(dt);
+    if (diff.inSeconds < 60) return 'Ahora';
+    if (diff.inMinutes < 60) return 'Hace ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'Hace ${diff.inHours} h';
+    return DateFormat('dd/MM HH:mm').format(dt);
   }
 }

@@ -9,6 +9,7 @@ import '../auth/app_session_controller.dart';
 import '../../data/repositories/activity_repository.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../ui/sao_ui.dart';
+import '../../core/utils/project_terminology.dart';
 import '../../ui/widgets/sao_validation_search_bar.dart';
 import 'activity_queue_projection.dart';
 import 'widgets/activity_queue_panel.dart';
@@ -745,8 +746,8 @@ class _ValidationPageNewDesignState
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // --- Frente ---
-                  Text('Frente',
+                  // --- Frente / Segmento ---
+                  Text(frontTerminology(ref.read(operationsProjectFilterProvider).trim(), capitalize: true),
                       style: SaoTypography.caption
                           .copyWith(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 8),
@@ -754,7 +755,8 @@ class _ValidationPageNewDesignState
                     initialValue: tempFront,
                     isExpanded: true,
                     decoration: InputDecoration(
-                      hintText: 'Todos los frentes',
+                      hintText: 'Todos los ${frontTerminology(ref.read(operationsProjectFilterProvider).trim(), plural: true)}',
+
                       border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(8)),
                       contentPadding: const EdgeInsets.symmetric(

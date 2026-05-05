@@ -1,4 +1,4 @@
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 import 'dart:convert';
 
 import 'package:path_provider/path_provider.dart';

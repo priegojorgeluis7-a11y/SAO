@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
+from fastapi import HTTPException
 
 from app.core.api_errors import api_error
 from app.core.firestore import get_firestore_client
@@ -56,7 +57,7 @@ async def cancel_activity(
     activity_uuid: str,
     reason: str | None = None,
     force: bool = False,
-    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR"])),
+    current_user: Any = Depends(get_current_user),
 ):
     """
     Cancel an activity.
@@ -90,6 +91,26 @@ async def cancel_activity(
         activity_data = activity_doc.to_dict() or {}
         old_state = activity_data.get("execution_state", "PENDIENTE")
         project_id = activity_data.get("project_id", "UNKNOWN")
+
+        caller_roles = {
+            str(role).strip().upper()
+            for role in (getattr(current_user, "roles", []) or [])
+            if str(role).strip()
+        }
+        is_admin = "ADMIN" in caller_roles
+
+        if not is_admin:
+            owner_user_id = str(
+                activity_data.get("assigned_to_user_id")
+                or activity_data.get("created_by_user_id")
+                or ""
+            ).strip()
+            if owner_user_id != str(current_user.id).strip():
+                raise api_error(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    code="ACTIVITY_CANCEL_FORBIDDEN",
+                    message="Users can only cancel their own activities",
+                )
 
         # ===== STATE VALIDATION =====
         if old_state == "CANCELED":

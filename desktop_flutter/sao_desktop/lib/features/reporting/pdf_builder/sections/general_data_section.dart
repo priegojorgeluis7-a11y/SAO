@@ -2,6 +2,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import 'report_section.dart';
+import '../../../core/utils/project_terminology.dart';
 
 /// Sección 2: Datos Generales (tabla técnica)
 class GeneralDataSection extends ReportSection {
@@ -32,7 +33,7 @@ class GeneralDataSection extends ReportSection {
       ['Campo', 'Valor'],
       ['Tipo de Actividad', context.activity.typeLabel],
       ['Proyecto', context.activity.projectName ?? context.activity.projectCode],
-      ['Frente', context.activity.frontName ?? 'N/A'],
+      [frontTerminology(context.activity.projectCode, capitalize: true), context.activity.frontName ?? 'N/A'],
       ['PK Declarado', context.activity.pkDeclared ?? 'N/A'],
       ['Fecha Ejecución', DateFormat('dd/MM/yyyy HH:mm').format(context.activity.executedAt)],
       ['Estado', context.activity.status.toUpperCase()],

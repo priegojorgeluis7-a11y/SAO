@@ -483,3 +483,36 @@ class AgendaAssignments extends Table {
   @override
   Set<Column> get primaryKey => {id};
 }
+
+// ---------- Notificaciones en-app ----------
+/// Notificaciones recibidas del backend: asignaciones, co-responsables y transferencias.
+class UserNotifications extends Table {
+  TextColumn get id => text()(); // UUID del backend
+
+  // new_assignment | co_responsable_added | assignment_transferred
+  TextColumn get type => text().withLength(min: 3, max: 60)();
+
+  TextColumn get activityId => text()();
+  TextColumn get activityTitle => text().withDefault(const Constant(''))();
+  TextColumn get projectId => text()();
+
+  TextColumn get fromUserId => text().nullable()();
+  TextColumn get fromUserName => text().nullable()();
+
+  // unread | read | accepted | declined
+  TextColumn get status => text().withDefault(const Constant('unread'))();
+
+  BoolColumn get requiresAcceptance =>
+      boolean().withDefault(const Constant(false))();
+
+  DateTimeColumn get createdAt => dateTime()();
+  DateTimeColumn get readAt => dateTime().nullable()();
+  DateTimeColumn get respondedAt => dateTime().nullable()();
+  DateTimeColumn get syncedAt => dateTime().withDefault(currentDateAndTime)();
+
+  /// JSON extra enviado por el backend (municipio, frente, etc.).
+  TextColumn get metadataJson => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}

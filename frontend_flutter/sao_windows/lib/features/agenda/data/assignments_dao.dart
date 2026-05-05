@@ -154,7 +154,9 @@ class AssignmentsDao implements AssignmentsLocalStore {
                     t.startAt.isSmallerThanValue(to) &
                     t.endAt.isBiggerThanValue(from) &
                     (t.syncStatus.equals('synced') |
+                t.syncStatus.equals('SYNCED') |
                         t.syncStatus.equals('uploading') |
+                t.syncStatus.equals('SYNC_IN_PROGRESS') |
                         t.syncStatus.equals('error')),
               ))
               .get();
@@ -210,7 +212,13 @@ class AssignmentsDao implements AssignmentsLocalStore {
   Future<List<AgendaItem>> listPending({String? projectId}) async {
     final query = _db.select(_db.agendaAssignments)
       ..where(
-        (t) => t.syncStatus.equals('pending') | t.syncStatus.equals('error'),
+        (t) =>
+            t.syncStatus.equals('pending') |
+            t.syncStatus.equals('READY_TO_SYNC') |
+            t.syncStatus.equals('LOCAL_PENDING') |
+            t.syncStatus.equals('DRAFT') |
+            t.syncStatus.equals('error') |
+            t.syncStatus.equals('SYNC_ERROR'),
       )
       ..orderBy([(t) => drift.OrderingTerm.asc(t.startAt)]);
 
@@ -662,13 +670,18 @@ class AssignmentsDao implements AssignmentsLocalStore {
   }
 
   static SyncStatus _syncStatusFromString(String value) {
-    switch (value.toLowerCase()) {
+    switch (value.trim().toLowerCase()) {
       case 'uploading':
+      case 'sync_in_progress':
         return SyncStatus.uploading;
       case 'synced':
         return SyncStatus.synced;
       case 'error':
+      case 'sync_error':
         return SyncStatus.error;
+      case 'ready_to_sync':
+      case 'local_pending':
+      case 'draft':
       default:
         return SyncStatus.pending;
     }

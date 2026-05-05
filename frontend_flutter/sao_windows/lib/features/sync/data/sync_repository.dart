@@ -178,6 +178,34 @@ class SyncRepository {
     return query.go();
   }
 
+  /// Cuenta cuántos ítems de la cola siguen pendientes (aún no subidos).
+  Future<int> countPendingItems() async {
+    final rows = await (_db.select(_db.syncQueue)
+          ..where((s) => s.status.isIn(['PENDING', 'IN_PROGRESS', 'ERROR'])))
+        .get();
+    return rows.length;
+  }
+
+  /// Borra todos los datos generados por el usuario en la BD local:
+  /// actividades, evidencias, cola de sync, eventos, asignaciones.
+  /// Conserva: catálogos, usuarios, proyectos, roles y KV externo.
+  Future<void> clearLocalData() async {
+    await _db.transaction(() async {
+      await _db.delete(_db.activityLog).go();
+      await _db.delete(_db.activityFields).go();
+      await _db.delete(_db.evidences).go();
+      await _db.delete(_db.pendingUploads).go();
+      await _db.delete(_db.activities).go();
+      await _db.delete(_db.localAssignments).go();
+      await _db.delete(_db.syncQueue).go();
+      await _db.delete(_db.localEvents).go();
+      await _db.delete(_db.agendaAssignments).go();
+      // Resetear timestamp de última sincronización
+      await (_db.update(_db.syncState)..where((s) => s.id.equals(1)))
+          .write(const SyncStateCompanion(lastSyncAt: Value(null)));
+    });
+  }
+
   // =================== Helpers ===================
 
   UploadQueueItem _mapToUploadItem(SyncQueueData row) {
@@ -297,17 +325,26 @@ class SyncRepository {
   }
 
   String _extractTitle(String entity, String entityId) {
-    final shortId = entityId.length <= 8 ? entityId : entityId.substring(0, 8);
+    final trimmedId = entityId.trim();
+    final displayId = _isUuid(trimmedId)
+        ? (trimmedId.length <= 8 ? trimmedId : trimmedId.substring(0, 8))
+        : trimmedId;
     switch (entity.toUpperCase()) {
       case 'ACTIVITY':
-        return 'Actividad #$shortId';
+        return 'Actividad #$displayId';
       case 'EVENT':
-        return 'Incidencia #$shortId';
+        return 'Incidencia #$displayId';
       case 'EVIDENCE':
         return 'Evidencia fotográfica';
       default:
-        return 'Ítem #$shortId';
+        return 'Ítem #$displayId';
     }
+  }
+
+  bool _isUuid(String value) {
+    return RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    ).hasMatch(value);
   }
 
   String _formatTimestamp(DateTime? dt) {

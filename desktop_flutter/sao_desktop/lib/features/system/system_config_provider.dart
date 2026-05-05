@@ -6,9 +6,9 @@ const _kFallbackCalendarId =
     '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151'
     '@group.calendar.google.com';
 
-// ── Read provider ──────────────────────────────────────────────────────────
+// ── Read providers ─────────────────────────────────────────────────────────
 
-/// Provides the Google Calendar ID configured by the admin.
+/// Provides the global Google Calendar ID configured by the admin.
 /// Falls back to the hardcoded default if the backend is unreachable.
 final systemCalendarIdProvider = FutureProvider<String>((ref) async {
   try {
@@ -46,6 +46,7 @@ class SystemConfigService {
     ) as Map<String, dynamic>;
     return (data['google_calendar_id'] as String?) ?? calendarId;
   }
+
 }
 
 final systemConfigServiceProvider = Provider<SystemConfigService>(

@@ -1,6 +1,7 @@
 // lib/ui/widgets/sao_evidence_viewer.dart
-import 'dart:io';
+import '../../core/compat/io_compat.dart';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:intl/intl.dart';
@@ -163,10 +164,9 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
       );
     }
 
-    if (source.startsWith('file://')) {
-      final file = File(Uri.parse(source).toFilePath());
-      return Image.file(
-        file,
+    if (source.startsWith('file://') && !kIsWeb) {
+      return Image.network(
+        source,
         fit: fit,
         errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
       );
@@ -175,9 +175,10 @@ class _SaoEvidenceViewerState extends State<SaoEvidenceViewer> {
     final localFile = File(source);
     if (!source.startsWith('http://') &&
         !source.startsWith('https://') &&
+        !kIsWeb &&
         localFile.existsSync()) {
-      return Image.file(
-        localFile,
+      return Image.network(
+        Uri.file(source).toString(),
         fit: fit,
         errorBuilder: (context, error, stackTrace) => _buildErrorWidget(),
       );

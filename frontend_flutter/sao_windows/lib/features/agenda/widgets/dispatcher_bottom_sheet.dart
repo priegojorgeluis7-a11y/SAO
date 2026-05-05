@@ -2,11 +2,17 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../../../core/constants.dart';
+import '../../../core/utils/project_terminology.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import '../../../core/di/service_locator.dart';
+import '../../../core/network/api_client.dart';
+import '../../../core/storage/kv_store.dart';
 import '../../../data/local/app_db.dart';
+import 'package:drift/drift.dart' as drift;
 import '../../../data/local/dao/activity_dao.dart';
+import '../../../data/repositories/projects_repository.dart';
 import '../../catalog/catalog_repository.dart';
 import '../data/agenda_assignment_factory.dart';
 import '../data/effective_catalog_version_resolver.dart';
@@ -44,6 +50,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
 
   int _currentStep = 0;
   String? _selectedResourceId;
+  final Set<String> _coResponsableIds = {};
   CatItem? _selectedActivity;
   RiskLevel? _selectedRisk;
   String _pk = '';
@@ -74,6 +81,18 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   bool _loadingMunicipios = false;
   String? _locationError;
 
+    String get _projectTerminologyKey =>
+      (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '')
+        .trim();
+
+    String get _frontLabel =>
+      frontTerminology(_projectTerminologyKey, capitalize: true);
+
+    String get _frontLabelLower => frontTerminology(_projectTerminologyKey);
+
+    String get _frontLabelPlural =>
+      frontTerminology(_projectTerminologyKey, plural: true);
+
   final _titleController = TextEditingController();
   final _pkController = TextEditingController();
   final _frontController = TextEditingController();
@@ -86,7 +105,6 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         widget.resources.any((resource) => resource.id == currentUserId && resource.isActive)) {
       _selectedResourceId = currentUserId;
     }
-    _loadWizardCatalogOptions();
     _loadProjectsAndFronts();
   }
 
@@ -98,14 +116,17 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     super.dispose();
   }
 
-  Future<void> _loadWizardCatalogOptions() async {
+  Future<void> _loadWizardCatalogOptions({String? projectId}) async {
     setState(() {
       _loadingActivities = true;
       _activitiesError = null;
     });
 
     try {
-      await _catalogRepo.init();
+      final normalizedProject = (projectId ?? '').trim().toUpperCase();
+      await _catalogRepo.init(
+        projectId: normalizedProject == kAllProjects ? '' : normalizedProject,
+      );
       final activities = _catalogRepo.activities;
       final risks = _catalogRepo.matrizRiesgo
           .map((value) => value.trim())
@@ -134,18 +155,57 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       _projectsError = null;
     });
 
+    final fromWidget = (widget.projectId ?? '').trim().toUpperCase();
+    final fromKv = ((await getIt<KvStore>().getString('selected_project')) ?? '')
+        .trim()
+        .toUpperCase();
+    final effectiveIncoming = fromWidget.isNotEmpty && fromWidget != kAllProjects && fromWidget != 'ALL'
+        ? fromWidget
+        : (fromKv.isNotEmpty && fromKv != kAllProjects && fromKv != 'ALL' ? fromKv : '');
+
     try {
-      final rows = await _activityDao.listActiveProjects();
-      final projects = rows
-          .map((project) => ProjectOption(id: project.id, code: project.code, name: project.name))
+      // Create ProjectsRepository with ApiClient from GetIt
+      final projectsRepository = ProjectsRepository(
+        apiClient: getIt<ApiClient>(),
+      );
+
+      // Fetch projects from backend (scoped by RBAC)
+      final dtoProjects = await projectsRepository.getProjects();
+      final projects = dtoProjects
+          .where((p) => p.code.trim().isNotEmpty)
+          .map((dto) => ProjectOption(
+                id: dto.id,
+                code: dto.code.trim().toUpperCase(),
+                name: dto.name.trim().isNotEmpty ? dto.name.trim() : dto.code.trim(),
+              ))
           .toList()
         ..sort((a, b) => a.code.toLowerCase().compareTo(b.code.toLowerCase()));
 
+      if (projects.isEmpty) {
+        // Offline/timeout cases can return [] without throwing; force local fallback path.
+        throw StateError('No remote projects available');
+      }
+
+        // Persistir en DB local para fallback offline
+        try {
+          final db = getIt<AppDb>();
+          for (final p in dtoProjects.where((p) => p.isActive && p.code.trim().length <= 10)) {
+            await db.into(db.projects).insertOnConflictUpdate(
+                  ProjectsCompanion.insert(
+                    id: p.id,
+                    code: p.code.trim().toUpperCase(),
+                      name: p.name.trim().isNotEmpty ? p.name.trim() : p.code.trim(),
+                  ),
+                );
+          }
+        } catch (_) {}
+
       ProjectOption? selected;
-      final incomingProject = widget.projectId?.trim();
-      if (incomingProject != null && incomingProject.isNotEmpty) {
+      final incomingProject = effectiveIncoming;
+      if (incomingProject.isNotEmpty) {
         for (final item in projects) {
-          if (item.id == incomingProject || item.code == incomingProject) {
+          if (item.id.trim().toUpperCase() == incomingProject ||
+              item.code.trim().toUpperCase() == incomingProject) {
             selected = item;
             break;
           }
@@ -153,7 +213,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       }
       selected ??= projects.isNotEmpty
           ? projects.first
-          : (incomingProject != null && incomingProject.isNotEmpty
+          : (incomingProject.isNotEmpty
               ? ProjectOption(id: incomingProject, code: incomingProject, name: incomingProject)
               : null);
 
@@ -164,23 +224,86 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         _loadingProjects = false;
       });
     } catch (_) {
-      final incomingProject = widget.projectId?.trim();
+      // Red no disponible: leer proyectos activos de la DB local.
+      final db = getIt<AppDb>();
+      List<ProjectOption> offlineProjects = const [];
+      try {
+        final rows = await (db.select(db.projects)
+              ..where((t) => t.isActive.equals(true))
+              ..orderBy([(t) => drift.OrderingTerm.asc(t.code)]))
+            .get();
+        offlineProjects = rows
+            .map((r) => ProjectOption(
+                  id: r.id,
+                  code: r.code.trim().toUpperCase(),
+                  name: r.name.trim().isNotEmpty ? r.name.trim() : r.code.trim(),
+                ))
+            .toList();
+      } catch (_) {
+        // DB también falló — se usará el fallback de widget.projectId.
+      }
+
+        // Filtrar entradas UUID (código demasiado largo o con guiones = no es un código de proyecto real)
+        bool looksLikeUuid(String s) =>
+            s.length > 12 || RegExp(r'^[0-9a-f]{8}-', caseSensitive: false).hasMatch(s);
+
+        final validProjects =
+            offlineProjects.where((p) => !looksLikeUuid(p.code)).toList();
+
+        // Si los proyectos de la tabla local son todos UUID, usar CatalogIndex como respaldo
+        if (validProjects.isEmpty) {
+          try {
+            final indexRows = await db.select(db.catalogIndex).get();
+            final catalogProjects = indexRows
+                .where((r) => r.projectId.trim().isNotEmpty && !looksLikeUuid(r.projectId.trim()))
+                .map((r) => ProjectOption(
+                      id: r.projectId.trim().toUpperCase(),
+                      code: r.projectId.trim().toUpperCase(),
+                      name: r.projectId.trim().toUpperCase(),
+                    ))
+                .toList()
+              ..sort((a, b) => a.code.compareTo(b.code));
+            offlineProjects = catalogProjects;
+          } catch (_) {}
+        } else {
+          offlineProjects = validProjects;
+        }
+
+        final incomingCode = effectiveIncoming;
+        final isValidCode = incomingCode.isNotEmpty && incomingCode != kAllProjects;
+
       if (!mounted) return;
       setState(() {
         _loadingProjects = false;
-        _projectsError = 'No se pudieron cargar los proyectos activos.';
-        if (incomingProject != null && incomingProject.isNotEmpty) {
-          _selectedProject = ProjectOption(
-            id: incomingProject,
-            code: incomingProject,
-            name: incomingProject,
+        if (offlineProjects.isNotEmpty) {
+          _projectOptions = offlineProjects;
+          _selectedProject = offlineProjects.firstWhere(
+            (p) => p.code == incomingCode || p.id.trim().toUpperCase() == incomingCode,
+            orElse: () => offlineProjects.first,
           );
+          _projectsError = null;
+        } else if (isValidCode) {
+          final fallback = ProjectOption(
+            id: incomingCode,
+            code: incomingCode,
+            name: incomingCode,
+          );
+          _projectOptions = [fallback];
+          _selectedProject = fallback;
+          _projectsError = null;
+        } else {
+          _projectOptions = const [];
+          _selectedProject = null;
+          _projectsError = 'Sin conexión y sin proyectos en caché local.';
         }
       });
     }
 
     await _loadProjectFronts();
     await _loadStatesForProject();
+    await _loadWizardCatalogOptions(
+      projectId: _selectedProject?.code ?? widget.projectId,
+    );
   }
 
   Future<void> _loadProjectFronts() async {
@@ -188,7 +311,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     if (projectKey.isEmpty) {
       setState(() {
         _loadingFronts = false;
-        _frontsError = 'No hay proyecto seleccionado para cargar frentes.';
+        _frontsError = 'No hay proyecto seleccionado para cargar $_frontLabelPlural.';
         _frontOptions = const [];
         _selectedFront = null;
       });
@@ -201,7 +324,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     });
 
     try {
-      await _catalogRepo.init();
+      await _catalogRepo.init(
+        projectId: projectKey.toUpperCase() == kAllProjects ? '' : projectKey,
+      );
       final remoteFronts = await _catalogRepo.fetchFrontsForProject(projectKey);
 
       List<FrontOption> fronts;
@@ -227,7 +352,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             .toList();
       }
 
-      fronts.sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+      fronts.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
 
       if (!mounted) return;
       setState(() {
@@ -237,13 +362,13 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         _frontController.text = '';
         _loadingFronts = false;
         _frontsError = fronts.isEmpty
-            ? 'No hay frentes disponibles en el catálogo del proyecto.'
+            ? 'No hay $_frontLabelPlural disponibles en el catálogo del proyecto.'
             : null;
       });
     } catch (_) {
       if (!mounted) return;
       setState(() {
-        _frontsError = 'No se pudieron cargar los frentes del proyecto.';
+        _frontsError = 'No se pudieron cargar los $_frontLabelPlural del proyecto.';
         _frontOptions = const [];
         _selectedFront = null;
         _loadingFronts = false;
@@ -279,7 +404,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     });
 
     try {
-      await _catalogRepo.init();
+      await _catalogRepo.init(
+        projectId: projectKey.toUpperCase() == kAllProjects ? '' : projectKey,
+      );
       final states = await _catalogRepo.fetchStatesForProject(projectKey);
       if (!mounted) return;
       setState(() {
@@ -412,6 +539,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   }
 
   Widget _buildStep1() {
+    final activeResources = widget.resources.where((r) => r.isActive).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -419,8 +547,13 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
           '¿A quién asignar?',
           style: SaoTypography.cardTitle,
         ),
+        const SizedBox(height: 4),
+        Text(
+          'Toca el responsable principal. Agrega co-responsables con ✚.',
+          style: SaoTypography.caption.copyWith(color: SaoColors.gray500),
+        ),
         const SizedBox(height: 16),
-        if (widget.resources.where((r) => r.isActive).isEmpty)
+        if (activeResources.isEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -435,101 +568,214 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             ),
           )
         else
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: widget.resources
-              .where((r) => r.isActive)
-              .map((r) {
-                final selected = _selectedResourceId == r.id;
-                final hasConflict = _checkConflict(r.id, null, null);
-                final isCurrentUser = widget.currentUserId == r.id;
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: activeResources.map((r) {
+              final isPrimary = _selectedResourceId == r.id;
+              final isCoResponsable = _coResponsableIds.contains(r.id);
+              final hasConflict = _checkConflict(r.id, null, null);
+              final isCurrentUser = widget.currentUserId == r.id;
 
-                return GestureDetector(
-                  onTap: () {
-                    setState(() => _selectedResourceId = r.id);
-                  },
-                  child: Column(
-                    children: [
-                      Container(
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: hasConflict != null
-                                ? SaoColors.error
-                                : selected
-                                    ? SaoColors.actionPrimary
-                                    : SaoColors.border,
-                            width: selected ? 3 : 2,
+              Color borderColor;
+              int borderWidth;
+              if (isPrimary) {
+                borderColor = SaoColors.actionPrimary;
+                borderWidth = 3;
+              } else if (isCoResponsable) {
+                borderColor = SaoColors.info;
+                borderWidth = 2;
+              } else if (hasConflict != null) {
+                borderColor = SaoColors.error;
+                borderWidth = 2;
+              } else {
+                borderColor = SaoColors.border;
+                borderWidth = 2;
+              }
+
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (_selectedResourceId == r.id) {
+                      // Si ya es primary y hay co-responsables, promover el primero
+                      if (_coResponsableIds.isNotEmpty) {
+                        _selectedResourceId = _coResponsableIds.first;
+                        _coResponsableIds.remove(_selectedResourceId);
+                      } else {
+                        _selectedResourceId = null;
+                      }
+                    } else if (_coResponsableIds.contains(r.id)) {
+                      // Si era co-responsable, promoverlo a primary (el anterior pasa a co)
+                      _coResponsableIds.remove(r.id);
+                      if (_selectedResourceId != null) {
+                        _coResponsableIds.add(_selectedResourceId!);
+                      }
+                      _selectedResourceId = r.id;
+                    } else {
+                      // Nuevo: asignar como primary si no hay ninguno
+                      _selectedResourceId = r.id;
+                    }
+                  });
+                },
+                onLongPress: () {
+                  setState(() {
+                    if (r.id == _selectedResourceId) return; // primary no puede ser co
+                    if (_coResponsableIds.contains(r.id)) {
+                      _coResponsableIds.remove(r.id);
+                    } else {
+                      _coResponsableIds.add(r.id);
+                    }
+                  });
+                },
+                child: Column(
+                  children: [
+                    Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: borderColor,
+                              width: borderWidth.toDouble(),
+                            ),
+                          ),
+                          child: CircleAvatar(
+                            radius: 32,
+                            backgroundColor: SaoColors.info,
+                            backgroundImage: r.avatarUrl != null
+                                ? NetworkImage(r.avatarUrl!)
+                                : null,
+                            child: r.avatarUrl == null
+                                ? Text(
+                                    r.initials,
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      color: SaoColors.onPrimary,
+                                    ),
+                                  )
+                                : null,
                           ),
                         ),
-                        child: CircleAvatar(
-                          radius: 32,
-                          backgroundColor: SaoColors.info,
-                          backgroundImage: r.avatarUrl != null
-                              ? NetworkImage(r.avatarUrl!)
-                              : null,
-                          child: r.avatarUrl == null
-                              ? Text(
-                                  r.initials,
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w900,
-                                    color: SaoColors.onPrimary,
+                        // Botón ✚ para añadir/quitar como co-responsable
+                        if (!isPrimary)
+                          Positioned(
+                            bottom: -4,
+                            right: -4,
+                            child: GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  if (_selectedResourceId == null) {
+                                    // Sin primary: seleccionar como primary
+                                    _selectedResourceId = r.id;
+                                    return;
+                                  }
+                                  if (_coResponsableIds.contains(r.id)) {
+                                    _coResponsableIds.remove(r.id);
+                                  } else {
+                                    _coResponsableIds.add(r.id);
+                                  }
+                                });
+                              },
+                              child: Container(
+                                width: 20,
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: isCoResponsable
+                                      ? SaoColors.info
+                                      : SaoColors.gray200,
+                                  border: Border.all(
+                                    color: SaoColors.surface,
+                                    width: 1.5,
                                   ),
-                                )
-                              : null,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      SizedBox(
-                        width: 74,
-                        child: Column(
-                          children: [
-                            Text(
-                              r.name.split(' ').first,
-                              textAlign: TextAlign.center,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
-                                color: selected
-                                    ? SaoColors.actionPrimary
-                                    : SaoColors.primaryLight,
+                                ),
+                                child: Icon(
+                                  isCoResponsable
+                                      ? Icons.check_rounded
+                                      : Icons.add_rounded,
+                                  size: 12,
+                                  color: isCoResponsable
+                                      ? SaoColors.onPrimary
+                                      : SaoColors.gray600,
+                                ),
                               ),
                             ),
-                            if (isCurrentUser) ...[
-                              const SizedBox(height: 4),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
-                                  vertical: 2,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: SaoColors.actionPrimary.withValues(alpha: 0.12),
-                                  borderRadius: BorderRadius.circular(999),
-                                  border: Border.all(
-                                    color: SaoColors.actionPrimary.withValues(alpha: 0.28),
-                                  ),
-                                ),
-                                child: const Text(
-                                  'Yo',
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: SaoColors.actionPrimary,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      width: 74,
+                      child: Column(
+                        children: [
+                          Text(
+                            r.name.split(' ').first,
+                            textAlign: TextAlign.center,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight: isPrimary || isCoResponsable
+                                  ? FontWeight.w700
+                                  : FontWeight.w600,
+                              color: isPrimary
+                                  ? SaoColors.actionPrimary
+                                  : isCoResponsable
+                                      ? SaoColors.info
+                                      : SaoColors.primaryLight,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          if (isPrimary)
+                            _RoleBadge(
+                              label: 'Principal',
+                              color: SaoColors.actionPrimary,
+                            )
+                          else if (isCoResponsable)
+                            _RoleBadge(
+                              label: 'Co-resp.',
+                              color: SaoColors.info,
+                            )
+                          else if (isCurrentUser)
+                            _RoleBadge(
+                              label: 'Yo',
+                              color: SaoColors.actionPrimary,
+                            ),
+                        ],
                       ),
-                    ],
+                    ),
+                  ],
+                ),
+              );
+            }).toList(),
+          ),
+        if (_coResponsableIds.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: SaoColors.info.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.info.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.people_alt_rounded, size: 16, color: SaoColors.info),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${_coResponsableIds.length} co-responsable${_coResponsableIds.length > 1 ? 's' : ''} agregado${_coResponsableIds.length > 1 ? 's' : ''}',
+                    style: SaoTypography.caption.copyWith(
+                      color: SaoColors.info,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
-                );
-              })
-              .toList(),
-        ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -612,7 +858,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         const SizedBox(height: 12),
         if (_loadingProjects)
           const LinearProgressIndicator(minHeight: 2)
-        else if (_projectsError != null)
+        else if (_projectsError != null && _selectedProject == null)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -652,6 +898,10 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
               if (value == null) return;
               setState(() {
                 _selectedProject = value;
+                _loadingActivities = true;
+                _activitiesError = null;
+                _activities = const [];
+                _riskOptions = const [];
                 _loadingFronts = true;
                 _frontsError = null;
                 _frontOptions = const [];
@@ -664,6 +914,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                 _selectedMunicipio = null;
                 _locationError = null;
               });
+              await _loadWizardCatalogOptions(projectId: value.code);
               await _loadProjectFronts();
               await _loadStatesForProject();
             },
@@ -692,8 +943,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
           DropdownButtonFormField<FrontOption>(
             initialValue: _selectedFront,
             isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Frente',
+            decoration: InputDecoration(
+              labelText: _frontLabel,
               border: OutlineInputBorder(),
             ),
             items: _frontOptions
@@ -724,15 +975,15 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                     _frontFreeText = value;
                   });
                 },
-                decoration: const InputDecoration(
-                  labelText: 'Frente',
-                  hintText: 'Captura el frente',
+                decoration: InputDecoration(
+                  labelText: _frontLabel,
+                  hintText: 'Captura el $_frontLabelLower',
                   border: OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 6),
-              const Text(
-                'Si el proyecto no trae frentes catalogados, puedes capturarlo manualmente.',
+              Text(
+                'Si el proyecto no trae $_frontLabelPlural catalogados, puedes capturarlo manualmente.',
                 style: SaoTypography.caption,
               ),
             ],
@@ -1173,6 +1424,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       effectiveVersionId: effectiveVersionId,
       municipio: _selectedMunicipio,
       estado: _selectedEstado,
+      coResponsableIds: _coResponsableIds.toList(),
     );
 
     final typedTitle = _titleController.text.trim();
@@ -1264,6 +1516,33 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _RoleBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _RoleBadge({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withValues(alpha: 0.28)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          color: color,
         ),
       ),
     );
@@ -1377,7 +1656,7 @@ class FrontOption {
     this.code = '',
   });
 
-  String get label => code.trim().isEmpty ? name : '$code · $name';
+  String get label => name;
 }
 
 class ProjectOption {

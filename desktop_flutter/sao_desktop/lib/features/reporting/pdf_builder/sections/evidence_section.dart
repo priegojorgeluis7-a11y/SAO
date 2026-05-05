@@ -1,7 +1,7 @@
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
-import 'dart:io';
+import '../../../../core/compat/io_compat.dart';
 import '../../domain/entities/report_context.dart';
 import 'report_section.dart';
 

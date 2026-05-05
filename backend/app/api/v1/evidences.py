@@ -32,7 +32,14 @@ from app.schemas.evidence import (
 
 router = APIRouter(prefix="/evidences", tags=["evidences"])
 
-_ALLOWED_MIME_TYPES = {"image/jpeg", "image/png", "application/pdf"}
+_ALLOWED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/heic",
+    "image/heif",
+    "application/pdf",
+}
 _MAX_UPLOAD_SIZE_BYTES = 20 * 1024 * 1024
 
 
@@ -274,9 +281,10 @@ def upload_init(
 
     normalized_mime = (request.mimeType or "").strip().lower()
     if normalized_mime not in _ALLOWED_MIME_TYPES:
+        allowed_values = ", ".join(sorted(_ALLOWED_MIME_TYPES))
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail="Invalid mime_type. Allowed values: image/jpeg, image/png, application/pdf",
+            detail=f"Invalid mime_type. Allowed values: {allowed_values}",
         )
     if request.sizeBytes > _MAX_UPLOAD_SIZE_BYTES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="File too large. Maximum allowed size is 20MB")

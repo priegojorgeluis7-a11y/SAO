@@ -1,12 +1,9 @@
-import 'dart:io';
-
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:intl/intl.dart';
-import 'package:path/path.dart' as path;
-import 'package:path_provider/path_provider.dart';
 import 'core/config/data_mode.dart';
 import 'core/session/session_migrator.dart';
 import 'core/theme/theme_provider.dart';
@@ -20,13 +17,6 @@ Future<void> _initializeLocalization() async {
   Intl.defaultLocale = 'es_MX';
 }
 
-Future<AppDatabase> _createDatabase() async {
-  final supportDir = await getApplicationSupportDirectory();
-  await supportDir.create(recursive: true);
-  final dbPath = path.join(supportDir.path, 'sao_desktop.sqlite');
-  return AppDatabase(File(dbPath).path);
-}
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
@@ -36,9 +26,12 @@ void main() async {
   AppDataMode.requireRealBackendUrl();
 
   // Migrate legacy plain-text session file to OS credential vault (one-shot).
-  await SessionMigrator.migrateIfNeeded();
+  // Not applicable on web.
+  if (!kIsWeb) {
+    await SessionMigrator.migrateIfNeeded();
+  }
 
-  final database = await _createDatabase();
+  final database = AppDatabase();
   await database.ensureBootstrapData();
 
   runApp(

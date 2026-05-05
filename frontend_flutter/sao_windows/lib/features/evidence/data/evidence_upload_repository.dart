@@ -73,12 +73,17 @@ class EvidenceUploadRepository {
     required Uint8List bytes,
     required String mimeType,
   }) async {
+    // Pass Uint8List directly — Stream.fromIterable is not supported by
+    // Dio's XHR adapter on Flutter Web and results in an empty body.
+    // Also set contentType on Options so Dio doesn't override the header.
     await _uploadDio.put<void>(
       signedUrl,
-      data: Stream.fromIterable([bytes]),
+      data: bytes,
       options: Options(
+        contentType: mimeType,
         headers: {
           'Content-Type': mimeType,
+          'Content-Length': bytes.length.toString(),
         },
       ),
     );

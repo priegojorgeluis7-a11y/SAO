@@ -54,8 +54,9 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
     WidgetsBinding.instance.addObserver(this);
 
     final database = GetIt.I<AppDb>();
-    final currentUserId =
-        ref.read(currentUserProvider)?.id ?? 'user-local';
+    final currentUser = ref.read(currentUserProvider);
+    final currentUserId = currentUser?.id ?? 'user-local';
+    final currentUserName = currentUser?.fullName ?? '';
 
     c = WizardController(
       activity: widget.activity,
@@ -64,6 +65,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
       pendingStore: widget.pendingStore,
       database: database,
       currentUserId: currentUserId,
+      currentUserName: currentUserName,
       isUnplanned: widget.isUnplanned,
     );
 

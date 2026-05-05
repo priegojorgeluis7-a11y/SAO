@@ -34,13 +34,14 @@ QueryExecutor _openConnection() {
     SyncQueue, SyncState,
     LocalEvents,
     AgendaAssignments,
+    UserNotifications,
   ],
 )
 class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 13;
+  int get schemaVersion => 14;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -105,6 +106,13 @@ class AppDb extends _$AppDb {
           }
           if (from < 13) {
             await m.addColumn(pendingUploads, pendingUploads.description);
+          }
+          if (from < 14) {
+            await m.createTable(userNotifications);
+            await customStatement(
+              'CREATE INDEX IF NOT EXISTS idx_user_notifications_status_created '
+              'ON user_notifications (status, created_at DESC);',
+            );
           }
         },
         beforeOpen: (details) async {
