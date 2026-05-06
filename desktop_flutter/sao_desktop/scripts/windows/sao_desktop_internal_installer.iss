@@ -34,8 +34,8 @@ Name: "desktopicon"; Description: "Crear acceso directo en el escritorio"; Group
 Source: "{#MySourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\SAO Desktop"; Filename: "{app}\{#MyAppExeName}"
-Name: "{autodesktop}\SAO Desktop"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
+Name: "{group}\SAO Desktop"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"
+Name: "{autodesktop}\SAO Desktop"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "Abrir SAO Desktop"; Flags: nowait postinstall skipifsilent

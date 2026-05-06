@@ -116,6 +116,10 @@ final assignmentsAdminRepositoryProvider =
   return AssignmentsAdminRepository(ref.watch(adminTransportProvider));
 });
 
+final syncIssuesRepositoryProvider = Provider<SyncIssuesRepository>((ref) {
+  return SyncIssuesRepository(ref.watch(adminTransportProvider));
+});
+
 final sessionControllerProvider =
     StateNotifierProvider<SessionController, SessionState>((ref) {
   return SessionController(ref.watch(authRepositoryProvider));

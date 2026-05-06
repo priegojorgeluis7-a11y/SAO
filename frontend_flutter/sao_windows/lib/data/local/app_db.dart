@@ -41,7 +41,7 @@ class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 14;
+  int get schemaVersion => 15;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -113,6 +113,12 @@ class AppDb extends _$AppDb {
               'CREATE INDEX IF NOT EXISTS idx_user_notifications_status_created '
               'ON user_notifications (status, created_at DESC);',
             );
+          }
+          if (from < 15) {
+            await m.addColumn(agendaAssignments, agendaAssignments.pkStart);
+            await m.addColumn(agendaAssignments, agendaAssignments.pkEnd);
+            await m.addColumn(agendaAssignments, agendaAssignments.lugar);
+            await m.addColumn(agendaAssignments, agendaAssignments.locationType);
           }
         },
         beforeOpen: (details) async {

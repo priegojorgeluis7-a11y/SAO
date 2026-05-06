@@ -710,3 +710,104 @@ def _disable_token_by_value(client: Any, token: str, now: datetime) -> None:
             {"enabled": False, "updated_at": now, "disabled_reason": "invalid_or_unregistered"},
             merge=True,
         )
+
+
+def notify_user(
+    *,
+    user_id: str,
+    title: str,
+    body: str,
+    data: dict[str, str] | None = None,
+    project_id: str | None = None,
+) -> dict[str, int]:
+    """Send a custom push notification to all registered devices of a specific user.
+
+    Optionally scoped to a project (only tokens registered for that project are used).
+    Safe to call even when FCM is disabled — returns zeroes without raising.
+    """
+    normalized_user = str(user_id or "").strip()
+    normalized_project = _normalize_project_id(project_id) if project_id else None
+
+    if not normalized_user:
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    if not _is_fcm_enabled():
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    app = _initialize_firebase_app()
+    if app is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    modules = _firebase_modules()
+    if modules is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+    _, _, messaging = modules
+
+    client = get_firestore_client()
+    query = (
+        client.collection(_COLLECTION)
+        .where("enabled", "==", True)
+        .where("user_id", "==", normalized_user)
+    )
+    if normalized_project:
+        query = query.where("project_id", "==", normalized_project)
+
+    token_rows: list[tuple[str, str]] = []
+    for doc in query.stream():
+        payload = doc.to_dict() or {}
+        token = str(payload.get("token") or "").strip()
+        if token:
+            token_rows.append((doc.id, token))
+
+    if not token_rows:
+        logger.warning(
+            "NOTIFY_USER_NO_TOKENS user_id=%s project_id=%s (no registered device tokens)",
+            normalized_user,
+            normalized_project or "*",
+        )
+        return {"sent": 0, "failed": 0, "invalidated": 0}
+
+    normalized_data: dict[str, str] = {k: str(v) for k, v in (data or {}).items()}
+
+    sent = 0
+    failed = 0
+    invalidated = 0
+    now = datetime.now(timezone.utc)
+
+    for index in range(0, len(token_rows), 500):
+        chunk = token_rows[index : index + 500]
+        tokens = [t for _, t in chunk]
+
+        message = messaging.MulticastMessage(
+            tokens=tokens,
+            notification=messaging.Notification(title=title, body=body),
+            data=normalized_data,
+            android=messaging.AndroidConfig(priority="high"),
+        )
+
+        response = messaging.send_each_for_multicast(message, app=app)
+        sent += response.success_count
+        failed += response.failure_count
+
+        for i, item in enumerate(response.responses):
+            if item.success:
+                continue
+            err = item.exception
+            if err is None or not _is_invalid_token_error(err):
+                continue
+            invalidated += 1
+            doc_id = chunk[i][0]
+            client.collection(_COLLECTION).document(doc_id).set(
+                {"enabled": False, "updated_at": now, "disabled_reason": "invalid_or_unregistered"},
+                merge=True,
+            )
+
+    logger.info(
+        "NOTIFY_USER user_id=%s project_id=%s sent=%s failed=%s invalidated=%s",
+        normalized_user,
+        normalized_project or "*",
+        sent,
+        failed,
+        invalidated,
+    )
+    return {"sent": sent, "failed": failed, "invalidated": invalidated}

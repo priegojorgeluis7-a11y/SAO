@@ -54,6 +54,10 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   CatItem? _selectedActivity;
   RiskLevel? _selectedRisk;
   String _pk = '';
+  String _pkStart = '';
+  String _pkEnd = '';
+  String _lugar = '';
+  LocationType _locationType = LocationType.pk;
   DateTime? _startTime;
   DateTime? _endTime;
 
@@ -95,6 +99,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
 
   final _titleController = TextEditingController();
   final _pkController = TextEditingController();
+  final _pkStartController = TextEditingController();
+  final _pkEndController = TextEditingController();
+  final _lugarController = TextEditingController();
   final _frontController = TextEditingController();
 
   @override
@@ -112,6 +119,9 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   void dispose() {
     _titleController.dispose();
     _pkController.dispose();
+    _pkStartController.dispose();
+    _pkEndController.dispose();
+    _lugarController.dispose();
     _frontController.dispose();
     super.dispose();
   }
@@ -1071,17 +1081,80 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
           ),
         ),
         const SizedBox(height: 12),
-        TextField(
-          controller: _pkController,
-          onChanged: (v) => setState(() => _pk = v),
-          keyboardType: TextInputType.number,
-          inputFormatters: [_PkInputFormatter()],
-          decoration: const InputDecoration(
-            labelText: 'PK',
-            border: OutlineInputBorder(),
-            hintText: 'Ej: 142+500',
-          ),
+        // ── Tipo de ubicación ──────────────────────────────────────
+        const Text('Tipo de ubicación', style: TextStyle(fontSize: 13)),
+        const SizedBox(height: 6),
+        SegmentedButton<LocationType>(
+          segments: const [
+            ButtonSegment(
+              value: LocationType.pk,
+              label: Text('PK'),
+            ),
+            ButtonSegment(
+              value: LocationType.pkRange,
+              label: Text('PK a PK'),
+            ),
+            ButtonSegment(
+              value: LocationType.lugar,
+              label: Text('Lugar'),
+            ),
+          ],
+          selected: {_locationType},
+          onSelectionChanged: (newSelection) {
+            setState(() {
+              _locationType = newSelection.first;
+            });
+          },
+          showSelectedIcon: false,
         ),
+        const SizedBox(height: 12),
+        // ── Campos según tipo ──────────────────────────────────────
+        if (_locationType == LocationType.pk)
+          TextField(
+            controller: _pkController,
+            onChanged: (v) => setState(() => _pk = v),
+            keyboardType: TextInputType.number,
+            inputFormatters: [_PkInputFormatter()],
+            decoration: const InputDecoration(
+              labelText: 'PK',
+              border: OutlineInputBorder(),
+              hintText: 'Ej: 142+500',
+            ),
+          )
+        else if (_locationType == LocationType.pkRange) ...[
+          TextField(
+            controller: _pkStartController,
+            onChanged: (v) => setState(() => _pkStart = v),
+            keyboardType: TextInputType.number,
+            inputFormatters: [_PkInputFormatter()],
+            decoration: const InputDecoration(
+              labelText: 'PK inicio',
+              border: OutlineInputBorder(),
+              hintText: 'Ej: 142+500',
+            ),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _pkEndController,
+            onChanged: (v) => setState(() => _pkEnd = v),
+            keyboardType: TextInputType.number,
+            inputFormatters: [_PkInputFormatter()],
+            decoration: const InputDecoration(
+              labelText: 'PK fin',
+              border: OutlineInputBorder(),
+              hintText: 'Ej: 145+000',
+            ),
+          ),
+        ] else
+          TextField(
+            controller: _lugarController,
+            onChanged: (v) => setState(() => _lugar = v),
+            decoration: const InputDecoration(
+              labelText: 'Descripción del lugar',
+              border: OutlineInputBorder(),
+              hintText: 'Ej: Camino de acceso km 12',
+            ),
+          ),
         const SizedBox(height: 16),
         if (_riskOptions.isEmpty)
           Container(
@@ -1419,7 +1492,11 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       frente: frontName,
       start: _startTime!,
       end: _endTime!,
-      pk: _pk.isNotEmpty ? _parsePk(_pk) : null,
+      pk: (_locationType == LocationType.pk && _pk.isNotEmpty) ? _parsePk(_pk) : null,
+      pkStart: (_locationType == LocationType.pkRange && _pkStart.isNotEmpty) ? _parsePk(_pkStart) : null,
+      pkEnd: (_locationType == LocationType.pkRange && _pkEnd.isNotEmpty) ? _parsePk(_pkEnd) : null,
+      lugar: (_locationType == LocationType.lugar && _lugar.isNotEmpty) ? _lugar.trim() : null,
+      locationType: _locationType,
       risk: _selectedRisk!,
       effectiveVersionId: effectiveVersionId,
       municipio: _selectedMunicipio,

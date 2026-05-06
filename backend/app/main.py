@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from app.api.v1 import (
     activities,
@@ -168,6 +169,66 @@ app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(system_config.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard_kpis.router, prefix=settings.API_V1_STR)
 app.include_router(completed_activities.router, prefix=settings.API_V1_STR)
+
+
+@app.get("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)
+def privacy_policy():
+    """Política de privacidad pública de SAO (sin autenticación)."""
+    html = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Política de Privacidad – SAO</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:860px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}
+  h1{font-size:1.8rem;margin-bottom:4px}
+  h2{font-size:1.2rem;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:4px}
+  p,li{font-size:0.97rem}
+  a{color:#0066cc}
+  .meta{color:#555;font-size:0.9rem;margin-bottom:2rem}
+</style>
+</head>
+<body>
+<h1>Política de Privacidad de SAO</h1>
+<p class="meta">Sistema de Administración Operativa (SAO) &mdash; Versión 1.0 &mdash; 2026-04-06</p>
+
+<p>SAO respeta la privacidad de sus usuarios y protege la información personal que se utiliza durante la operación de la plataforma. Los datos que pueden tratarse incluyen información de identificación básica, datos operativos, evidencias, registros de actividad, datos técnicos de sesión y, cuando aplica, ubicación vinculada a actividades de campo.</p>
+<p>Esta información se utiliza exclusivamente para fines de autenticación, operación del sistema, seguimiento de actividades, sincronización, seguridad, auditoría y soporte. SAO no vende datos personales ni los utiliza para fines publicitarios ajenos a la funcionalidad de la plataforma.</p>
+<p>El usuario puede solicitar información sobre el tratamiento de sus datos o ejercer sus derechos de acceso, rectificación, cancelación u oposición escribiendo a: <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a>.</p>
+
+<h2>1. Responsable del tratamiento</h2>
+<p>Correo de privacidad: <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a> &mdash; Teléfono: 5537741179</p>
+
+<h2>2. Datos que SAO puede tratar</h2>
+<ul>
+  <li>Datos de identificación: nombre, correo, rol, proyecto asignado.</li>
+  <li>Datos operativos: actividades, asignaciones, estatus, comentarios, historial.</li>
+  <li>Evidencias: fotografías, videos, documentos y sus metadatos.</li>
+  <li>Ubicación: coordenadas GPS cuando la operación lo requiere.</li>
+  <li>Datos técnicos: tokens de sesión, registros de acceso, IP y bitácoras de auditoría.</li>
+</ul>
+
+<h2>3. Finalidad del tratamiento</h2>
+<p>Los datos se usan para autenticar usuarios, operar flujos de trabajo, registrar evidencias, coordinar actividades, mantener sincronización, generar reportes y cumplir obligaciones contractuales y legales. SAO no comercializa datos personales.</p>
+
+<h2>4. Permisos del dispositivo</h2>
+<p>La aplicación puede solicitar acceso a <strong>cámara</strong> (captura de evidencias), <strong>ubicación</strong> (georreferenciación de actividades), <strong>fotos/archivos</strong> (adjuntar documentos) y <strong>biometría/PIN</strong> (inicio de sesión seguro). En iOS los permisos se solicitan de forma contextual y pueden revocarse desde Configuración.</p>
+
+<h2>5. Derechos ARCO</h2>
+<p>Los titulares pueden solicitar acceso, rectificación, cancelación u oposición enviando un correo a <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a> con asunto <em>"Ejercicio de derechos ARCO – SAO"</em>.</p>
+
+<h2>6. Seguridad</h2>
+<p>SAO usa HTTPS/TLS, autenticación por roles, tokens de sesión, registros de auditoría y almacenamiento controlado de evidencias.</p>
+
+<h2>7. Cambios a esta política</h2>
+<p>Esta política puede actualizarse ante cambios normativos o funcionales. La versión vigente se publicará en esta URL.</p>
+
+<h2>8. Contacto</h2>
+<p>Para dudas sobre privacidad: <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a></p>
+</body>
+</html>"""
+    return HTMLResponse(content=html, status_code=200)
 
 
 @app.get("/")

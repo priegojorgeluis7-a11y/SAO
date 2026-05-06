@@ -14248,6 +14248,48 @@ class $AgendaAssignmentsTable extends AgendaAssignments
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _pkStartMeta = const VerificationMeta(
+    'pkStart',
+  );
+  @override
+  late final GeneratedColumn<int> pkStart = GeneratedColumn<int>(
+    'pk_start',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _pkEndMeta = const VerificationMeta('pkEnd');
+  @override
+  late final GeneratedColumn<int> pkEnd = GeneratedColumn<int>(
+    'pk_end',
+    aliasedName,
+    true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _lugarMeta = const VerificationMeta('lugar');
+  @override
+  late final GeneratedColumn<String> lugar = GeneratedColumn<String>(
+    'lugar',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(''),
+  );
+  static const VerificationMeta _locationTypeMeta = const VerificationMeta(
+    'locationType',
+  );
+  @override
+  late final GeneratedColumn<String> locationType = GeneratedColumn<String>(
+    'location_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+    defaultValue: const Constant('pk'),
+  );
   static const VerificationMeta _startAtMeta = const VerificationMeta(
     'startAt',
   );
@@ -14313,6 +14355,10 @@ class $AgendaAssignmentsTable extends AgendaAssignments
     municipio,
     estado,
     pk,
+    pkStart,
+    pkEnd,
+    lugar,
+    locationType,
     startAt,
     endAt,
     risk,
@@ -14386,6 +14432,33 @@ class $AgendaAssignmentsTable extends AgendaAssignments
     }
     if (data.containsKey('pk')) {
       context.handle(_pkMeta, pk.isAcceptableOrUnknown(data['pk']!, _pkMeta));
+    }
+    if (data.containsKey('pk_start')) {
+      context.handle(
+        _pkStartMeta,
+        pkStart.isAcceptableOrUnknown(data['pk_start']!, _pkStartMeta),
+      );
+    }
+    if (data.containsKey('pk_end')) {
+      context.handle(
+        _pkEndMeta,
+        pkEnd.isAcceptableOrUnknown(data['pk_end']!, _pkEndMeta),
+      );
+    }
+    if (data.containsKey('lugar')) {
+      context.handle(
+        _lugarMeta,
+        lugar.isAcceptableOrUnknown(data['lugar']!, _lugarMeta),
+      );
+    }
+    if (data.containsKey('location_type')) {
+      context.handle(
+        _locationTypeMeta,
+        locationType.isAcceptableOrUnknown(
+          data['location_type']!,
+          _locationTypeMeta,
+        ),
+      );
     }
     if (data.containsKey('start_at')) {
       context.handle(
@@ -14466,6 +14539,22 @@ class $AgendaAssignmentsTable extends AgendaAssignments
         DriftSqlType.int,
         data['${effectivePrefix}pk'],
       ),
+      pkStart: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}pk_start'],
+      ),
+      pkEnd: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}pk_end'],
+      ),
+      lugar: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}lugar'],
+      )!,
+      locationType: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}location_type'],
+      )!,
       startAt: attachedDatabase.typeMapping.read(
         DriftSqlType.dateTime,
         data['${effectivePrefix}start_at'],
@@ -14506,6 +14595,10 @@ class AgendaAssignment extends DataClass
   final String municipio;
   final String estado;
   final int? pk;
+  final int? pkStart;
+  final int? pkEnd;
+  final String lugar;
+  final String locationType;
   final DateTime startAt;
   final DateTime endAt;
   final String risk;
@@ -14521,6 +14614,10 @@ class AgendaAssignment extends DataClass
     required this.municipio,
     required this.estado,
     this.pk,
+    this.pkStart,
+    this.pkEnd,
+    required this.lugar,
+    required this.locationType,
     required this.startAt,
     required this.endAt,
     required this.risk,
@@ -14543,6 +14640,14 @@ class AgendaAssignment extends DataClass
     if (!nullToAbsent || pk != null) {
       map['pk'] = Variable<int>(pk);
     }
+    if (!nullToAbsent || pkStart != null) {
+      map['pk_start'] = Variable<int>(pkStart);
+    }
+    if (!nullToAbsent || pkEnd != null) {
+      map['pk_end'] = Variable<int>(pkEnd);
+    }
+    map['lugar'] = Variable<String>(lugar);
+    map['location_type'] = Variable<String>(locationType);
     map['start_at'] = Variable<DateTime>(startAt);
     map['end_at'] = Variable<DateTime>(endAt);
     map['risk'] = Variable<String>(risk);
@@ -14564,6 +14669,14 @@ class AgendaAssignment extends DataClass
       municipio: Value(municipio),
       estado: Value(estado),
       pk: pk == null && nullToAbsent ? const Value.absent() : Value(pk),
+      pkStart: pkStart == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pkStart),
+      pkEnd: pkEnd == null && nullToAbsent
+          ? const Value.absent()
+          : Value(pkEnd),
+      lugar: Value(lugar),
+      locationType: Value(locationType),
       startAt: Value(startAt),
       endAt: Value(endAt),
       risk: Value(risk),
@@ -14587,6 +14700,10 @@ class AgendaAssignment extends DataClass
       municipio: serializer.fromJson<String>(json['municipio']),
       estado: serializer.fromJson<String>(json['estado']),
       pk: serializer.fromJson<int?>(json['pk']),
+      pkStart: serializer.fromJson<int?>(json['pkStart']),
+      pkEnd: serializer.fromJson<int?>(json['pkEnd']),
+      lugar: serializer.fromJson<String>(json['lugar']),
+      locationType: serializer.fromJson<String>(json['locationType']),
       startAt: serializer.fromJson<DateTime>(json['startAt']),
       endAt: serializer.fromJson<DateTime>(json['endAt']),
       risk: serializer.fromJson<String>(json['risk']),
@@ -14607,6 +14724,10 @@ class AgendaAssignment extends DataClass
       'municipio': serializer.toJson<String>(municipio),
       'estado': serializer.toJson<String>(estado),
       'pk': serializer.toJson<int?>(pk),
+      'pkStart': serializer.toJson<int?>(pkStart),
+      'pkEnd': serializer.toJson<int?>(pkEnd),
+      'lugar': serializer.toJson<String>(lugar),
+      'locationType': serializer.toJson<String>(locationType),
       'startAt': serializer.toJson<DateTime>(startAt),
       'endAt': serializer.toJson<DateTime>(endAt),
       'risk': serializer.toJson<String>(risk),
@@ -14625,6 +14746,10 @@ class AgendaAssignment extends DataClass
     String? municipio,
     String? estado,
     Value<int?> pk = const Value.absent(),
+    Value<int?> pkStart = const Value.absent(),
+    Value<int?> pkEnd = const Value.absent(),
+    String? lugar,
+    String? locationType,
     DateTime? startAt,
     DateTime? endAt,
     String? risk,
@@ -14640,6 +14765,10 @@ class AgendaAssignment extends DataClass
     municipio: municipio ?? this.municipio,
     estado: estado ?? this.estado,
     pk: pk.present ? pk.value : this.pk,
+    pkStart: pkStart.present ? pkStart.value : this.pkStart,
+    pkEnd: pkEnd.present ? pkEnd.value : this.pkEnd,
+    lugar: lugar ?? this.lugar,
+    locationType: locationType ?? this.locationType,
     startAt: startAt ?? this.startAt,
     endAt: endAt ?? this.endAt,
     risk: risk ?? this.risk,
@@ -14661,6 +14790,12 @@ class AgendaAssignment extends DataClass
       municipio: data.municipio.present ? data.municipio.value : this.municipio,
       estado: data.estado.present ? data.estado.value : this.estado,
       pk: data.pk.present ? data.pk.value : this.pk,
+      pkStart: data.pkStart.present ? data.pkStart.value : this.pkStart,
+      pkEnd: data.pkEnd.present ? data.pkEnd.value : this.pkEnd,
+      lugar: data.lugar.present ? data.lugar.value : this.lugar,
+      locationType: data.locationType.present
+          ? data.locationType.value
+          : this.locationType,
       startAt: data.startAt.present ? data.startAt.value : this.startAt,
       endAt: data.endAt.present ? data.endAt.value : this.endAt,
       risk: data.risk.present ? data.risk.value : this.risk,
@@ -14683,6 +14818,10 @@ class AgendaAssignment extends DataClass
           ..write('municipio: $municipio, ')
           ..write('estado: $estado, ')
           ..write('pk: $pk, ')
+          ..write('pkStart: $pkStart, ')
+          ..write('pkEnd: $pkEnd, ')
+          ..write('lugar: $lugar, ')
+          ..write('locationType: $locationType, ')
           ..write('startAt: $startAt, ')
           ..write('endAt: $endAt, ')
           ..write('risk: $risk, ')
@@ -14703,6 +14842,10 @@ class AgendaAssignment extends DataClass
     municipio,
     estado,
     pk,
+    pkStart,
+    pkEnd,
+    lugar,
+    locationType,
     startAt,
     endAt,
     risk,
@@ -14722,6 +14865,10 @@ class AgendaAssignment extends DataClass
           other.municipio == this.municipio &&
           other.estado == this.estado &&
           other.pk == this.pk &&
+          other.pkStart == this.pkStart &&
+          other.pkEnd == this.pkEnd &&
+          other.lugar == this.lugar &&
+          other.locationType == this.locationType &&
           other.startAt == this.startAt &&
           other.endAt == this.endAt &&
           other.risk == this.risk &&
@@ -14739,6 +14886,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
   final Value<String> municipio;
   final Value<String> estado;
   final Value<int?> pk;
+  final Value<int?> pkStart;
+  final Value<int?> pkEnd;
+  final Value<String> lugar;
+  final Value<String> locationType;
   final Value<DateTime> startAt;
   final Value<DateTime> endAt;
   final Value<String> risk;
@@ -14755,6 +14906,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
     this.municipio = const Value.absent(),
     this.estado = const Value.absent(),
     this.pk = const Value.absent(),
+    this.pkStart = const Value.absent(),
+    this.pkEnd = const Value.absent(),
+    this.lugar = const Value.absent(),
+    this.locationType = const Value.absent(),
     this.startAt = const Value.absent(),
     this.endAt = const Value.absent(),
     this.risk = const Value.absent(),
@@ -14772,6 +14927,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
     this.municipio = const Value.absent(),
     this.estado = const Value.absent(),
     this.pk = const Value.absent(),
+    this.pkStart = const Value.absent(),
+    this.pkEnd = const Value.absent(),
+    this.lugar = const Value.absent(),
+    this.locationType = const Value.absent(),
     required DateTime startAt,
     required DateTime endAt,
     this.risk = const Value.absent(),
@@ -14794,6 +14953,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
     Expression<String>? municipio,
     Expression<String>? estado,
     Expression<int>? pk,
+    Expression<int>? pkStart,
+    Expression<int>? pkEnd,
+    Expression<String>? lugar,
+    Expression<String>? locationType,
     Expression<DateTime>? startAt,
     Expression<DateTime>? endAt,
     Expression<String>? risk,
@@ -14811,6 +14974,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
       if (municipio != null) 'municipio': municipio,
       if (estado != null) 'estado': estado,
       if (pk != null) 'pk': pk,
+      if (pkStart != null) 'pk_start': pkStart,
+      if (pkEnd != null) 'pk_end': pkEnd,
+      if (lugar != null) 'lugar': lugar,
+      if (locationType != null) 'location_type': locationType,
       if (startAt != null) 'start_at': startAt,
       if (endAt != null) 'end_at': endAt,
       if (risk != null) 'risk': risk,
@@ -14830,6 +14997,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
     Value<String>? municipio,
     Value<String>? estado,
     Value<int?>? pk,
+    Value<int?>? pkStart,
+    Value<int?>? pkEnd,
+    Value<String>? lugar,
+    Value<String>? locationType,
     Value<DateTime>? startAt,
     Value<DateTime>? endAt,
     Value<String>? risk,
@@ -14847,6 +15018,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
       municipio: municipio ?? this.municipio,
       estado: estado ?? this.estado,
       pk: pk ?? this.pk,
+      pkStart: pkStart ?? this.pkStart,
+      pkEnd: pkEnd ?? this.pkEnd,
+      lugar: lugar ?? this.lugar,
+      locationType: locationType ?? this.locationType,
       startAt: startAt ?? this.startAt,
       endAt: endAt ?? this.endAt,
       risk: risk ?? this.risk,
@@ -14886,6 +15061,18 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
     if (pk.present) {
       map['pk'] = Variable<int>(pk.value);
     }
+    if (pkStart.present) {
+      map['pk_start'] = Variable<int>(pkStart.value);
+    }
+    if (pkEnd.present) {
+      map['pk_end'] = Variable<int>(pkEnd.value);
+    }
+    if (lugar.present) {
+      map['lugar'] = Variable<String>(lugar.value);
+    }
+    if (locationType.present) {
+      map['location_type'] = Variable<String>(locationType.value);
+    }
     if (startAt.present) {
       map['start_at'] = Variable<DateTime>(startAt.value);
     }
@@ -14919,6 +15106,10 @@ class AgendaAssignmentsCompanion extends UpdateCompanion<AgendaAssignment> {
           ..write('municipio: $municipio, ')
           ..write('estado: $estado, ')
           ..write('pk: $pk, ')
+          ..write('pkStart: $pkStart, ')
+          ..write('pkEnd: $pkEnd, ')
+          ..write('lugar: $lugar, ')
+          ..write('locationType: $locationType, ')
           ..write('startAt: $startAt, ')
           ..write('endAt: $endAt, ')
           ..write('risk: $risk, ')
@@ -25930,6 +26121,10 @@ typedef $$AgendaAssignmentsTableCreateCompanionBuilder =
       Value<String> municipio,
       Value<String> estado,
       Value<int?> pk,
+      Value<int?> pkStart,
+      Value<int?> pkEnd,
+      Value<String> lugar,
+      Value<String> locationType,
       required DateTime startAt,
       required DateTime endAt,
       Value<String> risk,
@@ -25948,6 +26143,10 @@ typedef $$AgendaAssignmentsTableUpdateCompanionBuilder =
       Value<String> municipio,
       Value<String> estado,
       Value<int?> pk,
+      Value<int?> pkStart,
+      Value<int?> pkEnd,
+      Value<String> lugar,
+      Value<String> locationType,
       Value<DateTime> startAt,
       Value<DateTime> endAt,
       Value<String> risk,
@@ -26007,6 +26206,26 @@ class $$AgendaAssignmentsTableFilterComposer
 
   ColumnFilters<int> get pk => $composableBuilder(
     column: $table.pk,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pkStart => $composableBuilder(
+    column: $table.pkStart,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get pkEnd => $composableBuilder(
+    column: $table.pkEnd,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lugar => $composableBuilder(
+    column: $table.lugar,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get locationType => $composableBuilder(
+    column: $table.locationType,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -26090,6 +26309,26 @@ class $$AgendaAssignmentsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<int> get pkStart => $composableBuilder(
+    column: $table.pkStart,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get pkEnd => $composableBuilder(
+    column: $table.pkEnd,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lugar => $composableBuilder(
+    column: $table.lugar,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get locationType => $composableBuilder(
+    column: $table.locationType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<DateTime> get startAt => $composableBuilder(
     column: $table.startAt,
     builder: (column) => ColumnOrderings(column),
@@ -26156,6 +26395,20 @@ class $$AgendaAssignmentsTableAnnotationComposer
   GeneratedColumn<int> get pk =>
       $composableBuilder(column: $table.pk, builder: (column) => column);
 
+  GeneratedColumn<int> get pkStart =>
+      $composableBuilder(column: $table.pkStart, builder: (column) => column);
+
+  GeneratedColumn<int> get pkEnd =>
+      $composableBuilder(column: $table.pkEnd, builder: (column) => column);
+
+  GeneratedColumn<String> get lugar =>
+      $composableBuilder(column: $table.lugar, builder: (column) => column);
+
+  GeneratedColumn<String> get locationType => $composableBuilder(
+    column: $table.locationType,
+    builder: (column) => column,
+  );
+
   GeneratedColumn<DateTime> get startAt =>
       $composableBuilder(column: $table.startAt, builder: (column) => column);
 
@@ -26219,6 +26472,10 @@ class $$AgendaAssignmentsTableTableManager
                 Value<String> municipio = const Value.absent(),
                 Value<String> estado = const Value.absent(),
                 Value<int?> pk = const Value.absent(),
+                Value<int?> pkStart = const Value.absent(),
+                Value<int?> pkEnd = const Value.absent(),
+                Value<String> lugar = const Value.absent(),
+                Value<String> locationType = const Value.absent(),
                 Value<DateTime> startAt = const Value.absent(),
                 Value<DateTime> endAt = const Value.absent(),
                 Value<String> risk = const Value.absent(),
@@ -26235,6 +26492,10 @@ class $$AgendaAssignmentsTableTableManager
                 municipio: municipio,
                 estado: estado,
                 pk: pk,
+                pkStart: pkStart,
+                pkEnd: pkEnd,
+                lugar: lugar,
+                locationType: locationType,
                 startAt: startAt,
                 endAt: endAt,
                 risk: risk,
@@ -26253,6 +26514,10 @@ class $$AgendaAssignmentsTableTableManager
                 Value<String> municipio = const Value.absent(),
                 Value<String> estado = const Value.absent(),
                 Value<int?> pk = const Value.absent(),
+                Value<int?> pkStart = const Value.absent(),
+                Value<int?> pkEnd = const Value.absent(),
+                Value<String> lugar = const Value.absent(),
+                Value<String> locationType = const Value.absent(),
                 required DateTime startAt,
                 required DateTime endAt,
                 Value<String> risk = const Value.absent(),
@@ -26269,6 +26534,10 @@ class $$AgendaAssignmentsTableTableManager
                 municipio: municipio,
                 estado: estado,
                 pk: pk,
+                pkStart: pkStart,
+                pkEnd: pkEnd,
+                lugar: lugar,
+                locationType: locationType,
                 startAt: startAt,
                 endAt: endAt,
                 risk: risk,

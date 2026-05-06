@@ -8,10 +8,11 @@ import 'auth/session_controller.dart';
 import 'data/admin_repositories.dart';
 import 'pages/audit_page.dart';
 import 'pages/dashboard_page.dart';
+import 'pages/invitations_page.dart';
 import 'pages/projects_page.dart';
 import 'pages/settings_page.dart';
+import 'pages/sync_issues_page.dart';
 import 'pages/users_page.dart';
-import 'pages/invitations_page.dart';
 
 class AdminShell extends ConsumerStatefulWidget {
   const AdminShell({super.key});
@@ -25,18 +26,25 @@ class _AdminShellState extends ConsumerState<AdminShell> {
   String _selectedProject = 'ALL';
   int _refreshToken = 0;
 
-  List<_NavItem> get _items => const [
-        _NavItem(icon: Icons.dashboard, label: 'Dashboard', page: AdminDashboardPage()),
-        _NavItem(icon: Icons.apartment, label: 'Projects', page: AdminProjectsPage()),
-        _NavItem(icon: Icons.people, label: 'Users', page: AdminUsersPage()),
-        _NavItem(icon: Icons.fact_check, label: 'Audit', page: AdminAuditPage()),
-        _NavItem(icon: Icons.settings, label: 'Settings', page: AdminSettingsPage()),
-        _NavItem(icon: Icons.mail_outline, label: 'Invitaciones', page: AdminInvitationsPage()),
-      ];
+  List<_NavItem> _buildItems(SessionState session) {
+    final items = [
+      const _NavItem(icon: Icons.dashboard, label: 'Dashboard', page: AdminDashboardPage()),
+      const _NavItem(icon: Icons.apartment, label: 'Projects', page: AdminProjectsPage()),
+      const _NavItem(icon: Icons.people, label: 'Users', page: AdminUsersPage()),
+      const _NavItem(icon: Icons.fact_check, label: 'Audit', page: AdminAuditPage()),
+      const _NavItem(icon: Icons.settings, label: 'Settings', page: AdminSettingsPage()),
+      const _NavItem(icon: Icons.mail_outline, label: 'Invitaciones', page: AdminInvitationsPage()),
+    ];
+    if (session.user?.isAdminOrDev ?? false) {
+      items.add(const _NavItem(icon: Icons.sync_problem_rounded, label: 'Sync Issues', page: AdminSyncIssuesPage()));
+    }
+    return items;
+  }
 
   @override
   Widget build(BuildContext context) {
     final session = ref.watch(sessionControllerProvider);
+    final items = _buildItems(session);
 
     return CallbackShortcuts(
       bindings: {
@@ -58,7 +66,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
               padding: EdgeInsets.symmetric(vertical: 16),
               child: Text('SAO', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
             ),
-            destinations: _items
+            destinations: items
                 .map((item) => NavigationRailDestination(icon: Icon(item.icon), label: Text(item.label)))
                 .toList(),
           ),
@@ -75,7 +83,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
                   ),
                   child: Row(
                     children: [
-                      Text(_items[_selectedIndex].label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
+                      Text(items[_selectedIndex].label, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
                       const Spacer(),
                       IconButton(
                         tooltip: 'Actualizar vista',
@@ -100,7 +108,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
                 Expanded(
                   child: KeyedSubtree(
                     key: ValueKey('admin-page-$_selectedIndex-$_refreshToken'),
-                    child: _items[_selectedIndex].page,
+                    child: items[_selectedIndex].page,
                   ),
                 ),
               ],

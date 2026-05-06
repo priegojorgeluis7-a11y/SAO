@@ -1,7 +1,7 @@
 name: sao_windows
 description: "A new Flutter project."
 publish_to: "none"
-version: 1.0.7+20013
+version: 1.0.8+20015
 
 environment:
   sdk: ^3.11.0

@@ -474,6 +474,10 @@ class AgendaAssignments extends Table {
   TextColumn get municipio => text().withDefault(const Constant(''))();
   TextColumn get estado => text().withDefault(const Constant(''))();
   IntColumn get pk => integer().nullable()();
+  IntColumn get pkStart => integer().nullable()();
+  IntColumn get pkEnd => integer().nullable()();
+  TextColumn get lugar => text().withDefault(const Constant(''))();
+  TextColumn get locationType => text().withDefault(const Constant('pk'))();
   DateTimeColumn get startAt => dateTime()();
   DateTimeColumn get endAt => dateTime()();
   TextColumn get risk => text().withDefault(const Constant('bajo'))();

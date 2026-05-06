@@ -117,15 +117,30 @@ class SessionUser {
   final String id;
   final String email;
   final String fullName;
+  final List<String> roles;
 
-  const SessionUser(
-      {required this.id, required this.email, required this.fullName});
+  const SessionUser({
+    required this.id,
+    required this.email,
+    required this.fullName,
+    this.roles = const [],
+  });
+
+  bool get isAdminOrDev {
+    final upper = roles.map((r) => r.toUpperCase()).toSet();
+    return upper.contains('ADMIN') || upper.contains('DESARROLLADOR');
+  }
 
   factory SessionUser.fromJson(Map<String, dynamic> json) {
+    final rawRoles = json['roles'];
+    final roleList = rawRoles is List
+        ? rawRoles.map((r) => r.toString().toUpperCase()).toList()
+        : <String>[];
     return SessionUser(
       id: json['id'].toString(),
       email: json['email'] as String,
       fullName: json['full_name'] as String? ?? '',
+      roles: roleList,
     );
   }
 }
@@ -932,5 +947,129 @@ class AssignmentsAdminRepository {
     return response
         .map((e) => AdminAssignmentItem.fromJson(e as Map<String, dynamic>))
         .toList();
+  }
+}
+
+// ─── Admin Activity (Sync Issues) ─────────────────────────────────────────────
+
+class AdminActivityItem {
+  final String uuid;
+  final String projectId;
+  final String executionState;
+  final String activityTypeCode;
+  final String title;
+  final String? assignedToUserId;
+  final String? assignedToUserName;
+  final bool hasWizardPayload;
+  final int syncVersion;
+  final DateTime updatedAt;
+  final DateTime createdAt;
+  final String? frontId;
+  final int? pkStart;
+  final int? pkEnd;
+
+  const AdminActivityItem({
+    required this.uuid,
+    required this.projectId,
+    required this.executionState,
+    required this.activityTypeCode,
+    required this.title,
+    required this.assignedToUserId,
+    required this.assignedToUserName,
+    required this.hasWizardPayload,
+    required this.syncVersion,
+    required this.updatedAt,
+    required this.createdAt,
+    required this.frontId,
+    required this.pkStart,
+    required this.pkEnd,
+  });
+
+  bool get isStuck =>
+      executionState.toUpperCase() == 'PENDIENTE' && !hasWizardPayload;
+
+  factory AdminActivityItem.fromJson(Map<String, dynamic> json) {
+    DateTime parseDate(dynamic v) =>
+        DateTime.tryParse((v ?? '').toString())?.toLocal() ?? DateTime.now();
+    return AdminActivityItem(
+      uuid: (json['uuid'] ?? '').toString(),
+      projectId: (json['project_id'] ?? '').toString(),
+      executionState: (json['execution_state'] ?? '').toString(),
+      activityTypeCode: (json['activity_type_code'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      assignedToUserId: json['assigned_to_user_id']?.toString(),
+      assignedToUserName: json['assigned_to_user_name']?.toString(),
+      hasWizardPayload: json['wizard_payload'] != null,
+      syncVersion: (json['sync_version'] as num?)?.toInt() ?? 0,
+      updatedAt: parseDate(json['updated_at']),
+      createdAt: parseDate(json['created_at']),
+      frontId: json['front_id']?.toString(),
+      pkStart: (json['pk_start'] as num?)?.toInt(),
+      pkEnd: (json['pk_end'] as num?)?.toInt(),
+    );
+  }
+}
+
+class SyncIssuesRepository {
+  final AdminApiTransport transport;
+
+  SyncIssuesRepository(this.transport);
+
+  /// List activities for [userId] optionally scoped to [projectId].
+  Future<List<AdminActivityItem>> listUserActivities(
+    String token, {
+    required String userId,
+    String? projectId,
+    int pageSize = 200,
+  }) async {
+    final query = <String, String>{
+      'assigned_to_user_id': userId,
+      'page': '1',
+      'page_size': '$pageSize',
+    };
+    if (projectId != null && projectId.isNotEmpty) {
+      query['project_id'] = projectId;
+    }
+    final response = await transport.get(
+      '/api/v1/activities',
+      token: token,
+      queryParams: query,
+    ) as Map<String, dynamic>;
+
+    final items = response['items'] as List<dynamic>? ?? const [];
+    return items
+        .map((e) => AdminActivityItem.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
+  /// Soft-delete an activity by uuid.
+  Future<void> deleteActivity(String token, String uuid) async {
+    await transport.delete('/api/v1/activities/$uuid', token: token);
+  }
+
+  /// Send a push notification to a user to trigger a sync pull.
+  Future<Map<String, dynamic>> pushUser(
+    String token, {
+    required String userId,
+    required String title,
+    required String body,
+    String type = 'activity_update',
+    String? projectId,
+  }) async {
+    final payload = <String, dynamic>{
+      'user_id': userId,
+      'title': title,
+      'body': body,
+      'type': type,
+    };
+    if (projectId != null && projectId.isNotEmpty) {
+      payload['project_id'] = projectId;
+    }
+    final response = await transport.post(
+      '/api/v1/notifications/admin/push-user',
+      token: token,
+      body: payload,
+    );
+    return (response as Map<String, dynamic>?) ?? {};
   }
 }

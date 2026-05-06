@@ -24,6 +24,7 @@ class _FakeSnapshot:
 class _FakeDocRef:
     def __init__(self, payload):
         self._payload = payload
+        self.deleted = False
 
     def get(self):
         return _FakeSnapshot(self._payload)
@@ -31,21 +32,31 @@ class _FakeDocRef:
     def update(self, updates):
         self._payload.update(updates)
 
+    def delete(self):
+        self.deleted = True
+        self._payload.clear()
+
 
 class _FakeCollection:
     def __init__(self, payload):
         self._payload = payload
+        self._refs: dict = {}
 
-    def document(self, _doc_id):
-        return _FakeDocRef(self._payload)
+    def document(self, doc_id):
+        if doc_id not in self._refs:
+            self._refs[doc_id] = _FakeDocRef(self._payload)
+        return self._refs[doc_id]
 
 
 class _FakeClient:
     def __init__(self, payload):
         self._payload = payload
+        self._collections: dict = {}
 
-    def collection(self, _name):
-        return _FakeCollection(self._payload)
+    def collection(self, name):
+        if name not in self._collections:
+            self._collections[name] = _FakeCollection(self._payload)
+        return self._collections[name]
 
 
 def _principal(*, email: str, roles: list[str], permission_scopes=None):
@@ -56,6 +67,7 @@ def _principal(*, email: str, roles: list[str], permission_scopes=None):
         status=UserStatus.ACTIVE,
         created_at=datetime.now(timezone.utc),
         last_login_at=None,
+        last_activity_at=None,
         roles=roles,
         project_ids=['TMQ'],
         scopes=[],
@@ -125,8 +137,9 @@ def test_activity_delete_writes_audit_for_admin(client, monkeypatch):
     payload = _activity_payload(activity_uuid)
     current_user = _principal(email='admin@example.com', roles=['ADMIN'])
     audit_calls = []
+    fake_client = _FakeClient(payload)
 
-    monkeypatch.setattr(activities_api, 'get_firestore_client', lambda: _FakeClient(payload))
+    monkeypatch.setattr(activities_api, 'get_firestore_client', lambda: fake_client)
     monkeypatch.setattr(
         activities_api,
         'write_firestore_audit_log',
@@ -139,10 +152,10 @@ def test_activity_delete_writes_audit_for_admin(client, monkeypatch):
     finally:
         app.dependency_overrides.pop(deps_module.get_current_user, None)
 
-    assert response.status_code == 200
-    assert payload['deleted_at'] is not None
-    assert response.json()['deleted_at'] is not None
+    assert response.status_code == 204
+    assert fake_client.collection('activities').document(activity_uuid).deleted is True
     assert len(audit_calls) == 1
     assert audit_calls[0]['action'] == 'ACTIVITY_DELETE'
     assert audit_calls[0]['entity'] == 'activity'
     assert audit_calls[0]['entity_id'] == activity_uuid
+    assert audit_calls[0]['details'].get('hard_delete') is True

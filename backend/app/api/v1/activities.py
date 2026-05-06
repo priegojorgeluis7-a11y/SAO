@@ -472,21 +472,19 @@ async def update_activity(
     return _firestore_activity_dto(doc_ref, uuid)
 
 
-@router.delete("/{uuid}", response_model=ActivityDTO)
+@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_activity(
     uuid: str,
     current_user: Any = Depends(get_current_user),
 ):
-    """Soft-delete activity by uuid. Sets deleted_at and increments sync_version."""
+    """Hard-delete activity by uuid. Permanently removes the document from Firestore."""
     client = get_firestore_client()
     doc_ref, snap, existing = _resolve_activity_doc_ref_and_snap(client, str(uuid))
     if doc_ref is None:
         raise api_error(status_code=status.HTTP_404_NOT_FOUND, code="ACTIVITY_NOT_FOUND", message=f"Activity {uuid} not found")
     project_id = str(existing.get("project_id") or "").strip().upper()
     _enforce_admin_delete_activity(current_user, project_id)
-    now = datetime.now(timezone.utc)
-    next_sync = int(existing.get("sync_version") or 0) + 1
-    doc_ref.update({"deleted_at": now, "updated_at": now, "sync_version": next_sync})
+    # Write audit log BEFORE deleting — document will be gone after
     write_firestore_audit_log(
         action="ACTIVITY_DELETE",
         entity="activity",
@@ -497,11 +495,10 @@ async def delete_activity(
             "title": existing.get("title"),
             "activity_type_code": existing.get("activity_type_code"),
             "execution_state": existing.get("execution_state"),
-            "soft_delete": True,
-            "deleted_at": now.isoformat(),
+            "hard_delete": True,
         }),
     )
-    return _firestore_activity_dto(doc_ref, uuid)
+    doc_ref.delete()
 
 
 @router.patch("/{uuid}/flags", response_model=ActivityDTO)

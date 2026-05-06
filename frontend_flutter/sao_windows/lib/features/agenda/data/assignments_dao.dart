@@ -16,6 +16,10 @@ class AgendaAssignmentRecord {
     required this.municipio,
     required this.estado,
     this.pk,
+    this.pkStart,
+    this.pkEnd,
+    this.lugar,
+    this.locationType,
     this.latitude,
     this.longitude,
     required this.startAt,
@@ -34,6 +38,10 @@ class AgendaAssignmentRecord {
   final String municipio;
   final String estado;
   final int? pk;
+  final int? pkStart;
+  final int? pkEnd;
+  final String? lugar;
+  final String? locationType;
   final double? latitude;
   final double? longitude;
   final DateTime startAt;
@@ -127,6 +135,10 @@ class AssignmentsDao implements AssignmentsLocalStore {
             municipio: drift.Value(record.municipio),
             estado: drift.Value(record.estado),
             pk: drift.Value(record.pk),
+            pkStart: drift.Value(record.pkStart),
+            pkEnd: drift.Value(record.pkEnd),
+            lugar: drift.Value(record.lugar ?? ''),
+            locationType: drift.Value(record.locationType ?? 'pk'),
             startAt: record.startAt,
             endAt: record.endAt,
             risk: drift.Value(_riskToString(record.risk)),
@@ -435,6 +447,10 @@ class AssignmentsDao implements AssignmentsLocalStore {
       municipio: row.municipio,
       estado: row.estado,
       pk: row.pk,
+      pkStart: row.pkStart,
+      pkEnd: row.pkEnd,
+      lugar: row.lugar.isNotEmpty ? row.lugar : null,
+      locationType: _locationTypeFromString(row.locationType),
       start: row.startAt,
       end: row.endAt,
       risk: _riskFromString(row.risk),
@@ -710,6 +726,18 @@ class AssignmentsDao implements AssignmentsLocalStore {
         return 'error';
       case SyncStatus.pending:
         return 'pending';
+    }
+  }
+
+  static LocationType _locationTypeFromString(String? value) {
+    switch (value?.trim().toLowerCase()) {
+      case 'pk_range':
+      case 'pkrange':
+        return LocationType.pkRange;
+      case 'lugar':
+        return LocationType.lugar;
+      default:
+        return LocationType.pk;
     }
   }
 }

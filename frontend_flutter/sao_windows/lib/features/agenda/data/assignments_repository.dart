@@ -48,6 +48,10 @@ class AssignmentsRepository {
       municipio: item.municipio,
       estado: item.estado,
       pk: item.pk,
+      pkStart: item.pkStart,
+      pkEnd: item.pkEnd,
+      lugar: item.lugar,
+      locationType: _locationTypeToString(item.locationType),
       startAt: item.start,
       endAt: item.end,
       risk: item.risk,
@@ -55,6 +59,17 @@ class AssignmentsRepository {
     );
     await _localStore.upsertAssignments([record]);
     await _upsertActivitiesFromAssignments([record]);
+  }
+
+  static String _locationTypeToString(LocationType type) {
+    switch (type) {
+      case LocationType.pkRange:
+        return 'pk_range';
+      case LocationType.lugar:
+        return 'lugar';
+      case LocationType.pk:
+        return 'pk';
+    }
   }
 
   /// Elimina una asignación del almacenamiento local por id.

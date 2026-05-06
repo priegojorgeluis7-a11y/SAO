@@ -6,7 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
-from app.api.deps import get_current_user, verify_project_access
+from app.api.deps import get_current_user, require_any_role, verify_project_access
 from app.core.config import settings
 from app.schemas.notification import NotificationListResponse, UserNotificationItem
 from app.services.notification_service import (
@@ -17,6 +17,7 @@ from app.services.notification_service import (
 from app.services.push_notification_service import (
     disable_device_push_token,
     notify_daily_agenda,
+    notify_user,
     register_device_push_token,
 )
 
@@ -93,6 +94,63 @@ def trigger_daily_agenda(
 
     result = notify_daily_agenda(project_id=project_id)
     logger.info("DAILY_AGENDA_TRIGGER result=%s", result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Admin: send push to a specific user
+# ---------------------------------------------------------------------------
+
+_PRIVILEGED_ROLES = ["ADMIN", "COORD", "SUPERVISOR", "DESARROLLADOR"]
+
+
+class AdminPushUserRequest(BaseModel):
+    user_id: str = Field(..., min_length=1, description="UUID of the target user")
+    title: str = Field(..., min_length=1, max_length=100, description="Notification title")
+    body: str = Field(..., min_length=1, max_length=300, description="Notification body")
+    type: str = Field(default="admin_message", description="FCM data.type value seen by the app")
+    project_id: str | None = Field(default=None, description="Scope to tokens for this project only")
+
+
+@router.post("/admin/push-user", status_code=status.HTTP_200_OK)
+def admin_push_user(
+    body: AdminPushUserRequest,
+    current_user: Any = Depends(require_any_role(_PRIVILEGED_ROLES)),
+):
+    """[ADMIN / PRIVILEGED ONLY] Send a custom push notification to all devices of a specific user.
+
+    Useful for prompting a user to open the app and sync, or for admin communications.
+    The ``type`` field is forwarded in the FCM data payload so the app can react accordingly.
+    Currently handled types by the mobile app: ``activity_update``, ``assignment_update``,
+    ``catalog_update``, ``review_approved``, ``review_changes_required``.
+    Any other value (e.g. ``admin_message``) will show the notification without extra actions.
+    """
+    target_user_id = body.user_id.strip()
+    if not target_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="user_id is required",
+        )
+
+    data: dict[str, str] = {"type": body.type.strip() or "admin_message"}
+    if body.project_id:
+        data["project_id"] = body.project_id.strip().upper()
+
+    result = notify_user(
+        user_id=target_user_id,
+        title=body.title,
+        body=body.body,
+        data=data,
+        project_id=body.project_id,
+    )
+
+    logger.info(
+        "ADMIN_PUSH_USER requested_by=%s target_user=%s type=%s result=%s",
+        getattr(current_user, "id", "?"),
+        target_user_id,
+        data["type"],
+        result,
+    )
     return result
 
 

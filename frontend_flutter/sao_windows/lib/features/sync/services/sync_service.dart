@@ -199,6 +199,20 @@ class SyncService {
         ignoreRetrySchedule: true,
       );
 
+      // 0. Recover stale IN_PROGRESS items left by a previous crash or force-close.
+      //    These would never be retried otherwise since the query below only picks
+      //    up PENDING / ERROR.
+      final staleCount = await (_db.update(_db.syncQueue)
+            ..where(
+              (s) => s.status.equals('IN_PROGRESS') & s.entity.equals('ACTIVITY'),
+            ))
+          .write(const SyncQueueCompanion(status: Value('PENDING')));
+      if (staleCount > 0) {
+        appLogger.w(
+          '♻️ Sync Push: recovered $staleCount stale IN_PROGRESS item(s) → PENDING',
+        );
+      }
+
       // 1. Fetch retryable items
       final pendingItems = await (_db.select(_db.syncQueue)
         ..where(
