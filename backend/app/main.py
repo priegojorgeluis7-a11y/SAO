@@ -231,6 +231,57 @@ def privacy_policy():
     return HTMLResponse(content=html, status_code=200)
 
 
+@app.get("/support", response_class=HTMLResponse, include_in_schema=False)
+def support():
+    """Página de soporte pública de SAO (sin autenticación)."""
+    html = """<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Soporte – SAO</title>
+<style>
+  body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;color:#1a1a1a;line-height:1.7}
+  h1{font-size:1.8rem;margin-bottom:4px}
+  h2{font-size:1.2rem;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:4px}
+  p,li{font-size:0.97rem}
+  a{color:#0066cc}
+  .meta{color:#555;font-size:0.9rem;margin-bottom:2rem}
+  .card{background:#f5f5f7;border-radius:12px;padding:20px 24px;margin:16px 0}
+</style>
+</head>
+<body>
+<h1>Soporte SAO</h1>
+<p class="meta">Sistema de Administración Operativa – SAO</p>
+
+<div class="card">
+  <strong>Contacto de soporte</strong><br>
+  Correo: <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a><br>
+  Teléfono: 55 3774 1179<br>
+  Horario: Lunes a viernes, 9:00–18:00 (hora Ciudad de México)
+</div>
+
+<h2>Preguntas frecuentes</h2>
+
+<p><strong>¿Cómo obtengo una cuenta?</strong><br>
+Las cuentas son creadas por el administrador del sistema. Contacta a tu supervisor o al equipo de soporte para solicitar acceso.</p>
+
+<p><strong>¿Olvidé mi contraseña. ¿Qué hago?</strong><br>
+En la pantalla de inicio de sesión, selecciona <em>"¿Olvidaste tu contraseña?"</em> e ingresa tu correo registrado. Recibirás un enlace de restablecimiento.</p>
+
+<p><strong>La aplicación no sincroniza mis actividades.</strong><br>
+Verifica tu conexión a internet. Si el problema persiste, ve a Configuración → Sincronización → "Reintentar sincronización". Si el error continúa, escríbenos a <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a>.</p>
+
+<p><strong>¿Cómo reporto un problema en la app?</strong><br>
+Envía un correo a <a href="mailto:priegojorgeluis7@gmail.com">priegojorgeluis7@gmail.com</a> con una descripción del problema, capturas de pantalla si es posible, y el modelo de tu dispositivo.</p>
+
+<h2>Política de privacidad</h2>
+<p>Consulta nuestra <a href="/privacy-policy">Política de Privacidad</a>.</p>
+</body>
+</html>"""
+    return HTMLResponse(content=html, status_code=200)
+
+
 @app.get("/")
 def root():
     return {"status": "ok"}

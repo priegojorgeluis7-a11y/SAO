@@ -124,12 +124,7 @@ class _SignupPageState extends ConsumerState<SignupPage> {
     return null;
   }
 
-  String? _validateBirthDate(String? value) {
-    if (value == null || value.trim().isEmpty) {
-      return 'Selecciona tu cumpleaños';
-    }
-    return null;
-  }
+  // birth_date is optional — no validation required
 
   String _normalizeName(String value) {
     final compact = value.trim().replaceAll(RegExp(r'\s+'), ' ');
@@ -305,11 +300,10 @@ class _SignupPageState extends ConsumerState<SignupPage> {
                     ),
                     const SizedBox(height: SaoSpacing.lg),
                     SaoInput(
-                      label: 'Cumpleaños',
+                      label: 'Cumpleaños (opcional)',
                       controller: _birthDateController,
                       readOnly: true,
                       onTap: _pickBirthDate,
-                      validator: _validateBirthDate,
                       prefixIcon: const Icon(Icons.cake_outlined),
                       suffixIcon: IconButton(
                         icon: const Icon(Icons.calendar_month_outlined),
