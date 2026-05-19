@@ -203,7 +203,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
                   _sectionTitle('Nivel de riesgo detectado'),
                   if (_fieldErrors['risk'] == true)
                     Padding(
-                      padding: EdgeInsets.only(top: 4),
+                      padding: const EdgeInsets.only(top: 4),
                       child: Text(
                         '⚠️ Dato obligatorio',
                         style: SaoTypography.caption.copyWith(
@@ -378,7 +378,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
               title: 'Institucionales',
               items: c.attendeesInstitutional,
               selectedIds: c.selectedAttendeeIds,
-              onToggle: (attendee, willSelect) => _handleInstitutionalAttendeeToggle(attendee, willSelect),
+              onToggle: _handleInstitutionalAttendeeToggle,
               detailBuilder: (attendee) {
                 final representative = c.attendeeRepresentative(attendee.id);
                 if (representative == null) return null;
@@ -442,15 +442,15 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
               maxLines: 8,
               keyboardType: TextInputType.multiline,
               textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Desarrollo / Notas',
                 hintText: 'Describe lo ocurrido, contexto, decisiones, solicitudes…',
                 alignLabelWithHint: true,
-                border: const OutlineInputBorder(),
+                border: OutlineInputBorder(),
                 suffixIcon: IconButton(
                   onPressed: null,
                   tooltip: 'Dictado por voz próximamente',
-                  icon: const Icon(Icons.mic_none_rounded),
+                  icon: Icon(Icons.mic_none_rounded),
                 ),
               ),
               controller: _notesController,
@@ -644,7 +644,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       debugPrint('[WIZARD] newItem.id="${newItem.id}" newItem.label="${newItem.label}"');
       c.setSubcategory(newItem);
 
-      if (mounted) {
+      if (context.mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(
@@ -729,7 +729,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
         c.toggleTopic(newTopic.id);
       }
 
-      if (mounted) {
+      if (context.mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(
@@ -799,7 +799,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       // Seleccionar la nueva actividad
       c.setActivity(newItem);
       
-      if (mounted) {
+      if (context.mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(
@@ -884,7 +884,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       // Seleccionar el nuevo propósito
       c.setPurpose(newItem);
       
-      if (mounted) {
+      if (context.mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(
@@ -958,7 +958,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
       // Seleccionar el nuevo asistente automáticamente
       c.toggleAttendee(newItem.id);
       
-      if (mounted) {
+      if (context.mounted) {
         showTransientSnackBar(
           context,
           appSnackBar(

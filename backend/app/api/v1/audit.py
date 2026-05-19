@@ -1,7 +1,10 @@
 import json as _json
+import logging
 import uuid as _uuid_mod
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+_logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, Query
 
@@ -67,8 +70,8 @@ def list_audit_logs(
                 entity_id=str(doc.get("entity_id") or ""),
                 details_json=sanitize_audit_details_json(details),
             ))
-        except Exception:
-            pass
+        except Exception as exc:  # pragma: no cover
+            _logger.warning("audit_list: skipping malformed log doc %s: %s", doc.id if hasattr(doc, 'id') else '?', exc)
 
     result.sort(key=lambda r: r.created_at, reverse=True)
     return result[:500]

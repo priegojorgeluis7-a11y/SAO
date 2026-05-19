@@ -248,7 +248,7 @@ class _AdminUsersPageState extends ConsumerState<AdminUsersPage> {
       context: context,
       barrierDismissible: true,
       barrierLabel: 'Cerrar',
-      barrierColor: Colors.black.withOpacity(0.35),
+      barrierColor: Colors.black.withValues(alpha: 0.35),
       transitionDuration: const Duration(milliseconds: 200),
       pageBuilder: (ctx, _, __) => _UserModal(
         user: user,
@@ -609,7 +609,7 @@ class _SearchToolbar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: _roleColor(roleFilter).withValues(alpha: 0.10),
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _roleColor(roleFilter).withOpacity(0.3)),
+                border: Border.all(color: _roleColor(roleFilter).withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -728,14 +728,14 @@ class _StatCardState extends State<_StatCard> {
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: widget.active
-                  ? accentColor.withOpacity(0.4)
+                  ? accentColor.withValues(alpha: 0.4)
                   : (_hovered ? AppColors.borderFor(context) : AppColors.borderFor(context)),
               width: widget.active ? 1.5 : 1,
             ),
             boxShadow: _hovered || widget.active
                 ? [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.05),
+                      color: Colors.black.withValues(alpha: 0.05),
                       blurRadius: 6,
                       offset: const Offset(0, 2),
                     )
@@ -855,7 +855,7 @@ class _UserRowState extends State<_UserRow> {
             boxShadow: _hovered || widget.selected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.04),
+                      color: Colors.black.withValues(alpha: 0.04),
                       blurRadius: 6,
                       offset: const Offset(0, 2),
                     )
@@ -981,7 +981,7 @@ class _DetailsSidebar extends StatelessWidget {
         border: Border.all(color: AppColors.borderFor(context)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -1007,7 +1007,7 @@ class _DetailsSidebar extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: roleBg,
                     shape: BoxShape.circle,
-                    border: Border.all(color: roleColor.withOpacity(0.24), width: 2),
+                    border: Border.all(color: roleColor.withValues(alpha: 0.24), width: 2),
                   ),
                   alignment: Alignment.center,
                   child: Text(
@@ -1455,9 +1455,9 @@ class _UserAvatar extends StatelessWidget {
       width: 32,
       height: 32,
       decoration: BoxDecoration(
-        color: color.withOpacity(0.12),
+        color: color.withValues(alpha: 0.12),
         shape: BoxShape.circle,
-        border: Border.all(color: color.withOpacity(0.2)),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
       ),
       alignment: Alignment.center,
       child: Text(
@@ -1638,7 +1638,7 @@ class _UserModalState extends State<_UserModal>
                           color: roleBg,
                           shape: BoxShape.circle,
                           border: Border.all(
-                              color: roleColor.withOpacity(0.25), width: 2),
+                              color: roleColor.withValues(alpha: 0.25), width: 2),
                         ),
                         alignment: Alignment.center,
                         child: Text(
@@ -2277,7 +2277,7 @@ class _RoleBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: bg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: fg.withOpacity(0.14)),
+        border: Border.all(color: fg.withValues(alpha: 0.14)),
       ),
       child: Text(
         role.toUpperCase(),
@@ -2309,7 +2309,7 @@ class _StatusBadge extends StatelessWidget {
       decoration: BoxDecoration(
         color: p.bg,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: p.fg.withOpacity(0.12)),
+        border: Border.all(color: p.fg.withValues(alpha: 0.12)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

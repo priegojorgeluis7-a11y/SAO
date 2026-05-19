@@ -159,7 +159,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                   return SizedBox(
                     width: 140,
                     child: DropdownButtonFormField<String>(
-                      value: selected,
+                      initialValue: selected,
                       decoration: const InputDecoration(
                         labelText: 'Proyecto',
                         border: OutlineInputBorder(),
@@ -181,7 +181,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
               SizedBox(
                 width: 140,
                 child: DropdownButtonFormField<String>(
-                  value: _severityFilter,
+                  initialValue: _severityFilter,
                   decoration: const InputDecoration(
                     labelText: 'Severidad',
                     border: OutlineInputBorder(),
@@ -207,7 +207,7 @@ class _EventsPageState extends ConsumerState<EventsPage> {
                   color: AppColors.gray900,
                   fontWeight: FontWeight.w600,
                 ),
-                side: BorderSide(color: AppColors.gray300),
+                side: const BorderSide(color: AppColors.gray300),
                 onSelected: (v) => setState(() => _showOnlyUnresolved = v),
               ),
               const SizedBox(width: 8),
@@ -447,7 +447,7 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.campaign_outlined, size: 64, color: AppColors.gray300),
+          const Icon(Icons.campaign_outlined, size: 64, color: AppColors.gray300),
           const SizedBox(height: 16),
           const Text(
             'Sin eventos registrados',
@@ -475,7 +475,7 @@ class _ErrorState extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.error_outline, size: 48, color: AppColors.error),
+          const Icon(Icons.error_outline, size: 48, color: AppColors.error),
           const SizedBox(height: 12),
           Text(message,
               textAlign: TextAlign.center,

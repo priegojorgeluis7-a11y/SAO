@@ -76,7 +76,11 @@ bool _looksGenericReportText(String value) {
       normalized.startsWith('actividad validada para emision') ||
       normalized.startsWith('actividad validada para emisión') ||
       normalized.startsWith('actividad:') ||
-      normalized.contains('|');
+      normalized.contains('|') ||
+      // Auto-generated narrative from _buildNaturalDevelopmentNarrative
+      normalized.startsWith('se llevó a cabo ') ||
+      normalized.startsWith('se realizó ') ||
+      normalized.startsWith('se efectuó ');
 }
 
 String _resolvedDraftPurpose(ReportActivityItem item) {
@@ -145,6 +149,8 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
 
   // Per-activity drafts
   final Map<String, _ActivityDraft> _drafts = {};
+  // Track which drafts have already been refreshed from hydrated backend data
+  final Set<String> _hydratedDraftIds = {};
 
   // Editor controllers (bound to the focused activity)
   final _titleCtrl = TextEditingController();
@@ -189,6 +195,7 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
   void _resetViewStateForProject() {
     _selectedIds.clear();
     _drafts.clear();
+    _hydratedDraftIds.clear();
     _focusedId = null;
     _initialized = false;
     _lastSavedPath = null;
@@ -670,11 +677,61 @@ class _ReportsPageState extends ConsumerState<ReportsPage>
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
+  void _refreshDraftsFromHydratedItems(List<ReportActivityItem> items) {
+    const kGenericPurpose =
+        'Desarrollar las acciones operativas previstas para la actividad y documentar sus resultados en campo.';
+    bool anyChange = false;
+    for (final item in items) {
+      if (_hydratedDraftIds.contains(item.id)) continue;
+      final hasPurpose = item.purpose?.trim().isNotEmpty == true;
+      final hasDetail = item.detail?.trim().isNotEmpty == true;
+      final hasAgreements = item.agreements?.trim().isNotEmpty == true;
+      if (!hasPurpose && !hasDetail && !hasAgreements) continue;
+      _hydratedDraftIds.add(item.id);
+      final existingDraft = _drafts[item.id];
+      if (existingDraft == null) continue;
+      final purposeNeedsUpdate =
+          hasPurpose && existingDraft.purpose.trim() == kGenericPurpose;
+      final detailNeedsUpdate =
+          hasDetail && _looksGenericReportText(existingDraft.detail);
+      final agreementsNeedsUpdate =
+          hasAgreements && existingDraft.agreements.trim().isEmpty;
+      if (!purposeNeedsUpdate && !detailNeedsUpdate && !agreementsNeedsUpdate) continue;
+      final newBase = _ActivityDraft.from(item);
+      _drafts[item.id] = _ActivityDraft(
+        title: existingDraft.title,
+        purpose: purposeNeedsUpdate ? newBase.purpose : existingDraft.purpose,
+        detail: detailNeedsUpdate ? newBase.detail : existingDraft.detail,
+        agreements: agreementsNeedsUpdate ? newBase.agreements : existingDraft.agreements,
+      );
+      anyChange = true;
+      if (item.id == _focusedId) {
+        final updated = _drafts[item.id]!;
+        if (purposeNeedsUpdate) _purposeCtrl.text = updated.purpose;
+        if (detailNeedsUpdate) _detailCtrl.text = updated.detail;
+        if (agreementsNeedsUpdate) _agreementsCtrl.text = updated.agreements;
+      }
+    }
+    if (anyChange && mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
     final filters = ref.watch(reportFiltersProvider);
     final activitiesAsync = ref.watch(reportActivitiesProvider);
+
+    // Refresh drafts when hydrated data arrives, without mutating state in build().
+    ref.listen<AsyncValue<List<ReportActivityItem>>>(
+      reportActivitiesProvider,
+      (_, next) {
+        final items = next.valueOrNull;
+        if (items == null) return;
+        final approved = items.where(_isApproved).toList();
+        if (approved.isEmpty) return;
+        _refreshDraftsFromHydratedItems(approved);
+      },
+    );
 
     if (activeProjectId != _projectScope) {
       WidgetsBinding.instance.addPostFrameCallback((_) {

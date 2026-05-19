@@ -499,6 +499,99 @@ async def delete_activity(
         }),
     )
     doc_ref.delete()
+    # Limpiar assignments y evidencias que referencian esta actividad
+    cascade_counts = _delete_activity_cascade(client, str(uuid))
+    if cascade_counts.get("assignments") or cascade_counts.get("evidences"):
+        logger.info(
+            "delete_activity cascade: uuid=%s assignments=%d evidences=%d storage_files=%d",
+            uuid,
+            cascade_counts.get("assignments", 0),
+            cascade_counts.get("evidences", 0),
+            cascade_counts.get("storage_files", 0),
+        )
+
+
+def _delete_activity_cascade(
+    client,
+    activity_uuid: str,
+    object_paths_to_delete: list[str] | None = None,
+) -> dict[str, int]:
+    """Borra en Firestore todos los documentos que referencian a una actividad eliminada.
+
+    Retorna un dict con el conteo de documentos borrados por colección.
+    Los errores de storage (GCS/local) son best-effort y no abortan la limpieza.
+    """
+    counts: dict[str, int] = {}
+    uuid_str = str(activity_uuid)
+
+    # 1. Assignments que apuntan a esta actividad
+    assignment_docs = list(
+        client.collection("activities")
+        .document(uuid_str)
+        .collection("assignments")
+        .stream()
+    )
+    # También buscar en la colección raíz de assignments (si existe tal diseño)
+    root_assignment_docs = list(
+        client.collection("assignments")
+        .where("activity_id", "==", uuid_str)
+        .stream()
+    )
+    for doc in assignment_docs:
+        doc.reference.delete()
+    for doc in root_assignment_docs:
+        doc.reference.delete()
+    counts["assignments"] = len(assignment_docs) + len(root_assignment_docs)
+
+    # 2. Documentos de evidencias referenciando esta actividad
+    evidence_docs = list(
+        client.collection("evidences")
+        .where("activity_id", "==", uuid_str)
+        .stream()
+    )
+    evidence_object_paths: list[str] = []
+    for doc in evidence_docs:
+        payload = doc.to_dict() or {}
+        # Resolver ruta del archivo para limpiar storage después
+        for key in ("object_path", "gcs_path", "storage_path", "pending_object_path"):
+            raw = str(payload.get(key) or "").strip()
+            if raw:
+                evidence_object_paths.append(raw)
+                break
+        doc.reference.delete()
+    counts["evidences"] = len(evidence_docs)
+
+    # 3. Limpiar archivos de storage (best-effort)
+    all_paths = (object_paths_to_delete or []) + evidence_object_paths
+    if all_paths:
+        from app.core.config import settings as _settings
+        from pathlib import Path as _Path
+
+        is_local = _settings.EVIDENCE_STORAGE_BACKEND == "local"
+        deleted_files = 0
+        for path in all_paths:
+            normalized = path.strip()
+            if not normalized:
+                continue
+            try:
+                if is_local:
+                    local_file = _Path(_settings.LOCAL_UPLOADS_DIR) / normalized
+                    if local_file.exists():
+                        local_file.unlink()
+                        deleted_files += 1
+                else:
+                    from google.cloud import storage as _gcs
+                    gcs_client = _gcs.Client()
+                    bucket_name = str(_settings.GCS_BUCKET or "").strip().lstrip("gs://").strip("/")
+                    blob = gcs_client.bucket(bucket_name).blob(normalized)
+                    if blob.exists(client=gcs_client):
+                        blob.delete()
+                        deleted_files += 1
+            except Exception as exc:
+                logger.warning("cascade_delete: could not remove storage object %s: %s", path, exc)
+        counts["storage_files"] = deleted_files
+
+    return counts
 
 
 @router.patch("/{uuid}/flags", response_model=ActivityDTO)

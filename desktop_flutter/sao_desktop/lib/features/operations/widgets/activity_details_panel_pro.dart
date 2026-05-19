@@ -1057,6 +1057,24 @@ class _ActivityDetailsPanelProState
         rawName.toUpperCase() != rawId.toUpperCase()) {
       return rawName;
     }
+
+    // For CUSTOM_ACT_* types not in catalog, check the wizard_payload and title
+    // so the human-readable name is shown instead of the raw ID.
+    final effectiveCode = (rawCode.isNotEmpty ? rawCode : rawId).toUpperCase();
+    if (effectiveCode.startsWith('CUSTOM_')) {
+      final wp = activity.wizardPayload;
+      final wpActName = (wp?['activity'] is Map)
+          ? ((wp!['activity'] as Map)['name']?.toString().trim() ?? '')
+          : '';
+      if (wpActName.isNotEmpty && !wpActName.toUpperCase().startsWith('CUSTOM_')) {
+        return wpActName;
+      }
+      final titleFallback = activity.activity.title.trim();
+      if (titleFallback.isNotEmpty && !titleFallback.toUpperCase().startsWith('CUSTOM_')) {
+        return titleFallback;
+      }
+    }
+
     if (rawCode.isNotEmpty) return rawCode;
     if (rawId.isNotEmpty) return rawId;
     return 'N/A';
@@ -1592,7 +1610,11 @@ class _ActivityDetailsPanelProState
                   ?.call('municipio', capturedMunicipio);
             },
           ),
-          if (_hasCustomWizardIds(activity)) ...[
+          // Show the custom-resolution banner only when the backend flag is active.
+          // Once an admin approves/replaces the custom values, catalog_changed is
+          // cleared on the backend and flags.catalogChanged becomes false here,
+          // preventing the banner from re-appearing for already-resolved activities.
+          if (activity.flags.catalogChanged && _hasCustomWizardIds(activity)) ...[
             const SizedBox(height: SaoSpacing.md),
             Container(
               padding: const EdgeInsets.all(SaoSpacing.sm),
@@ -2185,6 +2207,8 @@ class _ActivityDetailsPanelProState
     if (value == null || value.isEmpty || value == 'null') {
       return null;
     }
+    // Don't surface raw catalog IDs as display text
+    if (value.toUpperCase().startsWith('CUSTOM_')) return null;
     return value;
   }
 
@@ -2269,10 +2293,24 @@ class _ActivityDetailsPanelProState
   Future<void> _openCatalogResolution(ActivityWithDetails activity) async {
     final catalogRepo = ref.read(catalogRepositoryProvider);
     final actCode = activity.activityType?.code ?? activity.activityType?.id ?? '';
+
+    // When the activity type itself is a CUSTOM_* ID (not yet in the official
+    // catalog), filtering subcategories/purposes/topics by that ID returns an
+    // empty list. Fall back to all active catalog entries so the dropdowns are
+    // usable for the "Reemplazar" action.
+    final isCustomActivity =
+        actCode.isEmpty || actCode.toUpperCase().startsWith('CUSTOM_');
+
     final actTypes = catalogRepo.getActivityTypes();
-    final subcats = catalogRepo.subcategoriesFor(actCode);
-    final purposes = catalogRepo.purposesFor(activityId: actCode);
-    final topics = catalogRepo.temasSugeridosFor(actCode);
+    final subcats = isCustomActivity
+        ? catalogRepo.getAllSubcategories()
+        : catalogRepo.subcategoriesFor(actCode);
+    final purposes = isCustomActivity
+        ? catalogRepo.getAllPurposes()
+        : catalogRepo.purposesFor(activityId: actCode);
+    final topics = isCustomActivity
+        ? catalogRepo.getAllTopics()
+        : catalogRepo.temasSugeridosFor(actCode);
     final results = catalogRepo.getResults();
     final attendees = catalogRepo.getAssistants();
 

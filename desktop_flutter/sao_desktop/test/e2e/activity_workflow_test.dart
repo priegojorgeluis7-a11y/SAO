@@ -198,15 +198,15 @@ void main() {
 
         // WHEN: Activity attempts to transition COMPLETADA → CANCELED
         // Should FAIL unless force=true AND user role=ADMIN
-        final attempt_completedCancel = (force: false, role: 'COORD');
+        const attemptCompletedcancel = (force: false, role: 'COORD');
 
         // THEN: Would be rejected by state machine
-        expect(attempt_completedCancel.force, isFalse);
-        expect(attempt_completedCancel.role, isNotEmpty);
+        expect(attemptCompletedcancel.force, isFalse);
+        expect(attemptCompletedcancel.role, isNotEmpty);
 
         // WHEN: state machine checks COMPLETADA + force=false
-        final canTransition = (attempt_completedCancel.force == true) ||
-            (attempt_completedCancel.role == 'ADMIN');
+        final canTransition = (attemptCompletedcancel.force == true) ||
+            (attemptCompletedcancel.role == 'ADMIN');
 
         // THEN: transition blocked
         expect(canTransition, isFalse);
@@ -372,8 +372,8 @@ void main() {
       // OLD behavior: Dashboard would recalculate from queue (fragile)
       // NEW behavior: Dashboard independent, recalculates from activities only
 
-      final reviewQueueDelta = -1; // 1 approval
-      final dashboardImpact =
+      const reviewQueueDelta = -1; // 1 approval
+      const dashboardImpact =
           0; // No impact if no activity state change in activities table
 
       // THEN: Dashboard not affected by review queue changes alone

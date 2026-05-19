@@ -38,7 +38,7 @@ class RiskBadge extends StatelessWidget {
         color: config.bgColor,
         borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
         border: Border.all(
-          color: config.color.withOpacity(0.4),
+          color: config.color.withValues(alpha: 0.4),
         ),
       ),
       child: Row(
@@ -70,7 +70,7 @@ class RiskBadge extends StatelessWidget {
           label: 'Bajo',
           emoji: '🟢',
           color: SaoColors.riskLow,
-          bgColor: SaoColors.riskLow.withOpacity(0.12),
+          bgColor: SaoColors.riskLow.withValues(alpha: 0.12),
         );
       case 'medio':
       case 'medium':
@@ -78,7 +78,7 @@ class RiskBadge extends StatelessWidget {
           label: 'Medio',
           emoji: '🟡',
           color: SaoColors.riskMedium,
-          bgColor: SaoColors.riskMedium.withOpacity(0.12),
+          bgColor: SaoColors.riskMedium.withValues(alpha: 0.12),
         );
       case 'alto':
       case 'high':
@@ -86,7 +86,7 @@ class RiskBadge extends StatelessWidget {
           label: 'Alto',
           emoji: '🟠',
           color: SaoColors.riskHigh,
-          bgColor: SaoColors.riskHigh.withOpacity(0.12),
+          bgColor: SaoColors.riskHigh.withValues(alpha: 0.12),
         );
       case 'prioritario':
       case 'critical':
@@ -94,7 +94,7 @@ class RiskBadge extends StatelessWidget {
           label: 'Prioritario',
           emoji: '🔴',
           color: SaoColors.riskPriority,
-          bgColor: SaoColors.riskPriority.withOpacity(0.12),
+          bgColor: SaoColors.riskPriority.withValues(alpha: 0.12),
         );
       default:
         return _RiskConfig(

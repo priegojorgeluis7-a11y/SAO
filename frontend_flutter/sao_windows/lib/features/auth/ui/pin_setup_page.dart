@@ -103,7 +103,7 @@ class _PinSetupPageState extends ConsumerState<PinSetupPage> {
                   color: SaoColors.primary,
                 ),
                 const SizedBox(height: 16),
-                Text(
+                const Text(
                   'Configura tu PIN offline',
                   style: SaoTypography.pageTitle,
                   textAlign: TextAlign.center,

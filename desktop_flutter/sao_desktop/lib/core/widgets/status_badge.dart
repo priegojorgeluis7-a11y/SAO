@@ -59,42 +59,42 @@ class StatusBadge extends StatelessWidget {
           label: 'PENDIENTE',
           icon: Icons.pending_actions_rounded,
           color: SaoColors.statusPendiente,
-          bgColor: SaoColors.statusPendiente.withOpacity(0.12),
+          bgColor: SaoColors.statusPendiente.withValues(alpha: 0.12),
         );
       case ActivityStatus.approved:
         return _StatusConfig(
           label: 'APROBADA',
           icon: Icons.check_circle_rounded,
           color: SaoColors.statusAprobado,
-          bgColor: SaoColors.statusAprobado.withOpacity(0.12),
+          bgColor: SaoColors.statusAprobado.withValues(alpha: 0.12),
         );
       case ActivityStatus.rejected:
         return _StatusConfig(
           label: 'RECHAZADA',
           icon: Icons.cancel_rounded,
           color: SaoColors.statusRechazado,
-          bgColor: SaoColors.statusRechazado.withOpacity(0.12),
+          bgColor: SaoColors.statusRechazado.withValues(alpha: 0.12),
         );
       case ActivityStatus.needsFix:
         return _StatusConfig(
           label: 'REQUIERE FIX',
           icon: Icons.build_circle_rounded,
           color: SaoColors.riskHigh,
-          bgColor: SaoColors.riskHigh.withOpacity(0.12),
+          bgColor: SaoColors.riskHigh.withValues(alpha: 0.12),
         );
       case ActivityStatus.corrected:
         return _StatusConfig(
           label: 'CORREGIDA',
           icon: Icons.build_circle_rounded,
           color: SaoColors.info,
-          bgColor: SaoColors.info.withOpacity(0.12),
+          bgColor: SaoColors.info.withValues(alpha: 0.12),
         );
       case ActivityStatus.conflict:
         return _StatusConfig(
           label: 'PENDIENTE',
           icon: Icons.warning_amber_rounded,
           color: SaoColors.warning,
-          bgColor: SaoColors.warning.withOpacity(0.12),
+          bgColor: SaoColors.warning.withValues(alpha: 0.12),
         );
       default:
         return _StatusConfig(

@@ -77,7 +77,7 @@ void main() {
 
   test('pull sync persists wizard payload fields so they survive across views', () async {
     final db = AppDb();
-    addTearDown(() => db.close());
+    addTearDown(db.close);
 
     final now = DateTime.now().toUtc();
 

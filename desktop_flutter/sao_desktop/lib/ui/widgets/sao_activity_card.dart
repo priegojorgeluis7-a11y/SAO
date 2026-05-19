@@ -150,7 +150,7 @@ class SaoActivityCard extends StatelessWidget {
               overlayColor: WidgetStateProperty.resolveWith((states) {
                 if (!compact) return null;
                 if (states.contains(WidgetState.pressed)) {
-                  return compactStatus.color.withOpacity(0.10);
+                  return compactStatus.color.withValues(alpha: 0.10);
                 }
                 return null;
               }),
@@ -170,7 +170,7 @@ class SaoActivityCard extends StatelessWidget {
                           BoxShadow(
                             blurRadius: isHover ? 12 : 8,
                             offset: const Offset(0, 3),
-                            color: SaoColors.gray900.withOpacity(isHover ? 0.08 : 0.05),
+                            color: SaoColors.gray900.withValues(alpha: isHover ? 0.08 : 0.05),
                           ),
                         ]
                       : [
@@ -178,8 +178,8 @@ class SaoActivityCard extends StatelessWidget {
                             blurRadius: isHover ? 14 : 10,
                             offset: const Offset(0, 4),
                             color: needsAttention
-                                ? SaoColors.warning.withOpacity(0.1)
-                                : SaoColors.gray900.withOpacity(isHover ? 0.06 : 0.04),
+                                ? SaoColors.warning.withValues(alpha: 0.1)
+                                : SaoColors.gray900.withValues(alpha: isHover ? 0.06 : 0.04),
                           ),
                         ],
                   color: compact
@@ -319,10 +319,10 @@ class SaoActivityCard extends StatelessWidget {
                 decoration: BoxDecoration(
                   color: pkNotRegistered
                       ? SaoColors.alertBg
-                      : SaoColors.surfaceRaisedFor(context).withOpacity(0.85),
+                      : SaoColors.surfaceRaisedFor(context).withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: resolvedStatus.color.withOpacity(0.25),
+                    color: resolvedStatus.color.withValues(alpha: 0.25),
                     width: 1,
                   ),
                 ),
@@ -481,7 +481,7 @@ class SaoActivityCard extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(
+            const Icon(
               Icons.chevron_right_rounded,
               color: SaoColors.gray400,
               size: 20,
@@ -505,7 +505,7 @@ class SaoActivityCard extends StatelessWidget {
               vertical: 6,
             ),
             decoration: BoxDecoration(
-              color: riskHeaderBackgroundColor ?? accentColor.withOpacity(0.14),
+              color: riskHeaderBackgroundColor ?? accentColor.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(SaoRadii.sm),
             ),
             child: Text(

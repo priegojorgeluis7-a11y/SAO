@@ -36,6 +36,23 @@ class _FakeDocRef:
         self.deleted = True
         self._payload.clear()
 
+    def collection(self, name):
+        """Soporte para sub-colecciones (ej. activity/{id}/assignments)."""
+        return _FakeSubCollection()
+
+
+class _FakeSubCollection:
+    """Sub-colección vacía para soportar la cascada de borrado."""
+
+    def stream(self):
+        return iter([])
+
+    def where(self, *args, **kwargs):
+        return self
+
+    def document(self, doc_id):
+        return _FakeDocRef({})
+
 
 class _FakeCollection:
     def __init__(self, payload):
@@ -46,6 +63,12 @@ class _FakeCollection:
         if doc_id not in self._refs:
             self._refs[doc_id] = _FakeDocRef(self._payload)
         return self._refs[doc_id]
+
+    def where(self, *args, **kwargs):
+        return self
+
+    def stream(self):
+        return iter([])
 
 
 class _FakeClient:

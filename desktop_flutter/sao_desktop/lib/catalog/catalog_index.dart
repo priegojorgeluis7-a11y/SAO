@@ -12,6 +12,8 @@
 /// final role = RolesCatalog.coordinador;
 /// final project = ProjectsCatalog.tmq;
 /// ```
+library;
+
 
 export 'activity_catalog.dart';
 export 'status_catalog.dart';

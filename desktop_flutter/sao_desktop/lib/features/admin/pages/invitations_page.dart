@@ -139,7 +139,7 @@ class _AdminInvitationsPageState extends ConsumerState<AdminInvitationsPage> {
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
-        border: Border(bottom: BorderSide(color: AppColors.border)),
+        border: const Border(bottom: BorderSide(color: AppColors.border)),
       ),
       child: Row(
         children: [
@@ -153,7 +153,7 @@ class _AdminInvitationsPageState extends ConsumerState<AdminInvitationsPage> {
             Padding(
               padding: const EdgeInsets.only(right: 8),
               child: FilterChip(
-                label: Text('${_count(entry.key) > 0 ? _count(entry.key).toString() + ' ' : ''}${entry.value}'),
+                label: Text('${_count(entry.key) > 0 ? '${_count(entry.key)} ' : ''}${entry.value}'),
                 selected: _statusFilter == entry.key,
                 onSelected: (_) => setState(() => _statusFilter = entry.key),
                 visualDensity: VisualDensity.compact,
@@ -180,10 +180,10 @@ class _AdminInvitationsPageState extends ConsumerState<AdminInvitationsPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, color: AppColors.riskCritical, size: 40),
+            const Icon(Icons.error_outline, color: AppColors.riskCritical, size: 40),
             const SizedBox(height: 8),
             Text(_error ?? 'Error desconocido',
-                style: TextStyle(color: AppColors.riskCritical)),
+                style: const TextStyle(color: AppColors.riskCritical)),
             const SizedBox(height: 12),
             FilledButton(onPressed: _load, child: const Text('Reintentar')),
           ],
@@ -194,13 +194,13 @@ class _AdminInvitationsPageState extends ConsumerState<AdminInvitationsPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.mail_outline, color: AppColors.gray400, size: 48),
+            const Icon(Icons.mail_outline, color: AppColors.gray400, size: 48),
             const SizedBox(height: 12),
             Text(
               _statusFilter == 'all'
                   ? 'No hay invitaciones aún'
                   : 'No hay invitaciones en esta categoría',
-              style: TextStyle(color: AppColors.gray500),
+              style: const TextStyle(color: AppColors.gray500),
             ),
             if (_statusFilter == 'all') ...[
               const SizedBox(height: 16),
@@ -301,7 +301,7 @@ class _InvitationRow extends StatelessWidget {
                       if (inv.targetEmail != null)
                         Text(
                           'Para: ${inv.targetEmail}',
-                          style: TextStyle(
+                          style: const TextStyle(
                             fontSize: 11,
                             color: AppColors.gray500,
                           ),
@@ -344,13 +344,13 @@ class _InvitationRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 if (isUsed) ...[
-                  Text('Usada por:', style: TextStyle(fontSize: 11, color: AppColors.gray500)),
+                  const Text('Usada por:', style: TextStyle(fontSize: 11, color: AppColors.gray500)),
                   Text(inv.usedBy ?? '—', style: const TextStyle(fontSize: 12)),
                   if (inv.usedAt != null)
                     Text(_formatDate(inv.usedAt!),
-                        style: TextStyle(fontSize: 11, color: AppColors.gray400)),
+                        style: const TextStyle(fontSize: 11, color: AppColors.gray400)),
                 ] else ...[
-                  Text('Vence:', style: TextStyle(fontSize: 11, color: AppColors.gray500)),
+                  const Text('Vence:', style: TextStyle(fontSize: 11, color: AppColors.gray500)),
                   Text(_formatDate(inv.expiresAt), style: const TextStyle(fontSize: 12)),
                   if (daysLeft != null)
                     Text(
@@ -370,7 +370,7 @@ class _InvitationRow extends StatelessWidget {
             width: 130,
             child: Text(
               _formatDate(inv.createdAt),
-              style: TextStyle(fontSize: 11, color: AppColors.gray400),
+              style: const TextStyle(fontSize: 11, color: AppColors.gray400),
             ),
           ),
         ],
@@ -439,11 +439,11 @@ class _CreateInvitationDialogState extends State<_CreateInvitationDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Row(
+      title: const Row(
         children: [
-          const Icon(Icons.mail_outline, size: 20),
-          const SizedBox(width: 8),
-          const Text('Nueva invitación'),
+          Icon(Icons.mail_outline, size: 20),
+          SizedBox(width: 8),
+          Text('Nueva invitación'),
         ],
       ),
       content: SizedBox(
@@ -504,7 +504,7 @@ class _CreateInvitationDialogState extends State<_CreateInvitationDialog> {
         // Optional target email
         const Text('Email destino (opcional)', style: TextStyle(fontWeight: FontWeight.w600)),
         const SizedBox(height: 4),
-        Text(
+        const Text(
           'Si lo llevas, solo ese email puede usar el código.',
           style: TextStyle(fontSize: 12, color: AppColors.gray500),
         ),
@@ -537,14 +537,14 @@ class _CreateInvitationDialogState extends State<_CreateInvitationDialog> {
             decoration: BoxDecoration(
               color: AppColors.riskCriticalBg,
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: AppColors.riskCritical.withOpacity(0.3)),
+              border: Border.all(color: AppColors.riskCritical.withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
-                Icon(Icons.error_outline, size: 16, color: AppColors.riskCritical),
+                const Icon(Icons.error_outline, size: 16, color: AppColors.riskCritical),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: Text(_error!, style: TextStyle(color: AppColors.riskCritical, fontSize: 13)),
+                  child: Text(_error!, style: const TextStyle(color: AppColors.riskCritical, fontSize: 13)),
                 ),
               ],
             ),
@@ -560,11 +560,11 @@ class _CreateInvitationDialogState extends State<_CreateInvitationDialog> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        const Row(
           children: [
-            const Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 28),
-            const SizedBox(width: 10),
-            const Text('Invitación creada', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            Icon(Icons.check_circle, color: Color(0xFF16A34A), size: 28),
+            SizedBox(width: 10),
+            Text('Invitación creada', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
           ],
         ),
         const SizedBox(height: 20),
@@ -606,7 +606,7 @@ class _CreateInvitationDialogState extends State<_CreateInvitationDialog> {
           ],
         ),
         const SizedBox(height: 16),
-        Text(
+        const Text(
           'Comparte este código con la persona que quieres invitar. Solo puede usarse una vez.',
           style: TextStyle(fontSize: 12, color: AppColors.gray500),
         ),
@@ -617,9 +617,9 @@ class _CreateInvitationDialogState extends State<_CreateInvitationDialog> {
   Widget _chip(IconData icon, String label, Color color) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
+          color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: color.withOpacity(0.2)),
+          border: Border.all(color: color.withValues(alpha: 0.2)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

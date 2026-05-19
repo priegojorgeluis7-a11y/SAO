@@ -1192,7 +1192,7 @@ class _AdminProjectsPageState extends ConsumerState<AdminProjectsPage> {
                                 const SizedBox(width: 12),
                                 Expanded(
                                   child: DropdownButtonFormField<String>(
-                                    value: status,
+                                    initialValue: status,
                                     items: const [
                                       DropdownMenuItem(
                                           value: 'active',
@@ -2642,50 +2642,6 @@ class _SectionCard extends StatelessWidget {
           ),
           const SizedBox(height: 10),
           child,
-        ],
-      ),
-    );
-  }
-}
-
-class _CoverageMiniMapCard extends StatelessWidget {
-  final int selectedCount;
-
-  const _CoverageMiniMapCard({required this.selectedCount});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 56,
-            height: 56,
-            decoration: BoxDecoration(
-              color: const Color(0xFFDBEAFE),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: const Icon(Icons.map_outlined, color: Color(0xFF1D4ED8)),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              selectedCount == 0
-                  ? 'Sin cobertura seleccionada'
-                  : 'Cobertura seleccionada: $selectedCount municipio(s)',
-              style: const TextStyle(
-                fontWeight: FontWeight.w600,
-                color: Color(0xFF0F172A),
-              ),
-            ),
-          ),
         ],
       ),
     );

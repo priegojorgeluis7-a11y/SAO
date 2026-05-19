@@ -53,7 +53,7 @@ void main() {
   // regardless of whether the URL includes "index.html" or not.
   // Routes become /#/route instead of /route.
   if (kIsWeb) {
-    setUrlStrategy(HashUrlStrategy());
+    setUrlStrategy(const HashUrlStrategy());
   }
   runApp(const _BootstrapHost());
 }

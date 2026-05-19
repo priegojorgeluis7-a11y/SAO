@@ -2,7 +2,7 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import 'report_section.dart';
-import '../../../core/utils/project_terminology.dart';
+import '../../../../core/utils/project_terminology.dart';
 
 /// Sección 2: Datos Generales (tabla técnica)
 class GeneralDataSection extends ReportSection {

@@ -31,7 +31,7 @@ void main() {
 
   test('saveDraftSilently does not erase existing wizard fields while controller is still loading', () async {
     final db = AppDb();
-    addTearDown(() => db.close());
+    addTearDown(db.close);
 
     await db.into(db.roles).insertOnConflictUpdate(
           const RolesCompanion(

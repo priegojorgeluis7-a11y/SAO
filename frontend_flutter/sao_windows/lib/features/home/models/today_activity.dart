@@ -39,6 +39,7 @@ class TodayActivity {
   final String nextAction;
   final String? assignedToUserId;
   final String? assignedToName;
+  final bool isCoResponsible;
 
   const TodayActivity({
     required this.id,
@@ -61,6 +62,7 @@ class TodayActivity {
     this.nextAction = 'SIN_ACCION',
     this.assignedToUserId,
     this.assignedToName,
+    this.isCoResponsible = false,
   });
 
   TodayActivity copyWith({
@@ -76,6 +78,7 @@ class TodayActivity {
     String? nextAction,
     String? assignedToUserId,
     String? assignedToName,
+    bool? isCoResponsible,
   }) {
     return TodayActivity(
       id: id,
@@ -98,6 +101,7 @@ class TodayActivity {
       nextAction: nextAction ?? this.nextAction,
       assignedToUserId: assignedToUserId ?? this.assignedToUserId,
       assignedToName: assignedToName ?? this.assignedToName,
+      isCoResponsible: isCoResponsible ?? this.isCoResponsible,
     );
   }
 }

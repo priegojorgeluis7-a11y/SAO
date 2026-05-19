@@ -253,7 +253,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.cloud_off_rounded, size: 14, color: SaoColors.alertText),
+                        const Icon(Icons.cloud_off_rounded, size: 14, color: SaoColors.alertText),
                         const SizedBox(width: 4),
                         Text(
                           'Sin conexión',
@@ -470,7 +470,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
         width: size,
         height: size,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => fallback,
+        errorBuilder: (_, _, _) => fallback,
       );
     }
     return Image.file(
@@ -478,7 +478,7 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
       width: size,
       height: size,
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => fallback,
+      errorBuilder: (_, _, _) => fallback,
     );
   }
 }

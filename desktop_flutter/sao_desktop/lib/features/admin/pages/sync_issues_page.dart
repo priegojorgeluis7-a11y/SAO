@@ -1,6 +1,5 @@
 // ignore_for_file: deprecated_member_use
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
@@ -411,7 +410,7 @@ class _UserPanel extends StatelessWidget {
                             onTap: () => onSelect(u),
                             child: Container(
                               color: isSelected
-                                  ? AppColors.primary.withOpacity(0.08)
+                                  ? AppColors.primary.withValues(alpha: 0.08)
                                   : null,
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 12, vertical: 9),
@@ -773,7 +772,7 @@ class _ActivityPanel extends StatelessWidget {
                                 onTap: () => onToggleSelect(a.uuid),
                                 child: Container(
                                   color: isSelected
-                                      ? AppColors.primary.withOpacity(0.06)
+                                      ? AppColors.primary.withValues(alpha: 0.06)
                                       : a.isStuck
                                           ? const Color(0xFFFFFBEB)
                                           : null,
@@ -892,14 +891,14 @@ class _ActivityPanel extends StatelessWidget {
                                       SizedBox(
                                         width: 70,
                                         child: a.hasWizardPayload
-                                            ? Row(
+                                            ? const Row(
                                                 children: [
-                                                  const Icon(
+                                                  Icon(
                                                     Icons.check_circle_rounded,
                                                     size: 14,
                                                     color: AppColors.success,
                                                   ),
-                                                  const SizedBox(width: 4),
+                                                  SizedBox(width: 4),
                                                   Text(
                                                     'Llena',
                                                     style: TextStyle(
@@ -909,7 +908,7 @@ class _ActivityPanel extends StatelessWidget {
                                                   ),
                                                 ],
                                               )
-                                            : Row(
+                                            : const Row(
                                                 children: [
                                                   Icon(
                                                     Icons
@@ -917,7 +916,7 @@ class _ActivityPanel extends StatelessWidget {
                                                     size: 14,
                                                     color: AppColors.warning,
                                                   ),
-                                                  const SizedBox(width: 4),
+                                                  SizedBox(width: 4),
                                                   Text(
                                                     'Vacía',
                                                     style: TextStyle(
@@ -1035,7 +1034,7 @@ class _StatChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bg = active
-        ? (color ?? AppColors.primary).withOpacity(0.12)
+        ? (color ?? AppColors.primary).withValues(alpha: 0.12)
         : AppColors.gray100;
     final fg = active ? (color ?? AppColors.primary) : AppColors.gray600;
     return InkWell(
@@ -1047,7 +1046,7 @@ class _StatChip extends StatelessWidget {
           color: bg,
           borderRadius: BorderRadius.circular(20),
           border: active
-              ? Border.all(color: (color ?? AppColors.primary).withOpacity(0.3))
+              ? Border.all(color: (color ?? AppColors.primary).withValues(alpha: 0.3))
               : null,
         ),
         child: Text(
@@ -1074,7 +1073,7 @@ class _EmptySelection extends StatelessWidget {
         children: [
           Icon(Icons.manage_search_rounded,
               size: 52,
-              color: AppColors.textMutedFor(context).withOpacity(0.4)),
+              color: AppColors.textMutedFor(context).withValues(alpha: 0.4)),
           const SizedBox(height: 12),
           Text(
             'Selecciona un usuario para ver\nsus actividades en el servidor',

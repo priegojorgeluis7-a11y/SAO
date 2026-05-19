@@ -48,7 +48,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
 
     return CallbackShortcuts(
       bindings: {
-        SingleActivator(LogicalKeyboardKey.f5): () {
+        const SingleActivator(LogicalKeyboardKey.f5): () {
           if (!mounted) return;
           setState(() => _refreshToken++);
         },
@@ -79,7 +79,7 @@ class _AdminShellState extends ConsumerState<AdminShell> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.surface,
-                    border: Border(bottom: BorderSide(color: AppColors.border)),
+                    border: const Border(bottom: BorderSide(color: AppColors.border)),
                   ),
                   child: Row(
                     children: [

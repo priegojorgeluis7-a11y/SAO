@@ -47,7 +47,7 @@ class RiskClassification {
     // Reglas simples de clasificación automática
     final lowerText = text.toLowerCase();
     
-    RiskClassification _classify(String level, List<String> detectedTags) {
+    RiskClassification classify(String level, List<String> detectedTags) {
       return RiskClassification(
         riskLevel: level,
         tags: detectedTags,
@@ -57,24 +57,24 @@ class RiskClassification {
 
     // Infraestructura crítica (ORO)
     if (lowerText.contains('gasoducto') || lowerText.contains('cenagas')) {
-      return _classify('crítico', ['infraestructura_crítica', 'gasoducto']);
+      return classify('crítico', ['infraestructura_crítica', 'gasoducto']);
     }
     if (lowerText.contains('cfe') || lowerText.contains('electricidad')) {
-      return _classify('crítico', ['infraestructura_crítica', 'electricidad']);
+      return classify('crítico', ['infraestructura_crítica', 'electricidad']);
     }
 
     // Social (riesgo medio-alto)
     if (lowerText.contains('ejido') || 
         lowerText.contains('comunidad') || 
         lowerText.contains('asamblea')) {
-      return _classify('alto', ['social', 'comunitario']);
+      return classify('alto', ['social', 'comunitario']);
     }
 
     // Jurídico (riesgo medio-alto)
     if (lowerText.contains('avalúo') || 
         lowerText.contains('indaabin') || 
         lowerText.contains('predios')) {
-      return _classify('alto', ['jurídico', 'inmueble']);
+      return classify('alto', ['jurídico', 'inmueble']);
     }
 
     // Default: bajo

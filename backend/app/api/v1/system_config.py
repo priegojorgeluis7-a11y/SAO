@@ -27,12 +27,17 @@ class SystemConfig(BaseModel):
     google_calendar_id: str | None = None
     android_latest_version_code: int | None = None
     android_update_url: str | None = None
+    # Flags de comportamiento cliente controlables desde backend sin redistribuir.
+    # Ejemplos: allow_schedule_overlap, require_front_selection, require_pk, etc.
+    feature_flags: dict[str, bool] = {}
 
 
 class SystemConfigUpdate(BaseModel):
     google_calendar_id: str | None = None
     android_latest_version_code: int | None = None
     android_update_url: str | None = None
+    # Se admite cualquier flag booleano; el backend solo valida tipos, no nombres.
+    feature_flags: dict[str, bool] | None = None
 
 
 def _is_admin(user: Any) -> bool:
@@ -50,6 +55,9 @@ async def get_system_config(
         doc = db.collection(_COLLECTION).document(_DOC_ID).get()
         if doc.exists:
             data = doc.to_dict() or {}
+            raw_flags = data.get("feature_flags") or {}
+            # Garantizar que todos los valores sean bool
+            flags = {str(k): bool(v) for k, v in raw_flags.items() if isinstance(v, bool)}
             return SystemConfig(
                 google_calendar_id=data.get("google_calendar_id") or _DEFAULT_CALENDAR_ID,
                 android_latest_version_code=(
@@ -61,6 +69,7 @@ async def get_system_config(
                     str(data.get("android_update_url") or "").strip()
                     or "https://play.google.com/store/apps/details?id=com.tmq.sao"
                 ),
+                feature_flags=flags,
             )
     except Exception as exc:
         logger.warning("system_config read error: %s", exc)
@@ -110,6 +119,13 @@ async def update_system_config(
                 detail="android_update_url no puede estar vacío.",
             )
         update["android_update_url"] = normalized_url
+
+    if body.feature_flags is not None:
+        # Merge flags: los que vienen en el body sobreescriben; los que no vienen no se tocan.
+        # Se usa un merge en Firestore para este propósito (ver set con merge=True abajo).
+        # Aquí construimos el subpath de cada flag para el merge selectivo.
+        for flag_name, flag_value in body.feature_flags.items():
+            update[f"feature_flags.{flag_name}"] = bool(flag_value)
 
     if not update:
         raise HTTPException(

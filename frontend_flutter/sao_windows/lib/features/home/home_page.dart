@@ -164,22 +164,23 @@ class _HomePageState extends ConsumerState<HomePage>
           .setString('selected_project', widget.selectedProject);
     }
     // ignore: unawaited_futures
-    ref.read(offlineModeProvider.notifier).load();
-    // ignore: unawaited_futures
     _loadFilterMode();
     // ignore: unawaited_futures
     _loadHomeActivities();
-
     // ignore: unawaited_futures
     _resolveViewerRole();
     // ignore: unawaited_futures
+    _initAfterOfflineMode();
+  }
+
+  /// Espera a que el flag offline_mode sea leído de KvStore antes de ejecutar
+  /// llamadas de red, evitando la ventana donde el flag es `false` por defecto.
+  Future<void> _initAfterOfflineMode() async {
+    await ref.read(offlineModeProvider.notifier).load();
     _autoSyncCatalogIfNeeded(force: true);
-    // ignore: unawaited_futures
     _setupPushNotificationsBridge();
     _startRemoteRefreshTimer();
-    // ignore: unawaited_futures
     _refreshRemoteHomeStateIfNeeded(force: true);
-    // ignore: unawaited_futures
     _checkForAppUpdateOnce();
   }
 
@@ -906,7 +907,39 @@ class _HomePageState extends ConsumerState<HomePage>
       result.add(item);
     }
 
-    return result;
+    // Second pass: remove orphaned temp-assignment activities that are plain
+    // numeric IDs (timestamp-based, e.g. "1716000000000"). These are created
+    // by saveLocal before a push and should be cleaned up once the server-side
+    // activity (with a real pk) is present. Only remove when the orphan has no
+    // local execution state (pendiente) to avoid hiding in-progress work.
+    final pkItems = result
+        .where((i) => i.pk != null && i.pk! > 0)
+        .toList(growable: false);
+    if (pkItems.isEmpty) return result;
+
+    String normalize(String v) => v
+        .trim()
+        .toUpperCase()
+        .replaceAll('Á', 'A')
+        .replaceAll('É', 'E')
+        .replaceAll('Í', 'I')
+        .replaceAll('Ó', 'O')
+        .replaceAll('Ú', 'U')
+        .replaceAll(RegExp(r'\s+'), ' ');
+
+    return result.where((item) {
+      if (item.pk != null && item.pk! > 0) return true;
+      // Only consider items whose ID looks like a local timestamp (pure digits).
+      if (!RegExp(r'^\d+$').hasMatch(item.id)) return true;
+      // Keep if the operative has already started working on it.
+      if (item.executionState != ExecutionState.pendiente) return true;
+      // Drop the orphan when there is already a pk>0 item with the same title
+      // and the same assigned operative.
+      final nTitle = normalize(item.title);
+      return !pkItems.any((pk) =>
+          normalize(pk.title) == nTitle &&
+          pk.assignedToUserId == item.assignedToUserId);
+    }).toList();
   }
 
   int _executionStateScore(ExecutionState state) {
@@ -935,7 +968,7 @@ class _HomePageState extends ConsumerState<HomePage>
     final leftPk = left.pk;
     final rightPk = right.pk;
 
-    final normalize = (String value) => value
+    String normalize(String value) => value
         .trim()
         .toUpperCase()
         .replaceAll('Á', 'A')
@@ -1452,6 +1485,97 @@ class _HomePageState extends ConsumerState<HomePage>
     }
   }
 
+  bool _canAddCoResponsible(TodayActivity activity) {
+    if (ref.read(offlineModeProvider)) return false;
+    if (activity.executionState == ExecutionState.terminada) return false;
+    return _isAssignedToCurrentUser(
+      assignedToUserId: activity.assignedToUserId,
+      assignedToName: activity.assignedToName,
+    ) || _hasPrivilegedAssignmentTransferAccess;
+  }
+
+  Future<void> _openAddCoResponsibleSheet(TodayActivity activity) async {
+    final projectId = widget.selectedProject.trim();
+    if (projectId.isEmpty || projectId.toUpperCase() == kAllProjects) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'Selecciona un proyecto para agregar un co-responsable.'),
+      );
+      return;
+    }
+
+    List<Resource> resources;
+    try {
+      resources = await _agendaUsersRepository.getTransferCandidates(
+        projectId: projectId,
+        isOffline: false,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'No se pudo cargar el equipo del proyecto.'),
+      );
+      return;
+    }
+
+    // Exclude users already participating and admins
+    final existingParticipantIds = {
+      if (activity.assignedToUserId != null) activity.assignedToUserId!,
+    };
+    final candidates = resources
+        .where((r) =>
+            r.isActive &&
+            !existingParticipantIds.contains(r.id) &&
+            r.role != ResourceRole.administrador)
+        .toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+
+    if (candidates.isEmpty) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'No hay más personas disponibles en el proyecto.'),
+      );
+      return;
+    }
+
+    if (!mounted) return;
+    final selected = await showModalBottomSheet<Resource>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (_) => _AddCoResponsibleSheet(candidates: candidates),
+    );
+
+    if (selected == null || !mounted) return;
+
+    try {
+      await _assignmentsRepository.addParticipant(
+        activityId: activity.id,
+        participantUserId: selected.id,
+      );
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: '${selected.name} agregado como co-responsable.',
+          backgroundColor: SaoColors.success,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(
+          message: 'No se pudo agregar el co-responsable. Intenta de nuevo.',
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
   TodayActivity _toTodayActivity(HomeActivityRecord row) {
     final activity = row.activity;
     final executionState = _executionStateFromRow(activity);
@@ -1489,7 +1613,11 @@ class _HomePageState extends ConsumerState<HomePage>
     final hasAssignee = (row.assignedToUserId?.trim().isNotEmpty ?? false);
     final activityName = row.activityTypeName?.trim();
     final legacyTitle = _stripLegacyTitlePrefixes(activity.title);
-    final preferredTitle = (activityName?.isNotEmpty ?? false)
+    // Skip CUSTOM_ACT_* catalog stub names — they are raw IDs, not human-readable.
+    // Prefer activity.title which holds the planner-provided display name.
+    final activityNameIsCustomStub =
+        activityName != null && activityName.toUpperCase().startsWith('CUSTOM_');
+    final preferredTitle = (activityName?.isNotEmpty ?? false) && !activityNameIsCustomStub
         ? activityName!
         : legacyTitle;
     final title = _isLikelyActivityCode(preferredTitle)
@@ -1528,6 +1656,7 @@ class _HomePageState extends ConsumerState<HomePage>
       horaFin: activity.finishedAt,
       isUnplanned: row.isUnplanned,
       isRejected: isRejected,
+      isCoResponsible: row.isCoResponsible,
       syncState: syncState,
       operationalState: operationalState,
       reviewState: reviewState,
@@ -1931,9 +2060,10 @@ class _HomePageState extends ConsumerState<HomePage>
 
     final assignedTo = assignedToUserId?.trim().toLowerCase();
     if (assignedTo != null && assignedTo.isNotEmpty) {
-      if (assignedTo == currentUserId || assignedTo == currentUserEmail) {
-        return true;
-      }
+      // When an ID is present, only trust the ID — do not fall through to the
+      // name check, which could produce false positives for co-responsible
+      // siblings that share participant names.
+      return assignedTo == currentUserId || assignedTo == currentUserEmail;
     }
 
     final assignedName = assignedToName?.trim().toLowerCase();
@@ -1974,6 +2104,7 @@ class _HomePageState extends ConsumerState<HomePage>
     final resolvedId = await _resolveLocalActivityIdForAction(a);
     // Pasar la actividad con las horas ya registradas
     final currentActivity = (_findById(a.id) ?? a).copyWith();
+    if (!mounted) return null;
     final result = await context.push(
       '/activity/$resolvedId/wizard?project=${widget.selectedProject}',
       extra: currentActivity,
@@ -2036,6 +2167,7 @@ class _HomePageState extends ConsumerState<HomePage>
             gpsLocation: a.gpsLocation,
             isUnplanned: a.isUnplanned,
             isRejected: a.isRejected,
+            isCoResponsible: a.isCoResponsible,
             syncState: a.syncState,
             operationalState: a.operationalState,
             reviewState: a.reviewState,
@@ -2214,6 +2346,7 @@ class _HomePageState extends ConsumerState<HomePage>
       );
     }
 
+    if (!mounted) return;
     showTransientSnackBar(
       context,
       appSnackBar(
@@ -3236,6 +3369,12 @@ class _HomePageState extends ConsumerState<HomePage>
                                       : null,
                                   transferInProgress: _transferringActivityIds
                                       .contains(a.id),
+                                  onAddCoResponsible:
+                                      _canAddCoResponsible(currentActivity)
+                                      ? () => _openAddCoResponsibleSheet(
+                                          currentActivity,
+                                        )
+                                      : null,
                                   onSyncCompleted:
                                       (currentActivity.executionState ==
                                               ExecutionState.terminada &&
@@ -3274,6 +3413,113 @@ class _HomePageState extends ConsumerState<HomePage>
       return 'Tú';
     }
     return name?.isNotEmpty == true ? name : null;
+  }
+}
+
+/// Bottom sheet to pick a co-responsible to add to an activity.
+class _AddCoResponsibleSheet extends StatefulWidget {
+  final List<Resource> candidates;
+
+  const _AddCoResponsibleSheet({required this.candidates});
+
+  @override
+  State<_AddCoResponsibleSheet> createState() => _AddCoResponsibleSheetState();
+}
+
+class _AddCoResponsibleSheetState extends State<_AddCoResponsibleSheet> {
+  late String _selectedId;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedId = widget.candidates.first.id;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        left: 24,
+        right: 24,
+        top: 24,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 24,
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Agregar co-responsable',
+            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'La persona seleccionada será notificada y podrá ver la actividad.',
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: SaoColors.gray600),
+          ),
+          const SizedBox(height: 16),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 280),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: widget.candidates.length,
+              itemBuilder: (context, index) {
+                final r = widget.candidates[index];
+                final isSelected = r.id == _selectedId;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(
+                    isSelected
+                        ? Icons.radio_button_checked
+                        : Icons.radio_button_off,
+                    color: isSelected ? SaoColors.primary : SaoColors.gray400,
+                  ),
+                  title: Text(
+                    r.name,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  trailing: isSelected
+                      ? const Icon(Icons.check_rounded, color: SaoColors.primary)
+                      : null,
+                  selected: isSelected,
+                  selectedTileColor:
+                      SaoColors.primary.withValues(alpha: 0.05),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  onTap: () => setState(() => _selectedId = r.id),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 16),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(null),
+                child: const Text('Cancelar'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton(
+                onPressed: () {
+                  final selected = widget.candidates.firstWhere(
+                    (r) => r.id == _selectedId,
+                  );
+                  Navigator.of(context).pop(selected);
+                },
+                child: const Text('Agregar'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 }
 
@@ -3589,6 +3835,7 @@ class _SwipeActivityTile extends StatelessWidget {
   final String? assigneeLabel;
   final VoidCallback? onTransferResponsibility;
   final bool transferInProgress;
+  final VoidCallback? onAddCoResponsible;
 
   final VoidCallback onTapOpenWizard;
   final VoidCallback onSwipeRight;
@@ -3610,6 +3857,7 @@ class _SwipeActivityTile extends StatelessWidget {
     this.assigneeLabel,
     this.onTransferResponsibility,
     this.transferInProgress = false,
+    this.onAddCoResponsible,
     required this.onTapOpenWizard,
     required this.onSwipeRight,
     required this.onSwipeLeftIncident,
@@ -3755,6 +4003,7 @@ class _SwipeActivityTile extends StatelessWidget {
         assigneeLabel: assigneeLabel,
         onTransferResponsibility: onTransferResponsibility,
         transferInProgress: transferInProgress,
+        onAddCoResponsible: onAddCoResponsible,
         onTap: onTapOpenWizard,
         onSyncCompleted: onSyncCompleted,
         onDelete: onDelete,
@@ -3774,6 +4023,7 @@ class _ActivityTile extends StatelessWidget {
   final String? assigneeLabel;
   final VoidCallback? onTransferResponsibility;
   final bool transferInProgress;
+  final VoidCallback? onAddCoResponsible;
   final ExecutionState executionState;
   final ActivitySyncState syncState;
   final VoidCallback onTap;
@@ -3791,6 +4041,7 @@ class _ActivityTile extends StatelessWidget {
     this.assigneeLabel,
     this.onTransferResponsibility,
     this.transferInProgress = false,
+    this.onAddCoResponsible,
     required this.executionState,
     required this.syncState,
     required this.onTap,
@@ -3915,6 +4166,38 @@ class _ActivityTile extends StatelessWidget {
                                   ],
                                 ),
                               ),
+                            if (a.isCoResponsible)
+                              Container(
+                                margin: const EdgeInsets.only(right: 6),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: SaoColors.info.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: SaoColors.info),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.people_rounded,
+                                      size: 12,
+                                      color: SaoColors.info,
+                                    ),
+                                    SizedBox(width: 2),
+                                    Text(
+                                      'Co-responsable',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        color: SaoColors.info,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             if (needsAttention || isRejected)
                               Container(
                                 margin: const EdgeInsets.only(right: 6),
@@ -3998,6 +4281,17 @@ class _ActivityTile extends StatelessWidget {
                                 onPressed: onTransferResponsibility,
                                 icon: const Icon(
                                   Icons.swap_horiz_rounded,
+                                  size: 18,
+                                  color: SaoColors.gray600,
+                                ),
+                              ),
+                            if (onAddCoResponsible != null)
+                              IconButton(
+                                tooltip: 'Agregar co-responsable',
+                                splashRadius: 18,
+                                onPressed: onAddCoResponsible,
+                                icon: const Icon(
+                                  Icons.group_add_rounded,
                                   size: 18,
                                   color: SaoColors.gray600,
                                 ),

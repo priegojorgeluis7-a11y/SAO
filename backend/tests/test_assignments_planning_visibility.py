@@ -562,42 +562,43 @@ def test_transfer_assignment_writes_actor_and_role_details(monkeypatch):
 
 
 def test_next_project_sync_version_falls_back_when_index_query_fails(monkeypatch):
-    class _FailingOrderQuery:
-        def limit(self, _value):
-            return self
+    """Cuando el contador de Firestore falla, se recurre al escaneo de actividades."""
 
-        def stream(self):
-            raise RuntimeError('The query requires an index')
+    class _ErrorCounterRef:
+        def set(self, data, merge=False):
+            raise RuntimeError("The query requires an index")
 
-    class _FallbackCollection:
+        def get(self):
+            raise RuntimeError("The query requires an index")
+
+    class _ErrorCounterCollection:
+        def document(self, doc_id):
+            return _ErrorCounterRef()
+
+    class _ActivityCollection:
         def __init__(self, docs):
             self._docs = docs
 
         def where(self, field, op, value):
-            assert field == 'project_id'
-            assert op == '=='
-            filtered = [doc for doc in self._docs if doc.get('project_id') == value]
+            filtered = [d for d in self._docs if d.get(field) == value]
+            return _ActivityQuery(filtered)
 
-            class _WhereQuery:
-                def __init__(self, docs):
-                    self._docs = docs
+    class _ActivityQuery:
+        def __init__(self, docs):
+            self._docs = docs
 
-                def order_by(self, *_args, **_kwargs):
-                    return _FailingOrderQuery()
-
-                def stream(self):
-                    for payload in self._docs:
-                        yield SimpleNamespace(to_dict=lambda payload=payload: payload)
-
-            return _WhereQuery(filtered)
+        def stream(self):
+            for payload in self._docs:
+                yield SimpleNamespace(to_dict=lambda p=payload: p)
 
     class _FallbackClient:
         def __init__(self, docs):
             self._docs = docs
 
         def collection(self, name):
-            assert name == 'activities'
-            return _FallbackCollection(self._docs)
+            if name == "project_sync_counters":
+                return _ErrorCounterCollection()
+            return _ActivityCollection(self._docs)
 
     fake_client = _FallbackClient(
         [

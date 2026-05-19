@@ -221,9 +221,9 @@ class RolesCatalog {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: role.color.withOpacity(0.14),
+        color: role.color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: role.color.withOpacity(0.3)),
+        border: Border.all(color: role.color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

@@ -788,6 +788,22 @@ def review_decision(
     else:
         activity_payload = activity_snap.to_dict() or {}
 
+    # Guard: no permitir revisar actividades en estado inválido
+    current_state = _normalize_execution_state(activity_payload.get("execution_state"))
+    _REVIEWABLE_STATES = {REVISION_PENDIENTE, COMPLETADA}
+    if current_state not in _REVIEWABLE_STATES:
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
+            code="REVIEW_INVALID_STATE",
+            message=f"No se puede revisar una actividad en estado {current_state}",
+        )
+    if current_state == COMPLETADA and decision in {"APPROVE", "APPROVE_EXCEPTION"}:
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
+            code="REVIEW_ALREADY_APPROVED",
+            message="La actividad ya está aprobada",
+        )
+
     if decision == "REJECT":
         if not body.reject_reason_code:
             raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_REJECT_REASON_REQUIRED", message="reject_reason_code is required when decision is REJECT")

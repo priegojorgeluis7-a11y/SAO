@@ -88,7 +88,7 @@ void main() {
 
   test('wizard init backfills missing rejected fields from backend sync payload', () async {
     final db = AppDb();
-    addTearDown(() => db.close());
+    addTearDown(db.close);
 
     await db.into(db.roles).insertOnConflictUpdate(
           const RolesCompanion(

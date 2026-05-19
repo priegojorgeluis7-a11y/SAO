@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mapa de Calor TSNL – Actividades</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f1f5f9; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── Header ── */
+#header { background: #1e3a5f; color: white; padding: 10px 18px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#header h1 { font-size: 17px; font-weight: 700; }
+#header span { font-size: 12px; opacity: .75; }
+
+/* ── Login overlay ── */
+#login-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #1e3a5f 0%, #0f2440 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+#login-box {
+  background: white; border-radius: 14px; padding: 36px 40px;
+  width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  display: flex; flex-direction: column; gap: 16px;
+}
+#login-box h2 { font-size: 20px; font-weight: 700; color: #1e3a5f; text-align: center; margin-bottom: 4px; }
+#login-box .subtitle { font-size: 12px; color: #94a3b8; text-align: center; margin-top: -12px; }
+#login-box label { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: -10px; }
+#login-box input {
+  border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px;
+  font-size: 14px; outline: none; width: 100%;
+}
+#login-box input:focus { border-color: #1e3a5f; }
+#login-submit {
+  background: #1e3a5f; color: white; border: none; border-radius: 8px;
+  padding: 11px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px;
+}
+#login-submit:hover:not(:disabled) { background: #2d5187; }
+#login-submit:disabled { background: #94a3b8; cursor: not-allowed; }
+#login-error { font-size: 12px; color: #ef4444; text-align: center; min-height: 16px; }
+#login-logo { text-align: center; font-size: 32px; margin-bottom: -8px; }
+
+/* ── User bar ── */
+#user-bar {
+  background: #163358; color: white; padding: 5px 18px;
+  display: none; align-items: center; gap: 8px; flex-shrink: 0;
+  font-size: 12px; border-bottom: 1px solid #122a47;
+}
+#user-bar span { opacity: .8; }
+#logout-btn {
+  margin-left: auto; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+  color: white; border-radius: 5px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+}
+#logout-btn:hover { background: rgba(255,255,255,.25); }
+
+/* ── Toolbar ── */
+#toolbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 8px 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-shrink: 0; }
+#toolbar input, #toolbar select {
+  border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 10px;
+  font-size: 13px; background: #f8fafc; outline: none;
+}
+#toolbar input { width: 200px; }
+#toolbar input:focus, #toolbar select:focus { border-color: #3b82f6; }
+#toolbar label { font-size: 12px; color: #64748b; font-weight: 600; }
+.filter-group { display: flex; align-items: center; gap: 5px; }
+#clear-btn {
+  margin-left: auto; padding: 5px 12px; background: #f1f5f9; border: 1px solid #cbd5e1;
+  border-radius: 6px; font-size: 13px; cursor: pointer; color: #475569;
+}
+#clear-btn:hover { background: #e2e8f0; }
+#count-badge {
+  background: #1e3a5f; color: white; border-radius: 20px;
+  padding: 3px 10px; font-size: 12px; font-weight: 600; margin-left: 6px;
+}
+
+/* ── Main layout ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+#map { flex: 1; }
+
+/* ── Detail panel ── */
+#detail-panel {
+  width: 360px; flex-shrink: 0; background: white; overflow-y: auto;
+  border-left: 2px solid #e2e8f0; display: flex; flex-direction: column;
+  transition: width .2s;
+}
+#detail-panel.hidden { width: 0; overflow: hidden; border: none; }
+#panel-header {
+  background: #1e3a5f; color: white; padding: 12px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-weight: 700; font-size: 14px; flex-shrink: 0;
+}
+#panel-close {
+  cursor: pointer; font-size: 18px; line-height: 1;
+  background: none; border: none; color: white; padding: 0 4px;
+}
+#panel-body { padding: 16px; flex: 1; }
+
+.detail-section { margin-bottom: 16px; }
+.detail-section h3 {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  color: #94a3b8; letter-spacing: .8px; margin-bottom: 6px;
+  border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+}
+.detail-row { display: flex; gap: 8px; margin-bottom: 5px; font-size: 13px; }
+.detail-label { color: #64748b; flex-shrink: 0; min-width: 90px; font-weight: 500; }
+.detail-value { color: #1e293b; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+}
+.badge-state-COMPLETADA { background: #dcfce7; color: #166534; }
+.badge-state-PENDIENTE { background: #fef9c3; color: #854d0e; }
+.badge-state-EN_CURSO { background: #dbeafe; color: #1e40af; }
+.badge-state-REVISION_PENDIENTE { background: #f3e8ff; color: #6b21a8; }
+.badge-state-CANCELADA { background: #fee2e2; color: #991b1b; }
+.badge-risk-bajo { background: #dcfce7; color: #166534; }
+.badge-risk-medio { background: #fef3c7; color: #92400e; }
+.badge-risk-alto { background: #fee2e2; color: #991b1b; }
+.badge-risk-prioritario { background: #ede9fe; color: #5b21b6; }
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  background: #f1f5f9; color: #334155; border-radius: 4px;
+  padding: 2px 7px; font-size: 12px;
+}
+
+.pdf-btn {
+  display: block; margin-top: 6px; padding: 8px 14px;
+  background: #1e3a5f; color: white; border-radius: 7px;
+  border: none; font-size: 13px; font-weight: 600;
+  text-align: center; cursor: pointer; width: 100%;
+}
+.pdf-btn:hover:not(:disabled) { background: #2d5187; }
+.pdf-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+.pdf-loading { font-size: 12px; color: #64748b; margin-top: 4px; }
+.pdf-error { font-size: 12px; color: #ef4444; margin-top: 4px; }
+.pdf-unavailable {
+  background: #f1f5f9; color: #94a3b8; border: 1px dashed #cbd5e1;
+  border-radius: 7px; padding: 8px 14px; font-size: 12px;
+  text-align: center;
+}
+
+/* ── Legend ── */
+#legend {
+  position: absolute; bottom: 28px; left: 12px; z-index: 1000;
+  background: white; border-radius: 9px; padding: 12px 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.18); font-size: 12px; min-width: 170px;
+  max-height: 70vh; overflow-y: auto;
+}
+#legend h4 { font-size: 12px; font-weight: 700; color: #1e3a5f; margin-bottom: 8px; }
+.leg-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.leg-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<!-- Login overlay -->
+<div id="login-overlay">
+  <div id="login-box">
+    <div id="login-logo">🗺️</div>
+    <h2>Mapa TSNL</h2>
+    <p class="subtitle">Tren Saltillo – Nuevo Laredo</p>
+    <label>Correo electrónico</label>
+    <input type="email" id="login-email" placeholder="usuario@ejemplo.com" autocomplete="username"/>
+    <label>Contraseña</label>
+    <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
+    <div id="login-error"></div>
+    <button id="login-submit" onclick="doLogin()">Iniciar sesión</button>
+  </div>
+</div>
+
+<div id="header">
+  <div>
+    <h1>Mapa de Calor – Proyecto TSNL</h1>
+    <span>Tren Saltillo – Nuevo Laredo &nbsp;|&nbsp; Actividades georeferenciadas</span>
+  </div>
+</div>
+
+<div id="user-bar">
+  <span id="user-name">Usuario SAO</span>
+  <button id="logout-btn" onclick="doLogout()">Cerrar sesión</button>
+</div>
+
+<div id="toolbar">
+  <div class="filter-group">
+    <label>🔍</label>
+    <input type="text" id="search-input" placeholder="Buscar actividad, municipio…">
+  </div>
+  <div class="filter-group">
+    <label>Tipo</label>
+    <select id="filter-type">
+      <option value="">Todos</option>
+      <option value="AIN">Acompañamiento Institucional</option><option value="Accesos y pasos vehiculares">Accesos y pasos vehiculares</option><option value="CAM">Caminamiento</option><option value="REU">Reunión</option><option value="SOC">Socialización</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Frente</label>
+    <select id="filter-frente">
+      <option value="">Todos</option>
+      <option value="13 y 14">13 y 14</option><option value="F1">F1</option><option value="F2">F2</option><option value="F3">F3</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Riesgo</label>
+    <select id="filter-risk">
+      <option value="">Todos</option>
+      <option value="bajo">Bajo</option><option value="medio">Medio</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select id="filter-state">
+      <option value="">Todos</option>
+      <option value="COMPLETADA">Completada</option>
+      <option value="PENDIENTE">Pendiente</option>
+    </select>
+  </div>
+  <button id="clear-btn">Limpiar filtros</button>
+  <span id="count-badge">32 actividades</span>
+</div>
+
+<div id="main">
+  <div id="map"></div>
+  <div id="detail-panel" class="hidden">
+    <div id="panel-header">
+      <span id="panel-title">Detalle de actividad</span>
+      <button id="panel-close">✕</button>
+    </div>
+    <div id="panel-body"></div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <h4>Tipo de actividad</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#8b5cf6"></div><span>Acompañamiento Institucional</span></div><div class="leg-row"><div class="leg-dot" style="background:#ef4444"></div><span>Accesos y pasos vehiculares</span></div><div class="leg-row"><div class="leg-dot" style="background:#f59e0b"></div><span>Caminamiento</span></div><div class="leg-row"><div class="leg-dot" style="background:#3b82f6"></div><span>Reunión</span></div><div class="leg-row"><div class="leg-dot" style="background:#10b981"></div><span>Socialización</span></div>
+  <hr style="margin:8px 0; border:none; border-top:1px solid #e2e8f0;">
+  <h4>Estado</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#22c55e"></div><span>Completada</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f59e0b"></div><span>Pendiente</span></div>
+</div>
+
+<script>
+const ROWS = [{"id": "0174394b-6784-4794-8cbf-98175aa87385", "title": "Revisión de Avances", "activity_type_code": "REU", "activity_label": "Revisión de Avances", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Alejandro Rojas Hernández", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.540196, "lon": -100.5049611, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "0b7cbe91-014e-4c1a-a545-d0c8b6c989ff", "title": "Revisión de Avances", "activity_type_code": "REU", "activity_label": "Revisión de Avances", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Eliasaf Zapata", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.540196, "lon": -100.5049611, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "139358ba-f70b-4f63-92c2-a4113cb1fe8c", "title": "Socialización", "activity_type_code": "SOC", "activity_label": "Socialización", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "medio", "subcategory": "Atención a Inquietudes", "result": "Actividad realizada conforme al programa", "topics": ["Tenencia de la tierra"], "attendees": ["ATTRAPI", "Salinas Victoria"], "agreements": [], "assigned_to": "Alejandro Rojas Hernández", "pk_start": "156500", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "3e29b656-c4fd-4e0f-9d27-2957859ca1a8", "desc": "Reporte PDF"}, {"id": "4ef478bc-2735-4575-8201-40535e7a85e5", "desc": "Reporte PDF"}], "lat": 25.959424423782856, "lon": -100.28004933170038, "color": "#10b981", "risk_color": "#f59e0b", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/139358ba-f70b-4f63-92c2-a4113cb1fe8c/documents"}, {"id": "1586bd4c-ee1f-4a27-9910-992b0299505c", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Verificación de DDV", "result": "Actividad realizada conforme al programa", "topics": ["Arbolado / vegetación"], "attendees": ["ATTRAPI – Aaron Briones", "SEDATU – Luis Amezcoa", "Salinas Victoria"], "agreements": ["Se generarán los planos de polígono de afectación correspondientes para la firma del Convenio de Ocupación Previa programada para el día viernes."], "assigned_to": "Aarón Briones Magaña", "pk_start": "170200", "pk_end": "172880", "has_report": true, "evidence_docs": [{"id": "8dc9aef8-ead0-419f-8b21-457f6ba688e4", "desc": "Reporte PDF"}, {"id": "da123531-935f-42b5-b594-e4e91339608b", "desc": "Reporte PDF"}], "lat": 26.081623837618807, "lon": -100.31080929846817, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/1586bd4c-ee1f-4a27-9910-992b0299505c/documents"}, {"id": "260354d8-f526-4e76-afef-74392b0c7cef", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Firma de acta informativa / COP", "topics": ["Avalúos y pagos"], "attendees": ["ATTRAPI – Ing. Isis Carrasco", "SEDATU – Lic. Fernanda", "SICTNL – Lic. Rogelio López"], "agreements": [], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "188713", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "606b5487-a1ed-4d69-88ba-6c46ff047e7e", "desc": "Reporte PDF"}, {"id": "dd0d53d6-cc22-421d-b2d9-1f3eeb1b3f7b", "desc": "Reporte PDF"}], "lat": 25.68066195520278, "lon": -100.26187128594633, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/260354d8-f526-4e76-afef-74392b0c7cef/documents"}, {"id": "26a3405f-411c-42db-bbe9-c71701a08c12", "title": "Acompañamiento Institucional", "activity_type_code": "AIN", "activity_label": "Acompañamiento Institucional", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "San Nicolás de los Garza", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnico", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares", "Gálibos ferroviarios"], "attendees": ["ATTRAPI – Urbanista Aline", "SICTNL – Lic. Jorge Villfranca", "San Nicolás de los Garza"], "agreements": ["Se deberá revisar la posible afectación al proyecto municipal para ajustar las soluciones correspondientes"], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "4c6b98ee-164a-4e8a-85a8-87bad16a9a42", "desc": "Reporte PDF"}, {"id": "6a1bbd78-89f0-44db-bad7-2f0020248cd6", "desc": "Reporte PDF"}], "lat": 25.680078232380826, "lon": -100.2614128904045, "color": "#8b5cf6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/26a3405f-411c-42db-bbe9-c71701a08c12/documents"}, {"id": "3cebc07a-e579-4e27-bbd4-6f200bafb88a", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Santa Catarina", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Municipal / Estatal / PCivil", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares", "Afectaciones", "Cruces"], "attendees": ["ATTRAPI", "SEDATU – Lic. Gustavo Villicaña", "SICTNL – Lic. Jorge Villafranca", "García", "Santa Catarina", "San Pedro Garza García", "Monterrey", "General Esobedo"], "agreements": ["La próxima reunion se presentará informacion técnica y de programación del segmento 15A2"], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 25.680201491740025, "lon": -100.26160834872817, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": ""}, {"id": "40f1ce16-c831-4930-8f5b-b6b131cf9bac", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F1", "estado_geo": "Nuevo León", "municipio": "García", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnica / Interinstitucional", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares"], "attendees": ["ATTRAPI – Aline URBANISTA", "SICTNL – DG Jorge Villafranca", "García"], "agreements": ["Quedará pendiente reunión de seguimiento"], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "109f81cf-2e1d-427f-9439-eb83801120fa", "desc": "Reporte PDF"}, {"id": "87655f02-90aa-4a73-80c0-6d2e1d64af23", "desc": "Reporte PDF"}], "lat": 25.68003286338254, "lon": -100.26166020477079, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/40f1ce16-c831-4930-8f5b-b6b131cf9bac/documents"}, {"id": "44603e04-dde0-4792-a706-afc6e35a6141", "title": "FIRMA DE ANUENCIA CON PROPIETARIO HUMBERTO TREVIÑO", "activity_type_code": "SOC", "activity_label": "FIRMA DE ANUENCIA CON PROPIETARIO HUMBERTO TREVIÑO", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "", "pk_start": "156600", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 25.960111437186065, "lon": -100.28032463880662, "color": "#10b981", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "45ec9b1e-ccba-41fd-ac5c-05663a3bf7fd", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Verificación de DDV", "result": "Actividad realizada conforme al programa", "topics": ["Inspección de predio, para localizar límites de propiedad"], "attendees": ["ATTRAPI", "LIDERVIC"], "agreements": [], "assigned_to": "Fernando Villarreal Hernández", "pk_start": "159542", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "4f6b35d3-b0b2-488d-aa9e-3346d396feba", "desc": "Reporte PDF"}, {"id": "ae243dbf-c774-41dc-9f52-2f482e3efd72", "desc": "Reporte PDF"}], "lat": 25.991468127220447, "lon": -100.28690980904364, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/45ec9b1e-ccba-41fd-ac5c-05663a3bf7fd/documents"}, {"id": "4cca0f18-43ee-48cf-a2f1-556687f8c634", "title": "Caminamiento para marcaje de afectación de propiedad social y áreas de uso común del Ejido", "activity_type_code": "CAM", "activity_label": "Caminamiento para marcaje de afectación de propiedad social y áreas de uso común del Ejido", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Aarón Briones Magaña", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.610445409924115, "lon": -100.48408288242229, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "689c37f4-0ddd-46d2-84f7-664f7b523698", "title": "Socialización", "activity_type_code": "SOC", "activity_label": "Socialización", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "medio", "subcategory": "Atención a Inquietudes", "result": "Actividad realizada conforme al programa", "topics": ["Presentación de Proyecto a Socios del propietario"], "attendees": ["ATTRAPI – Alejandro Rojas Hernández", "SEDATU", "Salinas Victoria"], "agreements": ["El propietario se comunicará con nosotros para la firma de la anuencia"], "assigned_to": "Alejandro Rojas Hernández", "pk_start": "5000", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "751afdb4-1942-4a48-9f5c-0272a10a61c1", "desc": "Reporte PDF"}, {"id": "982e3419-1496-448e-9cfc-96280bd39fc9", "desc": "Reporte PDF"}], "lat": 25.680122609107396, "lon": -100.26173680617029, "color": "#10b981", "risk_color": "#f59e0b", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/689c37f4-0ddd-46d2-84f7-664f7b523698/documents"}, {"id": "696150cb-8301-49a3-9465-83f627c25c57", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Actividad realizada conforme al programa", "topics": ["Avalúos y pagos", "Tenencia de la tierra", "Accesos y pasos vehiculares"], "attendees": ["SICTNL – Lic. Ordorica", "ATTRAPI – Ing Fernando Villarreal", "SEDATU – Ing. Selma Baez"], "agreements": ["Se realizará el dia de mañana jueves 30 de Abril, a las 8:00am un recorrido en sitio para indicar límites"], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "159542", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "56ac10bd-c253-40e0-ad9f-bddd36d8697b", "desc": "Reporte PDF"}, {"id": "ee5c5f2b-f3b1-402e-8eba-51edd7a1a9b7", "desc": "Reporte PDF"}], "lat": 25.992112380860167, "lon": -100.2876445790348, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/696150cb-8301-49a3-9465-83f627c25c57/documents"}, {"id": "6be8a2a4-5a8a-4b8a-abb4-d218d4147ebd", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "medio", "subcategory": "Verificación de DDV", "result": "Actividad realizada conforme al programa", "topics": ["Tenencia de la tierra"], "attendees": ["ATTRAPI", "SEDATU", "Salinas Victoria"], "agreements": [], "assigned_to": "Alejandro Rojas Hernández", "pk_start": "143900", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "2e77f354-b92e-4480-8854-ebc052d3edd9", "desc": "Reporte PDF"}, {"id": "38d4ab51-b32d-4bf6-a3f5-ea953b50cbaf", "desc": "Reporte PDF"}], "lat": 25.959525966397692, "lon": -100.2808470623914, "color": "#f59e0b", "risk_color": "#f59e0b", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/6be8a2a4-5a8a-4b8a-abb4-d218d4147ebd/documents"}, {"id": "7ad3b298-166d-48cf-b87d-94b03de8e99c", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "medio", "subcategory": "Informativa", "result": "Actividad realizada conforme al programa", "topics": ["Consulta previa"], "attendees": ["ATTRAPI – Alejandro Rojas Hernández", "Salinas Victoria"], "agreements": [], "assigned_to": "Alejandro Rojas Hernández", "pk_start": "156650", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "520cee2e-e9d7-4a6b-8322-ce4da2e4aff0", "desc": "Reporte PDF"}, {"id": "78954839-0f88-4900-881e-92308c7ed412", "desc": "Reporte PDF"}], "lat": 26.1216805, "lon": -100.3270877, "color": "#3b82f6", "risk_color": "#f59e0b", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/7ad3b298-166d-48cf-b87d-94b03de8e99c/documents"}, {"id": "7c9b9534-afa5-4bca-a51f-0e4d50d0776d", "title": "Caminamiento para Avalúo de INDAABIN", "activity_type_code": "CAM", "activity_label": "Caminamiento para Avalúo de INDAABIN", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Aarón Briones Magaña", "pk_start": "163700", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.08437336571175, "lon": -100.31171997787065, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "7ca93872-1b8c-482d-b806-c178cc4b657d", "title": "Acompañamiento Institucional", "activity_type_code": "AIN", "activity_label": "Acompañamiento Institucional", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnico", "result": "Se ajusta superficie o valor de afectación", "topics": ["Avaluo"], "attendees": ["ATTRAPI – Aaron Briones", "INDAABIN – Raymundo Molano", "Salinas Victoria"], "agreements": ["Se proporcionará al INDAABIN el plano del polígono de afectación del predio antes mencionado."], "assigned_to": "Aarón Briones Magaña", "pk_start": "163750", "pk_end": "164200", "has_report": true, "evidence_docs": [{"id": "3e174d65-d4fe-4578-bb3e-07359fd3f908", "desc": "Reporte PDF"}, {"id": "f4595964-0103-4161-9b75-60ec9c051c04", "desc": "Reporte PDF"}], "lat": 25.680033503497217, "lon": -100.26103134726853, "color": "#8b5cf6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/7ca93872-1b8c-482d-b806-c178cc4b657d/documents"}, {"id": "8a3e69e0-624f-4098-9bdf-ebeaad922ff7", "title": "Mesa de Atención Social - Municpios Zona Rural", "activity_type_code": "REU", "activity_label": "Mesa de Atención Social - Municpios Zona Rural", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 25.680951674195637, "lon": -100.26142048559632, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "8f287bc9-1fb6-4323-aa7d-91e98d0c9dbe", "title": "Mesa de Atención Social - Municpios Zona Rural", "activity_type_code": "REU", "activity_label": "Mesa de Atención Social - Municpios Zona Rural", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Eliasaf Zapata", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 25.680951674195637, "lon": -100.26142048559632, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "9062d44e-dde0-4a3f-96da-ffaeb2eb3831", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "13 y 14", "estado_geo": "Coahuila de Zaragoza", "municipio": "Saltillo", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Actividad realizada conforme al programa", "topics": ["Planeacion de actividades"], "attendees": ["ATTRAPI"], "agreements": [], "assigned_to": "Fernando Martinez Maldonado", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "24abb9c5-736e-4ee8-8852-60000f2c8e3b", "desc": "Reporte PDF"}, {"id": "b0d48658-a7a8-4a2b-a866-a424c76a2d90", "desc": "Reporte PDF"}], "lat": 25.680122609107396, "lon": -100.26173680617029, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/9062d44e-dde0-4a3f-96da-ffaeb2eb3831/documents"}, {"id": "975bdce0-c848-458a-88ff-25ba14fd43e7", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Municipal / Estatal / PCivil", "result": "Actividad realizada conforme al programa", "topics": ["Afectaciones"], "attendees": ["ATTRAPI – Ing Javier Alarcon", "SEDATU – Lic. Gustavo Villicaña", "SICTNL – Lic. Rogelio López", "Lampazos de Naranjo", "SICTTAM – Ing. Mario Mata", "Estado NL"], "agreements": [], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "e9508b02-3b99-478d-9779-db60b9c70f3d", "desc": "Reporte PDF"}, {"id": "ee092164-ae9c-49a5-b532-2fcc1a7289d8", "desc": "Reporte PDF"}], "lat": 25.67996075453029, "lon": -100.26168052897746, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/975bdce0-c848-458a-88ff-25ba14fd43e7/documents"}, {"id": "b7047605-b1e3-4283-a1a2-c84b455f0481", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Firma de acta informativa / COP", "topics": ["Avalúos y pagos", "COP"], "attendees": ["ATTRAPI – Lic. Michel Ortiz", "SEDATU – Lic. Diego", "SICTNL – Lic. Jorge Villafranca", "P.A. – Lic. Cansino"], "agreements": [], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "234026", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "3547d9a4-2b11-49ae-a633-95a9a538f822", "desc": "Reporte PDF"}, {"id": "588fd262-754e-4aa6-b64a-7c4ee43e6bb8", "desc": "Reporte PDF"}], "lat": 26.630892332958236, "lon": -100.48675649530553, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/b7047605-b1e3-4283-a1a2-c84b455f0481/documents"}, {"id": "ce8d9f40-333c-47ba-94b3-7dff9a37a000", "title": "Firma Anuencia Propietario 15B - SOMOHANO", "activity_type_code": "SOC", "activity_label": "Firma Anuencia Propietario 15B - SOMOHANO", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "", "pk_start": "156500", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 25.95800652300758, "lon": -100.28015997993542, "color": "#10b981", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "d2e8382a-dd53-4351-a1da-f29f45cc287f", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Verificación de DDV", "result": "Actividad realizada conforme al programa", "topics": ["CUSTOM_TOP_1778091041408", "Cruces", "Afectaciones", "Tenencia de la tierra", "Accesos y pasos vehiculares"], "attendees": ["ATTRAPI", "SEDATU", "CUSTOM_ATT_INST_1777595380499", "LIDERVIC"], "agreements": [], "assigned_to": "Fernando Villarreal Hernández", "pk_start": "226350", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "746463e4-d548-475f-8ecb-cb2a21fd118a", "desc": "Reporte PDF"}, {"id": "80fcbb91-c631-4063-97ee-2434ea4c8caa", "desc": "Reporte PDF"}], "lat": 26.566972259745963, "lon": -100.47721642734444, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/d2e8382a-dd53-4351-a1da-f29f45cc287f/documents"}, {"id": "d6296446-1474-47fd-b3e9-45d72546ec40", "title": "Revisión de Avances", "activity_type_code": "REU", "activity_label": "Revisión de Avances", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Isis Monserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.540196, "lon": -100.5049611, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "dd87656f-5c98-4d63-be54-620959dc9a33", "title": "Revisión de Avances", "activity_type_code": "REU", "activity_label": "Revisión de Avances", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Fernando Martinez Maldonado", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.540196, "lon": -100.5049611, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "df5d0b4c-4724-42bb-93e5-86c9cbe01b06", "title": "Acompañamiento Institucional", "activity_type_code": "Accesos y pasos vehiculares", "activity_label": "Acompañamiento Institucional", "frente": "13 y 14", "estado_geo": "Coahuila de Zaragoza", "municipio": "Ramos Arizpe", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnico", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares"], "attendees": ["ATTRAPI", "SEDATU"], "agreements": [], "assigned_to": "Luis Andrade Martinez", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.610445409924115, "lon": -100.48408288242229, "color": "#ef4444", "risk_color": "#22c55e", "state_label": "Completada", "report_url": ""}, {"id": "dfc6708e-e5d9-443a-b5f4-03ba91aa47c2", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F2", "estado_geo": "Nuevo León", "municipio": "Santa Catarina", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Municipal / Estatal / PCivil", "result": "Actividad realizada conforme al programa", "topics": ["Afectaciones", "Accesos y pasos vehiculares"], "attendees": ["ATTRAPI – Ing. Javier Alarcón", "SEDATU – Lic. Gustavo Villicaña", "SICTNL – Lic. Michel Ortiz", "García", "Santa Catarina", "San Pedro Garza García", "Monterrey", "San Nicolás de los Garza"], "agreements": ["Se envaira programa de labores a realizar por municipio por parte de ATTRAPI Construcción", "Cuando asi se requiera se invitara a los municipios a participar en caminamientos de reconocimiento de problemáticas a preveer", "Queda pendiente realizar junta con MOVILIDAD a nivel estatal para pactar acuerdos de solución de rutas y vialidades afectadas"], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "89745319-a46a-4b85-96f6-792d8e833fa8", "desc": "Reporte PDF"}, {"id": "bd42b7ef-7fb1-4f32-82b2-cfc883667766", "desc": "Reporte PDF"}], "lat": 25.680083859109754, "lon": -100.26160457395041, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/dfc6708e-e5d9-443a-b5f4-03ba91aa47c2/documents"}, {"id": "e400a3a7-a16a-45be-a96e-0ed214e9b176", "title": "Levantamiento y Marcaje Nuevo DdV", "activity_type_code": "CAM", "activity_label": "Levantamiento y Marcaje Nuevo DdV", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Villaldama", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "222324", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.541340086934593, "lon": -100.45949598437522, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "f6581c37-4cf2-4424-b17e-ea7fff0716ca", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Marcaje de afectaciones", "result": "Actividad realizada conforme al programa", "topics": ["BDTs", "MARCAJE DE AFECTACIÓN"], "attendees": ["ATTRAPI", "SEDATU", "LIDERVIC"], "agreements": [], "assigned_to": "Fernando Villarreal Hernández", "pk_start": "232116", "pk_end": "233315", "has_report": true, "evidence_docs": [{"id": "5bf29f74-148d-46f1-9446-f8150784198c", "desc": "Reporte PDF"}, {"id": "9bc35b95-2ca8-4dea-a06a-e6476c08357f", "desc": "Reporte PDF"}], "lat": 26.609982452269282, "lon": -100.48402644762379, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/f6581c37-4cf2-4424-b17e-ea7fff0716ca/documents"}, {"id": "f712590f-51e9-44b4-a856-b0b26e520694", "title": "Revisión de Avances", "activity_type_code": "REU", "activity_label": "Revisión de Avances", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Bustamante", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "Michel Ortiz Elizalde", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 26.540196, "lon": -100.5049611, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "f7816ba9-96b1-47d8-9e89-fbf92fa2512a", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F3", "estado_geo": "Nuevo León", "municipio": "Salinas Victoria", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Mesa Técnica", "result": "Se obtienen anuencias / permisos", "topics": ["Cruces", "Accesos y pasos vehiculares"], "attendees": ["ATTRAPI – Fernando Villarreal Hernandez", "SICTNL – Rogelio López León De La Barra", "LIDERVIC"], "agreements": ["Revisar con el area de construcción la posibilidad de cambiar el PSV propuesto en Pk 195+530", "Solicitud de papelería que avale la propiedad del predio y de otros dos predios vistos y afectados por DV", "Firma de anuencia enviada de 3 predios para levantamientos correspondientes"], "assigned_to": "Isismonserrat Carrasco Negrin", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "c42a4f10-b019-4854-a27b-dbf26e4a6c3f", "desc": "Reporte PDF"}, {"id": "d654b8f4-4470-4f66-93fb-544dba77f1e3", "desc": "Reporte PDF"}], "lat": 25.680122609107396, "lon": -100.26173680617029, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/f7816ba9-96b1-47d8-9e89-fbf92fa2512a/documents"}];
+const TYPE_COLORS = {"REU": "#3b82f6", "SOC": "#10b981", "CAM": "#f59e0b", "AIN": "#8b5cf6", "Accesos y pasos vehiculares": "#ef4444"};
+const TYPE_NAMES = {"CAM": "Caminamiento", "REU": "Reunión", "SOC": "Socialización", "AIN": "Acompañamiento Institucional", "Accesos y pasos vehiculares": "Accesos y pasos vehiculares"};
+const DEFAULT_COLOR = '#6b7280';
+
+// Map
+const map = L.map('map').setView([26.07945963590933, -100.34952936145295], 9);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; CartoDB &copy; OSM contributors', maxZoom: 19
+}).addTo(map);
+
+// HeatMap layer
+let heatLayer = L.heatLayer([], {radius: 30, blur: 22, maxZoom: 14, minOpacity: 0.35}).addTo(map);
+
+// Markers layer group
+let markerLayer = L.layerGroup().addTo(map);
+
+// Panel helpers
+const panel = document.getElementById('detail-panel');
+const panelBody = document.getElementById('panel-body');
+const panelTitle = document.getElementById('panel-title');
+document.getElementById('panel-close').onclick = () => panel.classList.add('hidden');
+
+function riskBadge(r) {
+  return `<span class="badge badge-risk-${r || 'bajo'}">${(r || 'bajo').toUpperCase()}</span>`;
+}
+function stateBadge(s) {
+  const labels = {COMPLETADA:'Completada',PENDIENTE:'Pendiente',EN_CURSO:'En curso',REVISION_PENDIENTE:'En revisión',CANCELADA:'Cancelada'};
+  return `<span class="badge badge-state-${s}">${labels[s] || s}</span>`;
+}
+function tagList(arr) {
+  if (!arr || !arr.length) return '<span style="color:#94a3b8;font-size:12px">—</span>';
+  return '<div class="tag-list">' + arr.map(t => `<span class="tag">${t}</span>`).join('') + '</div>';
+}
+
+function formatPK(raw) {
+  if (!raw) return null;
+  const n = parseInt(String(raw).replace(/\D/g, ''), 10);
+  if (isNaN(n)) return raw;
+  const km = Math.floor(n / 1000);
+  const m = n % 1000;
+  return `${km}+${String(m).padStart(3, '0')}`;
+}
+
+function showDetail(row) {
+  panelTitle.textContent = row.title || row.activity_label;
+  const pkS = formatPK(row.pk_start);
+  const pkE = formatPK(row.pk_end);
+  let pks = (pkS && pkE) ? `${pkS} – ${pkE}` : pkS ? pkS : '—';
+
+  let pdfBlock;
+  if (!row.has_report || !row.evidence_docs || !row.evidence_docs.length) {
+    pdfBlock = `<div class="pdf-unavailable">Sin reporte generado</div>`;
+  } else {
+    const ev = row.evidence_docs[row.evidence_docs.length - 1];
+    pdfBlock = `<div style="margin-top:6px">
+      <button class="pdf-btn" id="pdf-btn-${ev.id}" onclick="fetchAndOpen('${ev.id}', this)">
+        📄 Ver documento del reporte
+      </button>
+      <div class="pdf-loading" id="pdf-msg-${ev.id}" style="display:none"></div>
+    </div>`;
+  }
+
+  panelBody.innerHTML = `
+    <div class="detail-section">
+      <h3>Identificación</h3>
+      <div class="detail-row"><span class="detail-label">Tipo</span><span class="detail-value">${TYPE_NAMES[row.activity_type_code] || row.activity_type_code}</span></div>
+      <div class="detail-row"><span class="detail-label">Subcategoría</span><span class="detail-value">${row.subcategory || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">Frente</span><span class="detail-value">${row.frente || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">Estado</span><span class="detail-value">${stateBadge(row.execution_state)}</span></div>
+      <div class="detail-row"><span class="detail-label">Riesgo</span><span class="detail-value">${riskBadge(row.risk)}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Ubicación</h3>
+      <div class="detail-row"><span class="detail-label">Municipio</span><span class="detail-value">${row.municipio || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">Estado</span><span class="detail-value">${row.estado_geo || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">PK</span><span class="detail-value">${pks}</span></div>
+      <div class="detail-row"><span class="detail-label">GPS</span><span class="detail-value" style="font-size:11px;color:#64748b">${row.lat.toFixed(6)}, ${row.lon.toFixed(6)}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Responsable</h3>
+      <div class="detail-row"><span class="detail-label">Asignado a</span><span class="detail-value">${row.assigned_to || '—'}</span></div>
+    </div>
+    ${row.result ? `<div class="detail-section"><h3>Resultado</h3><div style="font-size:13px;color:#1e293b;line-height:1.5">${row.result}</div></div>` : ''}
+    <div class="detail-section">
+      <h3>Temas tratados</h3>
+      ${tagList(row.topics)}
+    </div>
+    ${row.attendees && row.attendees.length ? `<div class="detail-section"><h3>Asistentes</h3>${tagList(row.attendees)}</div>` : ''}
+    ${row.agreements && row.agreements.length ? `<div class="detail-section"><h3>Acuerdos</h3><ul style="font-size:12px;color:#334155;padding-left:16px;line-height:1.6">${row.agreements.map(a=>`<li>${a}</li>`).join('')}</ul></div>` : ''}
+    <div class="detail-section">
+      <h3>Reporte PDF</h3>
+      ${pdfBlock}
+    </div>
+    <div style="font-size:10px;color:#cbd5e1;margin-top:8px">ID: ${row.id}</div>
+  `;
+  panel.classList.remove('hidden');
+}
+
+// Marker icon helper
+function makeIcon(color, opacity) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="32" viewBox="0 0 24 32">
+    <path fill="${color}" fill-opacity="${opacity}" stroke="white" stroke-width="1.5"
+      d="M12 2C7.6 2 4 5.6 4 10c0 6.4 8 20 8 20s8-13.6 8-20c0-4.4-3.6-8-8-8z"/>
+    <circle cx="12" cy="10" r="4" fill="white" fill-opacity="0.9"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg, className: '', iconSize: [24, 32], iconAnchor: [12, 32], popupAnchor: [0, -32]
+  });
+}
+
+// Render
+function render(filtered) {
+  markerLayer.clearLayers();
+  const heatPts = [];
+  filtered.forEach(row => {
+    const color = TYPE_COLORS[row.activity_type_code] || DEFAULT_COLOR;
+    const opacity = row.execution_state === 'COMPLETADA' ? 1 : 0.55;
+    const marker = L.marker([row.lat, row.lon], {icon: makeIcon(color, opacity)});
+    marker.bindTooltip(`<b>${row.title}</b><br>${row.frente} · ${row.municipio}`, {offset:[0,-28]});
+    marker.on('click', () => { showDetail(row); map.panTo([row.lat, row.lon]); });
+    markerLayer.addLayer(marker);
+    heatPts.push([row.lat, row.lon, 1]);
+  });
+  heatLayer.setLatLngs(heatPts);
+  document.getElementById('count-badge').textContent = filtered.length + ' actividades';
+}
+
+// Filters
+function applyFilters() {
+  const search = document.getElementById('search-input').value.toLowerCase().trim();
+  const type = document.getElementById('filter-type').value;
+  const frente = document.getElementById('filter-frente').value;
+  const risk = document.getElementById('filter-risk').value;
+  const state = document.getElementById('filter-state').value;
+  const filtered = ROWS.filter(r => {
+    if (type && r.activity_type_code !== type) return false;
+    if (frente && r.frente !== frente) return false;
+    if (risk && r.risk !== risk) return false;
+    if (state && r.execution_state !== state) return false;
+    if (search) {
+      const haystack = [r.title, r.municipio, r.estado_geo, r.assigned_to,
+                        r.subcategory, r.result, ...(r.topics||[]), ...(r.attendees||[])].join(' ').toLowerCase();
+      if (!haystack.includes(search)) return false;
+    }
+    return true;
+  });
+  render(filtered);
+}
+
+document.getElementById('search-input').addEventListener('input', applyFilters);
+document.getElementById('filter-type').addEventListener('change', applyFilters);
+document.getElementById('filter-frente').addEventListener('change', applyFilters);
+document.getElementById('filter-risk').addEventListener('change', applyFilters);
+document.getElementById('filter-state').addEventListener('change', applyFilters);
+document.getElementById('clear-btn').onclick = () => {
+  document.getElementById('search-input').value = '';
+  document.getElementById('filter-type').value = '';
+  document.getElementById('filter-frente').value = '';
+  document.getElementById('filter-risk').value = '';
+  document.getElementById('filter-state').value = '';
+  applyFilters();
+};
+
+const API_BASE = 'https://sao-api-97150883570.us-central1.run.app';
+let _token = null;
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass  = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-submit');
+  errEl.textContent = '';
+  if (!email || !pass) { errEl.textContent = 'Ingresa correo y contraseña.'; return; }
+  btn.disabled = true;
+  btn.textContent = 'Entrando…';
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    _token = data.access_token;
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('user-bar').style.display = 'flex';
+    document.getElementById('user-name').textContent = '✓ ' + email;
+  } catch (err) {
+    errEl.textContent = '✗ ' + err.message;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Iniciar sesión';
+  }
+}
+
+function doLogout() {
+  _token = null;
+  document.getElementById('user-bar').style.display = 'none';
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').textContent = '';
+}
+
+document.getElementById('login-email').addEventListener('keydown', e => { if (e.key === 'Enter') document.getElementById('login-pass').focus(); });
+document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+async function fetchAndOpen(evidenceId, btnEl) {
+  const msgEl = document.getElementById('pdf-msg-' + evidenceId);
+  if (!_token) {
+    msgEl.style.display = 'block';
+    msgEl.className = 'pdf-error';
+    msgEl.textContent = '⚠ Sesión expirada. Recarga la página e inicia sesión nuevamente.';
+    return;
+  }
+  btnEl.disabled = true;
+  msgEl.style.display = 'block';
+  msgEl.className = 'pdf-loading';
+  msgEl.textContent = 'Obteniendo enlace seguro…';
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/evidences/${evidenceId}/download-url`, {
+      headers: { 'Authorization': 'Bearer ' + _token }
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `Error ${res.status}`);
+    }
+    const data = await res.json();
+    window.open(data.signedUrl, '_blank');
+    msgEl.style.display = 'none';
+  } catch (err) {
+    msgEl.className = 'pdf-error';
+    msgEl.textContent = '✗ ' + err.message;
+  } finally {
+    btnEl.disabled = false;
+  }
+}
+
+// Initial render
+render(ROWS);
+</script>
+</body>
+</html>

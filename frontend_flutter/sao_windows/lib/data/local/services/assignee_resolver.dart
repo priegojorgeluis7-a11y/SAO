@@ -7,6 +7,8 @@
 /// 2. ActivityFields('assignee_user_id')
 /// 3. AgendaAssignments directa por activityId
 /// 4. Detección automática: proyecto + PK + título normalizado
+library;
+
 
 import 'package:drift/drift.dart';
 
@@ -46,8 +48,8 @@ class AssigneeResolver {
     final directAssignment = await (_db.select(_db.agendaAssignments)
           ..where((t) => t.activityId.equals(activityId)))
         .getSingleOrNull();
-    if (directAssignment != null && directAssignment.resourceId != null && directAssignment.resourceId!.trim().isNotEmpty) {
-      return directAssignment.resourceId!.trim();
+    if (directAssignment != null && directAssignment.resourceId.trim().isNotEmpty) {
+      return directAssignment.resourceId.trim();
     }
 
     // 4. Fallback: Detección automática por proyecto + PK + título normalizado
@@ -96,15 +98,15 @@ class AssigneeResolver {
         (c) => (c.title.trim().toLowerCase() == normalizedTitle),
         orElse: () => sameDayAssignments.first,
       );
-      if (match.resourceId != null && match.resourceId!.trim().isNotEmpty) {
-        return match.resourceId!.trim();
+      if (match.resourceId.trim().isNotEmpty) {
+        return match.resourceId.trim();
       }
     }
 
     // Fallback: usar la más reciente
     final mostRecent = candidates.reduce((a, b) => a.updatedAt.isAfter(b.updatedAt) ? a : b);
-    if (mostRecent.resourceId != null && mostRecent.resourceId!.trim().isNotEmpty) {
-      return mostRecent.resourceId!.trim();
+    if (mostRecent.resourceId.trim().isNotEmpty) {
+      return mostRecent.resourceId.trim();
     }
 
     return null;

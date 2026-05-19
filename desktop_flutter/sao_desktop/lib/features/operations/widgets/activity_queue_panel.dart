@@ -519,12 +519,14 @@ class _FrontSection extends StatelessWidget {
     final rangeMatch =
         RegExp(r'PK\s*\d+[+]?\d*\s*[\-–]\s*\d+[+]?\d*', caseSensitive: false)
             .firstMatch(text);
-    if (rangeMatch != null)
+    if (rangeMatch != null) {
       return rangeMatch.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
+    }
     final singleMatch =
         RegExp(r'PK\s*\d+', caseSensitive: false).firstMatch(text);
-    if (singleMatch != null)
+    if (singleMatch != null) {
       return singleMatch.group(0)!.replaceAll(RegExp(r'\s+'), ' ');
+    }
     return 'Sin PK';
   }
 

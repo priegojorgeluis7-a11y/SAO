@@ -318,6 +318,13 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     if (lowerPath.isEmpty || lowerPath.startsWith('pending://')) {
       return true;
     }
+    // Synthetic placeholder IDs (ev-{activityId}-{index}) are created locally
+    // when the activity list endpoint returns only an evidence_count. They don't
+    // correspond to real Firestore documents so they can never be resolved.
+    // Treat them as pending until the activity is fully hydrated.
+    if (evidence.id.startsWith('ev-') && lowerPath.startsWith('backend://')) {
+      return true;
+    }
     if (lowerPath.startsWith('backend://') ||
         lowerPath.startsWith('http://') ||
         lowerPath.startsWith('https://') ||
@@ -388,9 +395,15 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
       return _signedUrlCache[evidence.id];
     }
 
-    final signedUrl = await _evidenceRepository.getDownloadSignedUrl(evidence.id);
-    _signedUrlCache[evidence.id] = signedUrl;
-    return signedUrl;
+    try {
+      final signedUrl = await _evidenceRepository.getDownloadSignedUrl(evidence.id);
+      _signedUrlCache[evidence.id] = signedUrl;
+      return signedUrl;
+    } catch (_) {
+      // Evidence not found or network error — treat as pending so the UI
+      // shows the "not yet available" placeholder instead of crashing.
+      return null;
+    }
   }
 
   Widget _buildLoadingPlaceholder() {

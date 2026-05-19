@@ -17,6 +17,7 @@ def _principal(*, email: str, roles: list[str]) -> FirestoreUserPrincipal:
         status=UserStatus.ACTIVE,
         created_at=datetime.now(timezone.utc),
         last_login_at=None,
+        last_activity_at=None,
         roles=roles,
         project_ids=['TMQ'],
         scopes=[],

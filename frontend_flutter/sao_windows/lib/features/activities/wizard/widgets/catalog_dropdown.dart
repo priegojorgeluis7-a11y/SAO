@@ -53,7 +53,7 @@ class CatalogDropdown<T> extends StatelessWidget {
           // Key basada en número de items + valor seleccionado para forzar
           // reconstrucción cuando se agregan items custom al catálogo.
           key: ValueKey('${label}_${items.length}_${effectiveValue.hashCode}'),
-          value: effectiveValue,
+          initialValue: effectiveValue,
           isExpanded: true,
           menuMaxHeight: MediaQuery.of(context).size.height * 0.5,
           decoration: InputDecoration(

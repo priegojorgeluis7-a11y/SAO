@@ -30,7 +30,7 @@ class SaoSyncIndicator extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: EdgeInsets.symmetric(
+        padding: const EdgeInsets.symmetric(
           horizontal: SaoSpacing.sm,
           vertical: SaoSpacing.xs,
         ),
@@ -43,9 +43,9 @@ class SaoSyncIndicator extends StatelessWidget {
               size: 18,
             ),
             if (pendingCount > 0) ...[
-              SizedBox(width: SaoSpacing.xs),
+              const SizedBox(width: SaoSpacing.xs),
               Container(
-                padding: EdgeInsets.symmetric(
+                padding: const EdgeInsets.symmetric(
                   horizontal: 6,
                   vertical: 2,
                 ),

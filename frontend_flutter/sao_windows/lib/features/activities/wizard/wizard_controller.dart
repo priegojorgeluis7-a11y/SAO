@@ -458,10 +458,12 @@ class WizardController extends ChangeNotifier {
       List.unmodifiable(_availableMunicipios);
 
   String get contextProjectLabel {
-    if (selectedProjectName.trim().isNotEmpty)
+    if (selectedProjectName.trim().isNotEmpty) {
       return selectedProjectName.trim();
-    if (selectedProjectCode.trim().isNotEmpty)
+    }
+    if (selectedProjectCode.trim().isNotEmpty) {
       return selectedProjectCode.trim();
+    }
     return projectCode;
   }
 
@@ -1652,8 +1654,9 @@ class WizardController extends ChangeNotifier {
     }
 
     if (t.contains('asamblea')) return find('ASA') ?? list.first;
-    if (t.contains('reunión') || t.contains('reunion'))
+    if (t.contains('reunión') || t.contains('reunion')) {
       return find('REU') ?? list.first;
+    }
     if (t.contains('camin')) return find('CAM') ?? list.first;
 
     return find('CAM') ?? list.first;
@@ -1739,6 +1742,7 @@ class WizardController extends ChangeNotifier {
       var resolvedProjectId = await dao.resolveProjectId(requestedProjectId);
       var resolvedActivityTypeId = await dao.resolveActivityTypeId(
         requestedActivityTypeId,
+        displayName: _selectedActivity?.label,
       );
       final effectivePk = pk ?? pkInicio ?? existingActivity?.pk ?? activity.pk;
       final effectivePkRefType =
@@ -2058,6 +2062,14 @@ class WizardController extends ChangeNotifier {
     final fields = await dao.getFieldsByKey(activity.id);
     final existingActivity = await dao.getActivityById(activity.id);
 
+    // ── Inject custom items from the saved snapshot into the local catalog ──
+    // This ensures that CUSTOM_* IDs created on another user's device are
+    // resolvable on this device during the current wizard session.
+    final snapshot = await _loadExistingWizardPayloadSnapshot(activity.id);
+    if (snapshot != null) {
+      _injectSnapshotCustomItemsIntoCatalog(snapshot);
+    }
+
     if (existingActivity != null && !hasValidGpsCoordinates) {
       geoLat = existingActivity.geoLat;
       geoLon = existingActivity.geoLon;
@@ -2198,6 +2210,38 @@ class WizardController extends ChangeNotifier {
       if (found != null) _selectedActivity = found;
     }
 
+    // Para actividades asignadas desde desktop con tipo CUSTOM_ACT_*, el campo
+    // 'activity_type' no existe en la primera apertura (solo se guarda al grabar).
+    // Usamos activityTypeId del registro Drift, inyectamos el tipo al catálogo
+    // con el título de la actividad como nombre legible, y lo seleccionamos.
+    if (_selectedActivity == null && existingActivity != null) {
+      final driftTypeId = existingActivity.activityTypeId.trim();
+      if (driftTypeId.startsWith('CUSTOM_') &&
+          !catalogRepo.activities.any((a) => a.id == driftTypeId)) {
+        // Preferir el título almacenado en Drift (sync_service lo guarda desde dto.title).
+        final customName = existingActivity.title.trim().isNotEmpty &&
+                !existingActivity.title.trim().toUpperCase().startsWith('CUSTOM_')
+            ? existingActivity.title.trim()
+            : driftTypeId;
+        catalogRepo.injectTransientCustomItems(
+          activityIdToName: {driftTypeId: customName},
+          subcategoryIdToNameByActivityId: {},
+          purposeIdToNameBySubcategoryId: {},
+          topicIdToName: {},
+          attendeeInstIdToName: {},
+          attendeeLocalIdToName: {},
+        );
+      }
+      // Re-intentar lookup ahora que el custom type está inyectado.
+      if (driftTypeId.isNotEmpty) {
+        final found = catalogRepo.activities.cast<CatItem?>().firstWhere(
+          (a) => a?.id == driftTypeId,
+          orElse: () => null,
+        );
+        if (found != null) _selectedActivity = found;
+      }
+    }
+
     // Subcategoría
     if (_selectedActivity != null) {
       final subcatField = fields['subcategory'];
@@ -2243,8 +2287,9 @@ class WizardController extends ChangeNotifier {
       if (topicsField?.valueJson != null) {
         try {
           final decoded = jsonDecode(topicsField!.valueJson!);
-          if (decoded is List)
+          if (decoded is List) {
             selectedTopicIds.addAll(decoded.map((e) => e.toString()));
+          }
         } catch (_) {}
       }
     }
@@ -2260,8 +2305,9 @@ class WizardController extends ChangeNotifier {
       if (attendeesField?.valueJson != null) {
         try {
           final decoded = jsonDecode(attendeesField!.valueJson!);
-          if (decoded is List)
+          if (decoded is List) {
             selectedAttendeeIds.addAll(decoded.map((e) => e.toString()));
+          }
         } catch (_) {}
       }
     }
@@ -2325,8 +2371,9 @@ class WizardController extends ChangeNotifier {
     // Motivo actividad no planeada
     if (isUnplanned && unplannedReason == null) {
       final reasonField = fields['unplanned_reason'];
-      if (reasonField?.valueText != null)
+      if (reasonField?.valueText != null) {
         unplannedReason = reasonField!.valueText;
+      }
 
       final reasonOtherField = fields['unplanned_reason_other_text'];
       if (reasonOtherField?.valueText != null) {
@@ -2334,8 +2381,9 @@ class WizardController extends ChangeNotifier {
       }
 
       final refField = fields['unplanned_reference'];
-      if (refField?.valueText != null)
+      if (refField?.valueText != null) {
         unplannedReference = refField!.valueText!;
+      }
     }
 
     // Co-responsables (restaurar desde draft)
@@ -2430,6 +2478,109 @@ class WizardController extends ChangeNotifier {
     return null;
   }
 
+  /// Reads CUSTOM_* items stored in the wizard payload snapshot and injects
+  /// them into the local catalog for the current session only (no disk write).
+  /// This allows another user's device to resolve IDs it has never seen before.
+  void _injectSnapshotCustomItemsIntoCatalog(Map<String, dynamic> snapshot) {
+    final activityIdToName = <String, String>{};
+    final subcategoryIdToName = <String, Map<String, String>>{};
+    final purposeIdToName = <String, Map<String, String>>{};
+    final topicIdToName = <String, String>{};
+    final attendeeInstIdToName = <String, String>{};
+    final attendeeLocalIdToName = <String, String>{};
+    final resultadoIdToName = <String, String>{};
+
+    String? customId(dynamic raw) {
+      if (raw is! Map) return null;
+      final id = raw['id']?.toString().trim() ?? '';
+      return id.startsWith('CUSTOM_') ? id : null;
+    }
+
+    /// Returns the raw ID regardless of whether it's CUSTOM_ or not.
+    String? rawId(dynamic raw) {
+      if (raw is! Map) return null;
+      final id = raw['id']?.toString().trim() ?? '';
+      return id.isNotEmpty ? id : null;
+    }
+
+    String name(Map<dynamic, dynamic> raw) =>
+        raw['name']?.toString().trim().isNotEmpty == true
+            ? raw['name'].toString().trim()
+            : raw['id']?.toString().trim() ?? '';
+
+    // activity
+    final actRaw = snapshot['activity'];
+    final actId = customId(actRaw);
+    final actRawId = rawId(actRaw); // actual ID whether custom or not
+    if (actId != null) activityIdToName[actId] = name(actRaw as Map);
+
+    // subcategory — use actRawId (not just actId) so custom subs under a
+    // catalog activity are still injected cross-device.
+    final subRaw = snapshot['subcategory'];
+    final subId = customId(subRaw);
+    final subRawId = rawId(subRaw); // actual ID whether custom or not
+    if (subId != null && actRawId != null) {
+      subcategoryIdToName.putIfAbsent(actRawId, () => {})[subId] =
+          name(subRaw as Map);
+    }
+
+    // purpose — use subRawId so custom purposes under a catalog sub are injected.
+    final purRaw = snapshot['purpose'];
+    final purId = customId(purRaw);
+    if (purId != null && subRawId != null) {
+      purposeIdToName.putIfAbsent(subRawId, () => {})[purId] =
+          name(purRaw as Map);
+    }
+
+    // topics
+    final topicsRaw = snapshot['topics'];
+    if (topicsRaw is List) {
+      for (final t in topicsRaw) {
+        final topId = customId(t);
+        if (topId != null) topicIdToName[topId] = name(t as Map);
+      }
+    }
+
+    // attendees
+    final attendeesRaw = snapshot['attendees'];
+    if (attendeesRaw is List) {
+      for (final a in attendeesRaw) {
+        final attId = customId(a);
+        if (attId == null) continue;
+        if (attId.startsWith('CUSTOM_ATT_LOC_')) {
+          attendeeLocalIdToName[attId] = name(a as Map);
+        } else {
+          attendeeInstIdToName[attId] = name(a as Map);
+        }
+      }
+    }
+
+    // result
+    final resultRaw = snapshot['result'];
+    final resultId = customId(resultRaw);
+    if (resultId != null) resultadoIdToName[resultId] = name(resultRaw as Map);
+
+    if (activityIdToName.isEmpty &&
+        subcategoryIdToName.isEmpty &&
+        purposeIdToName.isEmpty &&
+        topicIdToName.isEmpty &&
+        attendeeInstIdToName.isEmpty &&
+        attendeeLocalIdToName.isEmpty &&
+        resultadoIdToName.isEmpty) {
+      return;
+    }
+
+    catalogRepo.injectTransientCustomItems(
+      activityIdToName: activityIdToName,
+      subcategoryIdToNameByActivityId: subcategoryIdToName,
+      purposeIdToNameBySubcategoryId: purposeIdToName,
+      topicIdToName: topicIdToName,
+      attendeeInstIdToName: attendeeInstIdToName,
+      attendeeLocalIdToName: attendeeLocalIdToName,
+      resultadoIdToName: resultadoIdToName,
+    );
+  }
+
   Future<List<EvidenceDraft>> _loadEvidenceDraftsFromPersistedSources(
     String activityId,
   ) async {
@@ -2448,7 +2599,7 @@ class WizardController extends ChangeNotifier {
                 ..orderBy([(t) => drift.OrderingTerm.desc(t.priority)])
                 ..limit(1))
               .getSingleOrNull());
-      final raw = queueRow?.payloadJson?.trim();
+      final raw = queueRow?.payloadJson.trim();
       if (raw != null && raw.isNotEmpty) {
         try {
           final decoded = jsonDecode(raw);
@@ -2507,7 +2658,10 @@ class WizardController extends ChangeNotifier {
         }
       }
       final typeId = _selectedActivity?.id ?? activity.title;
-      final resolvedTypeId = await dao.resolveActivityTypeId(typeId);
+      final resolvedTypeId = await dao.resolveActivityTypeId(
+        typeId,
+        displayName: _selectedActivity?.label,
+      );
       final resolvedAssignedToUserId = await _resolveAssignedUserIdForSync(
         activity.id,
       );
@@ -2576,7 +2730,10 @@ class WizardController extends ChangeNotifier {
 
       final typeId =
           _selectedActivity?.id ?? existing?.activityTypeId ?? activity.title;
-      final resolvedTypeId = await dao.resolveActivityTypeId(typeId);
+      final resolvedTypeId = await dao.resolveActivityTypeId(
+        typeId,
+        displayName: _selectedActivity?.label,
+      );
       final resolvedAssignedToUserId = await _resolveAssignedUserIdForSync(
         activityId,
       );
@@ -2686,7 +2843,7 @@ class WizardController extends ChangeNotifier {
 
       // Preservar verdad del servidor y, si el controller aún no trae estado útil,
       // también conservar el snapshot/datos previos del wizard para no vaciarlos.
-      const _serverTruthKeys = {
+      const serverTruthKeys = {
         'assignee_user_id',
         'operational_state',
         'review_state',
@@ -2696,7 +2853,7 @@ class WizardController extends ChangeNotifier {
         'review_reject_reason_code',
         'wizard_payload_snapshot',
       };
-      const _wizardDataKeys = {
+      const wizardDataKeys = {
         'risk_level',
         'activity_type',
         'subcategory',
@@ -2730,8 +2887,8 @@ class WizardController extends ChangeNotifier {
       };
       final preserveWizardData = !_hasMeaningfulWizardState();
       final keysToPreserve = <String>{
-        ..._serverTruthKeys,
-        if (preserveWizardData) ..._wizardDataKeys,
+        ...serverTruthKeys,
+        if (preserveWizardData) ...wizardDataKeys,
       }.toList();
       final existingPreservedFields =
           await (database.select(database.activityFields)..where(
@@ -2845,10 +3002,12 @@ class WizardController extends ChangeNotifier {
     }
 
     if (risk != null) add('risk_level', text: risk!.name);
-    if (_selectedActivity != null)
+    if (_selectedActivity != null) {
       add('activity_type', text: _selectedActivity!.id);
-    if (_selectedSubcategory != null)
+    }
+    if (_selectedSubcategory != null) {
       add('subcategory', text: _selectedSubcategory!.id);
+    }
     if (isOtherSubcategory && otherSubcategoryText.trim().isNotEmpty) {
       add('subcategory_other_text', text: otherSubcategoryText.trim());
     }
@@ -2899,8 +3058,9 @@ class WizardController extends ChangeNotifier {
       );
     }
     if (selectedResult != null) add('result', text: selectedResult!.id);
-    if (reportNotes.trim().isNotEmpty)
+    if (reportNotes.trim().isNotEmpty) {
       add('report_notes', text: reportNotes.trim());
+    }
     final cleanedAgreements = getReportAgreements();
     if (cleanedAgreements.isNotEmpty) {
       add('report_agreements', json: jsonEncode(cleanedAgreements));
@@ -2921,8 +3081,9 @@ class WizardController extends ChangeNotifier {
     }
     if (isUnplanned) {
       add('origin', text: 'unplanned');
-      if (unplannedReason != null)
+      if (unplannedReason != null) {
         add('unplanned_reason', text: unplannedReason);
+      }
       if (unplannedReasonOtherText.trim().isNotEmpty) {
         add(
           'unplanned_reason_other_text',
@@ -3107,6 +3268,12 @@ class WizardController extends ChangeNotifier {
         existingSnapshot: existingSnapshot,
       );
 
+      // Use the stored serverRevision so the backend can apply the update
+      // without a CONFLICT round-trip. For new activities (never synced) this
+      // is 0, which the backend handles via its forceOverride retry path.
+      final existingRow = await dao.getActivityById(activityId);
+      final knownSyncVersion = existingRow?.serverRevision ?? 0;
+
       final dto = ActivityDTO(
         uuid: activityId,
         projectId: companion.projectId.value,
@@ -3126,7 +3293,7 @@ class WizardController extends ChangeNotifier {
         wizardPayload: wizardPayload,
         createdAt: companion.createdAt.value,
         updatedAt: now,
-        syncVersion: 0,
+        syncVersion: knownSyncVersion,
       );
 
       await dao.markReadyToSync(
@@ -3157,9 +3324,48 @@ class WizardController extends ChangeNotifier {
     return activityTypeId;
   }
 
+  // Helper: extracts {'id': ..., 'name': ...} from a snapshot field.
+  // Returns null if the field is absent or has no usable name.
+  Map<String, dynamic>? _snapshotMapField(
+    Map<String, dynamic>? snapshot,
+    String key,
+  ) {
+    final raw = snapshot?[key];
+    if (raw is! Map) return null;
+    final id = raw['id']?.toString().trim() ?? '';
+    final name = raw['name']?.toString().trim() ?? '';
+    if (id.isEmpty && name.isEmpty) return null;
+    return {'id': id, 'name': name};
+  }
+
   Map<String, dynamic> _buildWizardPayloadForSync({
     Map<String, dynamic>? existingSnapshot,
   }) {
+    // Build cached-name lookups from the previous snapshot so that custom items
+    // (CUSTOM_ATT_* / CUSTOM_TOP_*) that no longer resolve from the live catalog
+    // still carry their human-readable label instead of falling back to the raw ID.
+    final snapshotTopicNames = <String, String>{};
+    if (existingSnapshot?['topics'] is List) {
+      for (final t in existingSnapshot!['topics'] as List) {
+        if (t is Map) {
+          final tId = t['id']?.toString().trim() ?? '';
+          final tName = t['name']?.toString().trim() ?? '';
+          if (tId.isNotEmpty && tName.isNotEmpty) snapshotTopicNames[tId] = tName;
+        }
+      }
+    }
+
+    final snapshotAttendeeNames = <String, String>{};
+    if (existingSnapshot?['attendees'] is List) {
+      for (final a in existingSnapshot!['attendees'] as List) {
+        if (a is Map) {
+          final aId = a['id']?.toString().trim() ?? '';
+          final aName = a['name']?.toString().trim() ?? '';
+          if (aId.isNotEmpty && aName.isNotEmpty) snapshotAttendeeNames[aId] = aName;
+        }
+      }
+    }
+
     final topicItems = <Map<String, String>>[];
     for (final topicId in selectedTopicIds) {
       if (topicId == 'OTRO_TEMA') continue;
@@ -3167,19 +3373,60 @@ class WizardController extends ChangeNotifier {
         (item) => item?.id == topicId,
         orElse: () => null,
       );
-      topicItems.add({'id': topicId, 'name': (match?.name ?? topicId).trim()});
+      final name = match?.name.trim().isNotEmpty == true
+          ? match!.name.trim()
+          : snapshotTopicNames[topicId] ?? topicId;
+      topicItems.add({'id': topicId, 'name': name});
     }
 
     final attendeeItems = selectedAttendeeIds
         .map((id) {
           final attendee = attendeeById(id);
+          final resolvedName = attendee?.name.trim().isNotEmpty == true
+              ? attendee!.name.trim()
+              : snapshotAttendeeNames[id] ?? id;
           return {
             'id': id,
-            'name': (attendee?.name ?? id).trim(),
+            'name': resolvedName,
             'representative_name': attendeeRepresentative(id),
           };
         })
         .toList(growable: false);
+
+    // Scalar catalog fields: use in-memory selection first, fall back to snapshot
+    // so that CUSTOM_* values survive re-sync after the catalog is reloaded.
+    final activityPayload = _selectedActivity != null
+        ? {'id': _selectedActivity!.id, 'name': _selectedActivity!.name}
+        : _snapshotMapField(existingSnapshot, 'activity');
+
+    final subcategoryPayload = _selectedSubcategory != null
+        ? {
+            'id': _selectedSubcategory!.id,
+            'name': _selectedSubcategory!.name,
+            'other_text': otherSubcategoryText.trim().isEmpty
+                ? null
+                : otherSubcategoryText.trim(),
+          }
+        : (() {
+            final snap = _snapshotMapField(existingSnapshot, 'subcategory');
+            if (snap == null) return null;
+            final existingOtherText =
+                (existingSnapshot?['subcategory'] as Map?)?['other_text'];
+            return {
+              ...snap,
+              'other_text': otherSubcategoryText.trim().isEmpty
+                  ? existingOtherText
+                  : otherSubcategoryText.trim(),
+            };
+          })();
+
+    final purposePayload = _selectedPurpose != null
+        ? {'id': _selectedPurpose!.id, 'name': _selectedPurpose!.name}
+        : _snapshotMapField(existingSnapshot, 'purpose');
+
+    final resultPayload = selectedResult != null
+        ? {'id': selectedResult!.id, 'name': selectedResult!.name}
+        : _snapshotMapField(existingSnapshot, 'result');
 
     final evidenceItems = evidencias
         .where((draft) => draft.localPath.trim().isNotEmpty)
@@ -3192,21 +3439,9 @@ class WizardController extends ChangeNotifier {
 
     return {
       'risk_level': risk?.name,
-      'activity': _selectedActivity == null
-          ? null
-          : {'id': _selectedActivity!.id, 'name': _selectedActivity!.name},
-      'subcategory': _selectedSubcategory == null
-          ? null
-          : {
-              'id': _selectedSubcategory!.id,
-              'name': _selectedSubcategory!.name,
-              'other_text': otherSubcategoryText.trim().isEmpty
-                  ? null
-                  : otherSubcategoryText.trim(),
-            },
-      'purpose': _selectedPurpose == null
-          ? null
-          : {'id': _selectedPurpose!.id, 'name': _selectedPurpose!.name},
+      'activity': activityPayload,
+      'subcategory': subcategoryPayload,
+      'purpose': purposePayload,
       'topics': topicItems,
       'topic_other_text': otherTopicText.trim().isEmpty
           ? null
@@ -3215,9 +3450,7 @@ class WizardController extends ChangeNotifier {
       'evidences': evidenceItems.isNotEmpty
           ? evidenceItems
           : persistedEvidenceItems,
-      'result': selectedResult == null
-          ? null
-          : {'id': selectedResult!.id, 'name': selectedResult!.name},
+      'result': resultPayload,
       'notes': reportNotes.trim().isEmpty ? null : reportNotes.trim(),
       'agreements': getReportAgreements(),
       'location': {

@@ -179,9 +179,9 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.08),
+                  color: AppColors.warning.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppColors.warning.withOpacity(0.3)),
+                  border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
                 ),
                 child: const Row(
                   children: [
@@ -215,7 +215,7 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: AppColors.error.withOpacity(0.08),
+                    color: AppColors.error.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
@@ -265,7 +265,7 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: AppColors.warning.withOpacity(0.12),
+                    color: AppColors.warning.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
@@ -330,7 +330,7 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
             if (field.action == 'replace') ...[
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
-                value: field.replacementId,
+                initialValue: field.replacementId,
                 isExpanded: true,
                 decoration: const InputDecoration(
                   labelText: 'Seleccionar valor existente',
@@ -366,6 +366,25 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
     );
   }
 
+  /// Returns the fields sorted so that parent entities are created before
+  /// dependent ones: activity → subcategory/purpose/result → topics/attendees.
+  List<_CustomField> _sortedByDependency(List<_CustomField> fields) {
+    const order = [
+      'activity',
+      'subcategory',
+      'purpose',
+      'result',
+      'topics',
+      'attendees',
+    ];
+    return [...fields]
+      ..sort((a, b) {
+          final ai = order.indexOf(a.fieldKey);
+          final bi = order.indexOf(b.fieldKey);
+          return (ai < 0 ? 999 : ai).compareTo(bi < 0 ? 999 : bi);
+        });
+  }
+
   Future<void> _save() async {
     // Validate all replace actions have a selection
     for (final field in _fields) {
@@ -389,8 +408,9 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
 
       for (final field in _fields) {
         if (field.action == 'approve') {
-          // For approve, we keep the custom name but can optionally add to catalog
-          // The flag will be cleared — admin accepted the value as-is
+          // The CUSTOM_* ID will be added to the catalog below; the
+          // wizard_payload already references it by that same ID so no
+          // replacement entry is needed.
           continue;
         }
         if (field.action == 'replace') {
@@ -413,14 +433,28 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
         }
       }
 
-      // Try to add approved items to the catalog via editor endpoints
-      for (final field in _fields) {
-        if (field.action != 'approve') continue;
+      // Add approved items to the catalog in dependency order.
+      // Process in order: activity first, then subcategory/purpose, then others
+      // so parent entries exist before their children are created.
+      final approveFields = _sortedByDependency(
+        _fields.where((f) => f.action == 'approve').toList(),
+      );
+      final catalogErrors = <String>[];
+      for (final field in approveFields) {
         try {
           await _addToCatalog(field);
-        } catch (_) {
-          // Non-blocking — the value stays in the activity either way
+        } catch (e) {
+          catalogErrors.add('"${field.customName}" (${field.label}): $e');
         }
+      }
+
+      if (catalogErrors.isNotEmpty) {
+        setState(() {
+          _isSaving = false;
+          _error =
+              'Error al agregar al catálogo:\n${catalogErrors.join('\n')}';
+        });
+        return;
       }
 
       await const BackendApiClient().patchJson(
@@ -454,9 +488,17 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
     final entity = entityMap[field.fieldKey];
     if (entity == null) return;
 
+    // project_id is required by the editor endpoint to locate the catalog version.
+    final projectId = Uri.encodeComponent(
+      widget.activity.activity.projectId.trim().toUpperCase(),
+    );
+
+    // Use the custom ID as the official catalog ID so the activity's
+    // wizard_payload already references the newly-created entry without
+    // needing a separate replacement call.
     final payload = <String, dynamic>{
+      'id': field.customId,
       'name': field.customName,
-      'is_enabled': true,
     };
 
     // Add parent references for cascaded entities
@@ -469,10 +511,16 @@ class _CatalogResolutionDialogState extends State<CatalogResolutionDialog> {
       if (sub is Map) payload['subcategory_id'] = sub['id'];
       final act = wp['activity'];
       if (act is Map) payload['activity_id'] = act['id'];
+    } else if (field.fieldKey == 'attendees') {
+      // AttendeeCreateRequest requires a 'type' field
+      payload['type'] = 'CUSTOM';
+    } else if (field.fieldKey == 'result') {
+      // ResultCreateRequest requires a 'category' field
+      payload['category'] = 'CUSTOM';
     }
 
     await const BackendApiClient().postJson(
-      '/api/v1/catalog/editor/$entity',
+      '/api/v1/catalog/editor/$entity?project_id=$projectId',
       payload,
     );
   }
@@ -507,7 +555,7 @@ class _ActionRadio extends StatelessWidget {
             width: selected ? 2 : 1,
           ),
           color: selected
-              ? AppColors.primary.withOpacity(0.04)
+              ? AppColors.primary.withValues(alpha: 0.04)
               : Colors.transparent,
         ),
         child: Column(

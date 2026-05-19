@@ -218,3 +218,111 @@ def test_sync_participant_fallback_uses_assignee_when_list_missing(force_firesto
     )
 
     assert participants == ["user-123"]
+
+
+# ---------------------------------------------------------------------------
+# Unit tests for sync push fixes
+# ---------------------------------------------------------------------------
+
+
+def _make_push_item(**overrides):
+    """Build a minimal SyncPushActivityItem-like dict for testing _firestore_push_item."""
+    from app.schemas.sync import SyncPushActivityItem
+    defaults = {
+        "uuid": str(uuid4()),
+        "project_id": "TMQ",
+        "front_id": None,
+        "pk_start": 0,
+        "pk_end": None,
+        "execution_state": "EN_CURSO",
+        "assigned_to_user_id": str(uuid4()),
+        "participant_user_ids": [],
+        "catalog_version_id": "v1",
+        "activity_type_code": "CAM",
+        "latitude": None,
+        "longitude": None,
+        "title": "Test activity",
+        "description": None,
+        "wizard_payload": None,
+        "sync_version": 1,
+        "created_by_user_id": str(uuid4()),
+        "deleted_at": None,
+        "server_id": None,
+    }
+    defaults.update(overrides)
+    return SyncPushActivityItem(**defaults)
+
+
+def _make_push_request(items, *, project_id="TMQ", force_override=False):
+    from app.schemas.sync import SyncPushRequest
+    return SyncPushRequest(
+        project_id=project_id,
+        activities=items,
+        force_override=force_override,
+    )
+
+
+def test_custom_activity_type_bypasses_catalog_check(monkeypatch, force_firestore_backend):
+    """CUSTOM_* activity_type_code must be accepted even when catalog lookup finds nothing."""
+    fake_client = _FakeFirestoreClient()
+
+    # Catalog is completely empty — valid_codes will be empty
+    monkeypatch.setattr(sync_api, "get_firestore_client", lambda: fake_client)
+    monkeypatch.setattr(sync_api, "_firestore_catalog_activity_codes", lambda **kwargs: set())
+
+    item = _make_push_item(activity_type_code="CUSTOM_INSPECCION_001")
+    request = _make_push_request([item])
+
+    results = []
+    catalog_cache = {}
+    sync_api._firestore_push_item(fake_client, None, datetime.now(timezone.utc), request, item, results, catalog_cache)
+
+    assert len(results) == 1
+    assert results[0].status in {"CREATED", "UPDATED"}, (
+        f"CUSTOM_* activity should be accepted even with empty catalog; got {results[0].status}: {results[0].error_code}"
+    )
+    # Must be flagged for admin review
+    stored = fake_client._docs.get(f"activities/{item.uuid}") or {}
+    assert stored.get("catalog_changed") is True
+
+
+def test_sibling_does_not_inherit_catalog_changed(monkeypatch, force_firestore_backend):
+    """Sibling activities created for co-responsibles must not inherit catalog_changed=True."""
+    fake_client = _FakeFirestoreClient()
+
+    monkeypatch.setattr(sync_api, "get_firestore_client", lambda: fake_client)
+    monkeypatch.setattr(
+        sync_api, "_firestore_catalog_activity_codes",
+        lambda **kwargs: {"CAM"},
+    )
+
+    primary_user = str(uuid4())
+    sibling_user = str(uuid4())
+    item = _make_push_item(
+        assigned_to_user_id=primary_user,
+        participant_user_ids=[primary_user, sibling_user],
+        wizard_payload={"activity": {"id": "CUSTOM_CAM_001", "name": "Custom Cam"}},
+    )
+    request = _make_push_request([item])
+
+    results = []
+    catalog_cache = {}
+    sync_api._firestore_push_item(fake_client, None, datetime.now(timezone.utc), request, item, results, catalog_cache)
+
+    # Primary activity should be flagged
+    primary_doc = fake_client._docs.get(f"activities/{item.uuid}") or {}
+    assert primary_doc.get("catalog_changed") is True
+
+    # Find sibling document (uuid different from item.uuid, assigned to sibling_user)
+    sibling_docs = [
+        doc for path, doc in fake_client._docs.items()
+        if path.startswith("activities/")
+        and path != f"activities/{item.uuid}"
+        and doc.get("assigned_to_user_id") == sibling_user
+    ]
+    assert len(sibling_docs) == 1, "Expected exactly one sibling activity"
+    sibling = sibling_docs[0]
+    assert sibling.get("catalog_changed") is False, (
+        f"Sibling must NOT inherit catalog_changed=True; got {sibling.get('catalog_changed')}"
+    )
+    assert sibling.get("wizard_payload") is None

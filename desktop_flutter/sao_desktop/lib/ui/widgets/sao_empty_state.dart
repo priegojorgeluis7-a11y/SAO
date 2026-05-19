@@ -27,7 +27,7 @@ class SaoEmptyState extends StatelessWidget {
           Icon(
             icon,
             size: 64,
-            color: SaoColors.gray400.withOpacity(0.5),
+            color: SaoColors.gray400.withValues(alpha: 0.5),
           ),
           const SizedBox(height: SaoSpacing.lg),
           Text(

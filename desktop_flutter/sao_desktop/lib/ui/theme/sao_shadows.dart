@@ -22,7 +22,7 @@ class SaoShadows {
   // Sombras sutiles para profundidad
   static final List<BoxShadow> sm = [
     BoxShadow(
-      color: SaoColors.gray900.withOpacity(0.05),
+      color: SaoColors.gray900.withValues(alpha: 0.05),
       blurRadius: 4,
       offset: const Offset(0, 1),
     ),
@@ -30,7 +30,7 @@ class SaoShadows {
 
   static final List<BoxShadow> md = [
     BoxShadow(
-      color: SaoColors.gray900.withOpacity(0.08),
+      color: SaoColors.gray900.withValues(alpha: 0.08),
       blurRadius: 8,
       offset: const Offset(0, 2),
     ),
@@ -38,7 +38,7 @@ class SaoShadows {
 
   static final List<BoxShadow> lg = [
     BoxShadow(
-      color: SaoColors.gray900.withOpacity(0.12),
+      color: SaoColors.gray900.withValues(alpha: 0.12),
       blurRadius: 16,
       offset: const Offset(0, 4),
     ),

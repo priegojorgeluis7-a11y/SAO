@@ -241,7 +241,7 @@ class AdminDashboardPage extends ConsumerWidget {
                   ),
                   const SizedBox(width: 20),
                   // ── Usuarios activos ─────────────────────────────
-                  SizedBox(
+                  const SizedBox(
                     width: 300,
                     child: _OnlineUsersPanel(),
                   ),

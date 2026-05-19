@@ -6,15 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
 import 'package:latlong2/latlong.dart' hide Path;
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/assignments_repository.dart';
+import '../../data/repositories/backend_api_client.dart';
 import '../../data/repositories/evidence_repository.dart';
 import '../../ui/theme/sao_colors.dart';
+import '../auth/app_session_controller.dart';
 import '../completed_activities/completed_activities_provider.dart';
 import '../reports/reports_provider.dart';
 import 'dashboard_provider.dart';
@@ -61,6 +67,19 @@ String _inferPdfFileName(EvidenceItem evidence, String activityId) {
     if (candidate.isNotEmpty) return candidate;
   }
   return 'reporte_${activityId.trim()}.pdf';
+}
+
+/// Carga una fuente TTF del sistema con soporte Unicode para el PDF.
+/// Retorna null si no se puede cargar (fallback a Helvetica).
+Future<pw.Font?> _loadSystemPdfFont(String path) async {
+  try {
+    final file = File(path);
+    if (await file.exists()) {
+      final bytes = await file.readAsBytes();
+      return pw.Font.ttf(bytes.buffer.asByteData());
+    }
+  } catch (_) {}
+  return null;
 }
 
 Future<String> _resolveDashboardDocumentsRootPath() async {
@@ -603,12 +622,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final range = ref.watch(selectedDashboardRangeProvider);
     final selectedProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
     final availableProjectsAsync = ref.watch(availableProjectsProvider);
-    final projectOptions = <String>{
-      for (final raw in (availableProjectsAsync.valueOrNull ?? const <String>[]))
-        if (raw.trim().isNotEmpty) raw.trim().toUpperCase(),
-      if (selectedProjectId.isNotEmpty) selectedProjectId,
-    }.toList()
-      ..sort();
+    final availableProjects = (availableProjectsAsync.valueOrNull ?? const <String>[])
+        .map((raw) => raw.trim().toUpperCase())
+        .where((raw) => raw.isNotEmpty)
+        .toSet();
+    // Solo agregar el proyecto activo si pertenece a la lista accesible del usuario.
+    if (selectedProjectId.isNotEmpty && availableProjects.isNotEmpty &&
+        !availableProjects.contains(selectedProjectId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(activeProjectIdProvider.notifier).select(availableProjects.first);
+      });
+    }
+    final projectOptions = availableProjects.toList()..sort();
     final dashboardAsync = ref.watch(dashboardProvider);
 
     return Scaffold(
@@ -704,6 +729,902 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     );
   }
 
+  // ── Resumen ejecutivo PDF (solo admin) ───────────────────────────────────
+
+  bool _exportingPdf = false;
+
+  // Calcula la fecha de inicio según el rango del dashboard
+  DateTime _dashboardRangeStart(DashboardRange range) {
+    final now = DateTime.now();
+    switch (range) {
+      case DashboardRange.today:
+        return DateTime(now.year, now.month, now.day);
+      case DashboardRange.week:
+        final weekday = now.weekday;
+        final start = now.subtract(Duration(days: weekday - 1));
+        return DateTime(start.year, start.month, start.day);
+      case DashboardRange.month:
+        return DateTime(now.year, now.month, 1);
+      case DashboardRange.all:
+        return DateTime(2020, 1, 1);
+    }
+  }
+
+  Future<void> _exportDashboardSummaryPdf(
+      DashboardData data, String projectId) async {
+    if (_exportingPdf) return;
+    if (!mounted) return;
+    setState(() => _exportingPdf = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      final dateFrom = _dashboardRangeStart(data.range);
+      final dateTo = DateTime.now();
+
+      // Cargar actividades con acuerdos/resultados del backend
+      final activities = await loadApprovedActivitiesForPdf(
+        projectId: projectId,
+        dateFrom: dateFrom,
+        dateTo: dateTo,
+        limit: 100,
+      );
+
+      // DEBUG: log first 3 activities
+      for (final act in activities.take(3)) {
+        // ignore: avoid_print
+        print('[PDF-DBG] type=${act.activityType} front=${act.frontName} muni=${act.municipality} sub=${act.subcategory} topics=${act.topics}');
+      }
+
+      // Buscar reportes PDF locales ya descargados para cada actividad
+      final localPdfPaths = <String, String>{};
+      for (final act in activities) {
+        final path = await findExistingLocalReportPath(
+          activityId: act.id,
+          projectId: act.projectId ?? projectId,
+          front: act.frontName,
+          state: act.state ?? '',
+          municipality: act.municipality ?? '',
+          activityType: act.activityType,
+        );
+        if (path != null) localPdfPaths[act.id] = path;
+      }
+
+      // Para actividades con reporte pero sin PDF local, descargar desde la nube
+      const apiClient = BackendApiClient();
+      for (final act in activities) {
+        if (localPdfPaths.containsKey(act.id)) continue;
+        if (!act.hasReport) continue;
+        // ignore: avoid_print
+        print('[PDF-DL] Descargando reporte para ${act.id} (${act.activityType})');
+        try {
+          final decoded = await apiClient.getJson(
+              '/api/v1/completed-activities/${Uri.encodeComponent(act.id)}');
+          if (decoded is! Map<String, dynamic>) continue;
+          final detail = CompletedActivityDetail.fromJson(decoded);
+          final pdfEvidence = _selectPdfEvidenceForDownload(detail);
+          if (pdfEvidence == null) {
+            // ignore: avoid_print
+            print('[PDF-DL] Sin evidencia PDF para ${act.id}');
+            continue;
+          }
+          final file = await _downloadPdfFromCloud(detail, pdfEvidence);
+          localPdfPaths[act.id] = file.path;
+          // ignore: avoid_print
+          print('[PDF-DL] OK: ${file.path}');
+        } catch (e) {
+          // ignore: avoid_print
+          print('[PDF-DL] ERROR ${act.id}: $e');
+        }
+      }
+
+      final bytes = await _buildDashboardSummaryPdfBytes(
+          data, projectId, activities, dateFrom, dateTo,
+          localPdfPaths: localPdfPaths);
+
+      final now = DateTime.now();
+      final stamp =
+          DateFormat('yyyyMMdd_HHmmss').format(now);
+      final project = projectId.trim().isEmpty ? 'GENERAL' : projectId.trim();
+      final fileName =
+          'resumen_dashboard_${project}_$stamp.pdf';
+
+      final docsRoot = await _resolveDashboardDocumentsRootPath();
+      final dir = Directory('$docsRoot/SAO_Reportes');
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final file = File('${dir.path}/$fileName');
+      await file.writeAsBytes(bytes, flush: true);
+
+      if (!mounted) return;
+      await _openDashboardLocalPath(file.path);
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text('PDF guardado: ${file.path}'),
+          duration: const Duration(seconds: 12),
+          action: SnackBarAction(
+            label: 'Abrir carpeta',
+            onPressed: () => _openDashboardLocalPath(dir.path),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      messenger.showSnackBar(
+        SnackBar(content: Text('No se pudo generar el PDF: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _exportingPdf = false);
+    }
+  }
+
+  // ── Catálogo de nombres por código de tipo de actividad ──────────────────
+  static const Map<String, String> _activityTypeNames = {
+    'CAM'    : 'Caminamiento',
+    'REU'    : 'Reunión',
+    'ASP'    : 'Asamblea Protocolizada',
+    'CIN'    : 'Consulta Indígena',
+    'SOC'    : 'Socialización',
+    'AIN'    : 'Acompañamiento Institucional',
+    'CAM_DDV': 'Verificación de DDV',
+    'CAM_MAR': 'Marcaje de afectaciones',
+    'CAM_ACC': 'Revisión de accesos / BDT',
+    'CAM_SEG': 'Seguimiento técnico',
+    'REU_TEC': 'Reunión Técnica / Interinstitucional',
+    'REU_EJI': 'Reunión Ejidal / Comisariado',
+    'REU_MUN': 'Reunión Municipal / Estatal',
+    'REU_SEG': 'Reunión de Seguimiento',
+    'REU_INF': 'Reunión Informativa',
+    'REU_MES': 'Mesa Técnica',
+  };
+
+  String _resolveActivityTypeName(String code) {
+    final c = code.trim().toUpperCase();
+    if (_activityTypeNames.containsKey(c)) return _activityTypeNames[c]!;
+    // Si el código ya es descriptivo (tiene espacios o >5 chars) úsalo tal cual
+    if (code.contains(' ') || code.length > 5) return code.trim();
+    return code.trim();
+  }
+
+  Future<Uint8List> _buildDashboardSummaryPdfBytes(
+      DashboardData data,
+      String projectId,
+      List<ReportActivityItem> activities,
+      DateTime dateFrom,
+      DateTime dateTo,
+      {Map<String, String> localPdfPaths = const {}}) async {
+    // ── Fuentes Unicode ──────────────────────────────────────────────────
+    final baseFont = await _loadSystemPdfFont(
+            '/System/Library/Fonts/Supplemental/Arial.ttf') ??
+        await _loadSystemPdfFont('/Library/Fonts/Arial.ttf');
+    final boldFont = await _loadSystemPdfFont(
+            '/System/Library/Fonts/Supplemental/Arial Bold.ttf') ??
+        await _loadSystemPdfFont('/Library/Fonts/Arial Bold.ttf');
+
+    // ── Rasterizar PDFs locales para incrustar ────────────────────────────
+    final Map<String, List<pw.MemoryImage>> rasterizedPages = {};
+    for (final entry in localPdfPaths.entries) {
+      try {
+        final pdfBytes = await File(entry.value).readAsBytes();
+        final pages = <pw.MemoryImage>[];
+        await for (final raster in Printing.raster(pdfBytes, dpi: 150)) {
+          pages.add(pw.MemoryImage(await raster.toPng()));
+        }
+        if (pages.isNotEmpty) rasterizedPages[entry.key] = pages;
+      } catch (_) {}
+    }
+
+    final pdf = pw.Document(
+      theme: pw.ThemeData.withFont(
+        base: baseFont ?? pw.Font.helvetica(),
+        bold: boldFont ?? pw.Font.helveticaBold(),
+        italic: pw.Font.helveticaOblique(),
+        boldItalic: pw.Font.helveticaBoldOblique(),
+      ),
+    );
+
+    // ── Colores ────────────────────────────────────────────────────────
+    const headerBg     = PdfColor.fromInt(0xFF0F172A);
+    const sectionBg    = PdfColor.fromInt(0xFF1E3A5F);
+    const accentBlue   = PdfColor.fromInt(0xFF3B82F6);
+    const accentGreen  = PdfColor.fromInt(0xFF10B981);
+    const accentOrange = PdfColor.fromInt(0xFFF59E0B);
+    const accentRed    = PdfColor.fromInt(0xFFEF4444);
+    const accentPurple = PdfColor.fromInt(0xFF7C3AED);
+    const textDark     = PdfColor.fromInt(0xFF1F2937);
+    const textGray     = PdfColor.fromInt(0xFF6B7280);
+    const borderGray   = PdfColor.fromInt(0xFFE5E7EB);
+    const stripeBg     = PdfColor.fromInt(0xFFF1F5F9);
+
+    // ── Datos derivados ────────────────────────────────────────────────
+    final now              = DateTime.now();
+    final dateStr          = DateFormat('dd/MM/yyyy HH:mm', 'es').format(now);
+    final fmtD            = DateFormat('dd/MM/yyyy', 'es');
+    final rangeStr         = '${fmtD.format(dateFrom)} – ${fmtD.format(dateTo)}';
+    // Etiqueta contextual: aclara si es acumulado o un sprint concreto
+    final (rangeLabel, rangeHeader) = switch (data.range) {
+      DashboardRange.all   => (
+          'Progreso acumulado del proyecto  (al ${fmtD.format(dateTo)})',
+          'Acumulado al ${fmtD.format(dateTo)}',
+        ),
+      DashboardRange.today => (
+          'Resumen del día  –  ${fmtD.format(dateTo)}',
+          rangeStr,
+        ),
+      DashboardRange.week  => (
+          'Resumen semanal  –  $rangeStr',
+          rangeStr,
+        ),
+      DashboardRange.month => (
+          'Resumen mensual  –  $rangeStr',
+          rangeStr,
+        ),
+    };
+    final project          = projectId.trim().isEmpty ? 'GENERAL' : projectId.trim();
+    final fronteLabel      = project.toUpperCase() == 'TSNL' ? 'Segmento' : 'Frente';
+    final progressPct      = (data.avancePct * 100).round();
+    final progressFraction = data.avancePct.clamp(0.0, 1.0);
+
+    // Agrupar actividades por nombre de tipo
+    final byType = <String, List<ReportActivityItem>>{};
+    for (final act in activities) {
+      byType.putIfAbsent(_resolveActivityTypeName(act.activityType), () => []).add(act);
+    }
+    final sortedTypes = byType.entries.toList()
+      ..sort((a, b) => b.value.length.compareTo(a.value.length));
+
+    // ── Mapa de calor: URL + tiles OSM ──────────────────────────
+    final heatmapUrl = project.toUpperCase() == 'TSNL'
+        ? 'https://storage.googleapis.com/sao-web-desktop-v2/heatmap_TSNL.html?v=4'
+        : 'https://storage.googleapis.com/sao-web-desktop-v2/heatmap_$project.html';
+
+    const tileCols = 3;
+    const tileRows = 3;
+    final gpts = data.geoPoints.where((p) => p.lat != 0 && p.lon != 0).toList();
+    final Map<String, pw.MemoryImage> tileImages = {};
+    var gridLonMin = 0.0, gridLonMax = 1.0;
+    var gridLatMin = 0.0, gridLatMax = 1.0;
+    var tileZoom = 7, tileX0 = 0, tileY0 = 0;
+
+    if (gpts.isNotEmpty) {
+      final rawLonMin = gpts.map((p) => p.lon).reduce(math.min);
+      final rawLonMax = gpts.map((p) => p.lon).reduce(math.max);
+      final rawLatMin = gpts.map((p) => p.lat).reduce(math.min);
+      final rawLatMax = gpts.map((p) => p.lat).reduce(math.max);
+      final lonSpan = math.max(rawLonMax - rawLonMin, 0.05);
+      final latSpan = math.max(rawLatMax - rawLatMin, 0.05);
+      final bLonMin = rawLonMin - lonSpan * 0.2;
+      final bLonMax = rawLonMax + lonSpan * 0.2;
+      final bLatMin = rawLatMin - latSpan * 0.2;
+      final bLatMax = rawLatMax + latSpan * 0.2;
+
+      // Use median instead of mean to resist outlier pull
+      final sortedLats = (gpts.map((p) => p.lat).toList()..sort());
+      final sortedLons = (gpts.map((p) => p.lon).toList()..sort());
+      final cLat = sortedLats[sortedLats.length ~/ 2];
+      final cLon = sortedLons[sortedLons.length ~/ 2];
+
+      int lonToX(double lon, int z) =>
+          ((lon + 180) / 360 * (1 << z)).floor().clamp(0, (1 << z) - 1);
+      int latToY(double lat, int z) {
+        final lr = lat * math.pi / 180;
+        return ((1.0 - math.log(math.tan(lr) + 1.0 / math.cos(lr)) / math.pi)
+                / 2.0 * (1 << z))
+            .floor()
+            .clamp(0, (1 << z) - 1);
+      }
+      double xToLon(int x, int z) => x / (1 << z) * 360.0 - 180.0;
+      double yToLat(int y, int z) {
+        final n = math.pi * (1.0 - 2.0 * y / (1 << z));
+        return 180.0 / math.pi * math.atan(0.5 * (math.exp(n) - math.exp(-n)));
+      }
+
+      // Find tightest zoom where bbox fits within _tileCols × _tileRows grid
+      for (int z = 12; z >= 5; z--) {
+        final x0 = lonToX(bLonMin, z);
+        final x1 = lonToX(bLonMax, z);
+        final y0 = latToY(bLatMax, z);
+        final y1 = latToY(bLatMin, z);
+        if ((x1 - x0 + 1) <= tileCols && (y1 - y0 + 1) <= tileRows) {
+          tileZoom = z;
+          // Center grid on median point
+          final cx = lonToX(cLon, z);
+          final cy = latToY(cLat, z);
+          tileX0 = (cx - tileCols ~/ 2).clamp(0, (1 << z) - tileCols);
+          tileY0 = (cy - tileRows ~/ 2).clamp(0, (1 << z) - tileRows);
+          break;
+        }
+      }
+
+      gridLonMin = xToLon(tileX0, tileZoom);
+      gridLonMax = xToLon(tileX0 + tileCols, tileZoom);
+      gridLatMax = yToLat(tileY0, tileZoom);
+      gridLatMin = yToLat(tileY0 + tileRows, tileZoom);
+
+      // Fetch all _tileCols × _tileRows tiles concurrently
+      final tileFutures = <Future<void>>[];
+      for (int r = 0; r < tileRows; r++) {
+        for (int c = 0; c < tileCols; c++) {
+          final lr = r, lc = c;
+          tileFutures.add(() async {
+            try {
+              final resp = await http
+                  .get(
+                    Uri.parse(
+                        'https://tile.openstreetmap.org/$tileZoom/${tileX0 + lc}/${tileY0 + lr}.png'),
+                    headers: {'User-Agent': 'SAO-Desktop/2.0 (reporting)'},
+                  )
+                  .timeout(const Duration(seconds: 10));
+              if (resp.statusCode == 200) {
+                tileImages['$lr,$lc'] = pw.MemoryImage(resp.bodyBytes);
+              }
+            } catch (_) {}
+          }());
+        }
+      }
+      await Future.wait(tileFutures);
+    }
+
+    // ── Helpers locales ────────────────────────────────────────────────
+    String fmtDate(String raw) {
+      try { return DateFormat('dd/MM/yyyy', 'es').format(DateTime.parse(raw)); }
+      catch (_) { return raw.length >= 10 ? raw.substring(0, 10) : raw; }
+    }
+
+    // Sanitiza el nombre del responsable: convierte emails a nombre legible.
+    // p.ej. "juan.perez@gmail.com" → "Juan Pérez" (parte local formateada).
+    String sanitizeName(String? raw) {
+      final s = raw?.trim() ?? '';
+      if (s.isEmpty) return '';
+      if (!s.contains('@')) return s;
+      // Tomar la parte local del email, reemplazar puntos/guiones por espacio
+      final local = s.split('@').first
+          .replaceAll('.', ' ')
+          .replaceAll('_', ' ')
+          .replaceAll('-', ' ');
+      // Capitalizar cada palabra
+      return local.split(' ')
+          .where((w) => w.isNotEmpty)
+          .map((w) => w[0].toUpperCase() + w.substring(1).toLowerCase())
+          .join(' ');
+    }
+
+    pw.Widget sectionTitle(String title, {PdfColor? bg}) => pw.Container(
+      width: double.infinity,
+      padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: pw.BoxDecoration(
+        color: bg ?? sectionBg,
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)),
+      ),
+      child: pw.Text(title, style: pw.TextStyle(fontSize: 11,
+          fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
+    );
+
+    pw.Widget kpiCard(String label, String value, PdfColor color) => pw.Expanded(
+      child: pw.Container(
+        margin: const pw.EdgeInsets.only(right: 8),
+        padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        decoration: pw.BoxDecoration(
+          color: PdfColors.white,
+          border: pw.Border.all(color: borderGray),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6)),
+        ),
+        child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          pw.Text(value, style: pw.TextStyle(fontSize: 20,
+              fontWeight: pw.FontWeight.bold, color: color)),
+          pw.SizedBox(height: 2),
+          pw.Text(label, style: const pw.TextStyle(fontSize: 8, color: textGray)),
+        ]),
+      ),
+    );
+
+    // ── Documento ──────────────────────────────────────────────────────
+    pdf.addPage(pw.MultiPage(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.fromLTRB(36, 32, 36, 32),
+      header: (_) => pw.Container(
+        margin: const pw.EdgeInsets.only(bottom: 10),
+        padding: const pw.EdgeInsets.only(bottom: 6),
+        decoration: const pw.BoxDecoration(
+            border: pw.Border(bottom: pw.BorderSide(color: borderGray))),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('SAO – Informe Ejecutivo de Proyecto',
+                style: const pw.TextStyle(fontSize: 8, color: textGray)),
+            pw.Text('$project  |  $rangeHeader',
+                style: const pw.TextStyle(fontSize: 8, color: textGray)),
+          ],
+        ),
+      ),
+      footer: (_) => pw.Container(
+        margin: const pw.EdgeInsets.only(top: 6),
+        padding: const pw.EdgeInsets.only(top: 6),
+        decoration: const pw.BoxDecoration(
+            border: pw.Border(top: pw.BorderSide(color: borderGray))),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text('Generado: $dateStr',
+                style: const pw.TextStyle(fontSize: 7, color: textGray)),
+            pw.Text('Documento confidencial – uso interno',
+                style: const pw.TextStyle(fontSize: 7, color: textGray)),
+          ],
+        ),
+      ),
+      build: (context) {
+        final w = <pw.Widget>[];
+
+        // ─── 1. Portada / encabezado ejecutivo ────────────────────────
+        w.add(pw.Container(
+          width: double.infinity,
+          padding: const pw.EdgeInsets.all(20),
+          decoration: const pw.BoxDecoration(
+            color: headerBg,
+            borderRadius: pw.BorderRadius.all(pw.Radius.circular(8)),
+          ),
+          child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+            pw.Text('INFORME EJECUTIVO DE PROYECTO',
+                style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold,
+                    color: accentBlue, letterSpacing: 1.5)),
+            pw.SizedBox(height: 6),
+            pw.Text(project,
+                style: pw.TextStyle(fontSize: 22,
+                    fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
+            pw.SizedBox(height: 4),
+            pw.Text(rangeLabel,
+                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey300)),
+            pw.SizedBox(height: 16),
+            // Barra de progreso
+            pw.Row(children: [
+              pw.Text('Avance general del proyecto',
+                  style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey300)),
+              pw.Spacer(),
+              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+                pw.Text('$progressPct%', style: pw.TextStyle(
+                    fontSize: 18, fontWeight: pw.FontWeight.bold,
+                    color: progressPct >= 70 ? accentGreen
+                        : progressPct >= 40 ? accentOrange : accentRed)),
+                pw.Text('${data.approvedCount} aprobadas / ${data.totalInQueue} total',
+                    style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey400)),
+              ]),
+            ]),
+            pw.SizedBox(height: 8),
+            pw.Stack(children: [
+              pw.Container(height: 10, width: double.infinity,
+                  decoration: const pw.BoxDecoration(
+                      color: PdfColor.fromInt(0xFF4B5568),
+                      borderRadius: pw.BorderRadius.all(pw.Radius.circular(5)))),
+              pw.Container(height: 10, width: 490 * progressFraction,
+                  decoration: pw.BoxDecoration(
+                      color: progressPct >= 70 ? accentGreen
+                          : progressPct >= 40 ? accentOrange : accentRed,
+                      borderRadius: const pw.BorderRadius.all(pw.Radius.circular(5)))),
+            ]),
+          ]),
+        ));
+        w.add(pw.SizedBox(height: 14));
+
+        // ─── 2. KPIs de estado ────────────────────────────────────────
+        w.add(pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+          kpiCard('Actividades en el periodo', '${activities.length}', accentBlue),
+          kpiCard('Aprobadas', '${data.approvedCount}', accentGreen),
+          kpiCard('Pendientes revisión', '${data.pendingCount}', accentOrange),
+          kpiCard('Rechazadas', '${data.rejectedCount}', accentRed),
+          pw.Expanded(child: pw.Container(
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+            decoration: pw.BoxDecoration(color: PdfColors.white,
+              border: pw.Border.all(color: borderGray),
+              borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6))),
+            child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+              pw.Text('${data.needsFixCount}', style: pw.TextStyle(
+                  fontSize: 20, fontWeight: pw.FontWeight.bold, color: accentRed)),
+              pw.SizedBox(height: 2),
+              pw.Text('Necesita corrección',
+                  style: const pw.TextStyle(fontSize: 8, color: textGray)),
+            ]),
+          )),
+        ]));
+        w.add(pw.SizedBox(height: 18));
+
+        // ─── 3. ¿Qué se realizó en el periodo? ───────────────────────
+        if (sortedTypes.isNotEmpty) {
+          w.add(sectionTitle('¿Qué se realizó en el periodo?'));
+          w.add(pw.SizedBox(height: 10));
+
+          // Gráfico de barras horizontal por tipo de actividad
+          {
+            final maxCount = sortedTypes.first.value.length;
+            const barTrackW = 260.0;
+            const barH = 12.0;
+            const barPalette = [
+              accentBlue,
+              accentGreen,
+              accentOrange,
+              accentPurple,
+              accentRed,
+              PdfColor.fromInt(0xFF0891B2),
+              PdfColor.fromInt(0xFF059669),
+            ];
+            final barRows = sortedTypes.asMap().entries.map((e) {
+              final count = e.value.value.length;
+              final fillW = (count / maxCount) * barTrackW;
+              final barColor = barPalette[e.key % barPalette.length];
+              return pw.Padding(
+                padding: const pw.EdgeInsets.only(bottom: 7),
+                child: pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
+                  children: [
+                    pw.SizedBox(
+                      width: 136,
+                      child: pw.Text(e.value.key,
+                          style: pw.TextStyle(fontSize: 8,
+                              fontWeight: pw.FontWeight.bold, color: textDark),
+                          maxLines: 2),
+                    ),
+                    pw.Stack(children: [
+                      pw.Container(
+                        width: barTrackW, height: barH,
+                        decoration: const pw.BoxDecoration(
+                          color: borderGray,
+                          borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+                        ),
+                      ),
+                      pw.Container(
+                        width: fillW.clamp(6.0, barTrackW), height: barH,
+                        decoration: pw.BoxDecoration(
+                          color: barColor,
+                          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+                        ),
+                      ),
+                    ]),
+                    pw.SizedBox(width: 8),
+                    pw.Text('$count',
+                        style: pw.TextStyle(fontSize: 9,
+                            fontWeight: pw.FontWeight.bold, color: textDark)),
+                  ],
+                ),
+              );
+            }).toList();
+            w.add(pw.Column(children: barRows));
+          }
+        }
+
+        // ─── 4. Mapa de calor ──────────────────────────────────────────
+        w.add(pw.SizedBox(height: 18));
+        w.add(sectionTitle('Distribución geográfica de actividades'));
+        w.add(pw.SizedBox(height: 10));
+
+        if (gpts.isNotEmpty) {
+          const mapW = 521.0;
+          const mapH = 220.0;
+          const tileDrawW = mapW / tileCols;
+          const tileDrawH = mapH / tileRows;
+          final lonRange = (gridLonMax - gridLonMin).abs().clamp(0.01, 180.0);
+          final latRange = (gridLatMax - gridLatMin).abs().clamp(0.01, 90.0);
+
+          PdfColor riskColor(String risk) => switch (risk.toLowerCase()) {
+            'alto'  => accentRed,
+            'medio' => accentOrange,
+            _       => accentGreen,
+          };
+
+          w.add(pw.SizedBox(
+            width: mapW,
+            height: mapH,
+            child: pw.Stack(children: [
+              // Fondo de respaldo
+              pw.Container(
+                width: mapW, height: mapH,
+                decoration: pw.BoxDecoration(
+                  color: const PdfColor.fromInt(0xFFEFF6FF),
+                  border: pw.Border.all(color: borderGray),
+                ),
+              ),
+              // Tiles OSM — always full _tileCols × _tileRows grid
+              for (int r = 0; r < tileRows; r++)
+                for (int c = 0; c < tileCols; c++)
+                  if (tileImages.containsKey('$r,$c'))
+                    pw.Positioned(
+                      left: c * tileDrawW,
+                      top: r * tileDrawH,
+                      child: pw.Image(
+                        tileImages['$r,$c']!,
+                        width: tileDrawW + 1,
+                        height: tileDrawH + 1,
+                        fit: pw.BoxFit.fill,
+                      ),
+                    ),
+              // Puntos georeferenciados
+              ...gpts.map((p) {
+                final x = ((p.lon - gridLonMin) / lonRange * mapW).clamp(4.0, mapW - 14.0);
+                final y = ((gridLatMax - p.lat) / latRange * mapH).clamp(4.0, mapH - 14.0);
+                return pw.Positioned(
+                  left: x - 5,
+                  top: y - 5,
+                  child: pw.Container(
+                    width: 12, height: 12,
+                    decoration: pw.BoxDecoration(
+                      color: riskColor(p.risk),
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: PdfColors.white, width: 1.5),
+                    ),
+                  ),
+                );
+              }),
+            ]),
+          ));
+          // Leyenda
+          w.add(pw.SizedBox(height: 6));
+          w.add(pw.Row(children: [
+            for (final e in [('Alto', accentRed), ('Medio', accentOrange), ('Bajo', accentGreen)])
+              pw.Padding(
+                padding: const pw.EdgeInsets.only(right: 14),
+                child: pw.Row(children: [
+                  pw.Container(width: 8, height: 8,
+                      decoration: pw.BoxDecoration(color: e.$2, shape: pw.BoxShape.circle)),
+                  pw.SizedBox(width: 4),
+                  pw.Text(e.$1, style: const pw.TextStyle(fontSize: 7, color: textGray)),
+                ]),
+              ),
+          ]));
+          w.add(pw.SizedBox(height: 10));
+        }
+
+        // Botón link al mapa de calor interactivo
+        w.add(pw.UrlLink(
+          destination: heatmapUrl,
+          child: pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: const pw.BoxDecoration(
+              color: headerBg,
+              borderRadius: pw.BorderRadius.all(pw.Radius.circular(6)),
+            ),
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              children: [
+                pw.Text('Ver mapa de calor interactivo',
+                    style: pw.TextStyle(
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.white)),
+                pw.Text(heatmapUrl,
+                    style: const pw.TextStyle(
+                        fontSize: 7,
+                        color: accentBlue,
+                        decoration: pw.TextDecoration.underline)),
+              ],
+            ),
+          ),
+        ));
+
+        return w;
+      },
+    ));
+
+    // ── Tabla de actividades en landscape ──────────────────────────────
+    if (activities.isNotEmpty) {
+      pdf.addPage(pw.MultiPage(
+        pageFormat: PdfPageFormat.a4.landscape,
+        margin: const pw.EdgeInsets.fromLTRB(28, 28, 28, 28),
+        header: (_) => pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 8),
+          padding: const pw.EdgeInsets.only(bottom: 5),
+          decoration: const pw.BoxDecoration(
+              border: pw.Border(bottom: pw.BorderSide(color: borderGray))),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('SAO – Detalle de actividades realizadas',
+                  style: const pw.TextStyle(fontSize: 8, color: textGray)),
+              pw.Text('$project  |  $rangeHeader',
+                  style: const pw.TextStyle(fontSize: 8, color: textGray)),
+            ],
+          ),
+        ),
+        footer: (_) => pw.Container(
+          margin: const pw.EdgeInsets.only(top: 5),
+          padding: const pw.EdgeInsets.only(top: 5),
+          decoration: const pw.BoxDecoration(
+              border: pw.Border(top: pw.BorderSide(color: borderGray))),
+          child: pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text('Generado: $dateStr',
+                  style: const pw.TextStyle(fontSize: 7, color: textGray)),
+              pw.Text('Documento confidencial – uso interno',
+                  style: const pw.TextStyle(fontSize: 7, color: textGray)),
+            ],
+          ),
+        ),
+        build: (context) {
+          return [
+            pw.Anchor(
+              name: '_index_',
+              child: pw.Table(
+                border: pw.TableBorder.all(color: borderGray, width: 0.5),
+                columnWidths: {
+                  0: const pw.FlexColumnWidth(1.0),  // Fecha
+                  1: const pw.FlexColumnWidth(1.5),  // Tipo
+                  2: const pw.FlexColumnWidth(1.8),  // Subtipo
+                  3: const pw.FlexColumnWidth(2.0),  // Temas
+                  4: const pw.FlexColumnWidth(1.2),  // Frente
+                  5: const pw.FlexColumnWidth(1.5),  // Municipio
+                  6: const pw.FlexColumnWidth(1.8),  // Responsable
+                  7: const pw.FlexColumnWidth(0.7),  // Riesgo
+                  8: const pw.FlexColumnWidth(3.5),  // Desarrollo
+                },
+                children: [
+                  pw.TableRow(
+                    decoration: const pw.BoxDecoration(color: headerBg),
+                    children: [
+                      for (final h in [
+                        'Fecha', 'Tipo de actividad', 'Subtipo', 'Temas',
+                        fronteLabel, 'Municipio', 'Responsable', 'Riesgo', 'Desarrollo',
+                      ])
+                        pw.Padding(
+                          padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 6),
+                          child: pw.Text(h, style: pw.TextStyle(fontSize: 7,
+                              fontWeight: pw.FontWeight.bold, color: PdfColors.white))),
+                    ],
+                  ),
+                  ...activities.take(200).toList().asMap().entries.map((entry) {
+                    final i = entry.key; final act = entry.value;
+                    final hasEmbed = rasterizedPages.containsKey(act.id);
+                    final anchor = 'report_${act.id}';
+                    final topicsText = act.topics
+                        .where((t) {
+                          final tl = t.trim().toLowerCase();
+                          return tl.isNotEmpty && tl != 'custom' && tl != 'otro' && !t.trim().toUpperCase().startsWith('CUSTOM_');
+                        })
+                        .join(', ');
+                    final rawDetail = act.notes?.trim().isNotEmpty == true
+                        ? act.notes!.trim()
+                        : (act.detail?.trim().isNotEmpty == true
+                            ? act.detail!.trim()
+                            : buildReportNaturalNarrative(act));
+                    final detailText = rawDetail.length > 220
+                        ? '${rawDetail.substring(0, 220)}…'
+                        : rawDetail;
+
+                    pw.Widget cell(pw.Widget child) {
+                      if (!hasEmbed) return child;
+                      return pw.Link(destination: anchor, child: child);
+                    }
+
+                    return pw.TableRow(
+                      decoration: pw.BoxDecoration(
+                          color: i % 2 == 0 ? PdfColors.white : stripeBg),
+                      children: [
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(fmtDate(act.createdAt),
+                                style: pw.TextStyle(fontSize: 7,
+                                    color: hasEmbed ? accentBlue : textDark,
+                                    decoration: hasEmbed ? pw.TextDecoration.underline : null)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(_resolveActivityTypeName(act.activityType),
+                                style: const pw.TextStyle(fontSize: 7, color: textDark)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(() {
+                              final s = act.subcategory?.trim() ?? '';
+                              final sl = s.toLowerCase();
+                              return (sl == 'custom' || sl == 'otro' || s.toUpperCase().startsWith('CUSTOM_')) ? '' : s;
+                            }(),
+                                style: const pw.TextStyle(fontSize: 7, color: textGray)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(topicsText,
+                                style: const pw.TextStyle(fontSize: 7, color: textGray)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(
+                                project.toUpperCase() == 'TSNL'
+                                    ? act.frontName.replaceAllMapped(RegExp(r'\bF(\d+)'), (m) => 'S${m[1]}')
+                                    : act.frontName,
+                                style: const pw.TextStyle(fontSize: 7, color: textDark)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(act.municipality ?? '',
+                                style: const pw.TextStyle(fontSize: 7, color: textDark)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(sanitizeName(act.assignedName),
+                                style: const pw.TextStyle(fontSize: 7, color: textDark)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(act.riskLevel ?? '',
+                                style: const pw.TextStyle(fontSize: 7, color: textGray)))),
+                        cell(pw.Padding(padding: const pw.EdgeInsets.all(4),
+                            child: pw.Text(detailText,
+                                style: const pw.TextStyle(fontSize: 7, color: textDark)))),
+                      ],
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ];
+        },
+      ));
+    } // end if (activities.isNotEmpty)
+
+    // ── Páginas incrustadas: un bloque por cada PDF de actividad ─────────
+    for (final act in activities) {
+      final pages = rasterizedPages[act.id];
+      if (pages == null || pages.isEmpty) continue;
+      final typeName = _resolveActivityTypeName(act.activityType);
+
+      // Primera página: encabezado + anchor + imagen
+      pdf.addPage(pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(24, 18, 24, 18),
+        build: (context) => pw.Anchor(
+          name: 'report_${act.id}',
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              // Mini encabezado de sección
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: const pw.BoxDecoration(
+                  color: sectionBg,
+                  borderRadius: pw.BorderRadius.all(pw.Radius.circular(4)),
+                ),
+                child: pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Expanded(
+                      child: pw.Text(
+                        '$typeName  ·  ${act.frontName}  ·  ${act.municipality ?? ''}'
+                            '  |  ${fmtDate(act.createdAt)}',
+                        style: pw.TextStyle(
+                            fontSize: 8, fontWeight: pw.FontWeight.bold,
+                            color: PdfColors.white),
+                      ),
+                    ),
+                    pw.SizedBox(width: 8),
+                    pw.Link(
+                      destination: '_index_',
+                      child: pw.Text('↑ Volver al índice',
+                          style: const pw.TextStyle(
+                              fontSize: 7, color: accentBlue,
+                              decoration: pw.TextDecoration.underline)),
+                    ),
+                  ],
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Expanded(
+                child: pw.Image(pages[0], fit: pw.BoxFit.contain),
+              ),
+            ],
+          ),
+        ),
+      ));
+
+      // Páginas adicionales del mismo PDF
+      for (int p = 1; p < pages.length; p++) {
+        pdf.addPage(pw.Page(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.fromLTRB(24, 18, 24, 18),
+          build: (context) => pw.Column(
+            children: [
+              pw.Container(
+                width: double.infinity,
+                padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: const pw.BoxDecoration(color: headerBg),
+                child: pw.Text(
+                  '$typeName  ·  ${act.frontName}  –  pág. ${p + 1}',
+                  style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey300),
+                ),
+              ),
+              pw.SizedBox(height: 4),
+              pw.Expanded(
+                child: pw.Image(pages[p], fit: pw.BoxFit.contain),
+              ),
+            ],
+          ),
+        ));
+      }
+    }
+
+    return pdf.save();
+  }
+
   Widget _buildHeader(
     DashboardData data,
     DashboardRange range,
@@ -774,6 +1695,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 icon: const Icon(Icons.refresh_rounded, color: Colors.white),
                 tooltip: 'Actualizar',
               ),
+              if (ref.watch(currentAppUserProvider)?.isAdmin == true) ...
+                [
+                  const SizedBox(width: 4),
+                  Tooltip(
+                    message: 'Exportar resumen ejecutivo (solo admin)',
+                    child: IconButton(
+                      onPressed: () => _exportDashboardSummaryPdf(data, selectedProjectId),
+                      icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+                    ),
+                  ),
+                ],
             ],
           ),
           const SizedBox(height: 16),

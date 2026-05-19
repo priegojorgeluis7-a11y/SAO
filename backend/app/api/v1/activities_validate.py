@@ -118,9 +118,21 @@ def validate_activity_submit(
 
         catalog_data = catalog_doc.to_dict() or {}
 
-        # Check if activity type exists in catalog
+        # Check if activity type exists in catalog.
+        # Exception: if a doc already exists in Firestore with this exact type code
+        # (pre-created by the assignment/planning endpoint), the code was already
+        # validated server-side — trust it and skip the catalog membership check.
         activities_in_catalog = catalog_data.get("activities", {})
+        _is_preassigned = False
         if activity_type_code not in activities_in_catalog:
+            activity_uuid = str(payload.uuid).strip() if payload.uuid else None
+            if activity_uuid:
+                _act_snap = client.collection("activities").document(activity_uuid).get()
+                _stored_code = str((_act_snap.to_dict() or {}).get("activity_type_code") or "").strip().upper()
+                if _act_snap.exists and _stored_code == activity_type_code:
+                    _is_preassigned = True
+
+        if not _is_preassigned and activity_type_code not in activities_in_catalog:
             errors.append(
                 ValidationError(
                     "activity_type_code",
@@ -128,7 +140,7 @@ def validate_activity_submit(
                     "ACTIVITY_TYPE_NOT_IN_CATALOG",
                 )
             )
-        else:
+        elif activity_type_code in activities_in_catalog:
             # Get activity type spec
             activity_spec = activities_in_catalog[activity_type_code] or {}
 

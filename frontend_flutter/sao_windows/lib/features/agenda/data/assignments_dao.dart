@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart' as drift;
 
 import '../../../core/flow/activity_flow_projection.dart';
@@ -248,6 +250,10 @@ class AssignmentsDao implements AssignmentsLocalStore {
       rows,
       activityById,
     );
+    final pendingCoResponsableIds = await _loadPendingCoResponsableIdsByActivityId(
+      rows,
+      activityById,
+    );
     return rows
         .map(
           (row) => _toAgendaItem(
@@ -255,6 +261,7 @@ class AssignmentsDao implements AssignmentsLocalStore {
             activityById,
             canonicalFlowByActivityId,
             assigneeByActivityId,
+            pendingCoResponsableIds,
           ),
         )
         .toList();
@@ -386,12 +393,60 @@ class AssignmentsDao implements AssignmentsLocalStore {
     return byLookupKey;
   }
 
+  /// Loads co-responsable IDs persisted by [saveLocal] when an assignment is
+  /// created offline. The IDs are stored as `pending_co_responsable_ids` in
+  /// [activityFields] so they survive the offline → online retry path.
+  Future<Map<String, List<String>>> _loadPendingCoResponsableIdsByActivityId(
+    List<AgendaAssignment> rows,
+    Map<String, Activity> activityById,
+  ) async {
+    final ids = activityById.values.map((a) => a.id).toSet().toList();
+    // Also include raw assignment IDs in case activityId == assignment ID (local temp).
+    for (final row in rows) {
+      ids.add(row.id.trim());
+      if (row.activityId?.trim().isNotEmpty == true) ids.add(row.activityId!.trim());
+    }
+    if (ids.isEmpty) return const {};
+
+    final fieldRows = await (_db.select(_db.activityFields)
+      ..where(
+        (t) => t.activityId.isIn(ids) & t.fieldKey.equals('pending_co_responsable_ids'),
+      ))
+        .get();
+
+    final byActivityId = <String, List<String>>{};
+    for (final row in fieldRows) {
+      try {
+        final decoded = jsonDecode(row.valueJson ?? '[]');
+        if (decoded is List) {
+          byActivityId[row.activityId] =
+              decoded.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList();
+        }
+      } catch (_) {}
+    }
+
+    // Map lookup keys back to the same key used by callers.
+    final byLookupKey = <String, List<String>>{};
+    for (final row in rows) {
+      final lookupKeys = <String>{
+        row.id.trim(),
+        if (row.activityId?.trim().isNotEmpty == true) row.activityId!.trim(),
+      };
+      for (final key in lookupKeys) {
+        final ids = byActivityId[key];
+        if (ids != null) byLookupKey[key] = ids;
+      }
+    }
+    return byLookupKey;
+  }
+
   AgendaItem _toAgendaItem(
     AgendaAssignment row,
     Map<String, Activity> activityById,
     Map<String, Map<String, String>> canonicalFlowByActivityId,
-    Map<String, String> assigneeByActivityId,
-  ) {
+    Map<String, String> assigneeByActivityId, [
+    Map<String, List<String>> pendingCoResponsableIdsByActivityId = const {},
+  ]) {
     final activityId = _effectiveActivityId(row);
     final activity = activityById[activityId] ?? activityById[row.id.trim()];
     final canonicalFlow =
@@ -458,6 +513,9 @@ class AssignmentsDao implements AssignmentsLocalStore {
       operationalState: operationalState,
       reviewState: reviewState,
       nextAction: nextAction,
+      coResponsableIds: pendingCoResponsableIdsByActivityId[activityId] ??
+          pendingCoResponsableIdsByActivityId[row.id.trim()] ??
+          const [],
     );
   }
 

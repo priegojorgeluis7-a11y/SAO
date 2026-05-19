@@ -31,9 +31,9 @@ class SaoRoleBadge extends StatelessWidget {
         vertical: dimensions.padding * 0.6,
       ),
       decoration: BoxDecoration(
-        color: config.color.withOpacity(0.14),
+        color: config.color.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(SaoRadii.sm),
-        border: Border.all(color: config.color.withOpacity(0.3)),
+        border: Border.all(color: config.color.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -43,7 +43,7 @@ class SaoRoleBadge extends StatelessWidget {
             color: config.color,
             size: dimensions.iconSize,
           ),
-          SizedBox(width: SaoSpacing.xs),
+          const SizedBox(width: SaoSpacing.xs),
           Text(
             config.label,
             style: SaoTypography.badgeText.copyWith(

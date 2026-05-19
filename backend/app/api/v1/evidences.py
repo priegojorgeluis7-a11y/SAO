@@ -20,6 +20,7 @@ from app.api.deps import require_any_role, user_has_permission, verify_project_a
 from app.core.rate_limit import enforce_rate_limit
 from app.core.config import settings
 from app.core.firestore import get_firestore_client
+from app.services.audit_service import write_firestore_audit_log
 from typing import Any
 from app.schemas.evidence import (
     UploadInitRequest,
@@ -367,7 +368,18 @@ def get_download_url(
     client = get_firestore_client()
     snap = client.collection("evidences").document(str(evidence_id)).get()
     if not snap.exists:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {evidence_id} not found")
+        # Secondary lookup: some evidence docs are stored with a generated Firestore
+        # document ID that differs from their internal 'id' field. The review endpoint
+        # returns the internal 'id' field, so we need to search by field value too.
+        docs = list(
+            client.collection("evidences")
+            .where("id", "==", str(evidence_id))
+            .limit(1)
+            .stream()
+        )
+        if not docs:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {evidence_id} not found")
+        snap = docs[0]
     payload = snap.to_dict() or {}
     project_id = _resolve_evidence_project_id(client, payload)
     verify_project_access(_authenticated_user, project_id, None)
@@ -470,3 +482,90 @@ async def local_upload(
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(body)
     return {"ok": True}
+
+
+@router.delete("/{evidence_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_evidence(
+    evidence_id: str,
+    current_user: Any = Depends(_allowed_for_evidence_edit()),
+):
+    """Elimina una evidencia: borra el documento Firestore y el archivo en GCS/local.
+
+    Requiere:
+    - Rol ADMIN/COORD/SUPERVISOR/OPERATIVO
+    - Permiso activity.edit sobre el proyecto de la evidencia
+    - Solo ADMIN puede eliminar evidencias ajenas; el dueño puede eliminar las propias.
+    """
+    client = get_firestore_client()
+
+    # Resolver el documento (por ID directo o por campo interno 'id')
+    snap = client.collection("evidences").document(str(evidence_id)).get()
+    if not snap.exists:
+        docs = list(
+            client.collection("evidences")
+            .where("id", "==", str(evidence_id))
+            .limit(1)
+            .stream()
+        )
+        if not docs:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {evidence_id} not found")
+        snap = docs[0]
+
+    payload = snap.to_dict() or {}
+    doc_id = snap.id
+    project_id = _resolve_evidence_project_id(client, payload)
+    verify_project_access(current_user, project_id, None)
+
+    if not user_has_permission(current_user, "activity.edit", None, project_id=project_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing permission: activity.edit for project: {project_id}",
+        )
+
+    # Solo el dueño o ADMIN pueden eliminar
+    caller_id = str(getattr(current_user, "id", "") or "")
+    owner_id = str(payload.get("created_by") or "")
+    caller_roles = [str(r).strip().upper() for r in (getattr(current_user, "roles", []) or [])]
+    is_admin = "ADMIN" in caller_roles
+    if not is_admin and caller_id != owner_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el propietario o un ADMIN pueden eliminar esta evidencia.",
+        )
+
+    object_path = _resolve_evidence_object_path(payload)
+
+    # 1. Borrar el archivo físico (best-effort; no falla el request si ya no existe)
+    if object_path:
+        try:
+            if _is_local_backend():
+                local_file = Path(settings.LOCAL_UPLOADS_DIR) / object_path
+                if local_file.exists():
+                    local_file.unlink()
+            else:
+                gcs_client = storage.Client()
+                blob = gcs_client.bucket(_normalized_bucket_name()).blob(object_path)
+                if blob.exists(client=gcs_client):
+                    blob.delete()
+        except Exception as exc:
+            # No-fatal: el documento se borra de todas formas.
+            # El archivo queda huérfano en storage pero no bloquea la operación.
+            import logging
+            logging.getLogger(__name__).warning(
+                "evidence_delete: could not remove storage object %s: %s", object_path, exc
+            )
+
+    # 2. Borrar el documento Firestore
+    write_firestore_audit_log(
+        action="EVIDENCE_DELETE",
+        entity="evidence",
+        entity_id=str(evidence_id),
+        actor=current_user,
+        details={
+            "project_id": project_id,
+            "activity_id": str(payload.get("activity_id") or ""),
+            "object_path": object_path,
+            "mime_type": str(payload.get("mime_type") or ""),
+        },
+    )
+    client.collection("evidences").document(doc_id).delete()

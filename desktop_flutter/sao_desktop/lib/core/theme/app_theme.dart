@@ -10,7 +10,7 @@ class AppTheme {
   static ThemeData get lightTheme {
     return ThemeData(
       useMaterial3: true,
-      colorScheme: ColorScheme.light(
+      colorScheme: const ColorScheme.light(
         primary: AppColors.primary,
         onPrimary: AppColors.onPrimary,
         secondary: AppColors.gray600,
@@ -101,7 +101,7 @@ class AppTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.gray100,
-        selectedColor: AppColors.primary.withOpacity(0.16),
+        selectedColor: AppColors.primary.withValues(alpha: 0.16),
         disabledColor: AppColors.gray200,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(AppSpacing.radiusSm),

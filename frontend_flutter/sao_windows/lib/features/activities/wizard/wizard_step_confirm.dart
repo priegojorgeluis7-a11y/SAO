@@ -7,6 +7,7 @@ import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 import 'report_share_utils.dart';
 import 'wizard_controller.dart';
+import '../../catalog/catalog_repository.dart';
 
 class WizardStepConfirm extends StatelessWidget {
   final WizardController controller;
@@ -384,6 +385,28 @@ class WizardStepConfirm extends StatelessWidget {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final titleController = TextEditingController();
 
+    List<String> resolvedTopics() {
+      final names = controller.selectedTopicIds
+          .where((id) => id != 'OTRO_TEMA')
+          .map((id) {
+            final match = controller.topics.cast<CatItem?>().firstWhere(
+              (t) => t?.id == id, orElse: () => null);
+            return (match?.label ?? id).trim();
+          })
+          .where((s) => s.isNotEmpty)
+          .toList();
+      if (controller.isOtherTopicSelected && controller.otherTopicText.trim().isNotEmpty) {
+        names.add(controller.otherTopicText.trim());
+      }
+      return names;
+    }
+
+    List<String> resolvedAttendees() =>
+        controller.selectedAttendeeIds
+            .map((id) => (controller.attendeeById(id)?.label ?? id).trim())
+            .where((s) => s.isNotEmpty)
+            .toList();
+
     String buildReportText() => buildInitialWhatsAppReport(
       projectCode: controller.projectCode,
       activity: controller.activity,
@@ -391,6 +414,8 @@ class WizardStepConfirm extends StatelessWidget {
       resultLabel: _shareableResultLabel(),
       notes: controller.getReportNotes(),
       agreements: controller.getReportAgreements(),
+      topics: resolvedTopics(),
+      attendees: resolvedAttendees(),
       evidenceCount: controller.evidencias.length,
     );
 

@@ -30,11 +30,6 @@ class ProjectsPage extends ConsumerStatefulWidget {
 class _ProjectsPageState extends ConsumerState<ProjectsPage> {
   static const _hiddenTemplateProjectCodes = {'PROJECT_0', 'P0'};
 
-  static const _fallbackProjects = <ProjectItem>[
-    ProjectItem(code: 'TMQ', name: 'Tren México–Querétaro', isActive: true),
-    ProjectItem(code: 'TAP', name: 'Tren AIFA–Pachuca', isActive: true),
-  ];
-
   List<ProjectItem> _projects = const [];
   bool _loading = true;
   String? _loadError;
@@ -95,17 +90,15 @@ class _ProjectsPageState extends ConsumerState<ProjectsPage> {
             .toList()
           ..sort((a, b) => a.code.compareTo(b.code));
         if (_projects.isEmpty) {
-          _projects = _fallbackProjects;
-          _loadError = 'No hay proyectos remotos disponibles. Mostrando lista local.';
+          _loadError = 'No tienes proyectos asignados. Contacta a tu administrador.';
         }
         _loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _projects = _fallbackProjects;
         _loading = false;
-        _loadError = 'No se pudo cargar la lista de proyectos remota. Mostrando lista local.';
+        _loadError = 'No se pudo cargar la lista de proyectos. Verifica tu conexión.';
       });
     }
   }

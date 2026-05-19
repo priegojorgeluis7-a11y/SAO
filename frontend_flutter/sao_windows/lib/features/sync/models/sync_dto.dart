@@ -91,6 +91,7 @@ class ActivityDTO {
   final DateTime updatedAt;
   final DateTime? deletedAt;
   final int syncVersion;
+  final bool isPrimaryResponsible;
 
   const ActivityDTO({
     required this.uuid,
@@ -122,6 +123,7 @@ class ActivityDTO {
     required this.updatedAt,
     this.deletedAt,
     required this.syncVersion,
+    this.isPrimaryResponsible = true,
   });
 
   factory ActivityDTO.fromJson(Map<String, dynamic> json) {
@@ -182,6 +184,7 @@ class ActivityDTO {
           ? DateTime.tryParse(asStringOrNull('deleted_at')!)?.toUtc()
           : null,
       syncVersion: asInt('sync_version'),
+      isPrimaryResponsible: (json['is_primary_responsible'] as bool?) ?? true,
     );
   }
 
@@ -215,6 +218,7 @@ class ActivityDTO {
       'updated_at': updatedAt.toIso8601String(),
       'deleted_at': deletedAt?.toIso8601String(),
       'sync_version': syncVersion,
+      'is_primary_responsible': isPrimaryResponsible,
     };
   }
 }

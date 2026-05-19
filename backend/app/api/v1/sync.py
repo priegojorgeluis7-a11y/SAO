@@ -264,6 +264,83 @@ def _firestore_catalog_activity_codes(project_id: str, catalog_version_id: str) 
     return set()
 
 
+# ---------------------------------------------------------------------------
+# Catalog candidates extraction
+# ---------------------------------------------------------------------------
+
+def _upsert_catalog_candidates(
+    client,
+    wizard_payload: dict[str, object],
+    project_id: str,
+    user_id: str,
+    activity_id: str,
+    now: "datetime",
+) -> None:
+    """Extract every CUSTOM_* item from *wizard_payload* and upsert it into the
+    ``catalog_candidates`` Firestore collection so admins can review/approve them.
+
+    Deduplication key: ``{project_id}_{type}_{id}`` — one document per unique
+    (project, type, custom ID).  If a document already exists and is **not** in
+    ``pending`` state (i.e. it was already reviewed), it is not overwritten.
+    """
+    coll = client.collection("catalog_candidates")
+
+    def _upsert(candidate_type: str, item_id: str, item_name: str) -> None:
+        doc_id = f"{project_id}__{candidate_type}__{item_id}"
+        ref = coll.document(doc_id)
+        snap = ref.get()
+        if snap.exists:
+            existing_status = str((snap.to_dict() or {}).get("status") or "pending")
+            if existing_status != "pending":
+                # Already reviewed — do not re-open.
+                return
+            # Still pending: update source activity and last seen timestamp.
+            ref.set({"last_seen_at": now, "activity_id": activity_id}, merge=True)
+        else:
+            ref.set({
+                "id": doc_id,
+                "custom_id": item_id,
+                "type": candidate_type,
+                "name": item_name,
+                "project_id": project_id,
+                "proposed_by_user_id": user_id,
+                "activity_id": activity_id,
+                "status": "pending",
+                "proposed_at": now,
+                "last_seen_at": now,
+                "reviewed_at": None,
+                "reviewed_by_user_id": None,
+                "review_comment": None,
+            })
+
+    for key, candidate_type in (
+        ("activity", "activity"),
+        ("subcategory", "subcategory"),
+        ("purpose", "purpose"),
+        ("result", "result"),
+    ):
+        entry = wizard_payload.get(key)
+        if isinstance(entry, dict):
+            item_id = str(entry.get("id") or "").strip()
+            item_name = str(entry.get("name") or entry.get("id") or "").strip()
+            if item_id.startswith("CUSTOM_") and item_name:
+                _upsert(candidate_type, item_id, item_name)
+
+    for key, candidate_type in (
+        ("topics", "topic"),
+        ("attendees", "attendee"),
+    ):
+        entries = wizard_payload.get(key)
+        if isinstance(entries, list):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                item_id = str(entry.get("id") or "").strip()
+                item_name = str(entry.get("name") or entry.get("id") or "").strip()
+                if item_id.startswith("CUSTOM_") and item_name:
+                    _upsert(candidate_type, item_id, item_name)
+
+
 def _firestore_push(request: SyncPushRequest) -> SyncPushResponse:
     client = get_firestore_client()
     now = _utc_now()
@@ -418,6 +495,28 @@ def _wizard_payload_has_custom_ids(wizard_payload: dict[str, object] | None) -> 
     return False
 
 
+def _extract_custom_ids(wizard_payload: dict[str, object] | None) -> set[str]:
+    """Return the set of all CUSTOM_* catalog IDs present in the wizard payload."""
+    ids: set[str] = set()
+    if not wizard_payload:
+        return ids
+    for key in ("activity", "subcategory", "purpose", "result"):
+        entry = wizard_payload.get(key)
+        if isinstance(entry, dict):
+            vid = str(entry.get("id") or "")
+            if vid.startswith("CUSTOM_"):
+                ids.add(vid)
+    for key in ("topics", "attendees"):
+        entries = wizard_payload.get(key)
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict):
+                    vid = str(entry.get("id") or "")
+                    if vid.startswith("CUSTOM_"):
+                        ids.add(vid)
+    return ids
+
+
 def _firestore_push_item(
     client,
     batch,
@@ -444,52 +543,66 @@ def _firestore_push_item(
         )
         return None, 0
 
-    cache_key = (item.project_id, str(item.catalog_version_id))
-    if cache_key not in catalog_cache:
-        catalog_cache[cache_key] = _firestore_catalog_activity_codes(
-            project_id=item.project_id,
-            catalog_version_id=str(item.catalog_version_id),
-        )
-    valid_codes = catalog_cache[cache_key]
-    if not valid_codes:
-        results.append(
-            _result_item(
-                item_uuid=item.uuid,
-                result_status="INVALID",
-                server_id=None,
-                sync_version=item.sync_version or 0,
-                error_code="CATALOG_VERSION_NOT_FOUND",
-                message=(
-                    f"catalog_version_id {item.catalog_version_id} is not available "
-                    f"in Firestore for project {item.project_id}"
-                ),
+    # CUSTOM_* activity type codes are created in the field and are never in the
+    # official catalog by definition.  Skip catalog validation for them entirely.
+    _server_snap_preloaded = None  # may be set early by the catalog precheck below
+    if str(item.activity_type_code or "").startswith("CUSTOM_"):
+        is_custom_activity = True
+    else:
+        is_custom_activity = False
+        cache_key = (item.project_id, str(item.catalog_version_id))
+        if cache_key not in catalog_cache:
+            catalog_cache[cache_key] = _firestore_catalog_activity_codes(
+                project_id=item.project_id,
+                catalog_version_id=str(item.catalog_version_id),
             )
-        )
-        return None, 0
-    if item.activity_type_code not in valid_codes:
-        # Allow CUSTOM_* codes from field-created catalog entries; mark for admin review.
-        if str(item.activity_type_code or "").startswith("CUSTOM_"):
-            is_custom_activity = True
-        else:
+        valid_codes = catalog_cache[cache_key]
+        if not valid_codes:
             results.append(
                 _result_item(
                     item_uuid=item.uuid,
                     result_status="INVALID",
                     server_id=None,
                     sync_version=item.sync_version or 0,
-                    error_code="ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION",
+                    error_code="CATALOG_VERSION_NOT_FOUND",
                     message=(
-                        f"activity_type_code {item.activity_type_code} is not part of "
-                        f"catalog_version_id {item.catalog_version_id}"
+                        f"catalog_version_id {item.catalog_version_id} is not available "
+                        f"in Firestore for project {item.project_id}"
                     ),
                 )
             )
             return None, 0
-    else:
-        is_custom_activity = False
+        if item.activity_type_code not in valid_codes:
+            # Before rejecting, check if this activity was pre-created server-side
+            # (e.g. via the planning/assignment endpoint) with this exact code.
+            # If so, the code was already validated at assignment time — trust it.
+            _pre_ref = client.collection("activities").document(str(item.uuid))
+            _server_snap_preloaded = _pre_ref.get()
+            _stored_code = str(
+                (_server_snap_preloaded.to_dict() or {}).get("activity_type_code") or ""
+            ).strip().upper()
+            _incoming_code = str(item.activity_type_code or "").strip().upper()
+            if _server_snap_preloaded.exists and _stored_code == _incoming_code:
+                # Doc exists server-side with this type: treat as trusted assignment code.
+                is_custom_activity = True
+            else:
+                results.append(
+                    _result_item(
+                        item_uuid=item.uuid,
+                        result_status="INVALID",
+                        server_id=None,
+                        sync_version=item.sync_version or 0,
+                        error_code="ACTIVITY_TYPE_NOT_IN_CATALOG_VERSION",
+                        message=(
+                            f"activity_type_code {item.activity_type_code} is not part of "
+                            f"catalog_version_id {item.catalog_version_id}"
+                        ),
+                    )
+                )
+                return None, 0
 
     doc_ref = client.collection("activities").document(str(item.uuid))
-    snap = doc_ref.get()
+    snap = _server_snap_preloaded if _server_snap_preloaded is not None else doc_ref.get()
 
     participant_user_ids = [str(user_id) for user_id in (item.participant_user_ids or [])]
     if item.assigned_to_user_id:
@@ -519,6 +632,7 @@ def _firestore_push_item(
             "created_by_user_id": str(item.created_by_user_id),
             "gps_mismatch": False,
             "catalog_changed": has_custom_values,
+            "is_primary_responsible": True,
             "created_at": now,
             "deleted_at": None,
             **({"activity_group_id": activity_group_id} if activity_group_id else {}),
@@ -530,6 +644,20 @@ def _firestore_push_item(
             batch.set(doc_ref, payload, merge=True)
         results.append(_result_item(item.uuid, "CREATED", None, 1))
 
+        # Extract CUSTOM_* catalog items for admin review.
+        if has_custom_values and item.wizard_payload:
+            try:
+                _upsert_catalog_candidates(
+                    client,
+                    item.wizard_payload,
+                    item.project_id,
+                    str(item.created_by_user_id),
+                    str(item.uuid),
+                    now,
+                )
+            except Exception:
+                logger.exception("CATALOG_CANDIDATES_UPSERT_FAILED uuid=%s", item.uuid)
+
         # Create sibling activities for each co-responsible (not the primary assignee).
         for sibling_uid in sibling_participant_ids:
             sibling_uuid = str(uuid4())
@@ -540,6 +668,10 @@ def _firestore_push_item(
                 "assigned_to_user_id": sibling_uid,
                 "execution_state": "PENDIENTE",
                 "wizard_payload": None,
+                # Siblings have no wizard_payload so there is nothing to resolve;
+                # do not inherit catalog_changed = True from the primary activity.
+                "catalog_changed": False,
+                "is_primary_responsible": False,
                 "group_completion_propagated": False,
                 "sync_version": 1,
                 "created_at": now,
@@ -650,6 +782,32 @@ def _firestore_push_item(
         wizard_payload=effective_wizard_payload,
     )
     payload["participant_user_ids"] = participant_user_ids
+    # If the wizard_payload now contains custom catalog IDs and the activity was not
+    # already flagged, raise the flag so Operaciones can review the catalog changes.
+    # Only raise when the incoming payload introduces NEW custom IDs that were not
+    # already present in the stored wizard_payload — this prevents re-flagging an
+    # activity that was already reviewed and cleared by an admin.
+    if not bool(existing.get("catalog_changed", False)) and _wizard_payload_has_custom_ids(
+        effective_wizard_payload
+    ):
+        existing_custom_ids = _extract_custom_ids(existing.get("wizard_payload"))
+        incoming_custom_ids = _extract_custom_ids(effective_wizard_payload)
+        new_custom_ids = incoming_custom_ids - existing_custom_ids
+        if new_custom_ids:
+            payload["catalog_changed"] = True
+            # Upsert only the genuinely new custom items as candidates.
+            if effective_wizard_payload:
+                try:
+                    _upsert_catalog_candidates(
+                        client,
+                        effective_wizard_payload,
+                        item.project_id,
+                        str(item.assigned_to_user_id or item.created_by_user_id or ""),
+                        str(item.uuid),
+                        now,
+                    )
+                except Exception:
+                    logger.exception("CATALOG_CANDIDATES_UPSERT_FAILED uuid=%s", item.uuid)
     incoming_state = str(item.execution_state or "").strip().upper()
     previous_state = str(existing.get("execution_state") or "").strip().upper()
     completed_like_states = {"REVISION_PENDIENTE", "COMPLETADA"}
@@ -829,7 +987,34 @@ async def sync_push(
     )
 
     _enforce_sync_permission(current_user, "activity.edit", request.project_id, None)
-    verify_project_access(current_user, request.project_id, None)
+
+    # If the user no longer has access to this project (e.g. was removed from it),
+    # return UNCHANGED for all items instead of a hard 403.  This unblocks stale
+    # entries that a user may still have in their local sync queue from a project
+    # they previously belonged to, preventing a permanent ERROR state on the client.
+    try:
+        verify_project_access(current_user, request.project_id, None)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_403_FORBIDDEN:
+            logger.warning(
+                "SYNC_PUSH_PROJECT_ACCESS_DENIED_SOFT user_id=%s project_id=%s items=%d — returning UNCHANGED to unblock client queue",
+                getattr(current_user, "id", "?"),
+                request.project_id,
+                len(request.activities),
+            )
+            return SyncPushResponse(
+                results=[
+                    _result_item(
+                        item_uuid=item.uuid,
+                        result_status="UNCHANGED",
+                        server_id=None,
+                        sync_version=item.sync_version or 0,
+                    )
+                    for item in request.activities
+                ]
+            )
+        raise
+
     return _firestore_push(request)
 
 
@@ -854,21 +1039,28 @@ async def sync_admin_diagnostics(
     """
     # Basic permission check: user must have project access
     verify_project_access(current_user, project_id, None)
-    
+
     db = get_firestore_client()
-    doc_ref = (
-        db.collection("projects")
-        .document(project_id)
-        .collection("activities")
-        .document(str(activity_uuid))
-    )
+    # Activities are stored at the root collection activities/{uuid},
+    # NOT nested under projects/{project_id}/activities/{uuid}.
+    doc_ref = db.collection("activities").document(str(activity_uuid))
     snap = doc_ref.get()
-    
+
     if not snap.exists:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Activity {activity_uuid} not found in project {project_id}",
+        # Fallback: mobile uploads may store a different document ID than the uuid field.
+        docs = list(
+            db.collection("activities")
+            .where("uuid", "==", str(activity_uuid))
+            .where("project_id", "==", project_id)
+            .limit(1)
+            .stream()
         )
+        if not docs:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Activity {activity_uuid} not found in project {project_id}",
+            )
+        snap = docs[0]
     
     data = snap.to_dict() or {}
     sync_version = data.get("sync_version", 0)

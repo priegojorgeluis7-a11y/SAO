@@ -84,8 +84,8 @@ ActivityWithDetails _buildActivity({
       status: 'ACTIVE',
       createdAt: DateTime(2026, 4, 6, 10, 0),
     ),
-    front: Front(id: 'front-1', name: 'Frente 1', projectId: 'TMQ'),
-    municipality: Municipality(id: 'mun-1', name: 'Doctor Mora', state: 'Guanajuato'),
+    front: const Front(id: 'front-1', name: 'Frente 1', projectId: 'TMQ'),
+    municipality: const Municipality(id: 'mun-1', name: 'Doctor Mora', state: 'Guanajuato'),
     evidences: const [],
     flags: ActivityFlags(gpsMismatch: gpsMismatch),
     wizardPayload: {

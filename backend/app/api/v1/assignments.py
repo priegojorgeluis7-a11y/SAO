@@ -4,6 +4,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from uuid import uuid4
 
+from google.cloud.firestore_v1 import Increment as _FSIncrement
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from app.core.api_errors import api_error
@@ -86,50 +88,46 @@ def _assignment_window(payload: dict[str, Any]) -> tuple[datetime, datetime]:
 
 
 def _next_project_sync_version(client: Any, project_id: str) -> int:
+    """Atomically increment and return the project-level sync version counter.
+
+    Uses a Firestore server-side INCREMENT transform on a dedicated counter
+    document so that concurrent requests cannot read the same max value and
+    produce duplicate sync_version numbers.
+    """
     normalized_project_id = str(project_id or "").strip().upper()
     if not normalized_project_id:
         return 1
 
-    base_query = client.collection("activities").where("project_id", "==", normalized_project_id)
-
+    counter_ref = client.collection("project_sync_counters").document(normalized_project_id)
     try:
-        docs = list(
-            base_query
-            .order_by("sync_version", direction="DESCENDING")
-            .limit(1)
-            .stream()
-        )
-        if docs:
-            payload = docs[0].to_dict() or {}
-            try:
-                return int(payload.get("sync_version") or 0) + 1
-            except (TypeError, ValueError):
-                return 1
+        counter_ref.set({"sync_version": _FSIncrement(1)}, merge=True)
+        snap = counter_ref.get()
+        return int((snap.to_dict() or {}).get("sync_version") or 1)
     except Exception as exc:
         logger.warning(
-            "Falling back to project scan for sync_version on assignments project=%s: %s",
+            "Falling back to activity scan for sync_version project=%s: %s",
             normalized_project_id,
             exc,
         )
 
+    # Fallback: scan activities for the current max (non-atomic, used only if
+    # the counter collection is unavailable)
     max_sync_version = 0
     try:
+        base_query = client.collection("activities").where("project_id", "==", normalized_project_id)
         for doc in base_query.stream():
-            payload = doc.to_dict() or {}
             try:
-                sync_version = int(payload.get("sync_version") or 0)
+                sv = int((doc.to_dict() or {}).get("sync_version") or 0)
             except (TypeError, ValueError):
-                sync_version = 0
-            if sync_version > max_sync_version:
-                max_sync_version = sync_version
-    except Exception as exc:
+                sv = 0
+            if sv > max_sync_version:
+                max_sync_version = sv
+    except Exception as exc2:
         logger.warning(
-            "Unable to scan sync_version values for assignments project=%s: %s",
+            "Unable to scan sync_version for project=%s: %s",
             normalized_project_id,
-            exc,
+            exc2,
         )
-        return 1
-
     return max_sync_version + 1
 
 
@@ -553,22 +551,10 @@ def list_assignees(
 ):
     _assignable_roles = {"OPERATIVO", "SUPERVISOR", "COORD"}
 
-    # If user is OPERATIVO ONLY (no ADMIN/COORD/SUPERVISOR), only return self
-    has_privileged_role = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
-    is_only_operativo = user_has_any_role(current_user, ["OPERATIVO"], None) and not has_privileged_role
-    
-    if is_only_operativo:
-        principal = current_user
-        if principal.status == UserStatus.ACTIVE:
-            return [
-                AssignmentAssigneeOption(
-                    user_id=principal.id,
-                    full_name=principal.full_name,
-                    email=principal.email,
-                    role_name=_principal_role_name(principal) or "",
-                )
-            ]
-        return []
+    # All callers (including OPERATIVO) now see all active project members.
+    # Restricting OPERATIVO to self-only prevented co-responsible candidate
+    # lists from working.  The create_assignment endpoint still enforces that
+    # OPERATIVO can only create assignments that include themselves.
 
     principals = list_firestore_users()
     options: list[AssignmentAssigneeOption] = []
@@ -744,7 +730,7 @@ def create_assignment(
             "title": title,
             "description": description_value,
             "gps_mismatch": False,
-            "catalog_changed": False,
+            "catalog_changed": type_code.startswith("CUSTOM_"),
             "latitude": str(payload.latitude) if payload.latitude is not None else None,
             "longitude": str(payload.longitude) if payload.longitude is not None else None,
             "assignment_start_at": payload.start_at.isoformat(),
@@ -757,6 +743,41 @@ def create_assignment(
         }
         client.collection("activities").document(str(participant_uuid)).set(doc_payload)
         created_uuids.append((str(participant_uuid), participant_id, participant_principal_obj))
+
+    # When the activity type code is CUSTOM_*, create a catalog_candidates
+    # entry so admins can review / approve it from the Verificación tab.
+    # Use `title` as the human-readable name (set by the planner when creating
+    # the assignment — it equals the custom name when no explicit title is given).
+    if type_code.startswith("CUSTOM_"):
+        now = datetime.now(timezone.utc)
+        coll = client.collection("catalog_candidates")
+        doc_id = f"{project_id}__activity__{type_code}"
+        ref = coll.document(doc_id)
+        snap = ref.get()
+        if not snap.exists:
+            ref.set({
+                "id": doc_id,
+                "custom_id": type_code,
+                "type": "activity",
+                "name": title,
+                "project_id": project_id,
+                "proposed_by_user_id": str(current_user.id),
+                "activity_id": str(activity_uuid),
+                "status": "pending",
+                "proposed_at": now,
+                "last_seen_at": now,
+                "reviewed_at": None,
+                "reviewed_by_user_id": None,
+                "review_comment": None,
+            })
+            logger.info(
+                "CATALOG_CANDIDATE_CREATED_FROM_ASSIGNMENT custom_id=%s name=%s project=%s",
+                type_code,
+                title,
+                project_id,
+            )
+        elif (snap.to_dict() or {}).get("status") == "pending":
+            ref.set({"last_seen_at": now, "activity_id": str(activity_uuid)}, merge=True)
 
     write_firestore_audit_log(
         action="ASSIGNMENT_CREATED",
@@ -1063,6 +1084,141 @@ def transfer_assignment(
     )
 
 
+class AssignmentAddParticipantRequest(BaseModel):
+    user_id: UUID
+
+
+@router.post("/{assignment_id}/add-participant", response_model=AssignmentListItem)
+def add_participant(
+    assignment_id: UUID,
+    payload: AssignmentAddParticipantRequest,
+    current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
+):
+    """Add a co-responsible to an existing activity without changing the primary assignee.
+
+    OPERATIVO callers must already be participants in the activity.
+    ADMIN/COORD/SUPERVISOR can add participants to any activity.
+    The new participant receives a notification.
+    """
+    client = get_firestore_client()
+    ref = client.collection("activities").document(str(assignment_id))
+    snap = ref.get()
+    if not snap.exists:
+        raise api_error(
+            status_code=status.HTTP_404_NOT_FOUND,
+            code="ASSIGNMENT_NOT_FOUND",
+            message="Assignment not found",
+        )
+
+    doc = snap.to_dict() or {}
+    project_id = str(doc.get("project_id") or "").strip().upper()
+    actor_user_id = _safe_uuid_str(getattr(current_user, "id", None))
+    existing_participant_user_ids = _normalized_participant_ids(doc)
+
+    if not _is_privileged_assignment_manager(current_user) and actor_user_id not in existing_participant_user_ids:
+        raise api_error(
+            status_code=status.HTTP_403_FORBIDDEN,
+            code="ADD_PARTICIPANT_FORBIDDEN",
+            message="Operativo can only add participants to activities where they are participants",
+        )
+
+    new_participant_id = str(payload.user_id)
+    if new_participant_id in existing_participant_user_ids:
+        raise api_error(
+            status_code=status.HTTP_409_CONFLICT,
+            code="ADD_PARTICIPANT_ALREADY_EXISTS",
+            message="User is already a participant of this activity",
+        )
+
+    new_participant_principal = _validate_transfer_target(
+        project_id=project_id,
+        assignee_user_id=new_participant_id,
+    )
+
+    updated_participant_ids = list(existing_participant_user_ids) + [new_participant_id]
+    participant_principals: list[Any] = []
+    for pid in updated_participant_ids:
+        p = get_firestore_user_by_id(pid)
+        if p is not None:
+            participant_principals.append(p)
+
+    primary_assignee_user_id = _safe_uuid_str(doc.get("assigned_to_user_id")) or (
+        existing_participant_user_ids[0] if existing_participant_user_ids else None
+    )
+    primary_assignee_principal = (
+        get_firestore_user_by_id(primary_assignee_user_id) if primary_assignee_user_id else None
+    )
+
+    now = datetime.now(timezone.utc)
+    next_sync_version = _next_project_sync_version(client, project_id)
+
+    participant_names = [
+        str(getattr(p, "full_name", "") or "").strip()
+        for p in participant_principals
+        if str(getattr(p, "full_name", "") or "").strip()
+    ]
+    ref.set(
+        {
+            "participant_user_ids": updated_participant_ids,
+            "participant_user_names": participant_names,
+            "updated_at": now.isoformat(),
+            "sync_version": next_sync_version,
+        },
+        merge=True,
+    )
+
+    updated_payload = dict(doc)
+    updated_payload.update({
+        "participant_user_ids": updated_participant_ids,
+        "participant_user_names": participant_names,
+        "updated_at": now.isoformat(),
+        "sync_version": next_sync_version,
+    })
+
+    write_firestore_audit_log(
+        client=client,
+        actor_user_id=actor_user_id or "",
+        actor_name=getattr(current_user, "full_name", None),
+        action="ADD_PARTICIPANT",
+        resource_type="activity",
+        resource_id=str(assignment_id),
+        project_id=project_id,
+        metadata={
+            "new_participant_user_id": new_participant_id,
+            "new_participant_name": new_participant_principal.full_name,
+            "participant_user_ids": updated_participant_ids,
+        },
+    )
+
+    try:
+        create_user_notification(
+            recipient_user_id=new_participant_id,
+            notification_type="co_responsible_added",
+            activity_id=str(assignment_id),
+            activity_title=str(doc.get("title") or doc.get("activity_type_code") or "Actividad"),
+            project_id=project_id,
+            from_user_id=actor_user_id or "",
+            from_user_name=getattr(current_user, "full_name", None),
+            requires_acceptance=True,
+            metadata={
+                "primary_assignee_user_id": primary_assignee_user_id,
+                "primary_assignee_name": primary_assignee_principal.full_name if primary_assignee_principal else None,
+                "municipio": str(doc.get("municipio") or "").strip() or None,
+                "estado": str(doc.get("estado") or "").strip() or None,
+                "frente": str(doc.get("frente") or "").strip() or None,
+            },
+        )
+    except Exception:
+        logger.exception("create_user_notification (add_participant) failed for activity %s", assignment_id)
+
+    return _build_assignment_list_item(
+        doc_id=str(assignment_id),
+        payload=updated_payload,
+        project_id=project_id,
+        assignee_principal=primary_assignee_principal,
+    )
+
+
 class AssignmentRespondRequest(BaseModel):
     notification_id: str | None = None
 
@@ -1179,12 +1335,61 @@ def decline_assignment(
             message="You are not a participant of this activity",
         )
 
-    is_primary_assignee = _safe_uuid_str(doc.get("assigned_to_user_id")) == current_user_id
+    # Use is_primary_responsible to distinguish the primary activity from a sibling.
+    # Sibling activities have assigned_to_user_id = co-responsible, but is_primary_responsible = False.
+    # Checking only assigned_to_user_id would incorrectly treat sibling declines as primary declines.
+    is_primary_responsible = bool(doc.get("is_primary_responsible", True))
+    is_primary_assignee = is_primary_responsible and _safe_uuid_str(doc.get("assigned_to_user_id")) == current_user_id
+    is_sibling_activity = not is_primary_responsible
+    activity_group_id = str(doc.get("activity_group_id") or "").strip()
 
     now = datetime.now(timezone.utc)
     next_sync_version = _next_project_sync_version(client, str(doc.get("project_id") or "").strip().upper())
 
-    if is_primary_assignee:
+    if is_sibling_activity:
+        # Co-responsable declining their own sibling activity: cancel (soft-delete) the sibling
+        # and remove them from the primary activity's participant list.
+        activity_ref.set(
+            {
+                "execution_state": "CANCELADA",
+                "deleted_at": now.isoformat(),
+                "updated_at": now.isoformat(),
+                "sync_version": next_sync_version,
+                f"acceptance_by_{current_user_id}": "declined",
+            },
+            merge=True,
+        )
+        # Update the primary activity in the same group to remove current user from participants.
+        if activity_group_id:
+            try:
+                primary_docs = list(
+                    client.collection("activities")
+                    .where("activity_group_id", "==", activity_group_id)
+                    .where("is_primary_responsible", "==", True)
+                    .limit(1)
+                    .stream()
+                )
+                if primary_docs:
+                    primary_ref = primary_docs[0].reference
+                    primary_data = primary_docs[0].to_dict() or {}
+                    primary_participants = _normalized_participant_ids(primary_data)
+                    updated_primary_participants = [uid for uid in primary_participants if uid != current_user_id]
+                    primary_sync_version = _next_project_sync_version(
+                        client, str(primary_data.get("project_id") or "").strip().upper()
+                    )
+                    primary_ref.set(
+                        {
+                            "participant_user_ids": updated_primary_participants,
+                            "updated_at": now.isoformat(),
+                            "sync_version": primary_sync_version,
+                        },
+                        merge=True,
+                    )
+            except Exception:
+                logger.warning(
+                    "Could not update primary activity participant list for group %s", activity_group_id
+                )
+    elif is_primary_assignee:
         # Primary declining: soft-remove them, leave activity unassigned.
         updated_participant_ids = [uid for uid in participant_user_ids if uid != current_user_id]
         activity_ref.set(
@@ -1198,7 +1403,7 @@ def decline_assignment(
             merge=True,
         )
     else:
-        # Co-responsable declining: just remove from participant list.
+        # Co-responsable declining (activity has is_primary_responsible=True but user is a participant).
         updated_participant_ids = [uid for uid in participant_user_ids if uid != current_user_id]
         activity_ref.set(
             {
@@ -1244,6 +1449,7 @@ def decline_assignment(
         details={
             "project_id": str(doc.get("project_id") or "").strip().upper(),
             "was_primary_assignee": is_primary_assignee,
+            "was_sibling_activity": is_sibling_activity,
         },
     )
 

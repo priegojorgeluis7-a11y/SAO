@@ -171,10 +171,10 @@ void main() {
 
     final fakeHttp = _FakeAuthHttp(
       onPost: (path, body, token) async {
-        throw HttpException('refresh failed');
+        throw const HttpException('refresh failed');
       },
       onGet: (path, token) async {
-        throw HttpException('access token invalid');
+        throw const HttpException('access token invalid');
       },
     );
 

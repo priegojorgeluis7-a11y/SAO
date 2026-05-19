@@ -53,7 +53,7 @@ class AttendeesGroup extends StatelessWidget {
           ),
           if (items.isEmpty) ...[
             const SizedBox(height: 8),
-            Text(
+            const Text(
               'Sin asistentes registrados',
               style: AppTypography.hint,
             ),
@@ -73,7 +73,7 @@ class AttendeesGroup extends StatelessWidget {
             const SizedBox(height: 8),
             if (selectedCount == 0)
               Padding(
-                padding: EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.only(bottom: 8),
                 child: Text(
                   'Ninguno seleccionado',
                   style: AppTypography.hint.copyWith(fontStyle: FontStyle.italic),

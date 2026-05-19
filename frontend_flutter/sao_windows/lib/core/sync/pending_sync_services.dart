@@ -126,7 +126,7 @@ class ActivitySyncServiceImpl implements ActivitySyncService {
     required int pulled,
   }) async {
     if (_shouldRecoverCursorGapOverride != null) {
-      return _shouldRecoverCursorGapOverride!(
+      return _shouldRecoverCursorGapOverride(
         projectId: projectId,
         currentVersion: currentVersion,
         pulled: pulled,
@@ -138,7 +138,7 @@ class ActivitySyncServiceImpl implements ActivitySyncService {
     }
 
     final minServerRevision = currentVersion - 1;
-    final existing = await ((_db!.select(_db!.activities)
+    final existing = await ((_db.select(_db.activities)
           ..where(
             (a) =>
                 a.projectId.equals(projectId.trim().toUpperCase()) &

@@ -14,6 +14,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/providers/project_providers.dart';
+import '../auth/app_session_controller.dart';
 import '../../core/utils/project_terminology.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../data/repositories/assignments_repository.dart';
@@ -171,7 +172,7 @@ class _PlanningPageState extends ConsumerState<PlanningPage> {
                     ),
                     data: (projects) {
                       final options = projects.isEmpty ? _fallbackProjects : projects;
-                      if (selectedProject.isEmpty && options.isNotEmpty) {
+                      if ((selectedProject.isEmpty || !options.contains(selectedProject)) && options.isNotEmpty) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           ref.read(activeProjectIdProvider.notifier).select(options.first);
                         });
@@ -474,6 +475,10 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
   static const String _tipoLugar = 'lugar';
 
   final _titleController = TextEditingController();
+  final _activityTypeManualController = TextEditingController();
+  /// Nombre legible del tipo de actividad custom creado desde el diálogo.
+  /// null cuando se usa un tipo del catálogo o no se ha creado ninguno.
+  String? _customActivityName;
   final _pkController = TextEditingController(text: '0+000');
   final _pkFocusNode = FocusNode();
   final _pkFinController = TextEditingController();
@@ -525,6 +530,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     _pkFinController.dispose();
     _pkFinFocusNode.dispose();
     _lugarController.dispose();
+    _activityTypeManualController.dispose();
     _startController.dispose();
     _endController.dispose();
     _coloniaController.dispose();
@@ -715,6 +721,21 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     return start.add(const Duration(hours: 1));
   }
 
+  /// Retorna true si el usuario puede asignar actividades con horarios superpuestos.
+  /// Lógica (en orden):
+  ///   1. Si el backend tiene `allow_schedule_overlap: true` → cualquiera puede.
+  ///   2. Si no, solo SUPERVISOR / COORD / ADMIN pueden.
+  bool _canOverrideConflict() {
+    // Leer flag backend (disponible si ya fue cargado; si no, cae al rol).
+    final flagsAsync = ref.read(systemFeatureFlagsProvider);
+    final flags = flagsAsync.valueOrNull ?? const {};
+    if (flags['allow_schedule_overlap'] == true) return true;
+
+    final user = ref.read(currentAppUserProvider);
+    if (user == null) return false;
+    return user.hasRole('SUPERVISOR') || user.hasRole('COORD') || user.isAdmin;
+  }
+
   String? _checkConflict() {
     final assigneeIds = _assigneeIds;
     final startAt = _composeDateTime(_startController.text);
@@ -880,7 +901,9 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         final requiresMunicipio = _municipioOptions.isNotEmpty;
         final hasEstado = !requiresEstado || _selectedEstado != null;
         final hasMunicipio = !requiresMunicipio || _selectedMunicipio != null;
-        return _activityTypeCode != null && hasFront && hasPk && hasEstado && hasMunicipio;
+        final hasActivityType = _activityTypeCode != null ||
+            _activityTypeManualController.text.trim().isNotEmpty;
+        return hasActivityType && hasFront && hasPk && hasEstado && hasMunicipio;
       case 2:
         final startAt = _composeDateTime(_startController.text);
         final endAt = _composeDateTime(_endController.text);
@@ -987,7 +1010,10 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
       case 0:
         return 'Selecciona al menos un responsable.';
       case 1:
-        if (_activityTypeCode == null) return 'Selecciona tipo de actividad.';
+        if (_activityTypeCode == null &&
+            _activityTypeManualController.text.trim().isEmpty) {
+          return 'Selecciona o escribe un tipo de actividad.';
+        }
         if (_frontId == null || _frontId!.trim().isEmpty) {
           return 'Selecciona ${frontTerminology(widget.projectId)}.';
         }
@@ -1011,8 +1037,9 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         final endAt = _composeDateTime(_endController.text);
         if (startAt == null || endAt == null) return 'Captura horario valido.';
         if (!endAt.isAfter(startAt)) return 'La hora fin debe ser mayor a la hora inicio.';
+        // SUPERVISOR/COORD pueden ignorar conflictos de horario.
         final conflict = _checkConflict();
-        if (conflict != null) return conflict;
+        if (conflict != null && !_canOverrideConflict()) return conflict;
         return 'Completa todos los campos obligatorios.';
       default:
         return 'Completa todos los campos obligatorios.';
@@ -1169,14 +1196,42 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
               .toList(),
           onChanged: _submitting
               ? null
-              : (value) => setState(() => _activityTypeCode = value),
+              : (value) => setState(() {
+                    _activityTypeCode = value;
+                    // Limpiar tipo custom si el usuario selecciona del catálogo.
+                    _activityTypeManualController.clear();
+                    _customActivityName = null;
+                  }),
         ),
+        const SizedBox(height: 6),
+        // ── Tipo de actividad personalizado ────────────────────────────
+        if (_customActivityName != null)
+          _CustomTypeBadge(
+            name: _customActivityName!,
+            onRemove: _submitting
+                ? null
+                : () => setState(() {
+                      _activityTypeManualController.clear();
+                      _customActivityName = null;
+                    }),
+          )
+        else
+          OutlinedButton.icon(
+            icon: const Icon(Icons.add_rounded, size: 16),
+            label: const Text('Agregar tipo personalizado'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: SaoColors.gray600,
+              side: const BorderSide(color: SaoColors.gray300),
+              visualDensity: VisualDensity.compact,
+            ),
+            onPressed: _submitting ? null : _addCustomActivityDialog,
+          ),
         const SizedBox(height: 10),
         DropdownButtonFormField<String>(
           initialValue: _frontId,
           decoration: InputDecoration(
             labelText: frontTerminology(widget.projectId, capitalize: true),
-            border: OutlineInputBorder(),
+            border: const OutlineInputBorder(),
           ),
           items: _fronts
               .map(
@@ -1196,7 +1251,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         const SizedBox(height: 10),
         if (_estadoOptions.isEmpty)
           InputDecorator(
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               labelText: 'Estado',
               border: OutlineInputBorder(),
             ),
@@ -1718,8 +1773,58 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     );
   }
 
+  Future<void> _addCustomActivityDialog() async {
+    final textController = TextEditingController();
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Agregar tipo de actividad personalizado'),
+        content: SizedBox(
+          width: 360,
+          child: TextField(
+            controller: textController,
+            autofocus: true,
+            textCapitalization: TextCapitalization.sentences,
+            maxLength: 100,
+            decoration: const InputDecoration(
+              labelText: 'Nombre del tipo de actividad',
+              hintText: 'Ej. Inspección técnica especial',
+              border: OutlineInputBorder(),
+            ),
+            onSubmitted: (v) {
+              if (v.trim().isNotEmpty) Navigator.of(ctx).pop(v.trim());
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final v = textController.text.trim();
+              if (v.isNotEmpty) Navigator.of(ctx).pop(v);
+            },
+            child: const Text('Agregar'),
+          ),
+        ],
+      ),
+    );
+    if (result != null && result.isNotEmpty && mounted) {
+      final id = 'CUSTOM_ACT_${DateTime.now().millisecondsSinceEpoch}';
+      setState(() {
+        _customActivityName = result;
+        _activityTypeManualController.text = id;
+        // Limpiar selección del catálogo para que no haya ambigüedad.
+        _activityTypeCode = null;
+      });
+    }
+  }
+
   Future<void> _submit() async {
-    if (_assigneeIds.isEmpty || _activityTypeCode == null) {
+    final manualCodeCheck = _activityTypeManualController.text.trim();
+    if (_assigneeIds.isEmpty || (_activityTypeCode == null && manualCodeCheck.isEmpty)) {
       setState(() => _error = 'Selecciona al menos un responsable y tipo de actividad.');
       return;
     }
@@ -1737,7 +1842,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     try {
       final pkInicio = _parsePkMeters(_pkController.text);
       final conflict = _checkConflict();
-      if (conflict != null) {
+      if (conflict != null && !_canOverrideConflict()) {
         setState(() {
           _submitting = false;
           _error = conflict;
@@ -1752,11 +1857,16 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         _ => 0,
       };
 
-          final selectedActivityName = _activityTypes
-            .where((item) => item.code == _activityTypeCode)
-              .map((item) => item.name.trim())
-            .firstOrNull ??
-          '';
+          final manualCode = _activityTypeManualController.text.trim().toUpperCase();
+          final effectiveActivityTypeCode =
+              manualCode.isNotEmpty ? manualCode : _activityTypeCode!;
+          // Usar el nombre legible del custom o buscar en el catálogo.
+          final selectedActivityName = _customActivityName ??
+              _activityTypes
+                  .where((item) => item.code == effectiveActivityTypeCode)
+                  .map((item) => item.name.trim())
+                  .firstOrNull ??
+              effectiveActivityTypeCode;
         final typedTitle = _titleController.text.trim();
         final effectiveTitle = typedTitle.isNotEmpty
           ? typedTitle
@@ -1767,7 +1877,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         projectId: widget.projectId,
         assigneeUserId: _assigneeIds.first,
         assigneeUserIds: _assigneeIds,
-        activityTypeCode: _activityTypeCode!,
+        activityTypeCode: effectiveActivityTypeCode,
         startAt: startAt,
         endAt: endAt,
         title: effectiveTitle,
@@ -2086,9 +2196,6 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     }
   }
 
-  static const _kFallbackCalendarId =
-      '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
-
   Future<void> _syncToGoogleCalendar() async {
     final item = widget.item;
 
@@ -2099,8 +2206,8 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
     final start = DateTime.tryParse(rawStart) ?? DateTime.now();
     final end = start.add(const Duration(hours: 1));
 
-    String _fmt(DateTime dt) =>
-        dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first + 'Z';
+    String fmt(DateTime dt) =>
+        '${dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first}Z';
 
     final location = [
       if ((item.colonia ?? '').isNotEmpty) item.colonia!,
@@ -2135,9 +2242,9 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
       'SAO-ID: ${item.id}',
     );
     final loc = Uri.encodeComponent(location);
-    final dates = '${_fmt(start)}/${_fmt(endReal)}';
-    final _resolvedCalId = await ref.read(systemConfigServiceProvider).getCalendarId();
-    final calId = Uri.encodeComponent(_resolvedCalId);
+    final dates = '${fmt(start)}/${fmt(endReal)}';
+    final resolvedCalId = await ref.read(systemConfigServiceProvider).getCalendarId();
+    final calId = Uri.encodeComponent(resolvedCalId);
 
     final baseUrl = 'https://calendar.google.com/calendar/render'
         '?action=TEMPLATE'
@@ -2450,6 +2557,53 @@ class _StatusPill extends StatelessWidget {
       ),
       child: Text(display,
           style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
+/// Badge que muestra el tipo de actividad personalizado seleccionado con un botón para eliminarlo.
+class _CustomTypeBadge extends StatelessWidget {
+  const _CustomTypeBadge({required this.name, this.onRemove});
+
+  final String name;
+  final VoidCallback? onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: cs.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: cs.primary.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.category_rounded, size: 16, color: cs.primary),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              name,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: cs.primary,
+                fontSize: 13,
+              ),
+            ),
+          ),
+          if (onRemove != null)
+            IconButton(
+              icon: const Icon(Icons.close_rounded, size: 16),
+              tooltip: 'Quitar tipo personalizado',
+              onPressed: onRemove,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+              color: cs.primary,
+            ),
+        ],
+      ),
     );
   }
 }
@@ -2948,22 +3102,6 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     });
   }
 
-  /// Convierte "20+630" → 20630 (metros). Devuelve null si no es parseable.
-  int? _pkToMeters(String raw) {
-    final s = raw.trim();
-    if (s.isEmpty || s == '—') return null;
-    final parts = s.split('+');
-    if (parts.length == 2) {
-      final km = int.tryParse(parts[0].trim());
-      final m = int.tryParse(parts[1].trim());
-      if (km != null && m != null) return km * 1000 + m;
-    }
-    return int.tryParse(s);
-  }
-
-  static const _kFallbackCalendarId =
-      '7874f5cb85c43eba5ba24e8b710c1b2fac0d8f64106f0cdfddb6bb14441bc151@group.calendar.google.com';
-
   Future<void> _syncItemToGoogleCalendar(AssignmentItem item) async {
     final rawStart = (item.startAt != null && item.startAt!.isNotEmpty)
         ? item.startAt!
@@ -2972,7 +3110,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     final end = start.add(const Duration(hours: 1));
 
     String fmt(DateTime dt) =>
-        dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first + 'Z';
+        '${dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first}Z';
 
     final location = [
       if ((item.colonia ?? '').isNotEmpty) item.colonia!,
@@ -3027,79 +3165,6 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
       return;
     }
     await launchUrl(url, mode: LaunchMode.externalApplication);
-  }
-
-  Future<void> _generateDailyReport(
-    List<({AssignmentItem item, DateTime start, DateTime end})> entries,
-  ) async {
-    final nowStamp = DateFormat('yyyyMMdd_HHmm').format(DateTime.now());
-    final dateStamp = DateFormat('yyyy-MM-dd').format(widget.selectedDate);
-
-    // Esquema normalizado:
-    // - responsable_id es el lookup key; nombre eliminado (redundante)
-    // - estado_geo  = ubicación física (Guerrero, Oaxaca…)
-    // - workflow_status = estado del flujo (PROGRAMADA, CANCELADA…)
-    // - valores vacíos en lugar de "Sin frente", "Sin estado", "—"
-    final csv = StringBuffer()
-      ..writeln('id_log,fecha,timestamp_ini,timestamp_fin,duracion_min,'
-          'actividad_cod,frente,pk_m,estado_geo,municipio,'
-          'responsable_id,workflow_status,nota');
-
-    // helper: devuelve cadena vacía si el valor es placeholder
-    String clean(String v) {
-      final t = v.trim();
-      if (t.isEmpty || t == '—') return '';
-      final lower = t.toLowerCase();
-      if (lower.startsWith('sin ') || lower == 'n/a') return '';
-      return t;
-    }
-
-    for (final entry in entries) {
-      // Quoted field – escapa comillas internas
-      String q(String v) {
-        final c = clean(v);
-        if (c.isEmpty) return '';          // NULL semántico → celda vacía sin comillas
-        return '"${c.replaceAll('"', '""')}"';
-      }
-
-      final tsIni = entry.start.toIso8601String();
-      final tsFin = entry.end.toIso8601String();
-      final durMin = entry.end.difference(entry.start).inMinutes;
-      final pkM = _pkToMeters(entry.item.pk)?.toString() ?? '';
-
-      csv.writeln(
-        '${q(entry.item.id)},$dateStamp,$tsIni,$tsFin,$durMin,'
-        '${q(entry.item.activityTypeName)},${q(_locationFront(entry.item))},$pkM,'
-        '${q(_locationEstado(entry.item))},${q(_locationMunicipio(entry.item))},'
-        '${q(entry.item.assigneeUserId)},${q(_effectiveStatus(entry.item))},'
-        '${q(_notesByAssignmentId[entry.item.id] ?? '')}',
-      );
-    }
-
-    final userProfile = Platform.environment['USERPROFILE'];
-    final downloadsPath = userProfile == null || userProfile.isEmpty
-        ? Directory.current.path
-        : '$userProfile\\Downloads';
-    final dir = Directory(downloadsPath);
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    final file = File('${dir.path}\\reporte_planeacion_${dateStamp}_$nowStamp.csv');
-    await file.writeAsString(csv.toString());
-
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Reporte guardado: ${file.path}'),
-        duration: const Duration(seconds: 8),
-        action: SnackBarAction(
-          label: 'Abrir carpeta',
-          onPressed: () {
-            Process.run('explorer.exe', [dir.path]);
-          },
-        ),
-      ),
-    );
   }
 
   DateTime? _parseAssignmentStart(AssignmentItem item) {
@@ -4800,9 +4865,9 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
                   ],
                 ),
               ),
-              Row(
+              const Row(
                 mainAxisSize: MainAxisSize.min,
-                children: const [],
+                children: [],
               ),
             ],
           ),

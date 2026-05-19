@@ -135,6 +135,7 @@ class HomeActivityRecord {
   final String? reviewComment;
   final String? reviewRejectReasonCode;
   final bool isUnplanned;
+  final bool isCoResponsible;
 
   const HomeActivityRecord({
     required this.activity,
@@ -152,6 +153,7 @@ class HomeActivityRecord {
     this.reviewComment,
     this.reviewRejectReasonCode,
     required this.isUnplanned,
+    this.isCoResponsible = false,
   });
 }
 
@@ -191,7 +193,10 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     return normalized;
   }
 
-  Future<String> resolveActivityTypeId(String activityTypeCodeOrId) async {
+  Future<String> resolveActivityTypeId(
+    String activityTypeCodeOrId, {
+    String? displayName,
+  }) async {
     final normalized = activityTypeCodeOrId.trim();
     if (normalized.isEmpty) return activityTypeCodeOrId;
 
@@ -201,6 +206,23 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     final byCode = await (select(catalogActivityTypes)..where((t) => t.code.equals(normalized))).getSingleOrNull();
     if (byCode != null) return byCode.id;
 
+    // Intento adicional con el código en mayúsculas (por diferencias de capitalización).
+    final byCodeUpper = await (select(catalogActivityTypes)
+          ..where((t) => t.code.equals(normalized.toUpperCase())))
+        .getSingleOrNull();
+    if (byCodeUpper != null) return byCodeUpper.id;
+
+    // El paquete de catálogo no ha sido sincronizado aún.
+    // Crear un stub local con el ID del bundle como id y code para que:
+    //   1) La FK de activities.activity_type_id quede satisfecha.
+    //   2) _resolveActivityTypeCodeForSync devuelva el código correcto al sincronizar.
+    await into(catalogActivityTypes).insertOnConflictUpdate(
+      CatalogActivityTypesCompanion.insert(
+        id: normalized,
+        code: normalized.toUpperCase(),
+        name: displayName ?? normalized,
+      ),
+    );
     return normalized;
   }
 
@@ -597,6 +619,7 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
                 'review_reject_reason_code',
                 'estado',
                 'municipio',
+                'is_co_responsible',
               ])))
         .get();
 
@@ -611,6 +634,7 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
     final reviewRejectReasonCodeByActivityId = <String, String>{};
     final estadoByActivityId = <String, String>{};
     final municipioByActivityId = <String, String>{};
+    final isCoResponsibleByActivityId = <String, bool>{};
 
     for (final field in fieldRows) {
       if (field.fieldKey == 'front_name' && (field.valueText?.trim().isNotEmpty ?? false)) {
@@ -645,6 +669,9 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
       }
       if (field.fieldKey == 'municipio' && (field.valueText?.trim().isNotEmpty ?? false)) {
         municipioByActivityId[field.activityId] = field.valueText!.trim();
+      }
+      if (field.fieldKey == 'is_co_responsible' && field.valueText == 'true') {
+        isCoResponsibleByActivityId[field.activityId] = true;
       }
     }
 
@@ -710,6 +737,7 @@ class ActivityDao extends DatabaseAccessor<AppDb> with _$ActivityDaoMixin {
               reviewComment: reviewCommentByActivityId[row.id],
               reviewRejectReasonCode: reviewRejectReasonCodeByActivityId[row.id],
               isUnplanned: isUnplannedByActivityId[row.id] ?? false,
+              isCoResponsible: isCoResponsibleByActivityId[row.id] ?? false,
             );
           },
         )

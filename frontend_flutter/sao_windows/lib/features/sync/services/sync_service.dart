@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../../core/flow/activity_flow_projection.dart';
 import '../../../core/network/exceptions.dart';
@@ -446,14 +447,11 @@ class SyncService {
   }) async {
     final dto = item.dto;
 
-    // Reject items with a non-UUID activity id — they can never succeed on the
-    // backend (HTTP 422) and should not be retried automatically.
+    // If the activity UUID is not a valid UUID (e.g. SQLite auto-increment numeric
+    // timestamp used as local id), attempt an automatic repair: generate a new UUID,
+    // migrate all local data, and continue without losing the user's captured data.
     if (!_isUuid(dto.uuid)) {
-      await _markError(
-        item.row,
-        'UUID de actividad inválido (${dto.uuid.length} chars): la actividad debe eliminarse y crearse de nuevo | accion sugerida: DELETE_AND_RECREATE',
-      );
-      return null;
+      return _repairInvalidUuid(item);
     }
 
     final normalizedCatalogVersionId = await _resolveCatalogVersionId(
@@ -703,6 +701,171 @@ class SyncService {
     }
 
     return true;
+  }
+
+  /// When a sync queue item has a non-UUID local id (e.g. a SQLite auto-increment
+  /// numeric timestamp), this method:
+  ///   1. Generates a proper UUID v4.
+  ///   2. Migrates the local `activities` row to the new id.
+  ///   3. Updates `activity_fields`, `evidences`, and `pending_uploads` rows
+  ///      that reference the old id.
+  ///   4. Updates the sync queue entry itself with the new entityId + payload.
+  ///
+  /// Returns the updated [_PendingItem] ready for sending, or null on failure.
+  Future<_PendingItem?> _repairInvalidUuid(_PendingItem item) async {
+    final oldId = item.dto.uuid;
+    final newId = const Uuid().v4();
+
+    appLogger.w('🔧 Repairing invalid activity UUID $oldId → $newId');
+
+    try {
+      await _db.transaction(() async {
+        // 1. Read the existing activities row (if any).
+        final existingActivity = await (_db.select(_db.activities)
+              ..where((a) => a.id.equals(oldId)))
+            .getSingleOrNull();
+
+        if (existingActivity != null) {
+          // 2. Insert a clone with the new UUID.
+          await _db.into(_db.activities).insert(
+                existingActivity.toCompanion(false).copyWith(
+                      id: Value(newId),
+                    ),
+                mode: InsertMode.insertOrIgnore,
+              );
+
+          // 3. Migrate activity_fields.
+          final fields = await (_db.select(_db.activityFields)
+                ..where((f) => f.activityId.equals(oldId)))
+              .get();
+          for (final f in fields) {
+            await _db.into(_db.activityFields).insert(
+                  f.toCompanion(false).copyWith(activityId: Value(newId)),
+                  mode: InsertMode.insertOrIgnore,
+                );
+            await (_db.delete(_db.activityFields)
+                  ..where((r) => r.id.equals(f.id) & r.activityId.equals(oldId)))
+                .go();
+          }
+
+          // 4. Migrate evidences.
+          final evs = await (_db.select(_db.evidences)
+                ..where((e) => e.activityId.equals(oldId)))
+              .get();
+          for (final e in evs) {
+            await _db.into(_db.evidences).insert(
+                  e.toCompanion(false).copyWith(activityId: Value(newId)),
+                  mode: InsertMode.insertOrIgnore,
+                );
+            await (_db.delete(_db.evidences)
+                  ..where((r) => r.id.equals(e.id) & r.activityId.equals(oldId)))
+                .go();
+          }
+
+          // 5. Migrate pending_uploads.
+          await (_db.update(_db.pendingUploads)
+                ..where((p) => p.activityId.equals(oldId)))
+              .write(PendingUploadsCompanion(activityId: Value(newId)));
+
+          // 5b. Delete activity_log rows for the old id — they are local-only
+          //     audit entries and cannot be migrated (they reference the old id
+          //     via FK).  The new activity starts with a clean log.
+          await (_db.delete(_db.activityLog)
+                ..where((l) => l.activityId.equals(oldId)))
+              .go();
+
+          // 6. Delete old activity row.
+          await (_db.delete(_db.activities)..where((a) => a.id.equals(oldId))).go();
+        }
+
+        // 7. Update the sync queue row with new entityId and new uuid in payload.
+        final updatedDto = ActivityDTO(
+          uuid: newId,
+          serverId: item.dto.serverId,
+          projectId: item.dto.projectId,
+          frontId: item.dto.frontId,
+          pkStart: item.dto.pkStart,
+          pkEnd: item.dto.pkEnd,
+          executionState: item.dto.executionState,
+          assignedToUserId: item.dto.assignedToUserId,
+          assignedToUserName: item.dto.assignedToUserName,
+          participantUserIds: item.dto.participantUserIds,
+          createdByUserId: item.dto.createdByUserId,
+          catalogVersionId: item.dto.catalogVersionId,
+          activityTypeCode: item.dto.activityTypeCode,
+          latitude: item.dto.latitude,
+          longitude: item.dto.longitude,
+          title: item.dto.title,
+          description: item.dto.description,
+          wizardPayload: item.dto.wizardPayload,
+          createdAt: item.dto.createdAt,
+          updatedAt: item.dto.updatedAt,
+          deletedAt: item.dto.deletedAt,
+          syncVersion: item.dto.syncVersion,
+        );
+
+        await (_db.update(_db.syncQueue)
+              ..where((s) => s.id.equals(item.row.id)))
+            .write(SyncQueueCompanion(
+          entityId: Value(newId),
+          payloadJson: Value(jsonEncode(updatedDto.toJson())),
+          status: const Value('PENDING'),
+          errorCode: const Value(null),
+          lastError: const Value(null),
+          suggestedAction: const Value(null),
+        ));
+
+        return _PendingItem(
+          item.row.copyWith(
+            entityId: newId,
+            payloadJson: jsonEncode(updatedDto.toJson()),
+            status: 'PENDING',
+          ),
+          updatedDto,
+        );
+      });
+
+      // Re-read the updated sync queue row.
+      final updatedRow = await (_db.select(_db.syncQueue)
+            ..where((s) => s.id.equals(item.row.id)))
+          .getSingleOrNull();
+      if (updatedRow == null) return null;
+
+      final updatedDto = ActivityDTO(
+        uuid: newId,
+        serverId: item.dto.serverId,
+        projectId: item.dto.projectId,
+        frontId: item.dto.frontId,
+        pkStart: item.dto.pkStart,
+        pkEnd: item.dto.pkEnd,
+        executionState: item.dto.executionState,
+        assignedToUserId: item.dto.assignedToUserId,
+        assignedToUserName: item.dto.assignedToUserName,
+        participantUserIds: item.dto.participantUserIds,
+        createdByUserId: item.dto.createdByUserId,
+        catalogVersionId: item.dto.catalogVersionId,
+        activityTypeCode: item.dto.activityTypeCode,
+        latitude: item.dto.latitude,
+        longitude: item.dto.longitude,
+        title: item.dto.title,
+        description: item.dto.description,
+        wizardPayload: item.dto.wizardPayload,
+        createdAt: item.dto.createdAt,
+        updatedAt: item.dto.updatedAt,
+        deletedAt: item.dto.deletedAt,
+        syncVersion: item.dto.syncVersion,
+      );
+
+      appLogger.i('✅ UUID repair complete: $oldId → $newId');
+      return _PendingItem(updatedRow, updatedDto);
+    } catch (e, st) {
+      appLogger.e('❌ UUID repair failed for $oldId: $e', error: e, stackTrace: st);
+      await _markError(
+        item.row,
+        'UUID de actividad inválido y no se pudo reparar automáticamente ($e) | accion sugerida: DELETE_AND_RECREATE',
+      );
+      return null;
+    }
   }
 
   bool _isUuid(String? value) {
@@ -973,7 +1136,12 @@ class SyncService {
         if (dto.assignedToUserId != null && dto.assignedToUserId!.trim().isNotEmpty) {
           await _ensureUserExists(dto.assignedToUserId!, name: dto.assignedToUserName);
         }
-        final activityTypeId = await _ensureActivityTypeExists(dto.activityTypeCode);
+        final activityTypeId = await _ensureActivityTypeExists(
+          dto.activityTypeCode,
+          displayName: dto.activityTypeCode.toUpperCase().startsWith('CUSTOM_')
+              ? dto.title
+              : null,
+        );
         final activityTypeName = await _resolveActivityTypeName(activityTypeId);
         final resolvedTitle = _resolveActivityTitle(
           catalogActivityName: activityTypeName,
@@ -1085,6 +1253,9 @@ class SyncService {
             'review_reject_reason_code': dto.reviewRejectReasonCode!
                 .trim()
                 .toUpperCase(),
+          // Mark activities where the current user is a co-responsible (sibling),
+          // not the primary responsible. Used to show "Co-responsable" badge in Home.
+          if (!dto.isPrimaryResponsible) 'is_co_responsible': 'true',
           ..._extractWizardTextFieldsFromPayload(dto.wizardPayload),
         };
         for (final entry in canonicalFields.entries) {
@@ -1422,11 +1593,25 @@ class SyncService {
         );
   }
 
-  Future<String> _ensureActivityTypeExists(String activityTypeCode) async {
+  Future<String> _ensureActivityTypeExists(
+    String activityTypeCode, {
+    String? displayName,
+  }) async {
     final byId = await (_db.select(_db.catalogActivityTypes)
           ..where((t) => t.id.equals(activityTypeCode)))
         .getSingleOrNull();
     if (byId != null) {
+      // Update name if we now have a better display name and the current one
+      // is still the raw ID stub (i.e. name == code).
+      final needsNameUpdate = displayName != null &&
+          displayName.trim().isNotEmpty &&
+          !displayName.trim().toUpperCase().startsWith('CUSTOM_') &&
+          byId.name.trim().toUpperCase() == activityTypeCode.toUpperCase();
+      if (needsNameUpdate) {
+        await (_db.update(_db.catalogActivityTypes)
+              ..where((t) => t.id.equals(activityTypeCode)))
+            .write(CatalogActivityTypesCompanion(name: Value(displayName.trim())));
+      }
       return byId.id;
     }
 
@@ -1437,11 +1622,15 @@ class SyncService {
       return byCode.id;
     }
 
+    final effectiveName = (displayName?.trim().isNotEmpty ?? false) &&
+            !(displayName!.trim().toUpperCase().startsWith('CUSTOM_'))
+        ? displayName.trim()
+        : activityTypeCode;
     await _db.into(_db.catalogActivityTypes).insertOnConflictUpdate(
           CatalogActivityTypesCompanion.insert(
             id: activityTypeCode,
             code: activityTypeCode,
-            name: activityTypeCode,
+            name: effectiveName,
           ),
         );
     return activityTypeCode;
@@ -1462,7 +1651,11 @@ class SyncService {
     required String activityTypeCode,
   }) {
     final byCatalog = catalogActivityName?.trim();
-    if (byCatalog != null && byCatalog.isNotEmpty) {
+    // Skip stub names that are raw CUSTOM_* IDs — they are not human-readable.
+    // For custom types the fallbackTitle (planner-provided name) is authoritative.
+    if (byCatalog != null &&
+        byCatalog.isNotEmpty &&
+        !byCatalog.toUpperCase().startsWith('CUSTOM_')) {
       return byCatalog;
     }
 

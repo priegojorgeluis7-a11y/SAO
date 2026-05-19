@@ -1734,8 +1734,8 @@ class _ValidationPageNewDesignState
       CatalogRepository catalogRepo, String projectId) async {
     final selected = _selectedActivity;
 
-    final actTypeId = selected?.activityType?.id?.trim() ?? '';
-    final actTypeCode = selected?.activityType?.code?.trim() ?? '';
+    final actTypeId = selected?.activityType?.id.trim() ?? '';
+    final actTypeCode = selected?.activityType?.code.trim() ?? '';
     final candidateName =
         (selected?.activityType?.name ?? selected?.activity.title ?? 'General')
             .trim();
@@ -2091,9 +2091,8 @@ class _ValidationPageNewDesignState
       for (final projectId in projects)
         if (projectId.trim().isNotEmpty) projectId.trim().toUpperCase(),
     };
-    if (selectedProjectId.isNotEmpty) {
-      normalized.add(selectedProjectId);
-    }
+    // No agregar selectedProjectId si no está en la lista accesible del usuario.
+    // Hacerlo causaría llamadas al backend con un proyecto prohibido → 403.
     final result = normalized.toList()..sort();
     return result;
   }

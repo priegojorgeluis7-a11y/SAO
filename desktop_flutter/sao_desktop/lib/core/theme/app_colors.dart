@@ -37,10 +37,10 @@ class AppColors {
   static const riskCritical = Color(0xFFDC2626); // 🔴 Rojo
 
   // Backgrounds de riesgo (con opacidad)
-  static final riskLowBg = riskLow.withOpacity(0.14);
-  static final riskMediumBg = riskMedium.withOpacity(0.14);
-  static final riskHighBg = riskHigh.withOpacity(0.14);
-  static final riskCriticalBg = riskCritical.withOpacity(0.14);
+  static final riskLowBg = riskLow.withValues(alpha: 0.14);
+  static final riskMediumBg = riskMedium.withValues(alpha: 0.14);
+  static final riskHighBg = riskHigh.withValues(alpha: 0.14);
+  static final riskCriticalBg = riskCritical.withValues(alpha: 0.14);
 
   // Alertas
   static const alertBg = Color(0xFFFFFBEB);
@@ -89,8 +89,8 @@ class AppColors {
   static const statusRejected = Color(0xFFEF4444);     // Rojo
   static const statusNeedsFix = Color(0xFFF97316);     // Naranja
   
-  static final statusPendingBg = statusPending.withOpacity(0.14);
-  static final statusApprovedBg = statusApproved.withOpacity(0.14);
-  static final statusRejectedBg = statusRejected.withOpacity(0.14);
-  static final statusNeedsFixBg = statusNeedsFix.withOpacity(0.14);
+  static final statusPendingBg = statusPending.withValues(alpha: 0.14);
+  static final statusApprovedBg = statusApproved.withValues(alpha: 0.14);
+  static final statusRejectedBg = statusRejected.withValues(alpha: 0.14);
+  static final statusNeedsFixBg = statusNeedsFix.withValues(alpha: 0.14);
 }

@@ -533,8 +533,8 @@ def list_projects(
                     front_location_scope=front_location_scope,
                 )
             )
-        except Exception:
-            pass
+        except Exception as exc:  # pragma: no cover
+            logger.warning("projects_list: skipping malformed project doc: %s", exc)
     result.sort(key=lambda proj: proj.id)
     return result
 

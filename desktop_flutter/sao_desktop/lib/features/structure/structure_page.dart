@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/project_providers.dart';
 import '../admin/pages/projects_page.dart';
+import '../catalogs/catalog_candidates_page.dart';
 import '../catalogs/catalogs_page.dart';
 import '../users/users_page.dart';
 
@@ -20,7 +21,7 @@ class _StructurePageState extends ConsumerState<StructurePage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -59,6 +60,7 @@ class _StructurePageState extends ConsumerState<StructurePage>
                 Tab(icon: Icon(Icons.domain_rounded, size: 18), text: 'Proyectos'),
                 Tab(icon: Icon(Icons.layers_rounded, size: 18), text: 'Catálogos'),
                 Tab(icon: Icon(Icons.group_rounded, size: 18), text: 'Usuarios'),
+                Tab(icon: Icon(Icons.checklist_rounded, size: 18), text: 'Verificación'),
               ],
             ),
           ),
@@ -70,6 +72,7 @@ class _StructurePageState extends ConsumerState<StructurePage>
               AdminProjectsPage(onOpenCatalog: _openCatalogForProject),
               const CatalogsPage(),
               const UsersPage(),
+              const CatalogCandidatesPage(),
             ],
           ),
         ),

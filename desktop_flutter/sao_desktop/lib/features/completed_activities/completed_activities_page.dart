@@ -38,9 +38,17 @@ class _CompletedActivitiesPageState
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final globalProject = ref.read(activeProjectIdProvider);
+      final globalProject = ref.read(activeProjectIdProvider).trim().toUpperCase();
       if (globalProject.isNotEmpty) {
-        ref.read(completedProjectFilterProvider.notifier).state = globalProject;
+        // Solo aplicar si el proyecto está en la lista accesible del usuario.
+        final availableProjects = ref.read(availableProjectsProvider).valueOrNull ?? const <String>[];
+        final accessibleIds = availableProjects
+            .map((p) => p.trim().toUpperCase())
+            .where((p) => p.isNotEmpty)
+            .toSet();
+        if (accessibleIds.isEmpty || accessibleIds.contains(globalProject)) {
+          ref.read(completedProjectFilterProvider.notifier).state = globalProject;
+        }
       }
     });
   }

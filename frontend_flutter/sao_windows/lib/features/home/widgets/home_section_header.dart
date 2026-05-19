@@ -124,7 +124,7 @@ class TaskSectionHeader extends StatelessWidget {
                               ),
                               decoration: BoxDecoration(
                                 color: metrics.hasCriticalItems
-                                    ? Colors.red.withOpacity(0.1)
+                                    ? Colors.red.withValues(alpha: 0.1)
                                     : Colors.transparent,
                                 borderRadius: BorderRadius.circular(4),
                               ),
@@ -212,7 +212,7 @@ class TaskSectionHeaderWithProgress extends StatelessWidget {
                   child: LinearProgressIndicator(
                     value: metrics.completionPercent / 100,
                     minHeight: 4,
-                    backgroundColor: metrics.priority.color.withOpacity(0.15),
+                    backgroundColor: metrics.priority.color.withValues(alpha: 0.15),
                     valueColor: AlwaysStoppedAnimation<Color>(
                       metrics.priority.color,
                     ),

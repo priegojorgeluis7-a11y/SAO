@@ -14,6 +14,8 @@ String buildInitialWhatsAppReport({
   String? resultLabel,
   String? notes,
   List<String> agreements = const [],
+  List<String> topics = const [],
+  List<String> attendees = const [],
   int evidenceCount = 0,
 }) {
   final cleanProject = projectCode.trim().isEmpty ? 'N/D' : projectCode.trim().toUpperCase();
@@ -24,6 +26,7 @@ String buildInitialWhatsAppReport({
   final cleanResult = (resultLabel ?? '').trim();
   final cleanNotes = (notes ?? '').trim();
   final cleanCustomTitle = (customTitle ?? '').trim();
+  final cleanAttendees = attendees.map((a) => a.trim()).where((a) => a.isNotEmpty).toList(growable: false);
   final cleanAgreements = agreements
       .map((item) => item.trim())
       .where((item) => item.isNotEmpty)
@@ -41,10 +44,9 @@ String buildInitialWhatsAppReport({
   ];
   final schedule = scheduleParts.isEmpty ? '' : scheduleParts.join(' · ');
 
-  final lines = <String>[
-    if (cleanCustomTitle.isNotEmpty) '*$cleanCustomTitle*',
-    if (cleanCustomTitle.isNotEmpty) '',
+  final mainRows = <String>[
     '*Proyecto:* $cleanProject',
+    if (activity.horaInicio != null) '*Fecha:* ${fmtDate(activity.horaInicio!)}',
     '*Actividad:* $cleanTitle',
     if (cleanFront.isNotEmpty)
       '*${frontTerminology(projectCode, capitalize: true)}:* $cleanFront',
@@ -52,18 +54,27 @@ String buildInitialWhatsAppReport({
     if (activity.pk != null) '*PK:* ${formatPk(activity.pk)}',
     if (schedule.isNotEmpty) '*Horario:* $schedule',
     if (cleanResult.isNotEmpty) '*Resultado:* $cleanResult',
-    if (cleanNotes.isNotEmpty) ...[
-      '',
-      '*Resumen:*',
-      cleanNotes,
-    ],
+    if (cleanNotes.isNotEmpty) '*Asunto:* $cleanNotes',
+  ];
+
+  final tailRows = <String>[
+    if (cleanAttendees.isNotEmpty) '*Autoridades presentes:* ${cleanAttendees.join(', ')}',
+    '*Estatus:* Terminada',
+  ];
+
+  final tailStart = mainRows.length + 1;
+
+  final lines = <String>[
+    if (cleanCustomTitle.isNotEmpty) '*$cleanCustomTitle*',
+    if (cleanCustomTitle.isNotEmpty) '',
+    ...mainRows.asMap().entries.map((e) => '${e.key + 1}. ${e.value}'),
     if (cleanAgreements.isNotEmpty) ...[
       '',
       '*Acuerdos relevantes:*',
       ...cleanAgreements.map((item) => '• $item'),
+      '',
     ],
-    '',
-    '*Estatus:* Terminada',
+    ...tailRows.asMap().entries.map((e) => '${tailStart + e.key}. ${e.value}'),
   ];
 
   return lines.join('\n');

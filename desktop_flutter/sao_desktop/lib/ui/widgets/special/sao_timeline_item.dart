@@ -50,7 +50,7 @@ class SaoTimelineItem extends StatelessWidget {
                 width: 32,
                 height: 32,
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.14),
+                  color: color.withValues(alpha: 0.14),
                   shape: BoxShape.circle,
                   border: Border.all(color: color, width: 2),
                 ),
@@ -65,26 +65,26 @@ class SaoTimelineItem extends StatelessWidget {
                 ),
             ],
           ),
-          SizedBox(width: SaoSpacing.md),
+          const SizedBox(width: SaoSpacing.md),
           // Content
           Expanded(
             child: Padding(
-              padding: EdgeInsets.only(bottom: SaoSpacing.lg),
+              padding: const EdgeInsets.only(bottom: SaoSpacing.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
                       Text(user, style: SaoTypography.bodyTextBold),
-                      SizedBox(width: SaoSpacing.xs),
+                      const SizedBox(width: SaoSpacing.xs),
                       Text(action, style: SaoTypography.bodyText),
                     ],
                   ),
                   if (details != null) ...[
-                    SizedBox(height: SaoSpacing.xs),
+                    const SizedBox(height: SaoSpacing.xs),
                     Text(details!, style: SaoTypography.hint),
                   ],
-                  SizedBox(height: SaoSpacing.xs),
+                  const SizedBox(height: SaoSpacing.xs),
                   Text(
                     _formatTimestamp(timestamp),
                     style: SaoTypography.caption,

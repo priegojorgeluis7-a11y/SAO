@@ -58,11 +58,11 @@ class _FlagResolutionDialogState extends State<FlagResolutionDialog> {
         : uuid;
 
     return AlertDialog(
-      title: Row(
+      title: const Row(
         children: [
           Icon(Icons.flag_rounded, color: AppColors.warning, size: 22),
-          const SizedBox(width: 8),
-          const Text('Flags de revisión'),
+          SizedBox(width: 8),
+          Text('Flags de revisión'),
         ],
       ),
       content: SizedBox(
@@ -137,10 +137,10 @@ class _FlagResolutionDialogState extends State<FlagResolutionDialog> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: AppColors.error.withOpacity(0.08),
+                  color: AppColors.error.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
-                      color: AppColors.error.withOpacity(0.3)),
+                      color: AppColors.error.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   children: [
@@ -234,12 +234,12 @@ class _FlagCard extends StatelessWidget {
     return Container(
       decoration: BoxDecoration(
         color: value
-            ? iconColor.withOpacity(0.06)
+            ? iconColor.withValues(alpha: 0.06)
             : AppColors.gray50,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
           color: value
-              ? iconColor.withOpacity(0.4)
+              ? iconColor.withValues(alpha: 0.4)
               : AppColors.border,
         ),
       ),

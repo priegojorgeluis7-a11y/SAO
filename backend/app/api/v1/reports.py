@@ -22,6 +22,8 @@ def _parse_dt(value: object) -> datetime | None:
 
 
 def _report_dt(doc: dict) -> datetime | None:
+    # Prioritize the review/update date so date filters on the reports endpoint
+    # match when the activity was last actioned, not when it was originally created.
     return (
         _parse_dt(doc.get("last_reviewed_at"))
         or _parse_dt(doc.get("updated_at"))
@@ -53,13 +55,36 @@ def _review_status_from_activity(doc: dict) -> str:
     return "PENDING_REVIEW"
 
 
+def _name_from_email(raw: str) -> str:
+    """Derive a display name from an email address or email-like string."""
+    raw = raw.strip()
+    if "@" not in raw:
+        return raw
+    local = raw.split("@")[0]
+    for sep in (".", "_", "-", "+"):
+        local = local.replace(sep, " ")
+    return " ".join(word.capitalize() for word in local.split() if word)
+
+
+def _sanitize_display_name(raw: str) -> str:
+    """Always convert email-like strings to readable names, even when stored as display_name."""
+    raw = raw.strip()
+    return _name_from_email(raw) if raw else ""
+
+
 def _build_users_map(client) -> dict[str, str]:
     users_map: dict[str, str] = {}
     for doc in client.collection("users").stream():
         payload = doc.to_dict() or {}
-        name = str(
-            payload.get("display_name") or payload.get("name") or payload.get("email") or ""
+        raw_name = str(
+            payload.get("full_name")
+            or payload.get("fullName")
+            or payload.get("display_name")
+            or payload.get("name")
+            or payload.get("email")
+            or ""
         ).strip()
+        name = _sanitize_display_name(raw_name)
         if name:
             users_map[str(doc.id)] = name
     return users_map
@@ -88,7 +113,15 @@ def _load_user_names(client, user_ids: set[str]) -> dict[str, str]:
         if not snap.exists:
             continue
         payload = snap.to_dict() or {}
-        name = str(payload.get("display_name") or payload.get("name") or payload.get("email") or "").strip()
+        raw_name = str(
+            payload.get("full_name")
+            or payload.get("fullName")
+            or payload.get("display_name")
+            or payload.get("name")
+            or payload.get("email")
+            or ""
+        ).strip()
+        name = _sanitize_display_name(raw_name)
         if name:
             result[user_id] = name
     return result
@@ -118,7 +151,7 @@ def list_report_activities(
     include_already_reported: bool = Query(False),
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=200),
-    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO"])),
+    _current_user: Any = Depends(require_any_role(["ADMIN", "SUPERVISOR", "COORD", "OPERATIVO", "LECTOR"])),
 ):
     client = get_firestore_client()
 
@@ -151,13 +184,15 @@ def list_report_activities(
     candidate_docs: list[dict[str, Any]] = []
     front_ids: set[str] = set()
     user_ids: set[str] = set()
+    _APPROVED_DECISIONS = {"APPROVE", "APPROVE_EXCEPTION", "APPROVED"}
     for doc in docs:
-        # OPERATIVO ownership guard: must be a participant and approved.
+        # Only include approved activities for all roles — this endpoint is for reporting.
+        if str(doc.get("review_decision") or "").upper() not in _APPROVED_DECISIONS:
+            continue
+        # OPERATIVO ownership guard: must also be a participant.
         if is_operativo:
             participant_user_ids = _participant_user_ids(doc)
             if caller_user_id not in participant_user_ids:
-                continue
-            if str(doc.get("review_decision") or "").upper() != "APPROVED":
                 continue
         if doc.get("deleted_at") is not None:
             continue
@@ -168,9 +203,9 @@ def list_report_activities(
         if status_filter and str(doc.get("execution_state") or "") != status_filter:
             continue
         report_dt = _report_dt(doc)
-        if date_from and (report_dt is None or report_dt < date_from):
+        if date_from and report_dt is not None and report_dt < date_from:
             continue
-        if date_to and (report_dt is None or report_dt > date_to):
+        if date_to and report_dt is not None and report_dt > date_to:
             continue
         candidate_docs.append(doc)
         front_ids.add(str(doc.get("front_id") or "").strip())
@@ -191,6 +226,7 @@ def list_report_activities(
         # Resolve result name from wizard_payload.result so clients receive the
         # human-readable text rather than just the catalog ID (e.g. "R01").
         _wp = doc.get("wizard_payload") or {}
+        _wp = _wp if isinstance(_wp, dict) else {}
         _res = _wp.get("result") if isinstance(_wp, dict) else None
         if isinstance(_res, dict):
             _result_obj = _res
@@ -198,21 +234,161 @@ def list_report_activities(
             _result_obj = {"id": _res, "name": _res}
         else:
             _result_obj = None
+
+        # ── Municipio ─────────────────────────────────────────────────
+        # Check top-level first, then wizard_payload.location, then wizard_payload itself
+        _municipality = str(doc.get("municipio") or doc.get("municipality") or "").strip()
+        if not _municipality:
+            _loc = _wp.get("location") or {}
+            if isinstance(_loc, dict):
+                _municipality = str(_loc.get("municipio") or _loc.get("municipality") or "").strip()
+        if not _municipality:
+            _municipality = str(
+                _wp.get("municipio") or _wp.get("municipality")
+                or (_wp.get("context") or {}).get("municipio")
+                or (_wp.get("context") or {}).get("municipality")
+                or ""
+            ).strip()
+
+        # ── Estado ────────────────────────────────────────────────────
+        _state = str(doc.get("estado") or doc.get("state") or "").strip()
+        if not _state:
+            _loc2 = _wp.get("location") or {}
+            if isinstance(_loc2, dict):
+                _state = str(_loc2.get("estado") or _loc2.get("state") or "").strip()
+        if not _state:
+            _state = str(
+                _wp.get("estado") or _wp.get("state")
+                or (_wp.get("context") or {}).get("estado")
+                or ""
+            ).strip()
+
+        # ── Frente ────────────────────────────────────────────────────
+        # wizard_payload.location.front_name is the canonical source
+        if not front_name:
+            _loc_f = _wp.get("location") or {}
+            if isinstance(_loc_f, dict):
+                front_name = str(
+                    _loc_f.get("front_name") or _loc_f.get("frente") or _loc_f.get("front") or ""
+                ).strip()
+        if not front_name:
+            front_name = str(
+                _wp.get("front_name") or _wp.get("frente") or _wp.get("front")
+                or (_wp.get("context") or {}).get("front_name")
+                or (_wp.get("context") or {}).get("frente")
+                or ""
+            ).strip()
+
+        # ── Subcategoría ──────────────────────────────────────────────
+        # Check wizard_payload first, then top-level doc fields
+        _raw_sub = (
+            _wp.get("subcategory")
+            or (_wp.get("context") or {}).get("subcategory")
+            or _wp.get("subtipo")
+            or (_wp.get("context") or {}).get("subtipo")
+            or doc.get("subcategory")
+            or doc.get("subcategoria")
+            or doc.get("subtipo")
+        )
+        if isinstance(_raw_sub, dict):
+            _sub_name = str(_raw_sub.get("name") or _raw_sub.get("id") or "").strip()
+            _subcategory = None if not _sub_name or _sub_name.upper().startswith("CUSTOM_") else _sub_name
+        elif isinstance(_raw_sub, str) and _raw_sub.strip():
+            _s = _raw_sub.strip()
+            _subcategory = None if _s.upper().startswith("CUSTOM_") else _s
+        else:
+            _subcategory = None
+
+        # ── Temas tratados ────────────────────────────────────────────
+        _raw_topics = _wp.get("topics") or _wp.get("temas") or _wp.get("temas_tratados")
+        if isinstance(_raw_topics, list):
+            def _topic_display_name(t):
+                if isinstance(t, dict):
+                    n = str(t.get("name") or t.get("label") or t.get("id") or "").strip()
+                else:
+                    n = str(t).strip()
+                return "" if not n or n.upper().startswith("CUSTOM_") else n
+            _topics = [n for t in _raw_topics if t for n in (_topic_display_name(t),) if n]
+        elif isinstance(_raw_topics, str) and _raw_topics.strip():
+            _topics = [t.strip() for t in _raw_topics.replace(";", ",").split(",") if t.strip() and not t.strip().upper().startswith("CUSTOM_")]
+        else:
+            _topics = []
+
+        # ── Propósito ─────────────────────────────────────────────────
+        _raw_purpose = _wp.get("purpose") or (_wp.get("context") or {}).get("purpose")
+        if isinstance(_raw_purpose, dict):
+            _pur_name = str(_raw_purpose.get("name") or _raw_purpose.get("id") or "").strip()
+            _purpose = None if not _pur_name or _pur_name.upper().startswith("CUSTOM_") else _pur_name
+        elif isinstance(_raw_purpose, str) and _raw_purpose.strip():
+            _p = _raw_purpose.strip()
+            _purpose = None if _p.upper().startswith("CUSTOM_") else _p
+        else:
+            _purpose = None
+
+        # ── Desarrollo / Detalle ──────────────────────────────────────
+        # wizard_payload.notes is what operatives fill in "Desarrollo / Notas".
+        # Mirrors the Flutter normalizer that maps wizard_payload.notes → description.
+        _detail = str(
+            _wp.get("detail") or _wp.get("description") or _wp.get("descripcion")
+            or _wp.get("minuta") or _wp.get("notes") or doc.get("description") or ""
+        ).strip() or None
+
+        # ── Notas / Minuta (campo "Desarrollo / Notas" del wizard) ───────
+        # Mirrors the Flutter normalizer: wizard_payload.notes → data_fields.report_notes
+        _df = doc.get("data_fields") or {}
+        _df = _df if isinstance(_df, dict) else {}
+        _notes = (
+            str(_wp.get("notes") or "").strip()
+            or str(_df.get("report_notes") or "").strip()
+            or None
+        )
+
+        # ── Acuerdos ──────────────────────────────────────────────────
+        _agreements = str(
+            _wp.get("agreements") or _wp.get("acuerdos") or _wp.get("commitments") or ""
+        ).strip() or None
+
+        # Resolve a human-readable activity type label.
+        # CUSTOM_ACT_* codes are internal IDs — use wizard_payload.activity.name
+        # or the activity title instead so reports don't show raw IDs.
+        _raw_type_code = str(doc.get("activity_type_code") or "").strip()
+        if _raw_type_code.upper().startswith("CUSTOM_"):
+            _wp_act = _wp.get("activity") if isinstance(_wp, dict) else None
+            _act_name = (
+                str((_wp_act or {}).get("name") or "").strip()
+                if isinstance(_wp_act, dict)
+                else ""
+            )
+            _activity_type_label = (
+                _act_name
+                or str(doc.get("title") or "").strip()
+                or _raw_type_code
+            )
+        else:
+            _activity_type_label = _raw_type_code
+
         items.append(
             {
                 "id": str(doc.get("uuid") or ""),
                 "project_id": str(doc.get("project_id") or ""),
-                "activity_type": str(doc.get("activity_type_code") or ""),
+                "activity_type": _activity_type_label,
                 "title": str(doc.get("title") or "") or None,
                 "pk": doc.get("pk_start"),
                 "pk_start": doc.get("pk_start"),
                 "pk_end": doc.get("pk_end"),
                 "front": front_name,
-                "municipality": str(doc.get("municipio") or doc.get("municipality") or "") or None,
-                "state": str(doc.get("estado") or doc.get("state") or "") or None,
+                "municipality": _municipality or None,
+                "state": _state or None,
                 "latitude": doc.get("latitude"),
                 "longitude": doc.get("longitude"),
                 "risk": _risk_from_activity(doc),
+                "risk_level": _risk_from_activity(doc),
+                "subcategory": _subcategory,
+                "topics": _topics,
+                "purpose": _purpose,
+                "detail": _detail,
+                "notes": _notes,
+                "agreements": _agreements,
                 "status": str(doc.get("execution_state") or ""),
                 "review_decision": review_decision,
                 "review_status": _review_status_from_activity(doc),

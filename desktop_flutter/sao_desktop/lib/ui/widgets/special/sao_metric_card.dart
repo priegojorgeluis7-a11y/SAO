@@ -49,12 +49,12 @@ class _SaoMetricCardState extends State<SaoMetricCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           curve: Curves.easeOutCubic,
-          padding: EdgeInsets.all(SaoSpacing.cardPadding),
+          padding: const EdgeInsets.all(SaoSpacing.cardPadding),
           decoration: BoxDecoration(
             color: SaoColors.surfaceFor(context),
             borderRadius: BorderRadius.circular(SaoRadii.md),
             border: Border.all(
-              color: _isHovered ? widget.color.withOpacity(0.3) : SaoColors.borderFor(context),
+              color: _isHovered ? widget.color.withValues(alpha: 0.3) : SaoColors.borderFor(context),
             ),
             boxShadow: _isHovered ? SaoShadows.md : SaoShadows.sm,
           ),
@@ -68,17 +68,17 @@ class _SaoMetricCardState extends State<SaoMetricCard> {
                   Icon(widget.icon, color: widget.color, size: 20),
                 ],
               ),
-              SizedBox(height: SaoSpacing.sm),
+              const SizedBox(height: SaoSpacing.sm),
               Text(
                 widget.value,
                 style: SaoTypography.metricValue.copyWith(color: widget.color),
               ),
               if (widget.subtitle != null) ...[
-                SizedBox(height: SaoSpacing.xs),
+                const SizedBox(height: SaoSpacing.xs),
                 Row(
                   children: [
                     _buildTrendIcon(),
-                    SizedBox(width: SaoSpacing.xs),
+                    const SizedBox(width: SaoSpacing.xs),
                     Text(
                       widget.subtitle!,
                       style: SaoTypography.caption.copyWith(
@@ -98,11 +98,11 @@ class _SaoMetricCardState extends State<SaoMetricCard> {
   Widget _buildTrendIcon() {
     switch (widget.trend) {
       case MetricTrend.up:
-        return Icon(Icons.arrow_upward, size: 14, color: SaoColors.success);
+        return const Icon(Icons.arrow_upward, size: 14, color: SaoColors.success);
       case MetricTrend.down:
-        return Icon(Icons.arrow_downward, size: 14, color: SaoColors.error);
+        return const Icon(Icons.arrow_downward, size: 14, color: SaoColors.error);
       default:
-        return Icon(Icons.remove, size: 14, color: SaoColors.gray400);
+        return const Icon(Icons.remove, size: 14, color: SaoColors.gray400);
     }
   }
 

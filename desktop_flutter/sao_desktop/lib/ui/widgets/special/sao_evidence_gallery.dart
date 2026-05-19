@@ -22,7 +22,7 @@ class SaoEvidenceGallery extends StatelessWidget {
     return GridView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 3,
         crossAxisSpacing: SaoSpacing.sm,
         mainAxisSpacing: SaoSpacing.sm,
@@ -62,7 +62,7 @@ class _EvidenceThumbnail extends StatelessWidget {
               borderRadius: BorderRadius.circular(SaoRadii.md),
               border: Border.all(color: SaoColors.borderFor(context)),
             ),
-            child: Center(
+            child: const Center(
               child: Icon(Icons.photo, color: SaoColors.gray400, size: 40),
             ),
           ),
@@ -71,7 +71,7 @@ class _EvidenceThumbnail extends StatelessWidget {
             top: SaoSpacing.xs,
             right: SaoSpacing.xs,
             child: Container(
-              padding: EdgeInsets.symmetric(
+              padding: const EdgeInsets.symmetric(
                 horizontal: SaoSpacing.xs,
                 vertical: 2,
               ),
@@ -95,12 +95,12 @@ class _EvidenceThumbnail extends StatelessWidget {
               bottom: SaoSpacing.xs,
               left: SaoSpacing.xs,
               child: Container(
-                padding: EdgeInsets.all(4),
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.9),
+                  color: Colors.white.withValues(alpha: 0.9),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(
+                child: const Icon(
                   Icons.location_on,
                   color: SaoColors.error,
                   size: 14,

@@ -98,6 +98,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       frontTerminology(_projectTerminologyKey, plural: true);
 
   final _titleController = TextEditingController();
+  final _customActivityTypeController = TextEditingController();
   final _pkController = TextEditingController();
   final _pkStartController = TextEditingController();
   final _pkEndController = TextEditingController();
@@ -122,6 +123,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     _pkStartController.dispose();
     _pkEndController.dispose();
     _lugarController.dispose();
+    _customActivityTypeController.dispose();
     _frontController.dispose();
     super.dispose();
   }
@@ -737,17 +739,17 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                           ),
                           const SizedBox(height: 2),
                           if (isPrimary)
-                            _RoleBadge(
+                            const _RoleBadge(
                               label: 'Principal',
                               color: SaoColors.actionPrimary,
                             )
                           else if (isCoResponsable)
-                            _RoleBadge(
+                            const _RoleBadge(
                               label: 'Co-resp.',
                               color: SaoColors.info,
                             )
                           else if (isCurrentUser)
-                            _RoleBadge(
+                            const _RoleBadge(
                               label: 'Yo',
                               color: SaoColors.actionPrimary,
                             ),
@@ -865,6 +867,29 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
               });
             },
           ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _customActivityTypeController,
+          textCapitalization: TextCapitalization.sentences,
+          onChanged: (_) => setState(() {}),
+          decoration: InputDecoration(
+            labelText: 'Nuevo tipo (si no está en el catálogo)',
+            hintText: 'Ej. Inspección especial de terreno',
+            border: const OutlineInputBorder(),
+            helperText: _customActivityTypeController.text.trim().isNotEmpty
+                ? 'Se registrará como tipo personalizado.'
+                : null,
+            suffixIcon: _customActivityTypeController.text.trim().isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.clear, size: 18),
+                    onPressed: () {
+                      _customActivityTypeController.clear();
+                      setState(() {});
+                    },
+                  )
+                : null,
+          ),
+        ),
         const SizedBox(height: 12),
         if (_loadingProjects)
           const LinearProgressIndicator(minHeight: 2)
@@ -955,7 +980,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             isExpanded: true,
             decoration: InputDecoration(
               labelText: _frontLabel,
-              border: OutlineInputBorder(),
+              border: const OutlineInputBorder(),
             ),
             items: _frontOptions
                 .map(
@@ -988,7 +1013,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                 decoration: InputDecoration(
                   labelText: _frontLabel,
                   hintText: 'Captura el $_frontLabelLower',
-                  border: OutlineInputBorder(),
+                  border: const OutlineInputBorder(),
                 ),
               ),
               const SizedBox(height: 6),
@@ -1341,9 +1366,13 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         final hasEstado = _stateOptions.isEmpty || _selectedEstado != null;
         final hasMunicipio = _municipioOptions.isEmpty || _selectedMunicipio != null;
         return hasProject &&
-          _selectedActivity != null &&
+          (_selectedActivity != null || _customActivityTypeController.text.trim().isNotEmpty) &&
           _selectedRisk != null &&
-          _pk.isNotEmpty &&
+          (_locationType == LocationType.pk
+              ? _pk.isNotEmpty
+              : _locationType == LocationType.pkRange
+                  ? _pkStart.isNotEmpty && _pkEnd.isNotEmpty
+                  : _lugar.isNotEmpty) &&
           hasFront &&
           hasEstado &&
           hasMunicipio;
@@ -1462,8 +1491,24 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   }
 
   Future<void> _createItem() async {
+    final customName = _customActivityTypeController.text.trim();
+    final effectiveActivity = _selectedActivity != null
+        ? EffectiveActivityInput(
+            id: _selectedActivity!.id,
+            name: _selectedActivity!.name,
+            colorHex: null,
+            severity: null,
+          )
+        : customName.isNotEmpty
+            ? EffectiveActivityInput(
+                id: 'CUSTOM_ACT_${DateTime.now().millisecondsSinceEpoch}',
+                name: customName,
+                colorHex: null,
+                severity: null,
+              )
+            : null;
     if (_selectedResourceId == null ||
-        _selectedActivity == null ||
+        effectiveActivity == null ||
         _startTime == null ||
         _endTime == null) {
       return;
@@ -1474,20 +1519,13 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       fallbackVersionId: null,
     );
 
-    final selectedActivity = _selectedActivity;
-    if (selectedActivity == null) return;
     final projectCode = (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '').trim();
     final frontName = (_selectedFront?.name ?? _frontFreeText).trim();
 
     final baseItem = _assignmentFactory.build(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       resourceId: _selectedResourceId!,
-      activity: EffectiveActivityInput(
-        id: selectedActivity.id,
-        name: selectedActivity.name,
-        colorHex: null,
-        severity: null,
-      ),
+      activity: effectiveActivity,
       projectCode: projectCode,
       frente: frontName,
       start: _startTime!,

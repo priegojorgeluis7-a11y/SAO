@@ -1,9 +1,8 @@
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
-import '../../domain/entities/report_context.dart';
 import 'report_section.dart';
-import '../../../core/utils/project_terminology.dart';
+import '../../../../core/utils/project_terminology.dart';
 
 /// Sección: Encabezado institucional
 class HeaderSection extends ReportSection {
@@ -33,18 +32,18 @@ class HeaderSection extends ReportSection {
           // Proyecto
           pw.Text(
             'Proyecto: ${context.activity.projectName ?? context.activity.projectCode}',
-            style: pw.TextStyle(
+            style: const pw.TextStyle(
               fontSize: 10,
-              color: const PdfColor.fromInt(0xFF4B5563),
+              color: PdfColor.fromInt(0xFF4B5563),
             ),
           ),
           // Frente / Segmento
           if (context.activity.frontName != null)
             pw.Text(
               '${frontTerminology(context.activity.projectCode, capitalize: true)}: ${toSegmentName(context.activity.frontName!)}',
-              style: pw.TextStyle(
+              style: const pw.TextStyle(
                 fontSize: 10,
-                color: const PdfColor.fromInt(0xFF4B5563),
+                color: PdfColor.fromInt(0xFF4B5563),
               ),
             ),
         ],

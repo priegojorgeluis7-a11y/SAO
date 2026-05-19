@@ -29,7 +29,7 @@ class ReportBuilder {
     pdf.addPage(
       pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
-        margin: pw.EdgeInsets.all(40),
+        margin: const pw.EdgeInsets.all(40),
         build: (context) {
           return [
             ...headerWidgets,

@@ -382,8 +382,11 @@ class _CompletedSyncedActivitiesPageState
   }
 
   String _title(String raw, String? activityTypeName) {
-    final base = (activityTypeName?.trim().isNotEmpty ?? false)
-        ? activityTypeName!.trim()
+    // Skip CUSTOM_ACT_* catalog stub names — they are raw IDs, not human-readable.
+    final typeNameRaw = activityTypeName?.trim() ?? '';
+    final typeNameIsCustomStub = typeNameRaw.toUpperCase().startsWith('CUSTOM_');
+    final base = (typeNameRaw.isNotEmpty && !typeNameIsCustomStub)
+        ? typeNameRaw
         : raw.trim();
     final upper = base.toUpperCase();
     switch (upper) {

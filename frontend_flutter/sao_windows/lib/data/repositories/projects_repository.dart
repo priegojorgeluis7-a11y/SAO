@@ -111,14 +111,10 @@ class ProjectsRepository {
 
   /// Get projects with fallback chain
   Future<List<ProjectDto>> getProjects() async {
-    // Try /me/projects first (scoped)
-    final myProjects = await getMyProjects();
-    if (myProjects.isNotEmpty) {
-      return myProjects;
-    }
-
-    // Fallback to /projects
-    return await getAllProjects();
+    // /me/projects is the authoritative, user-scoped source.
+    // Do NOT fall back to /projects (unfiltered) — that would expose all
+    // projects to users who have none assigned, or on transient errors.
+    return await getMyProjects();
   }
 }
 

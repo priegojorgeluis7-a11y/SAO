@@ -29,7 +29,7 @@ void main() {
 
   test('getFieldsByKey recovers missing wizard fields from cached sync payload', () async {
     final db = AppDb();
-    addTearDown(() => db.close());
+    addTearDown(db.close);
 
     await db.into(db.roles).insertOnConflictUpdate(
           const RolesCompanion(

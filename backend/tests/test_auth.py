@@ -35,6 +35,7 @@ def _build_firestore_principal(*, email: str, password: str, project_ids: list[s
         status=UserStatus.ACTIVE,
         created_at=datetime.now(timezone.utc),
         last_login_at=None,
+        last_activity_at=None,
         roles=["OPERATIVO"],
         project_ids=project_ids or [],
         password_hash=get_password_hash(password),
@@ -118,6 +119,72 @@ def test_firestore_verify_project_access_enforces_scope(force_firestore_backend)
     assert exc_info.value.status_code == 403
 
 
+def _build_firestore_principal_with_roles(*, email: str, roles: list[str], project_ids: list[str]):
+    from datetime import datetime, timezone
+    return FirestoreUserPrincipal(
+        id=uuid4(),
+        email=email,
+        full_name="Test User",
+        status=UserStatus.ACTIVE,
+        created_at=datetime.now(timezone.utc),
+        last_login_at=None,
+        last_activity_at=None,
+        roles=roles,
+        project_ids=project_ids,
+        password_hash=None,
+        pin_hash=None,
+    )
+
+
+def test_supervisor_without_project_ids_has_global_scope(force_firestore_backend):
+    """SUPERVISOR with empty project_ids can access any project (global scope)."""
+    principal = _build_firestore_principal_with_roles(
+        email="supervisor@example.com",
+        roles=["SUPERVISOR"],
+        project_ids=[],
+    )
+    # Should not raise — SUPERVISOR with no project_ids has global scope.
+    verify_project_access(principal, "TMQ", db=None)
+    verify_project_access(principal, "TAP", db=None)
+
+
+def test_supervisor_with_project_ids_is_restricted(force_firestore_backend):
+    """SUPERVISOR with explicit project_ids is restricted to those projects."""
+    principal = _build_firestore_principal_with_roles(
+        email="supervisor2@example.com",
+        roles=["SUPERVISOR"],
+        project_ids=["TMQ"],
+    )
+    verify_project_access(principal, "TMQ", db=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        verify_project_access(principal, "TAP", db=None)
+    assert exc_info.value.status_code == 403
+
+
+def test_coord_without_project_ids_has_global_scope(force_firestore_backend):
+    """COORD with empty project_ids can access any project (global scope)."""
+    principal = _build_firestore_principal_with_roles(
+        email="coord@example.com",
+        roles=["COORD"],
+        project_ids=[],
+    )
+    verify_project_access(principal, "TMQ", db=None)
+    verify_project_access(principal, "TAP", db=None)
+
+
+def test_operativo_without_project_ids_is_denied(force_firestore_backend):
+    """OPERATIVO with empty project_ids must NOT get global scope."""
+    principal = _build_firestore_principal_with_roles(
+        email="op@example.com",
+        roles=["OPERATIVO"],
+        project_ids=[],
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        verify_project_access(principal, "TMQ", db=None)
+    assert exc_info.value.status_code == 403
+
+
 def test_login_nonexistent_user_returns_401(client, monkeypatch, force_firestore_backend):
     monkeypatch.setattr("app.api.v1.auth.get_firestore_user_by_email", lambda _email: None)
     response = _login(client, "nonexistent@example.com", "anypassword")
@@ -125,6 +192,14 @@ def test_login_nonexistent_user_returns_401(client, monkeypatch, force_firestore
 
 
 def test_auth_me_includes_effective_permissions(client, monkeypatch, force_firestore_backend):
+    from app.services import role_permission_service
+    from app.core.permission_catalog import DEFAULT_ROLE_PERMISSION_CODES
+    # Isolate from any real Firestore role_permissions document that may exist locally.
+    monkeypatch.setattr(
+        role_permission_service,
+        "get_role_permission_map",
+        lambda: {k: list(v) for k, v in DEFAULT_ROLE_PERMISSION_CODES.items()},
+    )
     principal = FirestoreUserPrincipal(
         id=uuid4(),
         email="perm-user@example.com",
@@ -132,6 +207,7 @@ def test_auth_me_includes_effective_permissions(client, monkeypatch, force_fires
         status=UserStatus.ACTIVE,
         created_at=datetime.now(timezone.utc),
         last_login_at=None,
+        last_activity_at=None,
         roles=["COORD"],
         project_ids=["TMQ"],
         scopes=[],

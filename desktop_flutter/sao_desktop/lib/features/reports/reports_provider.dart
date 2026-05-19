@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:typed_data';
+import 'dart:developer' show log;
 import 'package:http/http.dart' as http;
 import '../../core/compat/io_compat.dart';
 
@@ -175,7 +175,7 @@ class ReportActivityItem {
       status: (json['status'] ?? 'PENDIENTE_REVISION').toString(),
       reviewDecision: json['review_decision']?.toString(),
       reviewStatus: json['review_status']?.toString(),
-      createdAt: (json['reviewed_at'] ?? json['last_reviewed_at'] ?? json['created_at'] ?? '').toString(),
+      createdAt: (json['created_at'] ?? json['completed_at'] ?? json['reviewed_at'] ?? json['last_reviewed_at'] ?? '').toString(),
       assignedName: (json['assignedName'] ?? json['assigned_name'])?.toString(),
       projectId: (json['project_id'])?.toString(),
       title: (json['title'] ?? json['activity_title'])?.toString(),
@@ -844,6 +844,72 @@ bool _isWithinSelectedRange(String rawDate, ReportDateRange range) {
   return !dt.isBefore(start) && !dt.isAfter(end);
 }
 
+/// Carga actividades aprobadas para el resumen PDF del dashboard.
+/// No realiza hidratación individual por ítem para mantener rendimiento.
+Future<List<ReportActivityItem>> loadApprovedActivitiesForPdf({
+  required String projectId,
+  required DateTime dateFrom,
+  required DateTime dateTo,
+  int limit = 100,
+}) async {
+  const client = BackendApiClient();
+  final dateRange = ReportDateRange(start: dateFrom, end: dateTo);
+  try {
+    final queryParams = [
+      'project_id=${Uri.encodeQueryComponent(projectId)}',
+      'date_from=${Uri.encodeQueryComponent(dateFrom.toUtc().toIso8601String())}',
+      'date_to=${Uri.encodeQueryComponent(dateTo.toUtc().toIso8601String())}',
+      'include_already_reported=true',
+      'page_size=200',
+    ];
+    final decoded =
+        await client.getJson('/api/v1/reports/activities?${queryParams.join("&")}');
+    if (decoded is Map<String, dynamic>) {
+      final items = (decoded['items'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map((e) => ReportActivityItem.fromJson(e))
+          .where((item) => item.isApprovedForReport)
+          .where((item) => _matchesSelectedProject(item, projectId))
+          .where((item) => _isWithinSelectedRange(item.createdAt, dateRange))
+          .take(limit)
+          .toList(growable: false);
+      if (items.isNotEmpty) return items;
+    }
+  } catch (_) {}
+  // Fallback: completed-activities list
+  try {
+    final queryParams = [
+      'project_id=${Uri.encodeQueryComponent(projectId)}',
+      'page=1',
+      'page_size=$limit',
+    ];
+    final decoded = await client.getJson(
+        '/api/v1/completed-activities?${queryParams.join("&")}');
+    if (decoded is! Map<String, dynamic>) return [];
+    final items = (decoded['items'] as List<dynamic>? ?? [])
+        .whereType<Map<String, dynamic>>()
+        .map((raw) {
+          final normalized = Map<String, dynamic>.from(raw);
+          normalized['status'] ??= 'APROBADO';
+          normalized['review_status'] ??= 'APPROVED';
+          normalized['front_name'] ??= normalized['front'];
+          normalized['activity_title'] ??= normalized['title'];
+          normalized['created_at'] =
+              normalized['created_at'] ?? normalized['reviewed_at'] ?? '';
+          return ReportActivityItem.fromJson(normalized);
+        })
+        .where((item) => _matchesSelectedProject(item, projectId))
+        .where((item) => item.isApprovedForReport)
+        .where((item) => _isWithinSelectedRange(item.createdAt, dateRange))
+        .take(limit)
+        .toList(growable: false);
+    items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return items;
+  } catch (_) {
+    return [];
+  }
+}
+
 Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
   const client = BackendApiClient();
 
@@ -920,10 +986,10 @@ Future<List<ReportActivityItem>> _loadFromCompletedActivities(
           normalized['front_name'] ??= normalized['front'];
           normalized['activity_title'] ??= normalized['title'];
           normalized['created_at'] =
-              normalized['reviewed_at'] ?? normalized['created_at'] ?? '';
+              normalized['created_at'] ?? normalized['reviewed_at'] ?? '';
           return ReportActivityItem.fromJson(normalized);
         })
-        .where((item) => !item.hasReport)
+        .where((item) => filters.includeAlreadyReported || !item.hasReport)
         .where((item) => _matchesSelectedProject(item, filters.projectId))
         .where((item) => item.isApprovedForReport)
         .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
@@ -965,6 +1031,9 @@ Future<ReportActivityItem> _hydrateReportItem(
       item.topics.isEmpty ||
       item.attendees.isEmpty ||
         item.evidences.isEmpty ||
+        // Synthetic placeholder evidences (id starts with 'ev-') need to be
+        // replaced with real evidence records from the backend.
+        item.evidences.any((e) => e.id.startsWith('ev-') || e.filePath.startsWith('backend://')) ||
         ((item.startTime?.trim().isEmpty ?? true) &&
           (item.endTime?.trim().isEmpty ?? true));
 
@@ -986,7 +1055,15 @@ Future<ReportActivityItem> _hydrateReportItem(
       if (rawActivityDecoded is Map<String, dynamic>) {
         normalized['wizard_payload'] ??= rawActivityDecoded['wizard_payload'];
         normalized['data_fields'] ??= rawActivityDecoded['data_fields'];
-        normalized['description'] ??= rawActivityDecoded['description'];
+        // Only use the legacy description field if it is NOT in the old pipe
+        // format ("Actividad: X | Subcategoría: Y | ...") that the mobile app
+        // used to generate automatically. Pipe-formatted descriptions carry no
+        // real operative notes and should be ignored so wizard_payload.notes
+        // can be surfaced instead.
+        final rawDesc = rawActivityDecoded['description'];
+        if (rawDesc is String && rawDesc.trim().isNotEmpty && !rawDesc.contains('|')) {
+          normalized['description'] ??= rawDesc;
+        }
         normalized['latitude'] ??= rawActivityDecoded['latitude'];
         normalized['longitude'] ??= rawActivityDecoded['longitude'];
         normalized['activity_type'] ??= rawActivityDecoded['activity_type_code'];
@@ -994,15 +1071,61 @@ Future<ReportActivityItem> _hydrateReportItem(
       }
     } catch (_) {}
 
+    // Build a caption lookup from wizard_payload.evidences[] for cases where
+    // the evidence record in Firestore has no description/caption field set.
+    final wizardPayload = normalized['wizard_payload'];
+    final wizardEvidenceEntries = (wizardPayload is Map &&
+            wizardPayload['evidences'] is List)
+        ? (wizardPayload['evidences'] as List)
+            .whereType<Map>()
+            .map((e) => e.cast<String, dynamic>())
+            .toList(growable: false)
+        : const <Map<String, dynamic>>[];
+
+    String? wizardCaption(String evidenceId, int index) {
+      for (final w in wizardEvidenceEntries) {
+        if ((w['id'] ?? '').toString().trim() == evidenceId) {
+          return (w['caption'] ?? w['description'] ?? w['descripcion'] ?? w['notes'])
+              ?.toString()
+              .trim()
+              .isNotEmpty == true
+              ? (w['caption'] ?? w['description'] ?? w['descripcion'] ?? w['notes']).toString().trim()
+              : null;
+        }
+      }
+      if (index >= 0 && index < wizardEvidenceEntries.length) {
+        final w = wizardEvidenceEntries[index];
+        return (w['caption'] ?? w['description'] ?? w['descripcion'] ?? w['notes'])
+            ?.toString()
+            .trim()
+            .isNotEmpty == true
+            ? (w['caption'] ?? w['description'] ?? w['descripcion'] ?? w['notes']).toString().trim()
+            : null;
+      }
+      return null;
+    }
+
     final detailEvidences = (normalized['evidences'] as List? ?? const [])
         .whereType<Map<String, dynamic>>()
-        .map((evidence) => <String, dynamic>{
-              'id': evidence['id'],
-              'file_path': evidence['gcs_path'] ?? '',
-              'file_type': evidence['type'] ?? 'PHOTO',
-              'caption': evidence['description'] ?? '',
-              'created_at': evidence['uploaded_at'] ?? '',
-            })
+        .toList(growable: false)
+        .asMap()
+        .entries
+        .map((entry) {
+          final index = entry.key;
+          final evidence = entry.value;
+          final evidenceId = (evidence['id'] ?? '').toString();
+          final backendCaption = (evidence['description'] ?? '').toString().trim();
+          final caption = backendCaption.isNotEmpty
+              ? backendCaption
+              : (wizardCaption(evidenceId, index) ?? '');
+          return <String, dynamic>{
+            'id': evidence['id'],
+            'file_path': evidence['gcs_path'] ?? '',
+            'file_type': evidence['type'] ?? 'PHOTO',
+            'caption': caption,
+            'created_at': evidence['uploaded_at'] ?? '',
+          };
+        })
         .toList(growable: false);
     final detailEvidenceById = <String, Map<String, dynamic>>{
       for (final evidence in detailEvidences)
@@ -1015,21 +1138,42 @@ Future<ReportActivityItem> _hydrateReportItem(
         '/api/v1/review/activity/${Uri.encodeComponent(item.id)}/evidences',
       );
       if (reviewDecoded is List) {
-        reviewEvidences = reviewDecoded
-            .whereType<Map<String, dynamic>>()
-            .map((evidence) {
+        final reviewList = reviewDecoded.whereType<Map<String, dynamic>>().toList(growable: false);
+        reviewEvidences = reviewList
+            .asMap()
+            .entries
+            .map((entry) {
+              final index = entry.key;
+              final evidence = entry.value;
               final evidenceId = (evidence['id'] ?? '').toString();
               final detailEvidence = detailEvidenceById[evidenceId] ?? const <String, dynamic>{};
+              final backendCaption = (evidence['description'] ?? '').toString().trim();
+              final fallbackCaption = (detailEvidence['caption'] ?? '').toString().trim();
+              final caption = backendCaption.isNotEmpty
+                  ? backendCaption
+                  : fallbackCaption.isNotEmpty
+                      ? fallbackCaption
+                      : (wizardCaption(evidenceId, index) ?? '');
               return <String, dynamic>{
                 'id': evidence['id'],
                 'file_path': evidence['gcsKey'] ?? detailEvidence['file_path'] ?? '',
                 'file_type': detailEvidence['file_type'] ?? 'PHOTO',
-                'caption': evidence['description'] ?? detailEvidence['caption'] ?? '',
+                'caption': caption,
                 'captured_at': evidence['takenAt'] ?? '',
                 'created_at': evidence['takenAt'] ?? detailEvidence['created_at'] ?? '',
               };
             })
-            .where((evidence) => (evidence['id'] ?? '').toString().isNotEmpty)
+            .where((evidence) {
+              if ((evidence['id'] ?? '').toString().isEmpty) return false;
+              // Exclude document evidences (PDFs) so only images reach the PDF
+              // generator. The review endpoint returns all evidences regardless
+              // of type, but the detail endpoint already filters them. Passing
+              // PDFs to the PDF generator wastes bandwidth and can cause slow
+              // downloads that time out before photo evidences are loaded.
+              final path = (evidence['file_path'] ?? '').toString().toLowerCase();
+              if (path.endsWith('.pdf')) return false;
+              return true;
+            })
             .toList(growable: false);
       }
     } catch (_) {}
@@ -1046,10 +1190,19 @@ Future<ReportActivityItem> _hydrateReportItem(
     normalized['assigned_name'] ??= item.assignedName;
     normalized['municipality'] ??= item.municipality;
     normalized['state'] ??= item.state;
+    normalized['completed_at'] ??= item.createdAt;
     normalized['created_at'] ??= item.createdAt;
     final resolvedEvidences = reviewEvidences.isNotEmpty ? reviewEvidences : detailEvidences;
     if (resolvedEvidences.isNotEmpty) {
       normalized['evidences'] = resolvedEvidences;
+    } else {
+      // If no real evidences were fetched, clear out synthetic placeholders so
+      // the PDF doesn't try to fetch download URLs for ev-{uuid}-{n} IDs.
+      final hadOnlySynthetics = item.evidences.isNotEmpty &&
+          item.evidences.every((e) => e.id.startsWith('ev-') || e.filePath.startsWith('backend://'));
+      if (hadOnlySynthetics) {
+        normalized['evidences'] = const <dynamic>[];
+      }
     }
 
     if ((normalized['start_time'] == null || normalized['start_time'].toString().trim().isEmpty) &&
@@ -1064,6 +1217,53 @@ Future<ReportActivityItem> _hydrateReportItem(
         final last = evidenceTimes.last;
         normalized['start_time'] = _formatTimeOnly(first);
         normalized['end_time'] = _formatTimeOnly(last);
+      }
+    }
+
+    // Populate description and agreements from wizard_payload and data_fields,
+    // since the mobile app stores them under 'notes'/'report_notes' and
+    // 'agreements'/'report_agreements' — names not in the fromJson candidates.
+    final wp = normalized['wizard_payload'];
+    if (wp is Map) {
+      final wpNotes = wp['notes'];
+      if (wpNotes is String && wpNotes.trim().isNotEmpty &&
+          (normalized['description'] ?? '').toString().trim().isEmpty) {
+        normalized['description'] = wpNotes.trim();
+      }
+      final wpAgreements = wp['agreements'];
+      if (wpAgreements is List && wpAgreements.isNotEmpty &&
+          (normalized['agreements'] ?? '').toString().trim().isEmpty) {
+        normalized['agreements'] = wpAgreements
+            .map((a) => a is String
+                ? a.trim()
+                : (a is Map
+                    ? (a['name'] ?? a['id'] ?? '').toString().trim()
+                    : a.toString().trim()))
+            .where((s) => s.isNotEmpty)
+            .join('\n');
+      }
+    }
+    final dataFieldsMap = normalized['data_fields'];
+    if (dataFieldsMap is Map) {
+      if ((normalized['description'] ?? '').toString().trim().isEmpty) {
+        final reportNotes = dataFieldsMap['report_notes'];
+        if (reportNotes is String && reportNotes.trim().isNotEmpty) {
+          normalized['description'] = reportNotes.trim();
+        }
+      }
+      if ((normalized['agreements'] ?? '').toString().trim().isEmpty) {
+        final reportAgreementsRaw = dataFieldsMap['report_agreements'];
+        if (reportAgreementsRaw is String && reportAgreementsRaw.trim().isNotEmpty) {
+          try {
+            final decoded = jsonDecode(reportAgreementsRaw);
+            if (decoded is List && decoded.isNotEmpty) {
+              normalized['agreements'] = decoded
+                  .whereType<String>()
+                  .where((s) => s.trim().isNotEmpty)
+                  .join('\n');
+            }
+          } catch (_) {}
+        }
       }
     }
 
@@ -1204,6 +1404,12 @@ Future<Uint8List> buildActivitiesPdfBytes(
   bool includeNotes = false,
   bool includeAttachments = true,
 }) async {
+  // Clear the evidence source cache so that expired proxy/signed URLs from a
+  // previous PDF generation are not reused. On Cloud Run the backend always
+  // issues short-lived proxy URLs (no GCS private key), so stale entries
+  // would cause silent 403 failures for every image.
+  _evidenceSourceCache.clear();
+
   final pdf = pw.Document();
   final now = DateTime.now();
   final singleBackground = await _loadMembreteImage(
@@ -1244,35 +1450,27 @@ Future<Uint8List> buildActivitiesPdfBytes(
       final allSummary = (executiveSummary.trim().isNotEmpty)
           ? executiveSummary.trim()
           : _buildNaturalDevelopmentNarrative(item);
-        final agreements = item.agreements?.trim() ?? '';
-      final shouldUseTwoPages =
-          allSummary.length + agreements.length > 1200 && item.evidences.length >= 5;
+      final agreements = item.agreements?.trim() ?? '';
 
-      final firstPageMargin = _buildAdaptiveMargin(
-        hasTemplate: hasTemplate,
-        textLength: allSummary.length + agreements.length,
-        evidenceCount: item.evidences.length,
-        isAnnex: false,
-      );
-      final annexPageMargin = _buildAdaptiveMargin(
-        hasTemplate: hasTemplate,
-        textLength: allSummary.length,
-        evidenceCount: item.evidences.length,
-        isAnnex: true,
-      );
-
+      // Resolve evidence images first so we know the real count before deciding
+      // whether to use one or two pages. Using item.evidences.length would cause
+      // the split even when most images fail to load, leaving the first page
+      // without any photos and the second page nearly empty.
       final resolvedEvidences = <_ResolvedEvidence>[];
       if (includeAttachments && item.evidences.isNotEmpty) {
         final sortedEvidences = item.evidences
-            .where((e) => e.filePath.trim().isNotEmpty)
+            .where((e) => e.filePath.trim().isNotEmpty || e.id.trim().isNotEmpty)
             .toList()
           ..sort((a, b) {
             final ad = _tryParseDate(a.capturedAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
             final bd = _tryParseDate(b.capturedAt ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
             return ad.compareTo(bd);
           });
-        final evidenceLimit = shouldUseTwoPages ? 5 : 2;
-        for (final evidence in sortedEvidences.take(evidenceLimit)) {
+        for (final evidence in sortedEvidences) {
+          // Skip document evidences early — no need to download a PDF to
+          // determine it cannot be rendered as an image.
+          final lowerPath = evidence.filePath.toLowerCase();
+          if (lowerPath.endsWith('.pdf')) continue;
           final bytes = await _loadEvidenceBytes(evidence);
           if (bytes == null || !_isSupportedImageFormat(bytes)) continue;
           pw.MemoryImage? image;
@@ -1291,6 +1489,24 @@ Future<Uint8List> buildActivitiesPdfBytes(
         }
       }
 
+      // Use an annex page only when there are more than 4 resolved images.
+      // ≤4 photos in compact mode (2 per row at 96 px) take ≈ 240 px and fit
+      // on the first page without crowding the text content.
+      final shouldUseTwoPages = resolvedEvidences.length > 4;
+
+      final firstPageMargin = _buildAdaptiveMargin(
+        hasTemplate: hasTemplate,
+        textLength: allSummary.length + agreements.length,
+        evidenceCount: resolvedEvidences.length,
+        isAnnex: false,
+      );
+      final annexPageMargin = _buildAdaptiveMargin(
+        hasTemplate: hasTemplate,
+        textLength: allSummary.length,
+        evidenceCount: resolvedEvidences.length,
+        isAnnex: true,
+      );
+
       pdf.addPage(
         pw.MultiPage(
           pageTheme: _buildPageTheme(page1Background, firstPageMargin),
@@ -1303,8 +1519,7 @@ Future<Uint8List> buildActivitiesPdfBytes(
             _buildSectionTitle('2. ASUNTO Y DESARROLLO'),
             pw.SizedBox(height: 6),
             _buildNarrativeBlock(item, allSummary),
-            pw.SizedBox(height: 6),
-            _buildAgreementsBlock(agreements),
+            if (agreements.trim().isNotEmpty) ...[pw.SizedBox(height: 6), _buildAgreementsBlock(agreements)],
             pw.SizedBox(height: 8),
             _buildSectionTitle('3. INVOLUCRADOS / AUTORIDADES'),
             pw.SizedBox(height: 6),
@@ -1313,14 +1528,6 @@ Future<Uint8List> buildActivitiesPdfBytes(
               pw.SizedBox(height: 6),
               _buildPendingEvidenceBlock(item),
             ],
-            if (includeAudit || includeNotes)
-              pw.Padding(
-                padding: const pw.EdgeInsets.only(top: 8),
-                child: pw.Text(
-                  'Notas internas: ${includeNotes ? 'incluidas' : 'no incluidas'} · Auditoría: ${includeAudit ? 'incluida' : 'no incluida'}',
-                  style: const pw.TextStyle(fontSize: 8, color: _textGray),
-                ),
-              ),
             if (includeAttachments &&
                 resolvedEvidences.isNotEmpty &&
                 !shouldUseTwoPages) ...[
@@ -1736,8 +1943,15 @@ pw.Widget _buildSectionTitle(String title) {
 }
 
 pw.Widget _buildNarrativeBlock(ReportActivityItem item, String text) {
-  final topics = item.topics.isEmpty ? 'Sin temas capturados' : item.topics.join(', ');
-  final purpose = item.purpose?.trim().isNotEmpty == true ? item.purpose!.trim() : 'Sin propósito capturado';
+  // Filtrar "Custom" y valores en blanco del propósito
+  final rawPurpose = item.purpose?.trim() ?? '';
+  final purposeIsCustom = rawPurpose.toLowerCase() == 'custom' || rawPurpose.toLowerCase() == 'otro';
+  final purpose = (rawPurpose.isEmpty || purposeIsCustom) ? null : rawPurpose;
+
+  // Filtrar temas vacíos
+  final validTopics = item.topics.where((t) => t.trim().isNotEmpty).toList();
+  final topicsText = validTopics.isEmpty ? null : validTopics.join(', ');
+
   final result = item.result?.trim().isNotEmpty == true ? item.result!.trim() : item.statusLabel;
   final notes = item.notes?.trim().isNotEmpty == true
       ? item.notes!.trim()
@@ -1748,8 +1962,8 @@ pw.Widget _buildNarrativeBlock(ReportActivityItem item, String text) {
     child: pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        _kvText('Propósito', purpose),
-        _kvText('Temas tratados', topics),
+        if (purpose != null) _kvText('Propósito', purpose),
+        if (topicsText != null) _kvText('Temas tratados', topicsText),
         _kvText('Desarrollo', notes),
         _kvText('Resultado final', result),
       ],
@@ -1763,6 +1977,8 @@ pw.Widget _buildAgreementsBlock(String agreements) {
       .map((line) => line.trim())
       .where((line) => line.isNotEmpty)
       .toList(growable: false);
+  // Si no hay acuerdos, omitir la sección completa
+  if (rows.isEmpty) return pw.SizedBox();
   return pw.Container(
     padding: const pw.EdgeInsets.all(8),
     decoration: pw.BoxDecoration(
@@ -1775,17 +1991,12 @@ pw.Widget _buildAgreementsBlock(String agreements) {
         pw.Text('Seguimiento acordado',
             style: pw.TextStyle(fontSize: 9, color: _guinda, fontWeight: pw.FontWeight.bold)),
         pw.SizedBox(height: 4),
-        if (rows.isEmpty)
-          pw.Text(
-            'Sin compromisos adicionales registrados para seguimiento.',
-              style: const pw.TextStyle(fontSize: 8.5, color: _textGray),
-          ),
         ...rows.map((row) => pw.Padding(
               padding: const pw.EdgeInsets.only(bottom: 3),
               child: pw.Row(
                 crossAxisAlignment: pw.CrossAxisAlignment.start,
                 children: [
-                    pw.Text('• ', style: const pw.TextStyle(fontSize: 9, color: _textDark)),
+                    pw.Text('- ', style: const pw.TextStyle(fontSize: 9, color: _textDark)),
                   pw.Expanded(
                       child: pw.Text(row, style: const pw.TextStyle(fontSize: 9, color: _textDark)),
                   ),
@@ -1995,7 +2206,12 @@ String _buildNaturalDevelopmentNarrative(
     item.projectId?.trim(),
     item.frontName.trim().isEmpty ? null : _toSegmentName(item.frontName.trim()),
   ], separator: ' / ');
-  final purpose = item.purpose?.trim();
+  final rawPurposeNarrative = item.purpose?.trim() ?? '';
+  final purpose = (rawPurposeNarrative.isEmpty ||
+          rawPurposeNarrative.toLowerCase() == 'custom' ||
+          rawPurposeNarrative.toLowerCase() == 'otro')
+      ? null
+      : rawPurposeNarrative;
   final topics = item.topics.where((topic) => topic.trim().isNotEmpty).toList(growable: false);
   final attendees = item.attendees.where((attendee) => attendee.trim().isNotEmpty).toList(growable: false);
   final result = item.result?.trim();
@@ -2140,8 +2356,11 @@ Future<String?> _resolveEvidenceSource(ReportEvidenceItem evidence) {
     }
 
     try {
-      return await _evidenceRepository.getDownloadSignedUrl(evidence.id);
-    } catch (_) {
+      final url = await _evidenceRepository.getDownloadSignedUrl(evidence.id);
+      log('[PDF-IMG] id=${evidence.id} signed URL resolved: $url');
+      return url;
+    } catch (e) {
+      log('[PDF-IMG] id=${evidence.id} getDownloadSignedUrl failed: $e');
       return null;
     }
   });
@@ -2150,15 +2369,20 @@ Future<String?> _resolveEvidenceSource(ReportEvidenceItem evidence) {
 Future<Uint8List?> _loadEvidenceBytes(ReportEvidenceItem evidence) async {
   final path = await _resolveEvidenceSource(evidence);
   if (path == null || path.trim().isEmpty) {
+    log('[PDF-IMG] id=${evidence.id} rawPath="${evidence.filePath}" → source=null → skip');
     return null;
   }
 
   try {
     if (path.startsWith('http://') || path.startsWith('https://')) {
-      final response = await http.get(Uri.parse(path));
+      final response = await http
+          .get(Uri.parse(path))
+          .timeout(const Duration(seconds: 20));
       if (response.statusCode >= 200 && response.statusCode < 300) {
+        log('[PDF-IMG] id=${evidence.id} → HTTP ${response.statusCode} OK (${response.bodyBytes.length} bytes)');
         return response.bodyBytes;
       }
+      log('[PDF-IMG] id=${evidence.id} → HTTP ${response.statusCode} FAIL url=$path');
       return null;
     }
 
@@ -2168,7 +2392,9 @@ Future<Uint8List?> _loadEvidenceBytes(ReportEvidenceItem evidence) async {
     if (await file.exists()) {
       return file.readAsBytes();
     }
-  } catch (_) {
+    log('[PDF-IMG] id=${evidence.id} local file not found: $path');
+  } catch (e) {
+    log('[PDF-IMG] id=${evidence.id} exception: $e');
     return null;
   }
   return null;
@@ -2363,6 +2589,8 @@ bool _parseBool(dynamic value) {
 }
 
 List<String> _parseStringList(dynamic raw) {
+  bool isCustomId(String s) => s.toUpperCase().startsWith('CUSTOM_');
+
   if (raw is List) {
     return raw
         .map((entry) {
@@ -2371,6 +2599,8 @@ List<String> _parseStringList(dynamic raw) {
               (key, value) => MapEntry(_normalizeFieldKey(key.toString()), value),
             );
             final name = _stringifyValue(normalized['name']);
+            // Skip raw catalog IDs stored as names — they have no display value
+            if (isCustomId(name)) return '';
             final representativeName = _stringifyValue(normalized['representativename']);
             if (name.isNotEmpty && representativeName.isNotEmpty) {
               return '$name - $representativeName';
@@ -2378,9 +2608,11 @@ List<String> _parseStringList(dynamic raw) {
             if (name.isNotEmpty) {
               return name;
             }
-            return _stringifyValue(normalized);
+            final fallback = _stringifyValue(normalized);
+            return isCustomId(fallback) ? '' : fallback;
           }
-          return entry.toString().trim();
+          final s = entry.toString().trim();
+          return isCustomId(s) ? '' : s;
         })
         .where((e) => e.isNotEmpty)
         .toList(growable: false);
@@ -2388,14 +2620,14 @@ List<String> _parseStringList(dynamic raw) {
   if (raw is Map) {
     return raw.values
         .map((e) => e.toString().trim())
-        .where((e) => e.isNotEmpty)
+        .where((e) => e.isNotEmpty && !isCustomId(e))
         .toList(growable: false);
   }
   if (raw is String) {
     return raw
         .split(RegExp(r'[\n;,|•]+'))
         .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
+        .where((e) => e.isNotEmpty && !isCustomId(e))
         .toList(growable: false);
   }
   return const [];

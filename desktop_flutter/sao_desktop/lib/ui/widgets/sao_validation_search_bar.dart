@@ -89,7 +89,7 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
         boxShadow: _hasFocus
             ? [
                 BoxShadow(
-                  color: SaoColors.primary.withOpacity(0.12),
+                  color: SaoColors.primary.withValues(alpha: 0.12),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -111,13 +111,13 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
                       vertical: 6,
                     ),
                     decoration: BoxDecoration(
-                      color: SaoColors.primary.withOpacity(0.1),
+                      color: SaoColors.primary.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(SaoRadii.sm),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(
+                        const Icon(
                           Icons.folder_rounded,
                           size: 16,
                           color: SaoColors.primary,
@@ -129,7 +129,7 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
                               value: (widget.projectName ?? '').trim(),
                               isDense: true,
                               borderRadius: BorderRadius.circular(SaoRadii.md),
-                              icon: Icon(
+                              icon: const Icon(
                                 Icons.expand_more_rounded,
                                 size: 18,
                                 color: SaoColors.primary,

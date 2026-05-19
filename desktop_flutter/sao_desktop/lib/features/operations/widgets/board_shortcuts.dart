@@ -1,10 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-class _RejectIntent extends Intent {
-  const _RejectIntent();
-}
-
 class _SkipIntent extends Intent {
   const _SkipIntent();
 }
@@ -34,9 +30,9 @@ class BoardShortcuts extends StatelessWidget {
     return Focus(
       autofocus: true,
       child: Shortcuts(
-        shortcuts: <ShortcutActivator, Intent>{
-          const SingleActivator(LogicalKeyboardKey.keyV): const _ValidateIntent(),
-          const SingleActivator(LogicalKeyboardKey.escape): const _SkipIntent(),
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.keyV): _ValidateIntent(),
+          SingleActivator(LogicalKeyboardKey.escape): _SkipIntent(),
         },
         child: Actions(
           actions: <Type, Action<Intent>>{

@@ -165,7 +165,20 @@ def resolve_user_project_access(user: Any) -> tuple[bool, set[str]]:
         if scope_project_id:
             explicit_project_ids.add(scope_project_id)
 
-    has_global_scope = "*" in explicit_project_ids or "ADMIN" in role_names
+    # ADMIN always has global scope.
+    # SUPERVISOR and COORD have global scope when their project_ids list is empty
+    # (meaning they are not restricted to specific projects). This is consistent
+    # with the /assignments/assignees listing logic that treats these roles as
+    # globally accessible when no explicit project membership is configured.
+    _global_scope_roles = {"ADMIN", "SUPERVISOR", "COORD"}
+    has_global_scope = (
+        "*" in explicit_project_ids
+        or "ADMIN" in role_names
+        or (
+            bool(role_names.intersection(_global_scope_roles))
+            and not explicit_project_ids
+        )
+    )
 
     allowed_project_ids = {
         project_id

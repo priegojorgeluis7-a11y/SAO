@@ -59,6 +59,21 @@ class AssignmentsRepository {
     );
     await _localStore.upsertAssignments([record]);
     await _upsertActivitiesFromAssignments([record]);
+
+    // Persist co-responsable IDs in activityFields so they survive the offline
+    // -> online retry path (AgendaAssignments table has no column for them).
+    final coIds = item.coResponsableIds.where((id) => id.trim().isNotEmpty).toList();
+    if (coIds.isNotEmpty) {
+      final activityId = record.activityId?.isNotEmpty == true ? record.activityId! : record.id;
+      await _database.into(_database.activityFields).insertOnConflictUpdate(
+        ActivityFieldsCompanion.insert(
+          id: '$activityId:pending_co_responsable_ids',
+          activityId: activityId,
+          fieldKey: 'pending_co_responsable_ids',
+          valueJson: drift.Value(jsonEncode(coIds)),
+        ),
+      );
+    }
   }
 
   static String _locationTypeToString(LocationType type) {
@@ -139,6 +154,7 @@ class AssignmentsRepository {
 
       if (remote.isNotEmpty) {
         final serverRecord = remote.first;
+        final tempActivityId = item.id.trim();
         await _localStore.deleteById(item.id);
         await _localStore.upsertAssignments([
           AgendaAssignmentRecord(
@@ -158,6 +174,18 @@ class AssignmentsRepository {
             syncStatus: SyncStatus.synced,
           ),
         ]);
+        // Ensure the server-canonical activity row exists in the local DB and
+        // remove the orphaned temporary activity (keyed by the local timestamp
+        // assignment ID) so Home doesn't show a duplicate entry.
+        await _upsertActivitiesFromAssignments([serverRecord]);
+        await _cleanupOrphanedLocalActivity(tempActivityId);
+        // Clean up the sidecar field used to persist co-responsable IDs for
+        // offline retry — no longer needed once the push succeeds.
+        await _cleanupPendingCoResponsableField(tempActivityId);
+        final serverActivityId = serverRecord.activityId;
+        if (serverActivityId != null && serverActivityId.isNotEmpty) {
+          await _cleanupPendingCoResponsableField(serverActivityId);
+        }
       } else {
         await _localStore.updateSyncStatus(item.id, SyncStatus.synced);
       }
@@ -268,6 +296,19 @@ class AssignmentsRepository {
       );
       return true;
     }
+  }
+
+  /// Adds a co-responsible participant to an existing activity.
+  /// Calls POST /assignments/{activityId}/add-participant on the backend.
+  /// Throws on failure (no offline queue — requires connectivity).
+  Future<void> addParticipant({
+    required String activityId,
+    required String participantUserId,
+  }) async {
+    await _apiClientOrThrow.post<dynamic>(
+      '/assignments/$activityId/add-participant',
+      data: {'user_id': participantUserId},
+    );
   }
 
   Future<List<AgendaItem>> loadRange({
@@ -495,6 +536,38 @@ class AssignmentsRepository {
   Future<void> _deleteQueuedAgendaAction(String assignmentId) async {
     await (_database.delete(_database.syncQueue)
           ..where((t) => t.id.equals(_queueIdForAssignment(assignmentId))))
+        .go();
+  }
+
+  /// Removes a temporary local activity row (created during saveLocal) when
+  /// the push succeeded and the canonical server-UUID activity has been stored.
+  /// Only deletes if the operative has not yet started working on it, preventing
+  /// data loss for activities opened in the wizard between creation and push.
+  Future<void> _cleanupOrphanedLocalActivity(String tempId) async {
+    if (tempId.isEmpty) return;
+    final existing = await (_database.select(_database.activities)
+          ..where((t) => t.id.equals(tempId)))
+        .getSingleOrNull();
+    if (existing == null) return;
+    // Guard: keep if the operative has already started working on the activity.
+    if (existing.startedAt != null) return;
+    final status = existing.status.trim().toUpperCase();
+    if (status == 'DRAFT' || status == 'REVISION_PENDIENTE') return;
+    await (_database.delete(_database.activities)
+          ..where((t) => t.id.equals(tempId)))
+        .go();
+  }
+
+  /// Removes the `pending_co_responsable_ids` sidecar field stored by
+  /// [saveLocal] once the assignment has been successfully pushed.
+  Future<void> _cleanupPendingCoResponsableField(String activityId) async {
+    if (activityId.isEmpty) return;
+    await (_database.delete(_database.activityFields)
+          ..where(
+            (t) =>
+                t.activityId.equals(activityId) &
+                t.fieldKey.equals('pending_co_responsable_ids'),
+          ))
         .go();
   }
 
@@ -1180,6 +1253,21 @@ class AssignmentsRepository {
   }
 
   Future<String> _resolveActivityTypeId(AgendaAssignmentRecord record) async {
+    // For CUSTOM_ACT_* types, ensure a stub exists in the local catalog so the
+    // FK constraint on activities.activity_type_id is satisfied and the wizard
+    // can detect the prefix to inject the transient custom item (Bug F/I fix).
+    final customId = record.activityId?.trim() ?? '';
+    if (customId.toUpperCase().startsWith('CUSTOM_')) {
+      await _database.into(_database.catalogActivityTypes).insertOnConflictUpdate(
+            CatalogActivityTypesCompanion.insert(
+              id: customId,
+              code: customId.toUpperCase(),
+              name: record.title.trim().isNotEmpty ? record.title.trim() : customId,
+            ),
+          );
+      return customId;
+    }
+
     final candidates = <String?>[
       record.activityId,
       record.title,

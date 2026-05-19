@@ -50,9 +50,12 @@ void main() {
       );
 
       expect(defaultText, isNot(contains('Primer reporte de actividad')));
-      expect(defaultText, contains('*Proyecto:* TMQ'));
-      expect(defaultText, contains('*Actividad:* Asamblea informativa'));
+      expect(defaultText, contains('1. *Proyecto:* TMQ'));
+      expect(defaultText, contains('2. *Fecha:* 15/04/2026'));
+      expect(defaultText, contains('3. *Actividad:* Asamblea informativa'));
       expect(defaultText, contains('Doctor Mora, Guanajuato'));
+      expect(defaultText, contains('*Asunto:* Se revisó avance de obra'));
+      expect(defaultText, isNot(contains('*Resumen:*')));
       expect(defaultText, contains('*Resultado:* Acuerdo con comunidad'));
       expect(defaultText, isNot(contains('*Evidencia:*')));
       expect(defaultText, isNot(contains('fotos adjuntas')));

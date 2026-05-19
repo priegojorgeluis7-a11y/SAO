@@ -279,6 +279,30 @@ def _effective_assignee_user_id(activity_payload: dict[str, Any]) -> str:
     ).strip()
 
 
+def _name_from_email(raw: str) -> str:
+    """Derive a display name from an email address or an email-like string.
+
+    'juan.perez@example.com' → 'Juan Perez'
+    If the string contains no '@' it is returned unchanged.
+    """
+    raw = raw.strip()
+    if "@" not in raw:
+        return raw
+    local = raw.split("@")[0]
+    for sep in (".", "_", "-", "+"):
+        local = local.replace(sep, " ")
+    return " ".join(word.capitalize() for word in local.split() if word)
+
+
+def _sanitize_display_name(raw: str) -> str:
+    """Return a clean display name, converting email-like strings to readable names."""
+    raw = raw.strip()
+    if not raw:
+        return raw
+    # If the stored 'name' is itself an email, extract a human-readable form
+    return _name_from_email(raw)
+
+
 def _build_users_map(client, user_ids: set[str]) -> dict[str, str]:
     result: dict[str, str] = {}
     for user_id in user_ids:
@@ -288,7 +312,8 @@ def _build_users_map(client, user_ids: set[str]) -> dict[str, str]:
         if not doc.exists:
             continue
         u = doc.to_dict() or {}
-        name = str(
+        # Prefer explicit name fields; fall back to email
+        raw_name = str(
             u.get("full_name")
             or u.get("fullName")
             or u.get("display_name")
@@ -296,6 +321,7 @@ def _build_users_map(client, user_ids: set[str]) -> dict[str, str]:
             or u.get("email")
             or ""
         ).strip()
+        name = _sanitize_display_name(raw_name)
         if name:
             result[str(user_id)] = name
     return result
@@ -387,6 +413,19 @@ def _resolve_activity_front_name(
     ).strip()
     if explicit_front:
         return explicit_front
+
+    # wizard_payload.location.front_name is the canonical source in mobile app
+    _wp = activity_payload.get("wizard_payload") or {}
+    if isinstance(_wp, dict):
+        _loc = _wp.get("location") or {}
+        if isinstance(_loc, dict):
+            _wp_front = str(_loc.get("front_name") or _loc.get("frente") or _loc.get("front") or "").strip()
+            if _wp_front:
+                return _wp_front
+        # Also try top-level wizard_payload keys
+        _wp_front2 = str(_wp.get("front_name") or _wp.get("frente") or _wp.get("front") or "").strip()
+        if _wp_front2:
+            return _wp_front2
 
     front_id = str(activity_payload.get("front_id") or "").strip()
     if front_id:
@@ -650,6 +689,35 @@ def list_completed_activities(
             continue
 
         reviewer_uid = str(doc.get("last_reviewed_by") or "").strip()
+
+        # ── Subcategoría y temas desde wizard_payload ─────────────────
+        _wp = doc.get("wizard_payload") or {}
+        _wp = _wp if isinstance(_wp, dict) else {}
+        _raw_sub = (
+            _wp.get("subcategory")
+            or doc.get("subcategory")
+            or doc.get("subcategoria")
+        )
+        if isinstance(_raw_sub, dict):
+            _sub_name = str(_raw_sub.get("name") or _raw_sub.get("id") or "").strip()
+            _subcategory = None if not _sub_name or _sub_name.upper().startswith("CUSTOM_") else _sub_name
+        elif isinstance(_raw_sub, str) and _raw_sub.strip():
+            _s = _raw_sub.strip()
+            _subcategory = None if _s.upper().startswith("CUSTOM_") else _s
+        else:
+            _subcategory = None
+        _raw_topics = _wp.get("topics") or _wp.get("temas") or []
+        if isinstance(_raw_topics, list):
+            def _topic_display_name(t):
+                if isinstance(t, dict):
+                    n = str(t.get("name") or t.get("label") or t.get("id") or "").strip()
+                else:
+                    n = str(t).strip()
+                return "" if not n or n.upper().startswith("CUSTOM_") else n
+            _topics = [n for t in _raw_topics if t for n in (_topic_display_name(t),) if n]
+        else:
+            _topics = []
+
         items.append({
             "id":               activity_id,
             "project_id":       str(doc.get("project_id") or ""),
@@ -662,11 +730,14 @@ def list_completed_activities(
             "has_report":       bool(doc.get("report_generated_at")),
             "reviewed_at":      _iso(doc.get("last_reviewed_at")),
             "created_at":       _iso(doc.get("created_at")),
+            "completed_at":     _iso(doc.get("completed_at")),
             "evidence_count":   0,
             "document_count":   0,
             "assigned_name":    assigned_name,
             "reviewed_by_name": users_map.get(reviewer_uid, ""),
             "review_decision":  decision,
+            "subcategory":      _subcategory,
+            "topics":           _topics,
         })
 
     items.sort(key=lambda x: x["reviewed_at"] or x["created_at"], reverse=True)
@@ -820,7 +891,8 @@ def get_completed_activity_detail(
         ts = log.get("timestamp") or log.get("created_at")
         changes, notes = _parse_log_details(log)
         actor_id = str(log.get("actor_id") or "").strip()
-        actor_name = str(log.get("actor_name") or "").strip() or users_map.get(actor_id, "")
+        _raw_actor = str(log.get("actor_name") or "").strip()
+        actor_name = _name_from_email(_raw_actor) if _raw_actor else users_map.get(actor_id, "")
         audit_trail.append({
             "id":          row["id"],
             "action":      str(log.get("action") or ""),
@@ -925,6 +997,7 @@ def get_completed_activity_detail(
         "has_report":       bool(doc.get("report_generated_at")) or bool(documents),
         "reviewed_at":      _iso(doc.get("last_reviewed_at")),
         "created_at":       _iso(doc.get("created_at")),
+        "completed_at":     _iso(doc.get("completed_at")),
         "evidence_count":   len(evidences),
         "document_count":   len(documents),
         "assigned_name":    users_map.get(assigned_uid, ""),

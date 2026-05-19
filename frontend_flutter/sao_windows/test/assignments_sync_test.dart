@@ -149,7 +149,7 @@ void main() {
 
         // WHEN
         // SyncService checks syncRetryCount before attempting POST
-        bool shouldSkip = assignment['syncRetryCount'] as int >= 3;
+        final bool shouldSkip = assignment['syncRetryCount'] as int >= 3;
 
         // THEN
         expect(shouldSkip, isTrue);

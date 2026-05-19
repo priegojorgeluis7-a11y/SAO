@@ -91,7 +91,7 @@ class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
             child: ListView.separated(
               padding: const EdgeInsets.symmetric(vertical: 8),
               itemCount: items.length,
-              separatorBuilder: (_, __) =>
+              separatorBuilder: (_, _) =>
                   const Divider(height: 1, indent: 72, endIndent: 16),
               itemBuilder: (context, i) =>
                   _NotificationTile(notification: items[i]),
@@ -130,7 +130,7 @@ class _NotificationTile extends ConsumerWidget {
         }
       },
       child: Container(
-        color: isUnread ? SaoColors.actionPrimary.withOpacity(0.04) : null,
+        color: isUnread ? SaoColors.actionPrimary.withValues(alpha: 0.04) : null,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -196,10 +196,10 @@ class _NotificationTile extends ConsumerWidget {
                     _ActionButtons(notification: notification),
                   ] else if (notification.status == 'accepted') ...[
                     const SizedBox(height: 4),
-                    _StatusChip(label: 'Aceptada', color: SaoColors.riskLow),
+                    const _StatusChip(label: 'Aceptada', color: SaoColors.riskLow),
                   ] else if (notification.status == 'declined') ...[
                     const SizedBox(height: 4),
-                    _StatusChip(
+                    const _StatusChip(
                         label: 'Rechazada', color: SaoColors.riskPriority),
                   ],
                 ],
@@ -345,7 +345,7 @@ class _TypeIcon extends StatelessWidget {
     };
     return CircleAvatar(
       radius: 20,
-      backgroundColor: color.withOpacity(0.12),
+      backgroundColor: color.withValues(alpha: 0.12),
       child: Icon(icon, size: 20, color: color),
     );
   }
@@ -395,9 +395,9 @@ class _StatusChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.10),
+        color: color.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
       ),
       child: Text(
         label,
@@ -413,22 +413,22 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
+    return const Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(Icons.notifications_none_rounded,
               size: 64, color: SaoColors.gray300),
-          const SizedBox(height: 16),
-          const Text(
+          SizedBox(height: 16),
+          Text(
             'Sin notificaciones',
             style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.w600,
                 color: SaoColors.gray600),
           ),
-          const SizedBox(height: 8),
-          const Text(
+          SizedBox(height: 8),
+          Text(
             'Aquí verás asignaciones,\ntransferencias y co-responsabilidades.',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 13, color: SaoColors.gray400),

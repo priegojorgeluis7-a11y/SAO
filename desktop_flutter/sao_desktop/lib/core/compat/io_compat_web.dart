@@ -1,4 +1,6 @@
 import 'dart:typed_data';
+import 'dart:convert';
+import 'dart:async';
 
 // ---------------------------------------------------------------------------
 // Stub Platform
@@ -53,7 +55,7 @@ class File extends FileSystemEntity {
       throw UnsupportedError('File I/O not supported on web');
   FileStat statSync() => FileStat._();
 
-  Directory get parent => Directory('');
+  Directory get parent => const Directory('');
   String get absolute => path;
   Uri get uri => Uri.file(path);
 }
@@ -150,11 +152,110 @@ class FileSystemException implements Exception {
 // ---------------------------------------------------------------------------
 
 class FileMode {
-  static const FileMode write = FileMode._('write');
-  static const FileMode append = FileMode._('append');
-  static const FileMode writeOnlyAppend = FileMode._('writeOnlyAppend');
-  static const FileMode read = FileMode._('read');
+  static const FileMode write = FileMode._();
+  static const FileMode append = FileMode._();
+  static const FileMode writeOnlyAppend = FileMode._();
+  static const FileMode read = FileMode._();
 
-  final String _name;
-  const FileMode._(this._name);
+  const FileMode._();
+}
+
+// ---------------------------------------------------------------------------
+// Stub SystemEncoding
+// ---------------------------------------------------------------------------
+
+class SystemEncoding extends Encoding {
+  const SystemEncoding();
+
+  @override
+  String get name => 'system';
+
+  @override
+  Converter<List<int>, String> get decoder => utf8.decoder;
+
+  @override
+  Converter<String, List<int>> get encoder => utf8.encoder;
+}
+
+const SystemEncoding systemEncoding = SystemEncoding();
+
+// ---------------------------------------------------------------------------
+// Stub ProcessSignal
+// ---------------------------------------------------------------------------
+
+class ProcessSignal {
+  const ProcessSignal._();
+
+  static const ProcessSignal sighup = ProcessSignal._();
+  static const ProcessSignal sigint = ProcessSignal._();
+  static const ProcessSignal sigquit = ProcessSignal._();
+  static const ProcessSignal sigkill = ProcessSignal._();
+  static const ProcessSignal sigterm = ProcessSignal._();
+  static const ProcessSignal sigwinch = ProcessSignal._();
+}
+
+// ---------------------------------------------------------------------------
+// Stub HttpHeaders
+// ---------------------------------------------------------------------------
+
+class HttpHeaders {
+  static const String acceptHeader = 'accept';
+  static const String authorizationHeader = 'authorization';
+  static const String cacheControlHeader = 'cache-control';
+  static const String connectionHeader = 'connection';
+  static const String contentEncodingHeader = 'content-encoding';
+  static const String contentLengthHeader = 'content-length';
+  static const String contentTypeHeader = 'content-type';
+  static const String dateHeader = 'date';
+  static const String hostHeader = 'host';
+  static const String locationHeader = 'location';
+  static const String serverHeader = 'server';
+  static const String transferEncodingHeader = 'transfer-encoding';
+  static const String userAgentHeader = 'user-agent';
+  static const String wwwAuthenticateHeader = 'www-authenticate';
+
+  void set(String name, Object value) {}
+  void add(String name, Object value) {}
+  String? value(String name) => null;
+  void remove(String name, Object value) {}
+  void removeAll(String name) {}
+}
+
+// ---------------------------------------------------------------------------
+// Stub HttpClient / HttpClientRequest / HttpClientResponse
+// ---------------------------------------------------------------------------
+
+class _WebHttpClientResponse extends Stream<List<int>> {
+  final int statusCode = 0;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) =>
+      throw UnsupportedError('HttpClient not supported on web');
+}
+
+class _WebHttpClientRequest {
+  bool followRedirects = true;
+  int maxRedirects = 5;
+  final HttpHeaders headers = HttpHeaders();
+
+  Future<_WebHttpClientResponse> close() =>
+      throw UnsupportedError('HttpClient not supported on web');
+}
+
+class HttpClient {
+  Duration? connectionTimeout;
+  Duration? idleTimeout;
+
+  Future<_WebHttpClientRequest> getUrl(Uri url) =>
+      throw UnsupportedError('HttpClient not supported on web');
+
+  Future<_WebHttpClientRequest> openUrl(String method, Uri url) =>
+      throw UnsupportedError('HttpClient not supported on web');
+
+  void close({bool force = false}) {}
 }

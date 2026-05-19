@@ -201,34 +201,14 @@ def list_users(
     project_id: Optional[str] = Query(None, description="Project scope filter"),
     current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
 ):
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    logger.info(f"list_users called: current_user={current_user.full_name} roles={current_user.roles} role_query={role} project={project_id}")
-    
-    # If user is OPERATIVO ONLY (no ADMIN/COORD/SUPERVISOR), only return self
     has_privileged_role = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
     is_only_operativo = user_has_any_role(current_user, ["OPERATIVO"], None) and not has_privileged_role
-    
-    logger.info(f"  is_only_operativo={is_only_operativo} has_privileged_role={has_privileged_role}")
-    
-    if is_only_operativo:
-        principal = current_user
-        logger.info(f"  OPERATIVO-ONLY path: returning self {principal.full_name}")
-        if principal.status != UserStatus.ACTIVE:
-            return []
-        return [
-            UserAgendaListItem(
-                id=principal.id,
-                full_name=principal.full_name,
-                email=principal.email,
-                role_name=canonicalize_role_name(principal.roles[0] if principal.roles else "") or "",
-                project_id=(principal.project_ids[0] if principal.project_ids else None),
-                is_active=principal.status == UserStatus.ACTIVE,
-            )
-        ]
 
-    logger.info(f"  Privileged path: fetching all users with role={role}")
+    # OPERATIVO callers can see all active members of their project(s).
+    # Restricting them to only themselves prevented co-responsible and
+    # dispatcher features from working.  Project-scoped filtering below
+    # still ensures they only see users in shared projects.
+
     principals = list_firestore_users(role=role)
     project_filter = project_id.strip().upper() if project_id and project_id.strip() else None
 
@@ -240,10 +220,13 @@ def list_users(
             continue
         if project_filter and principal.project_ids and project_filter not in principal.project_ids:
             continue
-        # Non-admin users only see users that share at least one project with them
+        # Non-admin users only see users that share at least one project with them.
+        # OPERATIVO callers are subject to this same project-scope restriction.
         if not has_global_scope:
             other_project_ids = {str(pid).strip().upper() for pid in (principal.project_ids or []) if str(pid).strip()}
-            if not caller_project_ids.intersection(other_project_ids):
+            # If the caller has project_ids, only show users in shared projects.
+            # If caller has no project_ids (rare), show all.
+            if caller_project_ids and not caller_project_ids.intersection(other_project_ids):
                 continue
         items.append(
             UserAgendaListItem(
@@ -257,6 +240,21 @@ def list_users(
         )
 
     items.sort(key=lambda item: item.full_name.lower())
+
+    # OPERATIVO users must always be able to see themselves even when
+    # list_firestore_users returns an empty list (e.g. no shared project cache).
+    if is_only_operativo:
+        current_user_id = str(getattr(current_user, 'id', '') or '')
+        if current_user_id and not any(str(item.id) == current_user_id for item in items):
+            items.insert(0, UserAgendaListItem(
+                id=current_user.id,
+                full_name=getattr(current_user, 'full_name', '') or '',
+                email=getattr(current_user, 'email', '') or '',
+                role_name=canonicalize_role_name(current_user.roles[0] if getattr(current_user, 'roles', []) else '') or '',
+                project_id=(current_user.project_ids[0] if getattr(current_user, 'project_ids', []) else None),
+                is_active=True,
+            ))
+
     return items
 
 

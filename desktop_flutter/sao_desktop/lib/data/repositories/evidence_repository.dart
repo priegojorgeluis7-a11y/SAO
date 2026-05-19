@@ -1,6 +1,5 @@
 import 'package:http/http.dart' as http;
 
-import '../../core/compat/io_compat.dart';
 import '../../core/auth/token_store.dart';
 import '../../core/config/data_mode.dart';
 import 'backend_api_client.dart';

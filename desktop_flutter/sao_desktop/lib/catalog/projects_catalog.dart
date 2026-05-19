@@ -196,9 +196,9 @@ class ProjectsCatalog {
             ),
             const SizedBox(width: 8),
             Text(project.acronym ?? project.id,
-                style: TextStyle(fontWeight: FontWeight.w600)),
+                style: const TextStyle(fontWeight: FontWeight.w600)),
             const SizedBox(width: 4),
-            Text('-', style: TextStyle(color: SaoColors.gray400)),
+            const Text('-', style: TextStyle(color: SaoColors.gray400)),
             const SizedBox(width: 4),
             Expanded(
               child: Text(
@@ -224,9 +224,9 @@ class ProjectsCatalog {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: project.accentColor.withOpacity(0.14),
+        color: project.accentColor.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: project.accentColor.withOpacity(0.3)),
+        border: Border.all(color: project.accentColor.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -261,9 +261,9 @@ class ProjectsCatalog {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: project.accentColor.withOpacity(0.14),
+        color: project.accentColor.withValues(alpha: 0.14),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: project.accentColor.withOpacity(0.4)),
+        border: Border.all(color: project.accentColor.withValues(alpha: 0.4)),
       ),
       child: Text(
         showFull ? project.label : (project.acronym ?? project.id),

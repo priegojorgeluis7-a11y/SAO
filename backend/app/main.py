@@ -17,6 +17,7 @@ from app.api.v1 import (
     audit,
     auth,
     catalog,
+    catalog_candidates,
     invitations,
     completed_activities,
     dashboard,
@@ -147,6 +148,7 @@ if settings.EVIDENCE_STORAGE_BACKEND == "local":
 # Include routers
 app.include_router(auth.router, prefix=settings.API_V1_STR)
 app.include_router(catalog.router, prefix=settings.API_V1_STR)
+app.include_router(catalog_candidates.router, prefix=settings.API_V1_STR)
 app.include_router(activities.router, prefix=settings.API_V1_STR)
 app.include_router(activities_validate.router, prefix=settings.API_V1_STR)
 app.include_router(activities_cancel.router, prefix=settings.API_V1_STR)

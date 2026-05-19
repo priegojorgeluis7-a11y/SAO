@@ -70,7 +70,7 @@ void main() {
 
   group('Event resolved state', () {
     test('null resolvedAt means unresolved', () {
-      final resolvedAt = null;
+      const resolvedAt = null;
       expect(resolvedAt == null, isTrue);
     });
 

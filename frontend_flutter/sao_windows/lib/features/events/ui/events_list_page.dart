@@ -56,7 +56,7 @@ class EventsListPage extends ConsumerWidget {
                     ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      value: selectedSeverity,
+                      initialValue: selectedSeverity,
                       decoration: const InputDecoration(labelText: 'Severidad'),
                       items: EventSeverity.values
                           .map(
@@ -346,7 +346,7 @@ class _EventCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      Icon(Icons.access_time,
+                      const Icon(Icons.access_time,
                           size: 12, color: SaoColors.onSurfaceVariant),
                       const SizedBox(width: 4),
                       Text(

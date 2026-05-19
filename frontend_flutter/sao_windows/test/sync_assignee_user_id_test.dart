@@ -1,5 +1,4 @@
 // frontend_flutter/sao_windows/test/sync_assignee_user_id_test.dart
-import 'package:drift/drift.dart' hide isNull;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:uuid/uuid.dart';
 
@@ -91,7 +90,7 @@ void main() {
 
         // WHEN
         // listHomeActivitiesByProject query runs:
-        final resolvedAssignee = primaryAssignee; // From row.assignedToUserId
+        const resolvedAssignee = primaryAssignee; // From row.assignedToUserId
         // (ActivityFields not consulted if primaryAssignee is set)
 
         // THEN
@@ -113,7 +112,7 @@ void main() {
 
         // WHEN
         // insertOnConflictUpdate is called (Drift UPSERT)
-        final updated = newAssignee;
+        const updated = newAssignee;
 
         // THEN
         // Row updated: assigned_to_user_id = bbbbbbbb...

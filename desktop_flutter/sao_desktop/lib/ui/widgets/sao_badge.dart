@@ -81,13 +81,13 @@ class SaoBadge extends StatelessWidget {
     switch (status.toLowerCase()) {
       case 'pending':
       case 'pendiente':
-        return (SaoColors.warning, SaoColors.warning.withOpacity(0.14));
+        return (SaoColors.warning, SaoColors.warning.withValues(alpha: 0.14));
       case 'approved':
       case 'aprobado':
-        return (SaoColors.success, SaoColors.success.withOpacity(0.14));
+        return (SaoColors.success, SaoColors.success.withValues(alpha: 0.14));
       case 'rejected':
       case 'rechazado':
-        return (SaoColors.error, SaoColors.error.withOpacity(0.14));
+        return (SaoColors.error, SaoColors.error.withValues(alpha: 0.14));
       default:
         return (SaoColors.gray600, SaoColors.gray100);
     }

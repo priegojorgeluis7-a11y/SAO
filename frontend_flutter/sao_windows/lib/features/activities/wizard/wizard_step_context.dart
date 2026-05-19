@@ -385,7 +385,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
                 ),
                 if (c.pkInicio != null && c.pkFin != null && c.pkFin! < c.pkInicio!)
                   Padding(
-                    padding: EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(
                       '⚠️ El PK final debe ser mayor al inicial',
                       style: SaoTypography.caption.copyWith(
@@ -430,7 +430,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
               
               if (_showRiskError)
                 Padding(
-                  padding: EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: 4),
                   child: Text(
                     '⚠️ Dato obligatorio',
                     style: SaoTypography.caption.copyWith(
@@ -652,7 +652,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   const SizedBox(height: 4),
                   if (c.availableStates.isNotEmpty)
                     DropdownButtonFormField<String>(
-                      value: c.estadoId,
+                      initialValue: c.estadoId,
                       decoration: const InputDecoration(
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         border: OutlineInputBorder(),
@@ -706,7 +706,7 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   const SizedBox(height: 4),
                   if (c.availableMunicipios.isNotEmpty)
                     DropdownButtonFormField<String>(
-                      value: c.municipioId,
+                      initialValue: c.municipioId,
                       decoration: const InputDecoration(
                         contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         border: OutlineInputBorder(),
@@ -1137,7 +1137,7 @@ class _LocationMapSection extends StatelessWidget {
                 label: const Text('Usar ubicación de operativo'),
               ),
             OutlinedButton.icon(
-              onPressed: () => onCaptureOperativeLocation(),
+              onPressed: onCaptureOperativeLocation,
               icon: const Icon(Icons.my_location_rounded, size: 16),
               label: const Text('Actualizar ubicación operativo'),
             ),
@@ -1281,7 +1281,7 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
               ),
               const SizedBox(height: 6),
               DropdownButtonFormField<ProjectRef>(
-                value: currentProject,
+                initialValue: currentProject,
                 decoration: const InputDecoration(
                   border: OutlineInputBorder(),
                   contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1304,7 +1304,7 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
               const SizedBox(height: 6),
               if (fronts.isNotEmpty)
                 DropdownButtonFormField<FrontRef>(
-                  value: currentFront,
+                  initialValue: currentFront,
                   decoration: const InputDecoration(
                     border: OutlineInputBorder(),
                     contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1330,7 +1330,7 @@ class _EditContextBottomSheetState extends State<_EditContextBottomSheet> {
                   controller: _frontNameController,
                   decoration: InputDecoration(
                     hintText: 'Captura el nombre del $frontLabelLower',
-                    border: OutlineInputBorder(),
+                    border: const OutlineInputBorder(),
                   ),
                   onChanged: c.setFrontName,
                 ),

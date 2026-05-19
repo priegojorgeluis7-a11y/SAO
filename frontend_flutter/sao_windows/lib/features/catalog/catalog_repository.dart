@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/constants.dart';
 import '../../core/network/api_client.dart';
 import '../../core/storage/kv_store.dart';
+import 'package:drift/drift.dart' show Value, InsertMode;
 import '../../data/local/app_db.dart';
 import 'data/catalog_offline_repository.dart';
 import 'models/catalog_bundle_models.dart';
@@ -176,6 +177,11 @@ class CatalogRepository {
     _data = CatalogData.fromJson({});
 
     _ready = true;
+
+    // Sincronizar tipos de actividad al Drift (solo si hay datos útiles).
+    if (_data.actividades.isNotEmpty) {
+      await _syncActivityTypesToDrift(_data);
+    }
   }
 
   /// Fuerza recarga remota del bundle (sin confiar en check-updates ni cache local).
@@ -218,6 +224,7 @@ class CatalogRepository {
 
         await _saveCachedBundle(_projectId, map);
         _data = parsed;
+        await _syncActivityTypesToDrift(parsed);
         if (purgeLocalCustom) {
           _customData = CustomCatalogData.empty();
           _pendingCandidates = [];
@@ -317,6 +324,35 @@ class CatalogRepository {
   }
 
   /// Persiste el bundle en las tablas Drift `catalog_index` y `catalog_bundles`.
+  /// Escribe los tipos de actividad del bundle en la tabla Drift `catalog_activity_types`.
+  /// Garantiza que la FK activities.activity_type_id quede satisfecha aun cuando
+  /// el endpoint /catalog/package no haya sido llamado todavía.
+  Future<void> _syncActivityTypesToDrift(CatalogData data) async {
+    if (data.actividades.isEmpty) return;
+    try {
+      final db = GetIt.instance<AppDb>();
+      await db.batch((batch) {
+        for (final item in data.actividades) {
+          final id = item.id.trim();
+          if (id.isEmpty) continue;
+          batch.insert(
+            db.catalogActivityTypes,
+            CatalogActivityTypesCompanion.insert(
+              id: id,
+              code: id.toUpperCase(),
+              name: item.label.trim().isNotEmpty ? item.label.trim() : id,
+              requiresGeo: Value(item.requiresGeo),
+              isActive: const Value(true),
+            ),
+            mode: InsertMode.insertOrReplace,
+          );
+        }
+      });
+    } catch (_) {
+      // No bloquear la carga del catálogo si Drift falla (ej: primera instalación).
+    }
+  }
+
   Future<void> _persistOfflineBundle(
     String projectId,
     Map<String, dynamic> bundle,
@@ -723,7 +759,7 @@ class CatalogRepository {
     ..._customData.customAttendeesLocal,
   ];
 
-  List<CatItem> get resultados => _data.resultados;
+  List<CatItem> get resultados => [..._data.resultados, ..._customData.customResultados];
 
   List<String> get matrizRiesgo => _data.matrizRiesgo;
 
@@ -737,6 +773,79 @@ class CatalogRepository {
     final item = CatItem(id: id, label: name, icon: Icons.category_rounded);
     _customData.customActivities.add(item);
     await _saveCustomData();
+  }
+
+  /// Registra en memoria un ítem custom con su ID real (proveniente de otro dispositivo).
+  /// No persiste el archivo — solo asegura que el wizard pueda resolver el ID durante
+  /// la sesión actual. Llama primero a este método antes de rehydrateContextFields.
+  void injectTransientCustomItems({
+    required Map<String, String> activityIdToName,
+    required Map<String, Map<String, String>> subcategoryIdToNameByActivityId,
+    required Map<String, Map<String, String>> purposeIdToNameBySubcategoryId,
+    required Map<String, String> topicIdToName,
+    required Map<String, String> attendeeInstIdToName,
+    required Map<String, String> attendeeLocalIdToName,
+    Map<String, String> resultadoIdToName = const {},
+  }) {
+    for (final e in activityIdToName.entries) {
+      if (!_customData.customActivities.any((i) => i.id == e.key)) {
+        _customData.customActivities.add(
+          CatItem(id: e.key, label: e.value, icon: Icons.category_rounded),
+        );
+      }
+    }
+    for (final actEntry in subcategoryIdToNameByActivityId.entries) {
+      for (final subEntry in actEntry.value.entries) {
+        final list = _customData.customSubcategories.putIfAbsent(actEntry.key, () => []);
+        if (!list.any((i) => i.id == subEntry.key)) {
+          list.add(CatItem(
+            id: subEntry.key,
+            label: subEntry.value,
+            icon: Icons.subdirectory_arrow_right_rounded,
+          ));
+        }
+      }
+    }
+    for (final subEntry in purposeIdToNameBySubcategoryId.entries) {
+      for (final purEntry in subEntry.value.entries) {
+        final list = _customData.customPurposes.putIfAbsent(subEntry.key, () => []);
+        if (!list.any((i) => i.id == purEntry.key)) {
+          list.add(CatItem(
+            id: purEntry.key,
+            label: purEntry.value,
+            icon: Icons.flag_rounded,
+          ));
+        }
+      }
+    }
+    for (final e in topicIdToName.entries) {
+      if (!_customData.customTopics.any((i) => i.id == e.key)) {
+        _customData.customTopics.add(
+          CatItem(id: e.key, label: e.value, icon: Icons.local_offer_rounded),
+        );
+      }
+    }
+    for (final e in attendeeInstIdToName.entries) {
+      if (!_customData.customAttendeesInstitutional.any((i) => i.id == e.key)) {
+        _customData.customAttendeesInstitutional.add(
+          CatItem(id: e.key, label: e.value, icon: Icons.apartment_rounded),
+        );
+      }
+    }
+    for (final e in attendeeLocalIdToName.entries) {
+      if (!_customData.customAttendeesLocal.any((i) => i.id == e.key)) {
+        _customData.customAttendeesLocal.add(
+          CatItem(id: e.key, label: e.value, icon: Icons.groups_rounded),
+        );
+      }
+    }
+    for (final e in resultadoIdToName.entries) {
+      if (!_customData.customResultados.any((i) => i.id == e.key)) {
+        _customData.customResultados.add(
+          CatItem(id: e.key, label: e.value, icon: Icons.check_circle_outline_rounded),
+        );
+      }
+    }
   }
 
   /// Agrega una nueva subcategoría personalizada para una actividad
@@ -1259,6 +1368,7 @@ class CustomCatalogData {
   final List<CatItem> customTopics;
   final List<CatItem> customAttendeesInstitutional;
   final List<CatItem> customAttendeesLocal;
+  final List<CatItem> customResultados;
 
   CustomCatalogData({
     required this.customActivities,
@@ -1267,6 +1377,7 @@ class CustomCatalogData {
     required this.customTopics,
     required this.customAttendeesInstitutional,
     required this.customAttendeesLocal,
+    required this.customResultados,
   });
 
   factory CustomCatalogData.empty() {
@@ -1277,6 +1388,7 @@ class CustomCatalogData {
       customTopics: <CatItem>[],
       customAttendeesInstitutional: <CatItem>[],
       customAttendeesLocal: <CatItem>[],
+      customResultados: <CatItem>[],
     );
   }
 
@@ -1325,6 +1437,10 @@ class CustomCatalogData {
         (json['customAttendeesLocal'] ?? <dynamic>[]) as List<dynamic>,
         Icons.groups_rounded,
       ),
+      customResultados: parseItems(
+        (json['customResultados'] ?? <dynamic>[]) as List<dynamic>,
+        Icons.check_circle_outline_rounded,
+      ),
     );
   }
 
@@ -1348,6 +1464,7 @@ class CustomCatalogData {
       'customTopics': itemsToJson(customTopics),
       'customAttendeesInstitutional': itemsToJson(customAttendeesInstitutional),
       'customAttendeesLocal': itemsToJson(customAttendeesLocal),
+      'customResultados': itemsToJson(customResultados),
     };
   }
 }

@@ -77,6 +77,7 @@ def _principal():
         status=UserStatus.ACTIVE,
         created_at=datetime.now(timezone.utc),
         last_login_at=None,
+        last_activity_at=None,
         roles=['ADMIN'],
         project_ids=['TMQ'],
         scopes=[],

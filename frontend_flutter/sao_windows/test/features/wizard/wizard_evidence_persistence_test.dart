@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:drift/drift.dart' as drift;
 import 'package:flutter/material.dart';
@@ -191,7 +190,7 @@ void main() {
     'saveToDatabase queues captured photos for upload and persists them locally',
     () async {
       final db = AppDb();
-      addTearDown(() => db.close());
+      addTearDown(db.close);
       await seedCoreData(db);
 
       final controller = buildController(db, activityId: 'act-evidence-save');
@@ -236,7 +235,7 @@ void main() {
     'init recovers evidence list from wizard snapshot when local rows are missing',
     () async {
       final db = AppDb();
-      addTearDown(() => db.close());
+      addTearDown(db.close);
       await seedCoreData(db);
 
       final now = DateTime(2026, 4, 6, 11, 30);
@@ -313,7 +312,7 @@ void main() {
     'retry worker resumes pending evidence uploads after a transient init failure',
     () async {
       final db = AppDb();
-      addTearDown(() => db.close());
+      addTearDown(db.close);
       await seedCoreData(db);
 
       final now = DateTime(2026, 4, 6, 12, 0);

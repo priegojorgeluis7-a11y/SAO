@@ -110,14 +110,14 @@ class EvidencePreviewCard extends StatelessWidget {
         cached,
         fit: BoxFit.cover,
         width: double.infinity,
-        errorBuilder: (_, __, ___) =>
+        errorBuilder: (_, _, _) =>
             const Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
       );
     }
     return Image.file(
       File(evidence.localPath),
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) =>
+      errorBuilder: (_, _, _) =>
           const Center(child: Icon(Icons.broken_image, size: 48, color: Colors.grey)),
     );
   }

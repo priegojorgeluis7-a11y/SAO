@@ -2,7 +2,6 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:intl/intl.dart';
 import '../../../../core/compat/io_compat.dart';
-import '../../domain/entities/report_context.dart';
 import 'report_section.dart';
 
 /// Sección 8: Evidences (fotos con pies editables)
@@ -143,9 +142,9 @@ class EvidenceSection extends ReportSection {
       final rows = <pw.TableRow>[
         // Header row
         pw.TableRow(
-          decoration: pw.BoxDecoration(color: mainColor),
+          decoration: const pw.BoxDecoration(color: mainColor),
           children: pdfData[0].cast<String>().map((header) => pw.Padding(
-            padding: pw.EdgeInsets.all(4),
+            padding: const pw.EdgeInsets.all(4),
             child: pw.Text(header, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.white)),
           )).toList(),
         ),
@@ -156,7 +155,7 @@ class EvidenceSection extends ReportSection {
         rows.add(
           pw.TableRow(
             children: row.cast<String>().map((cell) => pw.Padding(
-              padding: pw.EdgeInsets.all(4),
+              padding: const pw.EdgeInsets.all(4),
               child: pw.Text(cell, style: const pw.TextStyle(fontSize: 7)),
             )).toList(),
           ),
@@ -165,12 +164,12 @@ class EvidenceSection extends ReportSection {
 
       widgets.add(
         pw.Table(
-          border: pw.TableBorder(
-            horizontalInside: pw.BorderSide(color: const PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
-            top: pw.BorderSide(color: const PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
-            bottom: pw.BorderSide(color: const PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
-            left: pw.BorderSide(color: const PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
-            right: pw.BorderSide(color: const PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
+          border: const pw.TableBorder(
+            horizontalInside: pw.BorderSide(color: PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
+            top: pw.BorderSide(color: PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
+            bottom: pw.BorderSide(color: PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
+            left: pw.BorderSide(color: PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
+            right: pw.BorderSide(color: PdfColor.fromInt(0xFFE5E7EB), width: 0.5),
           ),
           children: rows,
         ),

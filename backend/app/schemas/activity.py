@@ -229,6 +229,7 @@ class ActivityDTO(BaseModel):
         None,
         description="Structured wizard payload with classification/location metadata",
     )
+    is_primary_responsible: bool = Field(True, description="False for co-responsible sibling activities")
     flags: dict[str, bool] = Field(default_factory=lambda: {
         "gps_mismatch": False,
         "catalog_changed": False,

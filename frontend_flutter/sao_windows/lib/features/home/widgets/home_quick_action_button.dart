@@ -31,7 +31,7 @@ class QuickActionButton extends StatelessWidget {
 
   /// Callback when action button is tapped
   /// Returns the action name as parameter
-  final Function(String actionName) onPressed;
+  final void Function(String actionName) onPressed;
 
   /// Whether button is in loading state
   final bool isLoading;
@@ -155,12 +155,12 @@ class QuickActionButton extends StatelessWidget {
       child: FilledButton.icon(
         onPressed: isLoading ? null : () => onPressed(details.actionName),
         icon: isLoading
-            ? SizedBox(
+            ? const SizedBox(
                 height: 16,
                 width: 16,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                 ),
               )
             : Icon(details.icon, size: 16),

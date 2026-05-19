@@ -10,6 +10,7 @@ import '../../../core/utils/format_utils.dart';
 import '../../../core/utils/project_terminology.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
+import '../../catalog/catalog_repository.dart';
 import '../../home/models/today_activity.dart';
 import '../../sync/services/sync_service.dart';
 import '../../../ui/theme/sao_colors.dart';
@@ -253,6 +254,52 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
     return [];
   }
 
+  List<String> _topicsFromFields() {
+    final raw = _fields['topics']?.valueJson;
+    if (raw == null || raw.trim().isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final catalog = GetIt.I<CatalogRepository>();
+      final allTopics = catalog.temas;
+      final names = <String>[];
+      for (final e in decoded) {
+        final id = e.toString();
+        if (id == 'OTRO_TEMA') {
+          final other = (_fields['topic_other_text']?.valueText ?? '').trim();
+          if (other.isNotEmpty) names.add(other);
+        } else {
+          final match = allTopics.cast<CatItem?>().firstWhere(
+            (t) => t?.id == id, orElse: () => null);
+          final label = (match?.label ?? id).trim();
+          if (label.isNotEmpty) names.add(label);
+        }
+      }
+      return names;
+    } catch (_) {}
+    return [];
+  }
+
+  List<String> _attendeesFromFields() {
+    final raw = _fields['attendees']?.valueJson;
+    if (raw == null || raw.trim().isEmpty) return [];
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return [];
+      final catalog = GetIt.I<CatalogRepository>();
+      final allAttendees = [
+        ...catalog.asistentesInstitucionales,
+        ...catalog.asistentesLocales,
+      ];
+      return decoded.map((e) => e.toString()).map((id) {
+        final match = allAttendees.cast<CatItem?>().firstWhere(
+          (a) => a?.id == id, orElse: () => null);
+        return (match?.label ?? id).trim();
+      }).where((s) => s.isNotEmpty).toList();
+    } catch (_) {}
+    return [];
+  }
+
   IconData _evidenceIcon(String type) {
     switch (type.toUpperCase()) {
       case 'VIDEO': return Icons.videocam_rounded;
@@ -333,6 +380,8 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
       resultLabel: _resultLabel(),
       notes: (_fields['report_notes']?.valueText ?? '').trim(),
       agreements: _agreements(),
+      topics: _topicsFromFields(),
+      attendees: _attendeesFromFields(),
       evidenceCount: _evidences.length,
     );
   }

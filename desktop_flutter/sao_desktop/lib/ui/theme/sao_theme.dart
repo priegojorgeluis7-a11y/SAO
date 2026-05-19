@@ -114,7 +114,7 @@ class SaoTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: _darkBorder,
-        selectedColor: _darkPrimary.withOpacity(0.20),
+        selectedColor: _darkPrimary.withValues(alpha: 0.20),
         disabledColor: _darkBorder,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(SaoRadii.sm),
@@ -277,7 +277,7 @@ class SaoTheme {
       // ============================================================
       chipTheme: ChipThemeData(
         backgroundColor: SaoColors.gray100,
-        selectedColor: SaoColors.actionPrimary.withOpacity(0.16),
+        selectedColor: SaoColors.actionPrimary.withValues(alpha: 0.16),
         disabledColor: SaoColors.gray200,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(SaoRadii.sm),

@@ -1080,6 +1080,34 @@ class CatalogRepository {
         .toList();
   }
 
+  /// Returns ALL active subcategories regardless of parent activity type.
+  /// Use this when the parent activity is a CUSTOM_* ID not yet in the
+  /// catalog, so the filtered [subcategoriesFor] would return an empty list.
+  List<CatItem> getAllSubcategories() {
+    return _data.subcategories
+        .where((entry) => entry.isActive)
+        .map((entry) => CatItem(id: entry.id, name: entry.name))
+        .toList();
+  }
+
+  /// Returns ALL active purposes regardless of parent activity/subcategory.
+  /// Use this when the parent is a CUSTOM_* ID not yet in the catalog.
+  List<CatItem> getAllPurposes() {
+    return _data.purposes
+        .where((entry) => entry.isActive)
+        .map((entry) => CatItem(id: entry.id, name: entry.name))
+        .toList();
+  }
+
+  /// Returns ALL active topics regardless of activity relationship.
+  /// Use this when the parent activity is a CUSTOM_* ID not yet in the catalog.
+  List<CatItem> getAllTopics() {
+    return _data.topics
+        .where((entry) => entry.isActive)
+        .map((entry) => CatItem(id: entry.id, name: entry.name))
+        .toList();
+  }
+
   List<String> getMunicipalities() {
     final dynamicValues = _extractLocationValuesFromBundle(
       municipalityKeys: const ['municipio', 'municipality'],

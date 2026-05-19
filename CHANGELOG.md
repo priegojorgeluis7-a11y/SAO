@@ -2,6 +2,53 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.8] - 2026-05-06
+
+Versión consolidada que incluye todos los cambios de 1.0.7 y 1.0.8.
+
+### Added
+- **Co-responsable en actividades**: el usuario OPERATIVO puede agregar a otro miembro del proyecto como co-responsable de una actividad desde la pantalla principal (app móvil).
+- **Notificaciones push FCM**: integración de Firebase Cloud Messaging para enviar notificaciones remotas a dispositivos registrados.
+- **Instalador Windows**: script `build_installer.ps1` con Inno Setup para generar el `.exe` del cliente escritorio con ícono oficial SAO.
+- **Página de administración de issues de sync** (`sync_issues_page.dart`) en el cliente escritorio.
+- **Endpoint público `/support`**: página de soporte accesible sin autenticación en el backend.
+- **Endpoint `/privacy-policy`** disponible públicamente.
+
+### Changed
+- Terminología **Frente → Segmento** en reportes PDF del cliente escritorio (`toSegmentName()`, aplica a todos los proyectos).
+- `DELETE /activities/{uuid}` cambiado a **hard-delete permanente** en Firestore (con audit log previo).
+- `birth_date` en el registro de usuario pasa a ser **opcional** (Guía 5.1.1v App Store).
+- AAB Android reducido de **137.9 MB → 52.9 MB** habilitando minify, shrinkResources y obfuscate.
+
+### Fixed
+- Corrección de overflow visual en reportes escritorio (TopBar, ActivityTray, MiniDocPreview).
+- Sincronización: tolerancia a `pk_end < pk_start` y UUIDs inválidos en `participant_user_ids`.
+- OPERATIVO ahora puede listar sus actividades aprobadas para generación de PDF.
+- Resolución correcta del nombre del resultado desde `wizard_payload` en `/completed-activities` y `/reports/activities`.
+
+---
+
+## [1.0.6] - 2026-04-28
+
+### Added
+- **Crear asignación propia**: OPERATIVO puede crear asignaciones para sí mismo sin necesitar a un despachador.
+- **Eliminar actividad**: cualquier usuario con el rol adecuado puede eliminar actividades, con validación de permisos por rol.
+- **Sincronización con Google Calendar** vía `url_launcher` (escritorio + móvil).
+- **Caché offline de catálogos geográficos**: municipios y frentes/segmentos disponibles sin conexión.
+
+### Changed
+- COORD obtiene alcance global de proyectos (equivalente a SUPERVISOR).
+- OPERATIVO ve a todos los miembros del proyecto como candidatos de transferencia de responsabilidad.
+
+### Fixed
+- Remoción del plugin `device_calendar` que causaba crash al abrir la app móvil.
+- Corrección de llave foránea al eliminar evidencias en base de datos local.
+- Filtro de asignables: ADMIN excluido de roles asignables; OPERATIVO filtrado por membresía de proyecto.
+- Pantalla gris en cliente web (soporte Drift para base de datos web).
+- Reportes: resolución correcta del campo `frente` en actividades completadas.
+
+---
+
 ## [0.2.4] - 2026-03-09
 ### Changed
 - Closed CI/CD Phase 1 for backend with complete GitHub Actions pipeline in green (`test + build + deploy + smoke`).
