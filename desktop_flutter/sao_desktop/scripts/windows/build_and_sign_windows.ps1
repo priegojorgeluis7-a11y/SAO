@@ -1,5 +1,6 @@
 param(
     [string]$ProjectRoot = ".",
+    [string]$BackendUrl  = "https://sao-api-97150883570.us-central1.run.app",
     [string]$PfxPath,
     [string]$PfxPassword,
     [string]$SigntoolPath = "signtool.exe",
@@ -41,7 +42,8 @@ try {
         flutter pub get
 
         Write-Host "Building Flutter Windows release..." -ForegroundColor Cyan
-        flutter build windows --release
+        flutter build windows --release `
+            --dart-define=SAO_BACKEND_URL=$BackendUrl
     }
 
     if (-not (Test-Path $ExePath)) {

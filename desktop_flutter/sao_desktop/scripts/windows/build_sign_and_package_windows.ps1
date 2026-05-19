@@ -1,5 +1,6 @@
 param(
     [string]$ProjectRoot = ".",
+    [string]$BackendUrl  = "https://sao-api-97150883570.us-central1.run.app",
     [string]$PfxPath,
     [string]$PfxPassword,
     [string]$InnoSetupCompiler = "iscc.exe",
@@ -35,7 +36,7 @@ try {
         throw "Signing script not found: $signScript"
     }
 
-    & $signScript -ProjectRoot $PWD -PfxPath $PfxPath -PfxPassword $PfxPassword
+    & $signScript -ProjectRoot $PWD -BackendUrl $BackendUrl -PfxPath $PfxPath -PfxPassword $PfxPassword
     if ($LASTEXITCODE -ne 0) {
         throw "Signing step failed with exit code $LASTEXITCODE"
     }
@@ -61,7 +62,7 @@ try {
     }
 
     Write-Host "Signing installer..." -ForegroundColor Cyan
-    & $signScript -ProjectRoot $PWD -PfxPath $PfxPath -PfxPassword $PfxPassword -SkipBuild -ExePath $installerPath
+    & $signScript -ProjectRoot $PWD -BackendUrl $BackendUrl -PfxPath $PfxPath -PfxPassword $PfxPassword -SkipBuild -ExePath $installerPath
 
     Write-Host "Internal installer ready:" -ForegroundColor Green
     Write-Host $installerPath
