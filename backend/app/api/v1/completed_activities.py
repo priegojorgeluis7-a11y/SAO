@@ -765,7 +765,10 @@ def list_completed_activities(
             _seen_groups.add(_gid)
         else:
             _lkey = _item.get("_lkey", "")
-            if _lkey.replace("|", ""):
+            # Only apply legacy dedup when assignment_start_at is present.
+            _parts = _lkey.split("|")
+            _lkey_has_start = len(_parts) > 2 and _parts[2].strip()
+            if _lkey_has_start:
                 if _lkey in _seen_legacy:
                     continue
                 _seen_legacy.add(_lkey)

@@ -104,16 +104,17 @@ def get_operational_kpis(
                     continue
                 _seen_groups.add(_gid)
             else:
-                _lkey = "|".join([
-                    str(_a.get("project_id") or ""),
-                    str(_a.get("activity_type_code") or ""),
-                    str(_a.get("assignment_start_at") or ""),
-                    str(_a.get("assignment_end_at") or ""),
-                    str(_a.get("created_by_user_id") or ""),
-                    str(_a.get("front_id") or ""),
-                    str(_a.get("pk_start") or ""),
-                ])
-                if _lkey.replace("|", ""):
+                _start_at = str(_a.get("assignment_start_at") or "").strip()
+                if _start_at:
+                    _lkey = "|".join([
+                        str(_a.get("project_id") or ""),
+                        str(_a.get("activity_type_code") or ""),
+                        _start_at,
+                        str(_a.get("assignment_end_at") or ""),
+                        str(_a.get("created_by_user_id") or ""),
+                        str(_a.get("front_id") or ""),
+                        str(_a.get("pk_start") or ""),
+                    ])
                     if _lkey in _seen_legacy:
                         continue
                     _seen_legacy.add(_lkey)

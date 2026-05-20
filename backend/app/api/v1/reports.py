@@ -211,6 +211,36 @@ def list_report_activities(
         front_ids.add(str(doc.get("front_id") or "").strip())
         user_ids.add(str(doc.get("assigned_to_user_id") or "").strip())
 
+    # Deduplicate multi-responsible activities: each activity_group counts as 1.
+    # For new activities: use activity_group_id.
+    # For legacy activities (no activity_group_id): use composite key.
+    _seen_groups_list: set[str] = set()
+    _seen_legacy_list: set[str] = set()
+    _deduped_candidates: list = []
+    for _cd in candidate_docs:
+        _gid = str(_cd.get("activity_group_id") or "").strip()
+        if _gid:
+            if _gid in _seen_groups_list:
+                continue
+            _seen_groups_list.add(_gid)
+        else:
+            _start_at_list = str(_cd.get("assignment_start_at") or "").strip()
+            if _start_at_list:
+                _lk = "|".join([
+                    str(_cd.get("project_id") or ""),
+                    str(_cd.get("activity_type_code") or ""),
+                    _start_at_list,
+                    str(_cd.get("assignment_end_at") or ""),
+                    str(_cd.get("created_by_user_id") or ""),
+                    str(_cd.get("front_id") or ""),
+                    str(_cd.get("pk_start") or ""),
+                ])
+                if _lk in _seen_legacy_list:
+                    continue
+                _seen_legacy_list.add(_lk)
+        _deduped_candidates.append(_cd)
+    candidate_docs = _deduped_candidates
+
     fronts_map = _load_front_names(client, front_ids)
     users_map = _load_user_names(client, user_ids)
 
@@ -475,16 +505,17 @@ def generate_auditab_report(
                     continue
                 _seen_groups_gen.add(_gid)
             else:
-                _lkey = "|".join([
-                    str(_a.get("project_id") or ""),
-                    str(_a.get("activity_type_code") or ""),
-                    str(_a.get("assignment_start_at") or ""),
-                    str(_a.get("assignment_end_at") or ""),
-                    str(_a.get("created_by_user_id") or ""),
-                    str(_a.get("front_id") or ""),
-                    str(_a.get("pk_start") or ""),
-                ])
-                if _lkey.replace("|", ""):
+                _start_at_gen = str(_a.get("assignment_start_at") or "").strip()
+                if _start_at_gen:
+                    _lkey = "|".join([
+                        str(_a.get("project_id") or ""),
+                        str(_a.get("activity_type_code") or ""),
+                        _start_at_gen,
+                        str(_a.get("assignment_end_at") or ""),
+                        str(_a.get("created_by_user_id") or ""),
+                        str(_a.get("front_id") or ""),
+                        str(_a.get("pk_start") or ""),
+                    ])
                     if _lkey in _seen_legacy_gen:
                         continue
                     _seen_legacy_gen.add(_lkey)

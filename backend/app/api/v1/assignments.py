@@ -439,6 +439,8 @@ def list_assignments(
 
     items: list[AssignmentListItem] = []
     seeded_project_ids: set[str] = set()
+    _seen_groups_assign: set[str] = set()
+    _seen_legacy_assign: set[str] = set()
     for doc in docs:
         payload = doc.to_dict() or {}
         is_canceled = payload.get("deleted_at") is not None
@@ -477,6 +479,27 @@ def list_assignments(
             )
             estado = estado or parsed_estado
             municipio = municipio or parsed_municipio
+        # Deduplicate multi-responsible activities: each activity_group counts as 1.
+        _gid_a = str(payload.get("activity_group_id") or "").strip()
+        if _gid_a:
+            if _gid_a in _seen_groups_assign:
+                continue
+            _seen_groups_assign.add(_gid_a)
+        else:
+            _start_at_a = str(payload.get("assignment_start_at") or "").strip()
+            if _start_at_a:
+                _lka = "|".join([
+                    str(payload.get("project_id") or ""),
+                    str(payload.get("activity_type_code") or ""),
+                    _start_at_a,
+                    str(payload.get("assignment_end_at") or ""),
+                    str(payload.get("created_by_user_id") or ""),
+                    str(payload.get("front_id") or ""),
+                    str(payload.get("pk_start") or ""),
+                ])
+                if _lka in _seen_legacy_assign:
+                    continue
+                _seen_legacy_assign.add(_lka)
         principal = principal_by_id.get(effective_assignee_user_id)
         items.append(
             AssignmentListItem(
