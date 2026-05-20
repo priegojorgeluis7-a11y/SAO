@@ -739,11 +739,23 @@ def list_completed_activities(
             "subcategory":      _subcategory,
             "topics":           _topics,
             "activity_group_id": str(doc.get("activity_group_id") or "").strip() or None,
+            # Internal: legacy dedup key for activities without activity_group_id.
+            "_lkey": "|".join([
+                str(doc.get("project_id") or ""),
+                str(doc.get("activity_type_code") or ""),
+                str(doc.get("assignment_start_at") or ""),
+                str(doc.get("assignment_end_at") or ""),
+                str(doc.get("created_by_user_id") or ""),
+                str(doc.get("front_id") or ""),
+                str(doc.get("pk_start") or ""),
+            ]),
         })
 
     # Deduplicate multi-responsible activities: each activity_group counts as 1.
-    # Keep the first document per group (primary assignee's copy).
+    # For new activities: use activity_group_id.
+    # For legacy activities (no activity_group_id): use composite key.
     _seen_groups: set[str] = set()
+    _seen_legacy: set[str] = set()
     _deduped_items: list = []
     for _item in items:
         _gid = str(_item.get("activity_group_id") or "").strip()
@@ -751,6 +763,13 @@ def list_completed_activities(
             if _gid in _seen_groups:
                 continue
             _seen_groups.add(_gid)
+        else:
+            _lkey = _item.get("_lkey", "")
+            if _lkey.replace("|", ""):
+                if _lkey in _seen_legacy:
+                    continue
+                _seen_legacy.add(_lkey)
+        _item.pop("_lkey", None)
         _deduped_items.append(_item)
     items = _deduped_items
 

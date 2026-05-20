@@ -463,7 +463,10 @@ def generate_auditab_report(
         activities = [doc.to_dict() for doc in docs if doc.to_dict()]
 
         # Deduplicate multi-responsible activities: each activity_group counts as 1.
+        # For new activities: use activity_group_id.
+        # For legacy activities (no activity_group_id): use composite key.
         _seen_groups_gen: set[str] = set()
+        _seen_legacy_gen: set[str] = set()
         _deduped_activities: list = []
         for _a in activities:
             _gid = str(_a.get("activity_group_id") or "").strip()
@@ -471,6 +474,20 @@ def generate_auditab_report(
                 if _gid in _seen_groups_gen:
                     continue
                 _seen_groups_gen.add(_gid)
+            else:
+                _lkey = "|".join([
+                    str(_a.get("project_id") or ""),
+                    str(_a.get("activity_type_code") or ""),
+                    str(_a.get("assignment_start_at") or ""),
+                    str(_a.get("assignment_end_at") or ""),
+                    str(_a.get("created_by_user_id") or ""),
+                    str(_a.get("front_id") or ""),
+                    str(_a.get("pk_start") or ""),
+                ])
+                if _lkey.replace("|", ""):
+                    if _lkey in _seen_legacy_gen:
+                        continue
+                    _seen_legacy_gen.add(_lkey)
             _deduped_activities.append(_a)
         activities = _deduped_activities
 

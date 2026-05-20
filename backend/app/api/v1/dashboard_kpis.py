@@ -92,8 +92,10 @@ def get_operational_kpis(
                 all_activities.append(payload)
 
         # Deduplicate multi-responsible activities: each activity_group counts as 1.
-        # Keep the first document encountered per group (primary assignee's copy).
+        # For new activities: use activity_group_id.
+        # For legacy activities (no activity_group_id): use composite key.
         _seen_groups: set[str] = set()
+        _seen_legacy: set[str] = set()
         _deduped: list = []
         for _a in all_activities:
             _gid = str(_a.get("activity_group_id") or "").strip()
@@ -101,6 +103,20 @@ def get_operational_kpis(
                 if _gid in _seen_groups:
                     continue
                 _seen_groups.add(_gid)
+            else:
+                _lkey = "|".join([
+                    str(_a.get("project_id") or ""),
+                    str(_a.get("activity_type_code") or ""),
+                    str(_a.get("assignment_start_at") or ""),
+                    str(_a.get("assignment_end_at") or ""),
+                    str(_a.get("created_by_user_id") or ""),
+                    str(_a.get("front_id") or ""),
+                    str(_a.get("pk_start") or ""),
+                ])
+                if _lkey.replace("|", ""):
+                    if _lkey in _seen_legacy:
+                        continue
+                    _seen_legacy.add(_lkey)
             _deduped.append(_a)
         all_activities = _deduped
 
