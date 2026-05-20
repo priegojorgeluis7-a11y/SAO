@@ -113,6 +113,17 @@ def _list_activities_firestore(
 
         # Keep a low-memory stream processing path when paging by project.
         # We still compute total to preserve API contract, but only parse DTOs for the requested page.
+        # Deduplicate multi-responsible activities when no personal/incremental filter is active.
+        # updated_since_sync_version / assigned_to_user_id scoped queries must NOT dedup
+        # (mobile sync and personal agenda need every document).
+        _do_dedup = (
+            updated_since_sync_version is None
+            and assigned_to_user_id is None
+            and created_by_user_id is None
+        )
+        _seen_groups_act: set[str] = set()
+        _seen_legacy_act: set[str] = set()
+
         stream_offset = offset or 0
         stream_page_size = page_size or 0
         matched_count = 0
@@ -121,6 +132,27 @@ def _list_activities_firestore(
             doc = snap.to_dict() or {}
             if not _match(doc):
                 continue
+            if _do_dedup:
+                _gid = str(doc.get("activity_group_id") or "").strip()
+                if _gid:
+                    if _gid in _seen_groups_act:
+                        continue
+                    _seen_groups_act.add(_gid)
+                else:
+                    _sat = str(doc.get("assignment_start_at") or "").strip()
+                    if _sat:
+                        _lk = "|".join([
+                            str(doc.get("project_id") or ""),
+                            str(doc.get("activity_type_code") or ""),
+                            _sat,
+                            str(doc.get("assignment_end_at") or ""),
+                            str(doc.get("created_by_user_id") or ""),
+                            str(doc.get("front_id") or ""),
+                            str(doc.get("pk_start") or ""),
+                        ])
+                        if _lk in _seen_legacy_act:
+                            continue
+                        _seen_legacy_act.add(_lk)
             matched_count += 1
             if stream_page_size > 0:
                 if matched_count <= stream_offset:
