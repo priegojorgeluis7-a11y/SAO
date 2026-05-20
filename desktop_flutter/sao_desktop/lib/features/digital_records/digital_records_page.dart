@@ -2776,11 +2776,14 @@ class _FollowUpChip extends StatelessWidget {
         children: [
           Icon(icon, size: 14, color: color),
           const SizedBox(width: 6),
-          Text(
-            label,
-            style: SaoTypography.caption.copyWith(
-              color: color,
-              fontWeight: FontWeight.w700,
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: SaoTypography.caption.copyWith(
+                color: color,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ],
@@ -3977,7 +3980,13 @@ class _StatPill extends StatelessWidget {
         children: [
           Icon(icon, size: 14, color: DigitalRecordColors.accent),
           const SizedBox(width: 6),
-          Text(label, style: SaoTypography.caption),
+          Flexible(
+            child: Text(
+              label,
+              overflow: TextOverflow.ellipsis,
+              style: SaoTypography.caption,
+            ),
+          ),
         ],
       ),
     );
