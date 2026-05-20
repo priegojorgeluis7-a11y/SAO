@@ -277,13 +277,15 @@ int _visualEvidenceCountFor(CompletedActivityDetail detail) {
 }
 
 int _summaryDocumentCount(CompletedActivity summary) {
-  if (summary.documentCount > 0) return summary.documentCount;
-  return summary.hasReport ? 1 : 0;
+  // Cap at 1: each activity has exactly one active report (the latest generation).
+  if (summary.documentCount > 0 || summary.hasReport) return 1;
+  return 0;
 }
 
 int _documentCountForDetail(CompletedActivityDetail detail) {
+  // Cap at 1: we only display the most recent document in the detail view.
   final documentCount = _documentEvidencesFor(detail).length;
-  if (documentCount > 0) return documentCount;
+  if (documentCount > 0) return 1;
   return _summaryDocumentCount(detail.summary);
 }
 
