@@ -91,6 +91,19 @@ def get_operational_kpis(
                     continue
                 all_activities.append(payload)
 
+        # Deduplicate multi-responsible activities: each activity_group counts as 1.
+        # Keep the first document encountered per group (primary assignee's copy).
+        _seen_groups: set[str] = set()
+        _deduped: list = []
+        for _a in all_activities:
+            _gid = str(_a.get("activity_group_id") or "").strip()
+            if _gid:
+                if _gid in _seen_groups:
+                    continue
+                _seen_groups.add(_gid)
+            _deduped.append(_a)
+        all_activities = _deduped
+
         if not all_activities:
             return {
                 "timestamp": now.isoformat(),

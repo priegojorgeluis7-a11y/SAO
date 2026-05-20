@@ -738,7 +738,21 @@ def list_completed_activities(
             "review_decision":  decision,
             "subcategory":      _subcategory,
             "topics":           _topics,
+            "activity_group_id": str(doc.get("activity_group_id") or "").strip() or None,
         })
+
+    # Deduplicate multi-responsible activities: each activity_group counts as 1.
+    # Keep the first document per group (primary assignee's copy).
+    _seen_groups: set[str] = set()
+    _deduped_items: list = []
+    for _item in items:
+        _gid = str(_item.get("activity_group_id") or "").strip()
+        if _gid:
+            if _gid in _seen_groups:
+                continue
+            _seen_groups.add(_gid)
+        _deduped_items.append(_item)
+    items = _deduped_items
 
     items.sort(key=lambda x: x["reviewed_at"] or x["created_at"], reverse=True)
     total = len(items)

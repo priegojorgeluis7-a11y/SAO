@@ -462,6 +462,18 @@ def generate_auditab_report(
         docs = list(query.stream())
         activities = [doc.to_dict() for doc in docs if doc.to_dict()]
 
+        # Deduplicate multi-responsible activities: each activity_group counts as 1.
+        _seen_groups_gen: set[str] = set()
+        _deduped_activities: list = []
+        for _a in activities:
+            _gid = str(_a.get("activity_group_id") or "").strip()
+            if _gid:
+                if _gid in _seen_groups_gen:
+                    continue
+                _seen_groups_gen.add(_gid)
+            _deduped_activities.append(_a)
+        activities = _deduped_activities
+
         report_data = []
         for activity in activities:
             report_data.append({
