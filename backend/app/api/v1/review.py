@@ -29,6 +29,7 @@ from app.services.push_notification_service import notify_review_decision
 from app.services.audit_redaction import sanitize_audit_details
 from app.services.audit_service import write_firestore_audit_log
 from app.services.firestore_identity_service import get_firestore_user_by_id
+from app.api.v1.evidences import _resolve_evidence_object_path as _resolve_ev_path
 
 router = APIRouter(prefix="/review", tags=["review"])
 logger = logging.getLogger(__name__)
@@ -660,11 +661,11 @@ def review_activity_evidences(
             accuracy=None,
             device=None,
             description=row.get("caption") or row.get("description") or row.get("descripcion"),
-            gcsKey=row.get("object_path"),
-            status="UPLOADED" if row.get("object_path") else "PENDING",
+            gcsKey=_resolve_ev_path(row) or None,
+            status="UPLOADED" if _resolve_ev_path(row) else "PENDING",
         )
         for row in evidences_docs
-        if row.get("id") and row.get("object_path")
+        if row.get("id") and _resolve_ev_path(row)
     ]
 
 
@@ -812,6 +813,7 @@ def review_decision(
     persisted_review_decision = "CHANGES_REQUIRED" if decision == "REJECT" else decision
     next_sync_version = int(activity_payload.get("sync_version") or 0) + 1
     action = "REVIEW_APPROVE_EXCEPTION" if decision == "APPROVE_EXCEPTION" else ("REVIEW_APPROVE" if decision == "APPROVE" else "REVIEW_REJECT")
+    derived_review_status = _review_status_from_firestore({"review_decision": persisted_review_decision})
 
     activity_ref.set(
         {
@@ -819,6 +821,7 @@ def review_decision(
             "sync_version": next_sync_version,
             "updated_at": now,
             "review_decision": persisted_review_decision,
+            "review_status": derived_review_status,
             "review_reject_reason_code": body.reject_reason_code,
             "review_comment": body.comment,
             "deleted_at": None,
