@@ -2260,10 +2260,14 @@ class _ActivityDetailsPanelProState
     final title = activity.activity.title.trim().toLowerCase();
     final description =
         (activity.activity.description ?? '').trim().toLowerCase();
+    // Use backend flag as the authoritative source. The local catalog check
+    // (_hasUnresolvedCatalogDecision) produces false positives when the bundle
+    // hasn't loaded yet or when approved-candidate values are absent from the
+    // local bundle. The backend already sets catalog_changed=True when custom
+    // IDs are detected, so this is sufficient.
     return title == 'otro' ||
         description.contains('no existe en catalogo') ||
-        activity.flags.catalogChanged ||
-        _hasUnresolvedCatalogDecision(activity);
+        activity.flags.catalogChanged;
   }
 
   bool _hasCustomWizardIds(ActivityWithDetails activity) {

@@ -144,6 +144,38 @@ def approve_catalog_candidate(
         data.get("project_id"),
         reviewer_id,
     )
+
+    # After approving, clear catalog_changed on the activity if no more pending
+    # candidates remain for it. This unblocks validation without requiring a
+    # manual admin step.
+    activity_id = str(data.get("activity_id") or "").strip()
+    if activity_id:
+        remaining = list(
+            client.collection("catalog_candidates")
+            .where("activity_id", "==", activity_id)
+            .where("status", "==", "pending")
+            .limit(1)
+            .stream()
+        )
+        if not remaining:
+            act_ref = client.collection("activities").document(activity_id)
+            act_snap = act_ref.get()
+            if act_snap.exists:
+                act_data = act_snap.to_dict() or {}
+                if act_data.get("catalog_changed"):
+                    act_ref.set(
+                        {
+                            "catalog_changed": False,
+                            "updated_at": now,
+                            "sync_version": int(act_data.get("sync_version") or 0) + 1,
+                        },
+                        merge=True,
+                    )
+                    logger.info(
+                        "CATALOG_CHANGED_CLEARED activity_id=%s after last candidate approved",
+                        activity_id,
+                    )
+
     return {"ok": True, "id": candidate_id, "status": "approved"}
 
 
