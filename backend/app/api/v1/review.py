@@ -26,6 +26,7 @@ from app.schemas.review import (
 )
 from app.schemas.activity import build_canonical_flow_projection, infer_sync_state
 from app.services.push_notification_service import notify_review_decision
+from app.services.notification_service import create_user_notification
 from app.services.audit_redaction import sanitize_audit_details
 from app.services.audit_service import write_firestore_audit_log
 from app.services.firestore_identity_service import get_firestore_user_by_id
@@ -798,7 +799,8 @@ def review_decision(
             code="REVIEW_INVALID_STATE",
             message=f"No se puede revisar una actividad en estado {current_state}",
         )
-    if current_state == COMPLETADA and decision in {"APPROVE", "APPROVE_EXCEPTION"}:
+    existing_review_decision = str(activity_payload.get("review_decision") or "").strip().upper()
+    if current_state == COMPLETADA and existing_review_decision in {"APPROVE", "APPROVE_EXCEPTION"}:
         raise api_error(
             status_code=status.HTTP_409_CONFLICT,
             code="REVIEW_ALREADY_APPROVED",
@@ -881,6 +883,31 @@ def review_decision(
         )
     except Exception:
         logger.exception("REVIEW_NOTIFY_FAILED activity_id=%s", activity_uuid)
+
+    if effective_assignee_user_id:
+        _review_notif_type = (
+            "review_changes_required"
+            if decision in {"REJECT", "CHANGES_REQUIRED"}
+            else "review_approved"
+        )
+        try:
+            create_user_notification(
+                recipient_user_id=effective_assignee_user_id,
+                notification_type=_review_notif_type,
+                activity_id=str(activity_uuid),
+                activity_title=str(activity_payload.get("title") or activity_payload.get("activity_type_code") or "Actividad"),
+                project_id=str(activity_payload.get("project_id") or ""),
+                from_user_id=str(getattr(current_user, "id", "")),
+                from_user_name=getattr(current_user, "full_name", None),
+                requires_acceptance=False,
+                metadata={
+                    "decision": persisted_review_decision,
+                    "comment": body.comment or None,
+                    "reject_reason_code": body.reject_reason_code or None,
+                },
+            )
+        except Exception:
+            logger.exception("REVIEW_IN_APP_NOTIFY_FAILED activity_id=%s", activity_uuid)
 
     assignee_principal = (
         get_firestore_user_by_id(effective_assignee_user_id)

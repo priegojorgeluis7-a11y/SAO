@@ -7,6 +7,7 @@ import '../../core/providers/project_providers.dart';
 import '../../data/models/activity_model.dart';
 import '../auth/app_session_controller.dart';
 import '../../data/repositories/activity_repository.dart';
+import '../../data/repositories/backend_api_client.dart';
 import '../../data/repositories/catalog_repository.dart';
 import '../../ui/sao_ui.dart';
 import '../../core/utils/project_terminology.dart';
@@ -550,6 +551,12 @@ class _ValidationPageNewDesignState
                                       () => _selectedEvidenceIndex = index),
                                   onCaptionChanged: (evidenceId, caption) =>
                                       _saveEvidenceCaption(evidenceId, caption),
+                                  onEvidenceAdded: () {
+                                    final act = _selectedActivity;
+                                    if (act != null) {
+                                      unawaited(_hydrateSelectedActivity(act));
+                                    }
+                                  },
                                 ),
                               ),
                             ),
@@ -1024,6 +1031,19 @@ class _ValidationPageNewDesignState
         );
       }
     } catch (e) {
+      // 409 REVIEW_ALREADY_APPROVED: la actividad ya fue aprobada (p.ej. doble tap).
+      // Tratar como éxito: refrescar la cola para sincronizar el estado visual.
+      if (e is BackendApiException &&
+          e.statusCode == 409 &&
+          e.message.contains('ya está aprobada')) {
+        if (mounted) {
+          await _refreshQueueAfterDecision(
+            processedActivityId: previousActivityId,
+            targetTab: 'PENDING',
+          );
+        }
+        return;
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1470,33 +1490,68 @@ class _ValidationPageNewDesignState
     final catalogRepo = ref.read(catalogRepositoryProvider);
     final repo = ref.read(activityRepositoryProvider);
 
+    // IDs resueltos: se reutiliza el ID existente si ya hay una entidad con el
+    // mismo nombre, evitando duplicados cuando la misma opción se crea más de
+    // una vez o desde actividades distintas.
+    var resolvedSubcatId = '';
+    var resolvedTopicId = '';
+    var resolvedPurposeId = '';
+
     try {
       await catalogRepo.loadProject(projectId);
+      final normalizedValue = value.trim().toLowerCase();
 
       switch (field) {
         case 'subcategoria':
           final activityId =
               await _ensureCatalogActivity(catalogRepo, projectId);
+          final existingSubcat = catalogRepo.data.subcategories
+              .where((s) =>
+                  s.isActive &&
+                  s.name.trim().toLowerCase() == normalizedValue)
+              .firstOrNull;
+          resolvedSubcatId =
+              existingSubcat?.id ?? _buildCatalogEntityId('subcat', value);
           await catalogRepo.createSubcategory(
-            id: _buildCatalogEntityId('subcat', value),
+            id: resolvedSubcatId,
             activityId: activityId,
             name: value,
             projectId: projectId,
           );
           break;
         case 'tema':
-          await catalogRepo.createTopic(
-            id: _buildCatalogEntityId('topic', value),
+          // Usar createTopicWithRelations para vincular el tema al tipo de actividad.
+          // Sin la relación activity_to_topics_suggested, el tema no aparecería en
+          // las opciones de catálogo y el campo seguiría marcado como pendiente.
+          final temaActivityId =
+              await _ensureCatalogActivity(catalogRepo, projectId);
+          final existingTopic = catalogRepo.data.topics
+              .where((t) =>
+                  t.isActive &&
+                  t.name.trim().toLowerCase() == normalizedValue)
+              .firstOrNull;
+          resolvedTopicId =
+              existingTopic?.id ?? _buildCatalogEntityId('topic', value);
+          await catalogRepo.createTopicWithRelations(
+            id: resolvedTopicId,
             name: value,
             type: 'OPERATIVO',
+            activityIds: [temaActivityId],
             projectId: projectId,
           );
           break;
         case 'proposito':
           final activityId =
               await _ensureCatalogActivity(catalogRepo, projectId);
+          final existingPurpose = catalogRepo.data.purposes
+              .where((p) =>
+                  p.isActive &&
+                  p.name.trim().toLowerCase() == normalizedValue)
+              .firstOrNull;
+          resolvedPurposeId =
+              existingPurpose?.id ?? _buildCatalogEntityId('purpose', value);
           await catalogRepo.createPurpose(
-            id: _buildCatalogEntityId('purpose', value),
+            id: resolvedPurposeId,
             activityId: activityId,
             name: value,
             projectId: projectId,
@@ -1524,7 +1579,7 @@ class _ValidationPageNewDesignState
             // Actualizar wizard_payload.subcategory para que el panel lo refleje.
             await repo.resolveWizardPayloadFields(
               activity.activity.id,
-              {'subcategory': {'id': _buildCatalogEntityId('subcat', value), 'name': value}},
+              {'subcategory': {'id': resolvedSubcatId, 'name': value}},
             );
             await repo.updateActivityFields(activity.activity.id, title: value);
             break;
@@ -1540,22 +1595,25 @@ class _ValidationPageNewDesignState
                     activity.activity.id,
                     {
                       'topics': [
-                        {'old_id': oldTopicId, 'id': _buildCatalogEntityId('topic', value), 'name': value},
+                        {'old_id': oldTopicId, 'id': resolvedTopicId, 'name': value},
                       ],
                     },
                   );
                 }
               }
             }
-            await repo.updateActivityFields(activity.activity.id, activityTypeCode: value);
+            // No actualizar activityTypeCode: el tipo de actividad (CAM, INS, etc.)
+            // no debe sobreescribirse con el nombre del tema.
             break;
           case 'proposito':
             // Actualizar wizard_payload.purpose para que el panel lo refleje.
             await repo.resolveWizardPayloadFields(
               activity.activity.id,
-              {'purpose': {'id': _buildCatalogEntityId('purpose', value), 'name': value}},
+              {'purpose': {'id': resolvedPurposeId, 'name': value}},
             );
-            await repo.updateActivityFields(activity.activity.id, description: value);
+            // No sobreescribir description: el propósito ya queda en wizard_payload.
+            // La description puede contener marcadores de municipio y GPS que no
+            // deben perderse.
             break;
           default:
             break;
@@ -1605,18 +1663,35 @@ class _ValidationPageNewDesignState
     }
 
     final repo = ref.read(activityRepositoryProvider);
+    final catalogRepo = ref.read(catalogRepositoryProvider);
+    final normalizedSelected = selectedValue.trim().toLowerCase();
     try {
       switch (field) {
         case 'subcategoria':
+          // Buscar el ID real de la entidad por nombre para evitar almacenar
+          // el nombre visible como ID en wizard_payload.
+          final existingSubcat = catalogRepo.data.subcategories
+              .where((s) =>
+                  s.isActive &&
+                  s.name.trim().toLowerCase() == normalizedSelected)
+              .firstOrNull;
+          final subcatId = existingSubcat?.id ?? selectedValue;
           // Actualiza wizard_payload.subcategory para que el panel lo refleje correctamente
           await repo.resolveWizardPayloadFields(
             activity.activity.id,
-            {'subcategory': {'id': selectedValue, 'name': selectedValue}},
+            {'subcategory': {'id': subcatId, 'name': selectedValue}},
           );
           // También actualiza el título para consistencia con la lista de cola
           await repo.updateActivityFields(activity.activity.id, title: selectedValue);
           break;
         case 'tema':
+          // Buscar el ID real del tema por nombre.
+          final existingTopic = catalogRepo.data.topics
+              .where((t) =>
+                  t.isActive &&
+                  t.name.trim().toLowerCase() == normalizedSelected)
+              .firstOrNull;
+          final topicId = existingTopic?.id ?? selectedValue;
           // Para temas (lista), intentar reemplazar el primer tema usando el ID capturado
           final wizardTopics = activity.wizardPayload?['topics'];
           if (wizardTopics is List && wizardTopics.isNotEmpty) {
@@ -1628,24 +1703,28 @@ class _ValidationPageNewDesignState
                   activity.activity.id,
                   {
                     'topics': [
-                      {'old_id': oldTopicId, 'id': selectedValue, 'name': selectedValue},
+                      {'old_id': oldTopicId, 'id': topicId, 'name': selectedValue},
                     ],
                   },
                 );
               }
             }
           }
-          // También actualiza activityTypeCode para consistencia
-          await repo.updateActivityFields(
-            activity.activity.id,
-            activityTypeCode: selectedValue,
-          );
+          // No actualizar activityTypeCode: el tipo de actividad (CAM, INS, etc.)
+          // no debe sobreescribirse con el nombre del tema.
           break;
         case 'proposito':
+          // Buscar el ID real del propósito por nombre.
+          final existingPurpose = catalogRepo.data.purposes
+              .where((p) =>
+                  p.isActive &&
+                  p.name.trim().toLowerCase() == normalizedSelected)
+              .firstOrNull;
+          final purposeId = existingPurpose?.id ?? selectedValue;
           // Actualiza wizard_payload.purpose para que el panel lo refleje correctamente
           await repo.resolveWizardPayloadFields(
             activity.activity.id,
-            {'purpose': {'id': selectedValue, 'name': selectedValue}},
+            {'purpose': {'id': purposeId, 'name': selectedValue}},
           );
           break;
         case 'municipio':
@@ -1793,9 +1872,10 @@ class _ValidationPageNewDesignState
     final compact = normalized
         .replaceAll(RegExp(r'_+'), '_')
         .replaceAll(RegExp(r'^_|_$'), '');
-    final suffix = DateTime.now().millisecondsSinceEpoch;
     final safe = compact.isEmpty ? 'item' : compact;
-    return '${prefix}_${safe}_$suffix';
+    // IDs estables (sin timestamp) para evitar duplicados al agregar el mismo
+    // valor varias veces o desde distintas actividades.
+    return '${prefix.toUpperCase()}_${safe.toUpperCase()}';
   }
 
   String _mergeMunicipalityMarker(

@@ -51,6 +51,13 @@ class _FakeCollectionRef:
     def document(self, doc_id: str) -> _FakeDocumentRef:
         return _FakeDocumentRef(self._client, f"{self._path}/{doc_id}")
 
+    # Support chained .where().where().stream() used by _publish_bundle_firestore
+    def where(self, *_args, **_kwargs) -> "_FakeCollectionRef":
+        return self
+
+    def stream(self):
+        return iter([])
+
 
 class _FakeFirestoreClient:
     def __init__(self):
@@ -140,15 +147,17 @@ def test_apply_project_ops_updates_current_bundle_version_metadata(monkeypatch):
         current_user=object(),
     )
 
-    assert updated_bundle["meta"]["version_id"] == current_version_id
+    # After auto-publish in apply_project_ops, the returned bundle's version_id
+    # is now a timestamp-based published version (e.g. "TMQ@2026-...").
+    assert updated_bundle["meta"]["version_id"].startswith(f"{project_id}@")
 
     current_bundle = fake_client.collection("catalog_bundles").document(project_id).get().to_dict()
-    assert current_bundle["meta"]["version_id"] == current_version_id
+    # The stored bundle should also have the published version_id.
+    assert current_bundle["meta"]["version_id"].startswith(f"{project_id}@")
 
     resolved_bundle = catalog_api._resolve_catalog_bundle_firestore(
         project_id=project_id,
         version_id=current_version_id,
         include_editor=True,
     )
-    assert resolved_bundle["meta"]["version_id"] == current_version_id
     assert resolved_bundle["effective"]["entities"]["activities"][0]["name"] == "Nombre actualizado"

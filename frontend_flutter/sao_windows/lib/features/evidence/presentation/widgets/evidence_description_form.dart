@@ -65,6 +65,9 @@ class _EvidenceDescriptionFormState extends State<EvidenceDescriptionForm> {
           onChanged: _updateDescription,
           maxLength: widget.maxLength,
           maxLines: 4,
+          autocorrect: true,
+          enableSuggestions: true,
+          spellCheckConfiguration: const SpellCheckConfiguration(),
           decoration: InputDecoration(
             hintText: 'Describe what this evidence shows, location details, etc.',
             hintStyle: SaoTypography.bodyMedium.copyWith(color: Colors.grey),

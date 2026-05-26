@@ -180,7 +180,8 @@ class ActivityUpdate(BaseModel):
     longitude: str | None = None
     title: str | None = None
     description: str | None = None
-    
+    wizard_payload: dict[str, Any] | None = None
+
     @field_validator("execution_state")
     @classmethod
     def validate_execution_state(cls, value: str | None) -> str | None:
@@ -241,6 +242,7 @@ class ActivityDTO(BaseModel):
     created_at: datetime
     updated_at: datetime
     deleted_at: datetime | None = None
+    assignment_start_at: datetime | None = Field(None, description="Scheduled/planned start date for the activity (set by supervisor at assignment time)")
     sync_version: int = Field(..., description="Monotonic increment for pull sync cursor")
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)

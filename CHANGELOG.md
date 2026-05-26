@@ -2,6 +2,77 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.0.10] - 2026-05-22
+
+### Fixed
+
+- **Incidencias de campo sin persistencia — App Móvil** (`home_page.dart` → `_reportIncident`)
+  Las incidencias rápidas «Clima», «Acceso denegado» y «Riesgo» solo actualizaban el estado visual en memoria; al recargar la app o tras un pull de sync el registro se perdía. Ahora se crea un `EventDTO` y se persiste en la tabla local `local_events` vía `EventsLocalRepository.saveEvent()`, que a su vez encola la incidencia en `sync_queue` con `entity=EVENT` para su envío automático al backend (`POST /events`). El estado visual de la actividad continúa reseteándose a `pendiente`.
+  Mapeo de tipos: «Acceso denegado» → `BLOQUEO`; «Clima» / «Riesgo» → `OTRO`.
+  Severidad: «Riesgo» → `HIGH`; resto → `MEDIUM`.
+
+- **Badge de notificaciones omitía alertas locales — App Móvil** (`home_page.dart:3138`)
+  El indicador visual de la campana en el AppBar evaluaba solo `backendUnreadCount` (notificaciones remotas sin leer). La variable `totalBellCount = _notificationCount + backendUnreadCount` existía y se calculaba correctamente pero se descartaba. Ahora la condición del badge usa `totalBellCount`, por lo que actividades rechazadas, vencidas y errores de sync locales también incrementan el contador.
+
+- **Sheet de estado de sync mostraba «Pendientes: N/A» hardcodeado — App Móvil** (`home_page.dart:2871`)
+  El panel de «Estado de sincronización» que aparece al tocar el ícono de nube siempre mostraba `Pendientes: N/A`. Ahora usa un `FutureBuilder` con `syncRepositoryProvider.countPendingItems()` para mostrar el conteo real de ítems en los estados `PENDING`, `IN_PROGRESS` o `ERROR` de la tabla `sync_queue`.
+
+- **Métricas de progreso de secciones siempre en cero — App Móvil** (`home_task_sections.dart:188`)
+  `TaskSectionMetrics.completedCount` estaba hardcodeado a `0` con un TODO. Ahora cuenta las actividades cuyo `executionState == ExecutionState.terminada` dentro de cada sección, lo que permite que los indicadores de progreso del Home reflejen el avance real.
+
+### Removed
+
+- **`AssignmentSyncServiceNoOp` eliminado** (`pending_sync_services.dart`)
+  Clase muerta con un TODO engañoso (`// TODO: Integrar sync de assignments cuando exista API/queue dedicada.`). El proveedor `assignmentSyncServiceProvider` ya apuntaba a `AssignmentSyncServiceImpl` (la implementación real con retry). La clase `NoOp` nunca fue instanciada en producción.
+
+- **`_hasUnresolvedCatalogDecision` eliminado** (`desktop_flutter/…/activity_details_panel_pro.dart`)
+  Método declarado pero nunca invocado (`unused_element` confirmado por `flutter analyze`). Fue desacoplado en la corrección de `_hasCatalogGap` (v1.0.9) pero nunca eliminado. Se remueve para evitar confusión y falsos retornos si se volvía a referenciar.
+
+### Added
+
+- **Script de backfill `review_decision`** (`backend/scripts/backfill_completada_review_decision.py`)
+  Localiza actividades con `execution_state=COMPLETADA` y `review_decision` nulo/vacío en Firestore (documentos corruptos por la condición de carrera corregida en v1.0.9) y les asigna `review_decision=APPROVED` + `review_state=APPROVED`. Soporta `--dry-run` para previsualizar y `--project` para filtrar por proyecto.
+  Uso: `FIRESTORE_PROJECT_ID=sao-prod-488416 JWT_SECRET=<secret> DATA_BACKEND=firestore python backend/scripts/backfill_completada_review_decision.py --dry-run`
+
+---
+
+## [1.0.9] - 2026-05-22
+
+### Fixed
+
+- **Dedup actividades multiresponsables — Backend (series de 4 fixes)**
+  - `dashboard_kpis.py`, `completed_activities.py`, `reports.py`: deduplica por `activity_group_id` antes de calcular métricas/totales; una actividad con N responsables ahora cuenta como 1 en KPIs, expediente y reportes.
+  - `reports.py`, `assignments.py`, `completed_activities.py`: mismo dedup aplicado en `/reports/activities` y `/assignments`.
+  - `activities.py`: dedup en `/activities` (fuente principal del dashboard) respetando modo sin-filtros personales para no romper sincronización móvil.
+  - `completed_activities.py`, `dashboard_kpis.py`, `reports.py`: dedup legacy por clave compuesta (`project_id + activity_type_code + assignment_start_at + assignment_end_at + created_by_user_id + front_id + pk_start`) cuando `activity_group_id` está ausente.
+  - `backend/scripts/backfill_activity_group_ids.py` (nuevo): script de migración que asigna `activity_group_id` en Firestore a grupos legacy con más de 1 documento.
+
+- **Fix evidencias en revisión** (`backend/app/api/v1/review.py`)  
+  Evidencias guardadas con `gcs_path` / `storage_path` / `pending_object_path` en lugar de `object_path` eran reportadas incorrectamente como PENDING en el panel de revisión ("La evidencia aún no está disponible en el servidor"). Ahora usa la misma lógica de resolución de ruta que el endpoint de descarga (`_resolve_evidence_object_path`).
+
+- **Auto-clear `catalog_changed` al aprobar último candidato** (`backend/app/api/v1/catalog_candidates.py`, `activity_details_panel_pro.dart`)  
+  Cuando se aprueba el último candidato de un grupo, el backend limpia automáticamente `flags.catalog_changed`. En el cliente desktop, `_hasCatalogGap` ahora usa únicamente `activity.flags.catalogChanged` (fuente de verdad del backend) en lugar de llamar también a `_hasUnresolvedCatalogDecision`, que generaba falsos positivos cuando el bundle aún no había cargado.
+
+- **Expediente digital — overflow en chips** (`digital_records_page.dart`)  
+  `_FollowUpChip` y `_StatPill` desbordaban visualmente cuando el espacio disponible era reducido. Se envuelve el `Text` en `Flexible` con `overflow: ellipsis`.
+
+- **Expediente digital — conteo de reportes** (`digital_records_page.dart`)  
+  El contador reflejaba cuántas veces se había regenerado el reporte en lugar de `1`. `_summaryDocumentCount` y `_documentCountForDetail` ahora devuelven máximo `1` (cada actividad tiene un único reporte activo).
+
+### Added
+
+- **Tests dedup multiresponsables** (`backend/tests/test_activities_dedup.py`)  
+  261 líneas, 5 casos: grupo de 3 responsables → devuelve 1; filtro `assigned_to_user_id` → sin dedup (modo móvil); filtro `updated_since_sync_version` → sin dedup (sync incremental); actividades individuales sin `activity_group_id`; mix grupo + individuales.
+
+### Chore
+
+- **Desktop v1.0.2+3** (`desktop_flutter/sao_desktop/pubspec.yaml`): bump de versión.
+- **Scripts de build Windows** (`build_windows_prod.ps1`, `build_and_sign_windows.ps1`, `build_sign_and_package_windows.ps1`): se agrega parámetro `BackendUrl` y se pasa `--dart-define=SAO_BACKEND_URL` en todos los scripts de build/firma/empaquetado.
+- **Instalador Windows v1.0.2** (`sao_desktop_instalador.iss`, `crear_instalador_sao.ps1`): versión 1.0.1 → 1.0.2; `--dart-define=SAO_BACKEND_URL` añadido al comando flutter build; README con instrucciones completas para otra PC (Git, Flutter, VS2022, Inno Setup 6).
+- **Entrega macOS**: zip renombrado a `SAO-Desktop-macOS-1.0.2.zip`.
+
+---
+
 ## [1.0.8] - 2026-05-06
 
 Versión consolidada que incluye todos los cambios de 1.0.7 y 1.0.8.

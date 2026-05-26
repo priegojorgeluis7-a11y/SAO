@@ -27,6 +27,7 @@ python-jose[cryptography]==3.3.0
 firebase-admin==6.6.0
 google-cloud-firestore==2.20.0
 google-cloud-storage==2.18.2
+icalendar==6.1.0
 numpy==1.26.4
 pillow==10.4.0
 pypdf==5.3.1

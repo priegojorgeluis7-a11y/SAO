@@ -25,6 +25,7 @@ import '../dashboard/dashboard_provider.dart';
 import '../reports/reports_provider.dart';
 import '../system/system_config_provider.dart';
 import 'planning_provider.dart';
+import 'activity_wizard_dialog.dart';
 
 class _ToggleCalendarIntent extends Intent {
   const _ToggleCalendarIntent();
@@ -701,7 +702,7 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
     if (item.scheduledTime.contains('T')) {
       return DateTime.tryParse(item.scheduledTime)?.toLocal();
     }
-    final datePart = DateTime.tryParse(item.scheduledDate);
+    final datePart = DateTime.tryParse(item.scheduledDate)?.toLocal();
     final timePart = item.scheduledTime.trim();
     if (datePart != null && timePart.contains(':')) {
       final parts = timePart.split(':');
@@ -716,7 +717,8 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
 
   DateTime? _parseAssignmentEnd(AssignmentItem item, DateTime start) {
     if ((item.endAt ?? '').isNotEmpty) {
-      return DateTime.tryParse(item.endAt!)?.toLocal();
+      final parsed = DateTime.tryParse(item.endAt!)?.toLocal();
+      if (parsed != null) return parsed;
     }
     return start.add(const Duration(hours: 1));
   }
@@ -2198,63 +2200,13 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
 
   Future<void> _syncToGoogleCalendar() async {
     final item = widget.item;
-
-    // Determine start/end datetimes
-    final rawStart = (item.startAt != null && item.startAt!.isNotEmpty)
+    final rawDate = (item.startAt != null && item.startAt!.isNotEmpty)
         ? item.startAt!
         : item.scheduledDate;
-    final start = DateTime.tryParse(rawStart) ?? DateTime.now();
-    final end = start.add(const Duration(hours: 1));
-
-    String fmt(DateTime dt) =>
-        '${dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first}Z';
-
-    final location = [
-      if ((item.colonia ?? '').isNotEmpty) item.colonia!,
-      if (item.municipio.isNotEmpty) item.municipio,
-      if (item.estado.isNotEmpty) item.estado,
-    ].join(', ');
-
-    final frente = item.frontName.isNotEmpty
-      ? item.frontName
-      : 'Sin ${frontTerminology(item.projectId)}';
-
-    // Duración en minutos entre start y end
-    final durationMin = item.endAt != null && item.endAt!.isNotEmpty
-        ? DateTime.tryParse(item.endAt!)?.difference(start).inMinutes
-        : null;
-    final durationStr = durationMin != null ? '$durationMin min' : '60 min';
-
-    final endReal = item.endAt != null && item.endAt!.isNotEmpty
-        ? (DateTime.tryParse(item.endAt!) ?? end)
-        : end;
-
-    final title = Uri.encodeComponent(item.title);
-    final details = Uri.encodeComponent(
-      'Actividad: ${item.title}\n'
-      '${frontTerminology(item.projectId, capitalize: true)}: $frente\n'
-      'Estado: ${item.status}\n'
-      'Municipio: ${item.municipio}\n'
-      'Estado (geo): ${item.estado}\n'
-      'PK: ${item.pk}\n'
-      'Duración: $durationStr\n'
-      'Asignado a: ${item.assigneeName}\n'
-      'SAO-ID: ${item.id}',
+    final date = DateTime.tryParse(rawDate)?.toLocal() ?? DateTime.now();
+    final url = Uri.parse(
+      'https://calendar.google.com/calendar/r/day/${date.year}/${date.month}/${date.day}',
     );
-    final loc = Uri.encodeComponent(location);
-    final dates = '${fmt(start)}/${fmt(endReal)}';
-    final resolvedCalId = await ref.read(systemConfigServiceProvider).getCalendarId();
-    final calId = Uri.encodeComponent(resolvedCalId);
-
-    final baseUrl = 'https://calendar.google.com/calendar/render'
-        '?action=TEMPLATE'
-        '&text=$title'
-        '&dates=$dates'
-        '&details=$details'
-        '&add=$calId';
-    final fullUrl = location.isNotEmpty ? '$baseUrl&location=$loc' : baseUrl;
-    final url = Uri.parse(fullUrl);
-
     if (!await canLaunchUrl(url)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -2379,7 +2331,7 @@ class _AssignmentActionsMenuState extends ConsumerState<_AssignmentActionsMenu> 
             children: [
               Icon(Icons.calendar_month_outlined, size: 16, color: Colors.blue),
               SizedBox(width: 8),
-              Text('Sincronizar con Google Calendar'),
+              Text('Ver en Google Calendar'),
             ],
           ),
         ),
@@ -3096,6 +3048,43 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     return value >= start && value <= end;
   }
 
+  Future<void> _startActivity(AssignmentItem item) async {
+    try {
+      const client = BackendApiClient();
+      await client.putJson(
+        '/api/v1/activities/${item.id}',
+        {'execution_state': 'EN_CURSO'},
+      );
+      if (!mounted) return;
+      setState(() {
+        _statusOverrideByAssignmentId[item.id] = 'EN_CURSO';
+      });
+      final container = ProviderScope.containerOf(context, listen: false);
+      _invalidateAssignmentDerivedProviders(container);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error al iniciar actividad: $e'),
+          backgroundColor: SaoColors.error,
+        ),
+      );
+    }
+  }
+
+  Future<void> _openFillWizardDialog(AssignmentItem item) async {
+    final submitted = await showActivityWizardDialog(
+      context: context,
+      assignment: item,
+    );
+    if (!submitted || !mounted) return;
+    final container = ProviderScope.containerOf(context, listen: false);
+    _invalidateAssignmentDerivedProviders(container);
+    setState(() {
+      _statusOverrideByAssignmentId[item.id] = 'EN_CURSO';
+    });
+  }
+
   Future<void> _updateStatus(AssignmentItem item, String newStatus) async {
     setState(() {
       _statusOverrideByAssignmentId[item.id] = newStatus;
@@ -3103,60 +3092,13 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
   }
 
   Future<void> _syncItemToGoogleCalendar(AssignmentItem item) async {
-    final rawStart = (item.startAt != null && item.startAt!.isNotEmpty)
+    final rawDate = (item.startAt != null && item.startAt!.isNotEmpty)
         ? item.startAt!
         : item.scheduledDate;
-    final start = DateTime.tryParse(rawStart) ?? DateTime.now();
-    final end = start.add(const Duration(hours: 1));
-
-    String fmt(DateTime dt) =>
-        '${dt.toUtc().toIso8601String().replaceAll('-', '').replaceAll(':', '').split('.').first}Z';
-
-    final location = [
-      if ((item.colonia ?? '').isNotEmpty) item.colonia!,
-      if (item.municipio.isNotEmpty) item.municipio,
-      if (item.estado.isNotEmpty) item.estado,
-    ].join(', ');
-
-    final frente = item.frontName.isNotEmpty
-      ? item.frontName
-      : 'Sin ${frontTerminology(item.projectId)}';
-
-    final durationMin = item.endAt != null && item.endAt!.isNotEmpty
-        ? DateTime.tryParse(item.endAt!)?.difference(start).inMinutes
-        : null;
-    final durationStr = durationMin != null ? '$durationMin min' : '60 min';
-
-    final endReal = item.endAt != null && item.endAt!.isNotEmpty
-        ? (DateTime.tryParse(item.endAt!) ?? end)
-        : end;
-
-    final title = Uri.encodeComponent(item.title);
-    final details = Uri.encodeComponent(
-      'Actividad: ${item.title}\n'
-      '${frontTerminology(item.projectId, capitalize: true)}: $frente\n'
-      'Estado: ${item.status}\n'
-      'Municipio: ${item.municipio}\n'
-      'Estado (geo): ${item.estado}\n'
-      'PK: ${item.pk}\n'
-      'Duración: $durationStr\n'
-      'Asignado a: ${item.assigneeName}\n'
-      'SAO-ID: ${item.id}',
+    final date = DateTime.tryParse(rawDate)?.toLocal() ?? DateTime.now();
+    final url = Uri.parse(
+      'https://calendar.google.com/calendar/r/day/${date.year}/${date.month}/${date.day}',
     );
-    final loc = Uri.encodeComponent(location);
-    final dates = '${fmt(start)}/${fmt(endReal)}';
-    final resolvedCalId = await ref.read(systemConfigServiceProvider).getCalendarId();
-    final calId = Uri.encodeComponent(resolvedCalId);
-
-    final baseUrl = 'https://calendar.google.com/calendar/render'
-        '?action=TEMPLATE'
-        '&text=$title'
-        '&dates=$dates'
-        '&details=$details'
-        '&add=$calId';
-    final fullUrl = location.isNotEmpty ? '$baseUrl&location=$loc' : baseUrl;
-    final url = Uri.parse(fullUrl);
-
     if (!await canLaunchUrl(url)) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3174,7 +3116,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
     if (item.scheduledTime.contains('T')) {
       return DateTime.tryParse(item.scheduledTime)?.toLocal();
     }
-    final datePart = DateTime.tryParse(item.scheduledDate);
+    final datePart = DateTime.tryParse(item.scheduledDate)?.toLocal();
     final timePart = item.scheduledTime.trim();
     if (datePart != null && timePart.contains(':')) {
       final parts = timePart.split(':');
@@ -4541,6 +4483,27 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
       return;
     }
 
+    // Verificar conflicto con otras asignaciones del mismo responsable.
+    for (final other in widget.assignments) {
+      if (other.id == item.id) continue;
+      if (other.assigneeUserId != item.assigneeUserId) continue;
+      final sched = _effectiveScheduleFor(other);
+      if (newStart.isBefore(sched.end) && newEnd.isAfter(sched.start)) {
+        final endLabel =
+            '${sched.end.hour.toString().padLeft(2, '0')}:${sched.end.minute.toString().padLeft(2, '0')}';
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+                'Advertencia: conflicto de horario con otra asignación hasta las $endLabel.'),
+            backgroundColor: Colors.orange.shade700,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+        break;
+      }
+    }
+
     setState(() {
       _manualScheduleById[item.id] = (start: newStart, end: newEnd);
       final note = noteController.text.trim();
@@ -5280,6 +5243,14 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
                                             PopupMenuButton<String>(
                                               tooltip: 'Acciones',
                                               onSelected: (value) {
+                                                if (value == 'INICIAR') {
+                                                  _startActivity(item);
+                                                  return;
+                                                }
+                                                if (value == 'FILL_WIZARD') {
+                                                  _openFillWizardDialog(item);
+                                                  return;
+                                                }
                                                 if (value == 'OPEN_REPORT') {
                                                   _openActivityReport(item);
                                                   return;
@@ -5310,6 +5281,31 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
                                                 }
                                               },
                                               itemBuilder: (context) => [
+                                                if (_statusOverrideByAssignmentId[item.id] ?? item.status case final st
+                                                  when st == 'PROGRAMADA' || st == 'PENDIENTE')
+                                                  const PopupMenuItem<String>(
+                                                    value: 'INICIAR',
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(Icons.play_circle_outline_rounded,
+                                                            size: 16, color: Colors.blue),
+                                                        SizedBox(width: 8),
+                                                        Text('Iniciar actividad'),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                const PopupMenuItem<String>(
+                                                  value: 'FILL_WIZARD',
+                                                  child: Row(
+                                                    children: [
+                                                      Icon(Icons.edit_note_rounded,
+                                                          size: 16, color: Colors.teal),
+                                                      SizedBox(width: 8),
+                                                      Text('Llenar datos'),
+                                                    ],
+                                                  ),
+                                                ),
+                                                const PopupMenuDivider(),
                                                 if (hasReport)
                                                   const PopupMenuItem<String>(
                                                     value: 'OPEN_REPORT',
@@ -5348,7 +5344,7 @@ class _HourlyAssignmentsViewState extends ConsumerState<_HourlyAssignmentsView> 
                                                     children: [
                                                       Icon(Icons.calendar_month_outlined, size: 16, color: Colors.blue),
                                                       SizedBox(width: 8),
-                                                      Text('Sincronizar con Google Calendar'),
+                                                      Text('Ver en Google Calendar'),
                                                     ],
                                                   ),
                                                 ),

@@ -149,6 +149,16 @@ def _is_invalid_token_error(error: Exception) -> bool:
     )
 
 
+def _build_apns_config(messaging: Any) -> Any:
+    """Return an APNSConfig with immediate priority and default sound for iOS."""
+    return messaging.APNSConfig(
+        headers={"apns-priority": "10"},
+        payload=messaging.APNSPayload(
+            aps=messaging.Aps(sound="sao_notify.mp3"),
+        ),
+    )
+
+
 def notify_catalog_update(*, project_id: str, version_id: str) -> dict[str, int]:
     normalized_project = _normalize_project_id(project_id)
     normalized_version = str(version_id or "").strip()
@@ -209,7 +219,14 @@ def notify_catalog_update(*, project_id: str, version_id: str) -> dict[str, int]
                 "project_id": normalized_project,
                 "version_id": normalized_version,
             },
-            android=messaging.AndroidConfig(priority="high"),
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    channel_id="sao_assignments",
+                    sound="sao_notify",
+                ),
+            ),
+            apns=_build_apns_config(messaging),
         )
 
         response = messaging.send_each_for_multicast(message, app=app)
@@ -343,7 +360,14 @@ def notify_review_decision(
                 "activity_id": normalized_activity,
                 "decision": normalized_decision,
             },
-            android=messaging.AndroidConfig(priority="high"),
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    channel_id="sao_assignments",
+                    sound="sao_notify",
+                ),
+            ),
+            apns=_build_apns_config(messaging),
         )
 
         response = messaging.send_each_for_multicast(message, app=app)
@@ -499,7 +523,14 @@ def notify_new_assignment(
                 "project_id": normalized_project,
                 "activity_id": normalized_activity,
             },
-            android=messaging.AndroidConfig(priority="high"),
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    channel_id="sao_assignments",
+                    sound="sao_notify",
+                ),
+            ),
+            apns=_build_apns_config(messaging),
         )
 
         response = messaging.send_each_for_multicast(message, app=app)
@@ -666,6 +697,7 @@ def notify_daily_agenda(*, project_id: str | None = None) -> dict[str, int]:
                         "count": str(count),
                     },
                     android=messaging.AndroidConfig(priority="normal"),
+                    apns=_build_apns_config(messaging),
                 )
                 response = messaging.send_each_for_multicast(message, app=app)
                 sent += response.success_count
@@ -710,6 +742,155 @@ def _disable_token_by_value(client: Any, token: str, now: datetime) -> None:
             {"enabled": False, "updated_at": now, "disabled_reason": "invalid_or_unregistered"},
             merge=True,
         )
+
+
+def notify_inactive_users(
+    *,
+    project_id: str | None = None,
+    threshold_hours: int = 24,
+) -> dict[str, int]:
+    """Send a reminder push to users who have not registered any activity in the last ``threshold_hours``.
+
+    Designed to be triggered once a day by Cloud Scheduler (e.g. 18:00 America/Mexico_City).
+    Queries all active device tokens, then for each unique user checks whether they created or
+    updated any activity within the threshold window. Users with no recent activity receive a
+    friendly reminder to open the app and register their work.
+    """
+    if not _is_fcm_enabled():
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    app = _initialize_firebase_app()
+    if app is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    modules = _firebase_modules()
+    if modules is None:
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+    _, _, messaging = modules
+
+    client = get_firestore_client()
+
+    filter_project = _normalize_project_id(project_id) if project_id else None
+    threshold_hours = max(1, int(threshold_hours))
+
+    now_utc = datetime.now(timezone.utc)
+    cutoff_utc = now_utc.replace(microsecond=0) - __import__("datetime").timedelta(hours=threshold_hours)
+    cutoff_iso = cutoff_utc.isoformat()
+
+    # --- Collect active tokens grouped by user ---
+    token_query = client.collection(_COLLECTION).where("enabled", "==", True)
+    token_docs = list(token_query.stream())
+
+    # user_id → list of (doc_id, token, project_id)
+    user_tokens: dict[str, list[tuple[str, str, str]]] = {}
+    for doc in token_docs:
+        payload = doc.to_dict() or {}
+        uid = str(payload.get("user_id") or "").strip()
+        pid = str(payload.get("project_id") or "").strip()
+        token = str(payload.get("token") or "").strip()
+        if not uid or not pid or not token:
+            continue
+        if filter_project and pid != filter_project:
+            continue
+        user_tokens.setdefault(uid, []).append((doc.id, token, pid))
+
+    if not user_tokens:
+        logger.info("INACTIVITY_PUSH no active device tokens found")
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    # --- Determine which users have been active recently ---
+    active_user_ids: set[str] = set()
+    all_uids = list(user_tokens.keys())
+
+    # Firestore: query activities created or updated after cutoff, scoped to project if given
+    acts_query = client.collection("activities")
+    if filter_project:
+        acts_query = acts_query.where("project_id", "==", filter_project)
+
+    for doc in acts_query.stream():
+        d = doc.to_dict() or {}
+        if d.get("deleted_at") is not None:
+            continue
+        uid = str(d.get("created_by_user_id") or "").strip()
+        if not uid or uid not in user_tokens:
+            continue
+        created = str(d.get("created_at") or "").strip()
+        updated = str(d.get("updated_at") or "").strip()
+        # Compare ISO strings lexicographically — safe for UTC ISO-8601
+        if (created and created >= cutoff_iso) or (updated and updated >= cutoff_iso):
+            active_user_ids.add(uid)
+
+    inactive_uids = [uid for uid in all_uids if uid not in active_user_ids]
+
+    if not inactive_uids:
+        logger.info(
+            "INACTIVITY_PUSH cutoff=%s threshold_hours=%s no inactive users",
+            cutoff_iso,
+            threshold_hours,
+        )
+        return {"sent": 0, "failed": 0, "invalidated": 0, "users_notified": 0}
+
+    title = "¿Ya registraste tus actividades?"
+    body_text = (
+        "Recuerda capturar tus actividades del día en SAO para mantener tu avance al día "
+        "y facilitar el seguimiento del proyecto."
+    )
+
+    sent = failed = invalidated = users_notified = 0
+
+    for uid in inactive_uids:
+        rows = user_tokens[uid]  # list of (doc_id, token, project_id)
+        tokens = [t for _, t, _ in rows]
+        # Use the first project_id associated with this user for data payload
+        pid_for_data = rows[0][2]
+
+        for index in range(0, len(tokens), 500):
+            chunk_tokens = tokens[index: index + 500]
+            # doc_ids align with tokens for invalidation
+            chunk_doc_ids = [rows[index + k][0] for k in range(len(chunk_tokens))]
+
+            message = messaging.MulticastMessage(
+                tokens=chunk_tokens,
+                notification=messaging.Notification(title=title, body=body_text),
+                data={
+                    "type": "inactivity_reminder",
+                    "project_id": pid_for_data,
+                },
+                android=messaging.AndroidConfig(priority="normal"),
+                apns=_build_apns_config(messaging),
+            )
+
+            response = messaging.send_each_for_multicast(message, app=app)
+            sent += response.success_count
+            failed += response.failure_count
+
+            now = datetime.now(timezone.utc)
+            for i, item in enumerate(response.responses):
+                if item.success:
+                    continue
+                err = item.exception
+                if err is None or not _is_invalid_token_error(err):
+                    continue
+                invalidated += 1
+                doc_id = chunk_doc_ids[i]
+                client.collection(_COLLECTION).document(doc_id).set(
+                    {"enabled": False, "updated_at": now, "disabled_reason": "invalid_or_unregistered"},
+                    merge=True,
+                )
+
+        users_notified += 1
+
+    logger.info(
+        "INACTIVITY_PUSH cutoff=%s threshold_hours=%s inactive=%s sent=%s failed=%s invalidated=%s users_notified=%s",
+        cutoff_iso,
+        threshold_hours,
+        len(inactive_uids),
+        sent,
+        failed,
+        invalidated,
+        users_notified,
+    )
+    return {"sent": sent, "failed": failed, "invalidated": invalidated, "users_notified": users_notified}
 
 
 def notify_user(
@@ -782,7 +963,14 @@ def notify_user(
             tokens=tokens,
             notification=messaging.Notification(title=title, body=body),
             data=normalized_data,
-            android=messaging.AndroidConfig(priority="high"),
+            android=messaging.AndroidConfig(
+                priority="high",
+                notification=messaging.AndroidNotification(
+                    channel_id="sao_assignments",
+                    sound="sao_notify",
+                ),
+            ),
+            apns=_build_apns_config(messaging),
         )
 
         response = messaging.send_each_for_multicast(message, app=app)

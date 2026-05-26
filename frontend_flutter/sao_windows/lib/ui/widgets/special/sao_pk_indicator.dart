@@ -24,13 +24,12 @@ class SaoPKIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // TODO: Implementar barra horizontal con escala PK
     return Container(
       height: 60,
       padding: const EdgeInsets.all(SaoSpacing.md),
       color: SaoColors.gray100,
       child: const Center(
-        child: Text('PK Indicator (TODO)'),
+        child: SizedBox.shrink(),
       ),
     );
   }

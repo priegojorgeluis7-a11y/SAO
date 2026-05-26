@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Mapa de Calor TQI – Actividades</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f1f5f9; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── Header ── */
+#header { background: #1a3a2a; color: white; padding: 10px 18px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+#header h1 { font-size: 17px; font-weight: 700; }
+#header span { font-size: 12px; opacity: .75; }
+
+/* ── Login overlay ── */
+#login-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #1a3a2a 0%, #0d2018 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+#login-box {
+  background: white; border-radius: 14px; padding: 36px 40px;
+  width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  display: flex; flex-direction: column; gap: 16px;
+}
+#login-box h2 { font-size: 20px; font-weight: 700; color: #1a3a2a; text-align: center; margin-bottom: 4px; }
+#login-box .subtitle { font-size: 12px; color: #94a3b8; text-align: center; margin-top: -12px; }
+#login-box label { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: -10px; }
+#login-box input {
+  border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px;
+  font-size: 14px; outline: none; width: 100%;
+}
+#login-box input:focus { border-color: #1a3a2a; }
+#login-submit {
+  background: #1a3a2a; color: white; border: none; border-radius: 8px;
+  padding: 11px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px;
+}
+#login-submit:hover:not(:disabled) { background: #2d5c42; }
+#login-submit:disabled { background: #94a3b8; cursor: not-allowed; }
+#login-error { font-size: 12px; color: #ef4444; text-align: center; min-height: 16px; }
+#login-logo { text-align: center; font-size: 32px; margin-bottom: -8px; }
+
+/* ── User bar ── */
+#user-bar {
+  background: #143020; color: white; padding: 5px 18px;
+  display: none; align-items: center; gap: 8px; flex-shrink: 0;
+  font-size: 12px; border-bottom: 1px solid #0e2218;
+}
+#user-bar span { opacity: .8; }
+#logout-btn {
+  margin-left: auto; background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+  color: white; border-radius: 5px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+}
+#logout-btn:hover { background: rgba(255,255,255,.25); }
+
+/* ── Toolbar ── */
+#toolbar { background: white; border-bottom: 1px solid #e2e8f0; padding: 8px 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-shrink: 0; }
+#toolbar input, #toolbar select {
+  border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 10px;
+  font-size: 13px; background: #f8fafc; outline: none;
+}
+#toolbar input { width: 200px; }
+#toolbar input:focus, #toolbar select:focus { border-color: #3b82f6; }
+#toolbar label { font-size: 12px; color: #64748b; font-weight: 600; }
+.filter-group { display: flex; align-items: center; gap: 5px; }
+#clear-btn {
+  margin-left: auto; padding: 5px 12px; background: #f1f5f9; border: 1px solid #cbd5e1;
+  border-radius: 6px; font-size: 13px; cursor: pointer; color: #475569;
+}
+#clear-btn:hover { background: #e2e8f0; }
+#count-badge {
+  background: #1a3a2a; color: white; border-radius: 20px;
+  padding: 3px 10px; font-size: 12px; font-weight: 600; margin-left: 6px;
+}
+
+/* ── Main layout ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+#map { flex: 1; }
+
+/* ── Detail panel ── */
+#detail-panel {
+  width: 360px; flex-shrink: 0; background: white; overflow-y: auto;
+  border-left: 2px solid #e2e8f0; display: flex; flex-direction: column;
+  transition: width .2s;
+}
+#detail-panel.hidden { width: 0; overflow: hidden; border: none; }
+#panel-header {
+  background: #1a3a2a; color: white; padding: 12px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-weight: 700; font-size: 14px; flex-shrink: 0;
+}
+#panel-close {
+  cursor: pointer; font-size: 18px; line-height: 1;
+  background: none; border: none; color: white; padding: 0 4px;
+}
+#panel-body { padding: 16px; flex: 1; }
+
+.detail-section { margin-bottom: 16px; }
+.detail-section h3 {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  color: #94a3b8; letter-spacing: .8px; margin-bottom: 6px;
+  border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+}
+.detail-row { display: flex; gap: 8px; margin-bottom: 5px; font-size: 13px; }
+.detail-label { color: #64748b; flex-shrink: 0; min-width: 90px; font-weight: 500; }
+.detail-value { color: #1e293b; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+}
+.badge-state-COMPLETADA { background: #dcfce7; color: #166534; }
+.badge-state-PENDIENTE { background: #fef9c3; color: #854d0e; }
+.badge-state-EN_CURSO { background: #dbeafe; color: #1e40af; }
+.badge-state-REVISION_PENDIENTE { background: #f3e8ff; color: #6b21a8; }
+.badge-state-CANCELADA { background: #fee2e2; color: #991b1b; }
+.badge-risk-bajo { background: #dcfce7; color: #166534; }
+.badge-risk-medio { background: #fef3c7; color: #92400e; }
+.badge-risk-alto { background: #fee2e2; color: #991b1b; }
+
+.tag-list { display: flex; flex-wrap: wrap; gap: 4px; }
+.tag {
+  background: #f1f5f9; color: #334155; border-radius: 4px;
+  padding: 2px 7px; font-size: 12px;
+}
+
+.pdf-btn {
+  display: block; margin-top: 6px; padding: 8px 14px;
+  background: #1a3a2a; color: white; border-radius: 7px;
+  border: none; font-size: 13px; font-weight: 600;
+  text-align: center; cursor: pointer; width: 100%;
+}
+.pdf-btn:hover:not(:disabled) { background: #2d5c42; }
+.pdf-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+.pdf-loading { font-size: 12px; color: #64748b; margin-top: 4px; }
+.pdf-error { font-size: 12px; color: #ef4444; margin-top: 4px; }
+.pdf-unavailable {
+  background: #f1f5f9; color: #94a3b8; border: 1px dashed #cbd5e1;
+  border-radius: 7px; padding: 8px 14px; font-size: 12px;
+  text-align: center;
+}
+
+/* ── Legend ── */
+#legend {
+  position: absolute; bottom: 28px; left: 12px; z-index: 1000;
+  background: white; border-radius: 9px; padding: 12px 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.18); font-size: 12px; min-width: 170px;
+  max-height: 70vh; overflow-y: auto;
+}
+#legend h4 { font-size: 12px; font-weight: 700; color: #1a3a2a; margin-bottom: 8px; }
+.leg-row { display: flex; align-items: center; gap: 7px; margin-bottom: 4px; }
+.leg-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+</style>
+</head>
+<body>
+
+<!-- Login overlay -->
+<div id="login-overlay">
+  <div id="login-box">
+    <div id="login-logo">🗺️</div>
+    <h2>Mapa TQI</h2>
+    <p class="subtitle">Tren Querétaro – Irapuato</p>
+    <label>Correo electrónico</label>
+    <input type="email" id="login-email" placeholder="usuario@ejemplo.com" autocomplete="username"/>
+    <label>Contraseña</label>
+    <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
+    <div id="login-error"></div>
+    <button id="login-submit" onclick="doLogin()">Iniciar sesión</button>
+  </div>
+</div>
+
+<div id="header">
+  <div>
+    <h1>Mapa de Calor – Proyecto TQI</h1>
+    <span>Tren Querétaro – Irapuato &nbsp;|&nbsp; Actividades georeferenciadas</span>
+  </div>
+</div>
+
+<div id="user-bar">
+  <span id="user-name">Usuario SAO</span>
+  <button id="logout-btn" onclick="doLogout()">Cerrar sesión</button>
+</div>
+
+<div id="toolbar">
+  <div class="filter-group">
+    <label>🔍</label>
+    <input type="text" id="search-input" placeholder="Buscar actividad, municipio…">
+  </div>
+  <div class="filter-group">
+    <label>Tipo</label>
+    <select id="filter-type">
+      <option value="">Todos</option>
+      <option value="AIN">Acompañamiento Institucional</option><option value="Avalúos y pagos">Avalúos y pagos</option><option value="CAM">Caminamiento</option><option value="CAMINAMIENTO TMQ F8">Caminamiento TMQ F8</option><option value="MAS">Mesa de Atención Social</option><option value="REU">Reunión</option><option value="Seguimiento">Seguimiento</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Frente</label>
+    <select id="filter-frente">
+      <option value="">Todos</option>
+      <option value="F11">F11</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Estado</label>
+    <select id="filter-state">
+      <option value="">Todos</option>
+      <option value="COMPLETADA">Completada</option>
+      <option value="PENDIENTE">Pendiente</option>
+      <option value="REVISION_PENDIENTE">En revisión</option>
+    </select>
+  </div>
+  <button id="clear-btn">Limpiar filtros</button>
+  <span id="count-badge">23 actividades</span>
+</div>
+
+<div id="main">
+  <div id="map"></div>
+  <div id="detail-panel" class="hidden">
+    <div id="panel-header">
+      <span id="panel-title">Detalle de actividad</span>
+      <button id="panel-close">✕</button>
+    </div>
+    <div id="panel-body"></div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <h4>Tipo de actividad</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#8b5cf6"></div><span>Acompañamiento Institucional</span></div><div class="leg-row"><div class="leg-dot" style="background:#6b7280"></div><span>Avalúos y pagos</span></div><div class="leg-row"><div class="leg-dot" style="background:#f59e0b"></div><span>Caminamiento</span></div><div class="leg-row"><div class="leg-dot" style="background:#f97316"></div><span>Caminamiento TMQ F8</span></div><div class="leg-row"><div class="leg-dot" style="background:#ec4899"></div><span>Mesa de Atención Social</span></div><div class="leg-row"><div class="leg-dot" style="background:#3b82f6"></div><span>Reunión</span></div><div class="leg-row"><div class="leg-dot" style="background:#06b6d4"></div><span>Seguimiento</span></div>
+  <hr style="margin:8px 0; border:none; border-top:1px solid #e2e8f0;">
+  <h4>Estado</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#22c55e"></div><span>Completada</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f59e0b"></div><span>Pendiente</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#a855f7"></div><span>En revisión</span></div>
+</div>
+
+<script>
+const ROWS = [{"id": "0bef2a5f-2afa-45f7-887a-72f574a40b9c", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "=Irapuato", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 20.6758761, "lon": -101.3521052, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "2ae6a438-7737-4a75-bf67-f1d5ab811f61", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Municipal / Estatal / PCivil", "result": "Actividad realizada conforme al programa", "topics": ["Seguimiento"], "attendees": ["ARTF", "SEDATU", "Presidencia Municipal"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "1546fd21-01fe-47f0-a273-d87ff96d32f6", "desc": "Reporte PDF"}, {"id": "81ba6b4a-d971-4eea-a0c2-95034c685fdc", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/2ae6a438-7737-4a75-bf67-f1d5ab811f61/documents"}, {"id": "2f719fac-4c7f-4d6e-8cfa-251238a0dc44", "title": "Reunión con Propiedad Privada", "activity_type_code": "AIN", "activity_label": "Reunión con Propiedad Privada", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "=Apaseo el Grande", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "", "pk_start": "35500", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 20.5919326, "lon": -100.5979868, "color": "#8b5cf6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "501651e6-f3c8-42ac-908d-4e93aae8448a", "title": "Seguimiento / Evaluación", "activity_type_code": "Avalúos y pagos", "activity_label": "Seguimiento / Evaluación", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Se obtienen anuencias / permisos", "topics": ["Avalúos y pagos"], "attendees": ["ARTF", "ARTF", "ARTF"], "agreements": [], "assigned_to": "", "pk_start": "95400", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "ca3b492b-0e0a-47e2-96e3-2fc404779870", "desc": "Reporte PDF"}, {"id": "d4ee7f93-6629-4129-949d-73125c8cb1a5", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#6b7280", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/501651e6-f3c8-42ac-908d-4e93aae8448a/documents"}, {"id": "5906e74e-3f5a-4085-b2d0-d3e2c67f71c7", "title": "Mesa de Atención Social", "activity_type_code": "MAS", "activity_label": "Mesa de Atención Social", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Mesa social", "result": "Actividad realizada conforme al programa", "topics": ["Sitios arqueológicos / INAH", "Gálibos ferroviarios"], "attendees": ["ARTF", "Gobierno Municipal"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "4b43fba4-c863-49a4-882d-96e9f3dedb54", "desc": "Reporte PDF"}, {"id": "709f8654-4dc6-41a9-ab71-e3d4d84ba94b", "desc": "Reporte PDF"}], "lat": 20.567362189644143, "lon": -101.1979508379343, "color": "#ec4899", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/5906e74e-3f5a-4085-b2d0-d3e2c67f71c7/documents"}, {"id": "617e1ca7-f190-4644-8a27-7a129a3a5e29", "title": "Técnica / Interinstitucional", "activity_type_code": "Seguimiento", "activity_label": "Técnica / Interinstitucional", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnica / Interinstitucional", "result": "Actividad realizada conforme al programa", "topics": ["Seguimiento"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "396fdc1c-fbac-4644-9349-ec1ea6363f38", "desc": "Reporte PDF"}, {"id": "3df78c2d-11b7-4c55-a72b-3ea6466fceca", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#06b6d4", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/617e1ca7-f190-4644-8a27-7a129a3a5e29/documents"}, {"id": "63d56be9-3807-4ea7-a4d1-4f4c11eeedce", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Marcaje de afectaciones", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "93800", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "276c91ee-7ddb-4890-8788-2fca601a8c40", "desc": "Reporte PDF"}, {"id": "3418ec97-66b8-4e80-b359-64479b88dce3", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/63d56be9-3807-4ea7-a4d1-4f4c11eeedce/documents"}, {"id": "73889f76-0873-4bbb-9812-c851b5603908", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Marcaje de afectaciones", "result": "Se obtienen anuencias / permisos", "topics": ["Anuencia"], "attendees": ["ARTF", "Propiedad Privada"], "agreements": [], "assigned_to": "", "pk_start": "76900", "pk_end": "77800", "has_report": true, "evidence_docs": [{"id": "1330ecb3-500f-4562-8e00-c56f87c6c094", "desc": "Reporte PDF"}, {"id": "d77f2f86-a598-4e76-8b38-d2f6713c7759", "desc": "Reporte PDF"}], "lat": 20.589862715345163, "lon": -101.07354086151867, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/73889f76-0873-4bbb-9812-c851b5603908/documents"}, {"id": "7472617b-a1c6-4300-a8e2-350c2be24bac", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Irapuato", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Marcaje de afectaciones", "result": "Actividad realizada conforme al programa", "topics": ["Tenencia de la tierra"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "7296a62c-6169-47f0-a4b9-834380bf083c", "desc": "Reporte PDF"}, {"id": "8b70d600-e768-4a8f-829d-d13ac9c5b77b", "desc": "Reporte PDF"}], "lat": 20.6758761, "lon": -101.3521052, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/7472617b-a1c6-4300-a8e2-350c2be24bac/documents"}, {"id": "7bb11e7f-2c77-44a7-836a-be7eddfc171f", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Cortazar", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares", "Seguimiento"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "60950", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "5db411fe-9266-460c-9cef-ae81c44574ac", "desc": "Reporte PDF"}, {"id": "90d77a1f-ae6f-48c3-873f-23c6960fecdd", "desc": "Reporte PDF"}], "lat": 20.4220211, "lon": -100.9305673, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/7bb11e7f-2c77-44a7-836a-be7eddfc171f/documents"}, {"id": "97c2e043-0eb1-43be-a641-64ec87cb1c04", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Marcaje de afectaciones", "result": "Actividad realizada conforme al programa", "topics": ["Accesos y pasos vehiculares"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "76900", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "23330b93-189d-407a-ba50-bff6645192e3", "desc": "Reporte PDF"}, {"id": "669bb751-c372-4697-b5cf-73b3d095ae05", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/97c2e043-0eb1-43be-a641-64ec87cb1c04/documents"}, {"id": "a91a21e3-074e-41fa-a452-a0dc71db1581", "title": "Mesa de Atención Social", "activity_type_code": "MAS", "activity_label": "Mesa de Atención Social", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Santa Cruz de Juventino Rosas", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento", "result": "Actividad realizada conforme al programa", "topics": ["Seguimiento"], "attendees": ["ARTF", "SEDATU", "Presidencia Municipal"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "3065309e-5f31-4332-bd07-f3ececc0ce02", "desc": "Reporte PDF"}, {"id": "3b5975d0-4659-4f43-ba37-379181f23eb1", "desc": "Reporte PDF"}], "lat": 20.6825364, "lon": -100.9586774, "color": "#ec4899", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/a91a21e3-074e-41fa-a452-a0dc71db1581/documents"}, {"id": "bfd4ace6-c9a7-4bce-a291-5b768219a001", "title": "Acompañamiento Institucional", "activity_type_code": "AIN", "activity_label": "Acompañamiento Institucional", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Celaya", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Documental", "result": "Actividad realizada conforme al programa", "topics": ["Seguimiento"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "2748d587-fd57-4665-8c74-a35d437110fc", "desc": "Reporte PDF"}, {"id": "d8b410d3-83c6-4040-9bd5-d492d566cb8f", "desc": "Reporte PDF"}], "lat": 20.5222851, "lon": -100.8307739, "color": "#8b5cf6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/bfd4ace6-c9a7-4bce-a291-5b768219a001/documents"}, {"id": "c1245eee-a908-4f81-b91b-7860db1dd4fe", "title": "Reunión", "activity_type_code": "Seguimiento", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnica / Interinstitucional", "result": "Sin quórum / segunda convocatoria programada", "topics": ["Seguimiento"], "attendees": ["ARTF"], "agreements": [], "assigned_to": "", "pk_start": "88000", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "136980ec-80b2-4909-86ed-1f7f8fcfa3f4", "desc": "Reporte PDF"}, {"id": "1f9c13e2-5ec5-43dd-ac1e-d15d55faefef", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#06b6d4", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/c1245eee-a908-4f81-b91b-7860db1dd4fe/documents"}, {"id": "c957a701-ce7f-4c24-a155-a99ae1f2c9ed", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Irapuato", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento / Evaluación", "result": "Actividad realizada conforme al programa", "topics": ["Gálibos ferroviarios"], "attendees": ["ARTF"], "agreements": [], "assigned_to": "", "pk_start": "95000", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "13df2c32-bcfb-4dcd-a5dd-9db821a24f22", "desc": "Reporte PDF"}, {"id": "b78db280-1e4e-4424-923e-87d9815e0b06", "desc": "Reporte PDF"}], "lat": 20.6740385, "lon": -101.3467244, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/c957a701-ce7f-4c24-a155-a99ae1f2c9ed/documents"}, {"id": "d0be049e-a89d-4e45-a41b-d24dcd286cae", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnica / Interinstitucional", "result": "Actividad realizada conforme al programa", "topics": ["Firma de anuencia"], "attendees": ["ARTF"], "agreements": [], "assigned_to": "", "pk_start": "96006", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "66069bc8-afed-409c-9692-1beaf2772c9a", "desc": "Reporte PDF"}, {"id": "e62bb7f3-512a-4f12-93a3-1916359ae65e", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/d0be049e-a89d-4e45-a41b-d24dcd286cae/documents"}, {"id": "d16d1c07-72d1-4140-a604-a939ab394987", "title": "Caminamiento", "activity_type_code": "CAM", "activity_label": "Caminamiento", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Salamanca", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Marcaje de afectaciones", "result": "Actividad realizada conforme al programa", "topics": ["Gálibos ferroviarios"], "attendees": ["ARTF", "SEDATU", "Presidencia Municipal"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "2ad242df-de22-4846-a7a6-c9608167ec94", "desc": "Reporte PDF"}, {"id": "67698461-e7f9-4408-9ba9-e063294e250c", "desc": "Reporte PDF"}], "lat": 20.6511359, "lon": -101.166767, "color": "#f59e0b", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/d16d1c07-72d1-4140-a604-a939ab394987/documents"}, {"id": "d2574c12-1902-4375-a349-6c1883a47923", "title": "Mesa de Atención Social", "activity_type_code": "MAS", "activity_label": "Mesa de Atención Social", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Villagrán", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Seguimiento", "result": "Actividad realizada conforme al programa", "topics": ["Seguimiento"], "attendees": ["ARTF", "SEDATU", "Presidencia Municipal"], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": true, "evidence_docs": [{"id": "2cda6be0-c5d5-4a38-a59b-63f3e6d21a7a", "desc": "Reporte PDF"}, {"id": "83837c33-9d47-4d95-89c8-2ea835a3c9da", "desc": "Reporte PDF"}], "lat": 20.5140574, "lon": -100.996994, "color": "#ec4899", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/d2574c12-1902-4375-a349-6c1883a47923/documents"}, {"id": "dc6510e9-e0f5-44d5-bef6-2a8374589976", "title": "Acompañamiento Institucional", "activity_type_code": "AIN", "activity_label": "Acompañamiento Institucional", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Celaya", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnico", "result": "Firma de acta informativa / COP", "topics": ["Firma de COP", "Avalúos y pagos"], "attendees": ["ATTRAPI", "SICT VINCULACIÓN"], "agreements": [], "assigned_to": "", "pk_start": "36300", "pk_end": "107100", "has_report": true, "evidence_docs": [{"id": "2c61f611-de79-48e6-be01-53b32a5cf7a6", "desc": "Reporte PDF"}, {"id": "7760bd6c-822c-425d-9baf-f42d358247b2", "desc": "Reporte PDF"}], "lat": 20.556740939237812, "lon": -100.8220852113626, "color": "#8b5cf6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/dc6510e9-e0f5-44d5-bef6-2a8374589976/documents"}, {"id": "dcce55c2-676a-44d3-94eb-e8912f578c37", "title": "Acompañamiento Institucional", "activity_type_code": "AIN", "activity_label": "Acompañamiento Institucional", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Celaya", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnico", "result": "Firma de acta informativa / COP", "topics": ["Firma de COP", "Avalúos y pagos"], "attendees": ["ATTRAPI", "SICT VINCULACIÓN"], "agreements": [], "assigned_to": "", "pk_start": "59100", "pk_end": "59400", "has_report": true, "evidence_docs": [{"id": "215bf89a-1ea1-4b59-83fa-4146d0fbafd5", "desc": "Reporte PDF"}, {"id": "8cab29b6-4547-428c-b02e-f8e35df9fe4c", "desc": "Reporte PDF"}], "lat": 20.556730765114555, "lon": -100.82215745256232, "color": "#8b5cf6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/dcce55c2-676a-44d3-94eb-e8912f578c37/documents"}, {"id": "e21eb959-f340-435d-a7e4-b94c37137234", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "Apaseo el Grande", "execution_state": "COMPLETADA", "risk": "bajo", "subcategory": "Técnica / Interinstitucional", "result": "Actividad realizada conforme al programa", "topics": ["Seguimiento"], "attendees": ["ARTF", "SEDATU"], "agreements": [], "assigned_to": "", "pk_start": "35006", "pk_end": "35009", "has_report": true, "evidence_docs": [{"id": "7fe89a1e-b093-451c-b0b9-5653226512ba", "desc": "Reporte PDF"}, {"id": "df5b8d77-fb73-44a7-870d-d26ae636d1da", "desc": "Reporte PDF"}], "lat": 20.6825364, "lon": -100.9586774, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Completada", "report_url": "https://sao-api-97150883570.us-central1.run.app/api/v1/completed-activities/e21eb959-f340-435d-a7e4-b94c37137234/documents"}, {"id": "fb8ba7b1-9a27-4593-ac30-901bb279bacc", "title": "Reunión", "activity_type_code": "REU", "activity_label": "Reunión", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "=Santa Cruz de Juventino Rosas", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "", "pk_start": "", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 20.6825364, "lon": -100.9586774, "color": "#3b82f6", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}, {"id": "ff43e584-b6f0-4bec-a008-1444f569203b", "title": "CAMINAMIENTO TMQ F8", "activity_type_code": "CAMINAMIENTO TMQ F8", "activity_label": "CAMINAMIENTO TMQ F8", "frente": "F11", "estado_geo": "Guanajuato", "municipio": "=Querétaro", "execution_state": "PENDIENTE", "risk": "bajo", "subcategory": "", "result": "", "topics": [], "attendees": [], "agreements": [], "assigned_to": "", "pk_start": "144400", "pk_end": "", "has_report": false, "evidence_docs": [], "lat": 20.2730635, "lon": -99.8816014, "color": "#6b7280", "risk_color": "#22c55e", "state_label": "Pendiente", "report_url": ""}];
+const TYPE_COLORS = {"CAM": "#f59e0b", "REU": "#3b82f6", "AIN": "#8b5cf6", "SOC": "#10b981", "MAS": "#ec4899", "Seguimiento": "#06b6d4", "CAMINAMIENTO TMQ F8": "#f97316"};
+const TYPE_NAMES = {"CAM": "Caminamiento", "REU": "Reunión", "AIN": "Acompañamiento Institucional", "SOC": "Socialización", "MAS": "Mesa de Atención Social", "Seguimiento": "Seguimiento", "CAMINAMIENTO TMQ F8": "Caminamiento TMQ F8"};
+const DEFAULT_COLOR = '#6b7280';
+
+const map = L.map('map').setView([20.6033279743192, -101.0180330766686], 10);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; CartoDB &copy; OSM contributors', maxZoom: 19
+}).addTo(map);
+
+let heatLayer = L.heatLayer([], {radius: 35, blur: 25, maxZoom: 14, minOpacity: 0.35}).addTo(map);
+let markerLayer = L.layerGroup().addTo(map);
+
+const panel = document.getElementById('detail-panel');
+const panelBody = document.getElementById('panel-body');
+const panelTitle = document.getElementById('panel-title');
+document.getElementById('panel-close').onclick = () => panel.classList.add('hidden');
+
+function riskBadge(r) {
+  return `<span class="badge badge-risk-${r || 'bajo'}">${(r || 'bajo').toUpperCase()}</span>`;
+}
+function stateBadge(s) {
+  const labels = {COMPLETADA:'Completada',PENDIENTE:'Pendiente',EN_CURSO:'En curso',REVISION_PENDIENTE:'En revisión',CANCELADA:'Cancelada'};
+  return `<span class="badge badge-state-${s}">${labels[s] || s}</span>`;
+}
+function tagList(arr) {
+  if (!arr || !arr.length) return '<span style="color:#94a3b8;font-size:12px">—</span>';
+  return '<div class="tag-list">' + arr.map(t => `<span class="tag">${t}</span>`).join('') + '</div>';
+}
+function formatPK(raw) {
+  if (!raw) return null;
+  const n = parseInt(String(raw).replace(/\D/g, ''), 10);
+  if (isNaN(n)) return raw;
+  const km = Math.floor(n / 1000);
+  const m = n % 1000;
+  return `${km}+${String(m).padStart(3, '0')}`;
+}
+
+function showDetail(row) {
+  panelTitle.textContent = row.title || row.activity_label;
+  const pkS = formatPK(row.pk_start);
+  const pkE = formatPK(row.pk_end);
+  let pks = (pkS && pkE) ? `${pkS} – ${pkE}` : pkS ? pkS : '—';
+  let pdfBlock;
+  if (!row.has_report || !row.evidence_docs || !row.evidence_docs.length) {
+    pdfBlock = `<div class="pdf-unavailable">Sin reporte generado</div>`;
+  } else {
+    const ev = row.evidence_docs[row.evidence_docs.length - 1];
+    pdfBlock = `<div style="margin-top:6px">
+      <button class="pdf-btn" id="pdf-btn-${ev.id}" onclick="fetchAndOpen('${ev.id}', this)">
+        📄 Ver documento del reporte
+      </button>
+      <div class="pdf-loading" id="pdf-msg-${ev.id}" style="display:none"></div>
+    </div>`;
+  }
+  panelBody.innerHTML = `
+    <div class="detail-section">
+      <h3>Identificación</h3>
+      <div class="detail-row"><span class="detail-label">Tipo</span><span class="detail-value">${TYPE_NAMES[row.activity_type_code] || row.activity_type_code}</span></div>
+      <div class="detail-row"><span class="detail-label">Subcategoría</span><span class="detail-value">${row.subcategory || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">Frente</span><span class="detail-value">${row.frente || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">Estado</span><span class="detail-value">${stateBadge(row.execution_state)}</span></div>
+      <div class="detail-row"><span class="detail-label">Riesgo</span><span class="detail-value">${riskBadge(row.risk)}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Ubicación</h3>
+      <div class="detail-row"><span class="detail-label">Municipio</span><span class="detail-value">${row.municipio || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">Estado</span><span class="detail-value">${row.estado_geo || '—'}</span></div>
+      <div class="detail-row"><span class="detail-label">PK</span><span class="detail-value">${pks}</span></div>
+      <div class="detail-row"><span class="detail-label">GPS</span><span class="detail-value" style="font-size:11px;color:#64748b">${row.lat.toFixed(6)}, ${row.lon.toFixed(6)}</span></div>
+    </div>
+    <div class="detail-section">
+      <h3>Responsable</h3>
+      <div class="detail-row"><span class="detail-label">Asignado a</span><span class="detail-value">${row.assigned_to || '—'}</span></div>
+    </div>
+    ${row.result ? `<div class="detail-section"><h3>Resultado</h3><div style="font-size:13px;color:#1e293b;line-height:1.5">${row.result}</div></div>` : ''}
+    <div class="detail-section">
+      <h3>Temas tratados</h3>
+      ${tagList(row.topics)}
+    </div>
+    ${row.attendees && row.attendees.length ? `<div class="detail-section"><h3>Asistentes</h3>${tagList(row.attendees)}</div>` : ''}
+    ${row.agreements && row.agreements.length ? `<div class="detail-section"><h3>Acuerdos</h3><ul style="font-size:12px;color:#334155;padding-left:16px;line-height:1.6">${row.agreements.map(a=>`<li>${a}</li>`).join('')}</ul></div>` : ''}
+    <div class="detail-section">
+      <h3>Reporte PDF</h3>
+      ${pdfBlock}
+    </div>
+    <div style="font-size:10px;color:#cbd5e1;margin-top:8px">ID: ${row.id}</div>
+  `;
+  panel.classList.remove('hidden');
+}
+
+function makeIcon(color, opacity) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="24" height="32" viewBox="0 0 24 32">
+    <path fill="${color}" fill-opacity="${opacity}" stroke="white" stroke-width="1.5"
+      d="M12 2C7.6 2 4 5.6 4 10c0 6.4 8 20 8 20s8-13.6 8-20c0-4.4-3.6-8-8-8z"/>
+    <circle cx="12" cy="10" r="4" fill="white" fill-opacity="0.9"/>
+  </svg>`;
+  return L.divIcon({html: svg, className: '', iconSize: [24,32], iconAnchor: [12,32], popupAnchor: [0,-32]});
+}
+
+function render(filtered) {
+  markerLayer.clearLayers();
+  const heatPts = [];
+  filtered.forEach(row => {
+    const color = TYPE_COLORS[row.activity_type_code] || DEFAULT_COLOR;
+    const opacity = row.execution_state === 'COMPLETADA' ? 1 : 0.55;
+    const marker = L.marker([row.lat, row.lon], {icon: makeIcon(color, opacity)});
+    marker.bindTooltip(`<b>${row.title}</b><br>${row.frente} · ${row.municipio || row.estado_geo}`, {offset:[0,-28]});
+    marker.on('click', () => { showDetail(row); map.panTo([row.lat, row.lon]); });
+    markerLayer.addLayer(marker);
+    heatPts.push([row.lat, row.lon, 1]);
+  });
+  heatLayer.setLatLngs(heatPts);
+  document.getElementById('count-badge').textContent = filtered.length + ' actividades';
+}
+
+function applyFilters() {
+  const search = document.getElementById('search-input').value.toLowerCase().trim();
+  const type   = document.getElementById('filter-type').value;
+  const frente = document.getElementById('filter-frente').value;
+  const state  = document.getElementById('filter-state').value;
+  const filtered = ROWS.filter(r => {
+    if (type   && r.activity_type_code !== type)   return false;
+    if (frente && r.frente !== frente)               return false;
+    if (state  && r.execution_state !== state)       return false;
+    if (search) {
+      const hay = [r.title,r.municipio,r.estado_geo,r.assigned_to,r.subcategory,r.result,
+                   ...(r.topics||[]),...(r.attendees||[])].join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+  render(filtered);
+}
+
+document.getElementById('search-input').addEventListener('input', applyFilters);
+document.getElementById('filter-type').addEventListener('change', applyFilters);
+document.getElementById('filter-frente').addEventListener('change', applyFilters);
+document.getElementById('filter-state').addEventListener('change', applyFilters);
+document.getElementById('clear-btn').onclick = () => {
+  document.getElementById('search-input').value = '';
+  document.getElementById('filter-type').value = '';
+  document.getElementById('filter-frente').value = '';
+  document.getElementById('filter-state').value = '';
+  applyFilters();
+};
+
+const API_BASE = 'https://sao-api-97150883570.us-central1.run.app';
+let _token = null;
+
+async function doLogin() {
+  const email = document.getElementById('login-email').value.trim();
+  const pass  = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  const btn   = document.getElementById('login-submit');
+  errEl.textContent = '';
+  if (!email || !pass) { errEl.textContent = 'Ingresa correo y contraseña.'; return; }
+  btn.disabled = true; btn.textContent = 'Entrando…';
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/auth/login`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({email, password: pass})
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `Error ${res.status}`);
+    _token = data.access_token;
+    document.getElementById('login-overlay').style.display = 'none';
+    document.getElementById('user-bar').style.display = 'flex';
+    document.getElementById('user-name').textContent = '✓ ' + email;
+  } catch (err) {
+    errEl.textContent = '✗ ' + err.message;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Iniciar sesión';
+  }
+}
+
+function doLogout() {
+  _token = null;
+  document.getElementById('user-bar').style.display = 'none';
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').textContent = '';
+}
+
+document.getElementById('login-email').addEventListener('keydown', e => { if (e.key==='Enter') document.getElementById('login-pass').focus(); });
+document.getElementById('login-pass').addEventListener('keydown', e => { if (e.key==='Enter') doLogin(); });
+
+async function fetchAndOpen(evidenceId, btnEl) {
+  const msgEl = document.getElementById('pdf-msg-' + evidenceId);
+  if (!_token) {
+    msgEl.style.display='block'; msgEl.className='pdf-error';
+    msgEl.textContent='⚠ Sesión expirada. Recarga la página e inicia sesión nuevamente.'; return;
+  }
+  btnEl.disabled = true; msgEl.style.display='block'; msgEl.className='pdf-loading'; msgEl.textContent='Obteniendo enlace seguro…';
+  try {
+    const res = await fetch(`${API_BASE}/api/v1/evidences/${evidenceId}/download-url`, {headers: {'Authorization':'Bearer '+_token}});
+    if (!res.ok) { const b=await res.json().catch(()=>({})); throw new Error(b.detail||`Error ${res.status}`); }
+    const data = await res.json();
+    window.open(data.signedUrl, '_blank');
+    msgEl.style.display='none';
+  } catch(err) {
+    msgEl.className='pdf-error'; msgEl.textContent='✗ '+err.message;
+  } finally { btnEl.disabled=false; }
+}
+
+render(ROWS);
+</script>
+</body>
+</html>

@@ -1204,6 +1204,7 @@ class SyncService {
                 createdAt: dto.createdAt.toLocal(),
                 startedAt: Value(startedAt),
                 finishedAt: Value(finishedAt),
+                assignmentStartAt: Value(dto.assignmentStartAt?.toLocal()),
                 createdByUserId: dto.createdByUserId,
                 assignedToUserId: Value(dto.assignedToUserId?.trim()),
                 status: Value(localStatus),

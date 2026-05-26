@@ -1,6 +1,7 @@
 import '../../../core/compat/io_compat.dart';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../../data/database/app_database.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../data/repositories/evidence_repository.dart';
@@ -162,6 +163,11 @@ class _EvidenceGalleryPanelState extends State<EvidenceGalleryPanel> {
                     );
                   }
 
+                  final isPdf = evidence.fileType == 'DOCUMENT' ||
+                      imageUrl.toLowerCase().contains('.pdf');
+                  if (isPdf) {
+                    return _buildPdfViewer(context, evidence, imageUrl);
+                  }
                   return _buildEvidenceViewer(context, evidence, imageUrl);
                 },
               ),
@@ -186,6 +192,90 @@ class _EvidenceGalleryPanelState extends State<EvidenceGalleryPanel> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPdfViewer(
+    BuildContext context,
+    Evidence evidence,
+    String pdfUrl,
+  ) {
+    final caption = (evidence.caption ?? '').trim();
+    return Container(
+      color: SaoColors.gray100,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(SaoSpacing.xl),
+              decoration: BoxDecoration(
+                color: SaoColors.surface,
+                borderRadius: BorderRadius.circular(SaoRadii.lg),
+                border: Border.all(color: SaoColors.border),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.picture_as_pdf_rounded,
+                    size: 72,
+                    color: Color(0xFFE53935),
+                  ),
+                  const SizedBox(height: SaoSpacing.md),
+                  Text(
+                    'Documento PDF',
+                    style: SaoTypography.sectionTitle.copyWith(fontSize: 18),
+                  ),
+                  if (caption.isNotEmpty) ...
+                  [
+                    const SizedBox(height: SaoSpacing.sm),
+                    Text(
+                      caption,
+                      textAlign: TextAlign.center,
+                      style: SaoTypography.bodyText.copyWith(
+                        color: SaoColors.gray600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: SaoSpacing.lg),
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final uri = Uri.parse(pdfUrl);
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri,
+                            mode: LaunchMode.externalApplication);
+                      } else if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('No se pudo abrir el PDF'),
+                            backgroundColor: SaoColors.error,
+                          ),
+                        );
+                      }
+                    },
+                    icon: const Icon(Icons.open_in_new_rounded),
+                    label: const Text('Abrir PDF'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFFE53935),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: SaoSpacing.lg, vertical: SaoSpacing.md),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

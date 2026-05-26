@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAO – Mapa Interactivo de Proyectos</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', Arial, sans-serif; background: #f1f5f9; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+/* ── Login overlay ── */
+#login-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: linear-gradient(135deg, #1e3a5f 0%, #0f2440 100%);
+  display: flex; align-items: center; justify-content: center;
+}
+#login-box {
+  background: white; border-radius: 14px; padding: 36px 40px;
+  width: 340px; box-shadow: 0 20px 60px rgba(0,0,0,.4);
+  display: flex; flex-direction: column; gap: 16px;
+}
+#login-logo { text-align: center; font-size: 36px; margin-bottom: -6px; }
+#login-box h2 { font-size: 20px; font-weight: 700; color: #1e3a5f; text-align: center; }
+#login-box .subtitle { font-size: 12px; color: #94a3b8; text-align: center; margin-top: -10px; }
+#login-box label { font-size: 12px; font-weight: 600; color: #475569; margin-bottom: -10px; }
+#login-box input {
+  border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px;
+  font-size: 14px; outline: none; width: 100%;
+  transition: border-color .15s;
+}
+#login-box input:focus { border-color: #1e3a5f; }
+#login-submit {
+  background: #1e3a5f; color: white; border: none; border-radius: 8px;
+  padding: 11px; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px;
+  transition: background .15s;
+}
+#login-submit:hover:not(:disabled) { background: #2d5187; }
+#login-submit:disabled { background: #94a3b8; cursor: not-allowed; }
+#login-error { font-size: 12px; color: #ef4444; text-align: center; min-height: 16px; }
+
+/* ── Header ── */
+#header {
+  background: #1e3a5f; color: white; padding: 9px 18px;
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+#header-left { display: flex; align-items: center; gap: 10px; }
+#header h1 { font-size: 16px; font-weight: 700; }
+#header .subtitle { font-size: 11px; opacity: .7; margin-top: 1px; }
+#user-info { font-size: 12px; opacity: .8; display: flex; align-items: center; gap: 10px; }
+#logout-btn {
+  background: rgba(255,255,255,.15); border: 1px solid rgba(255,255,255,.3);
+  color: white; border-radius: 5px; padding: 3px 10px; font-size: 11px; cursor: pointer;
+  transition: background .15s;
+}
+#logout-btn:hover { background: rgba(255,255,255,.25); }
+
+/* ── Toolbar ── */
+#toolbar {
+  background: white; border-bottom: 1px solid #e2e8f0;
+  padding: 8px 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; flex-shrink: 0;
+}
+#toolbar select, #toolbar input[type="text"] {
+  border: 1px solid #cbd5e1; border-radius: 6px; padding: 5px 10px;
+  font-size: 13px; background: #f8fafc; outline: none; transition: border-color .15s;
+}
+#toolbar select:focus, #toolbar input[type="text"]:focus { border-color: #3b82f6; }
+#project-select { font-weight: 600; color: #1e3a5f; min-width: 200px; }
+#search-input { width: 180px; }
+.filter-group { display: flex; align-items: center; gap: 5px; }
+.filter-group label { font-size: 12px; color: #64748b; font-weight: 600; white-space: nowrap; }
+#clear-btn {
+  padding: 5px 12px; background: #f1f5f9; border: 1px solid #cbd5e1;
+  border-radius: 6px; font-size: 13px; cursor: pointer; color: #475569;
+  transition: background .15s;
+}
+#clear-btn:hover { background: #e2e8f0; }
+#load-btn {
+  padding: 5px 14px; background: #1e3a5f; border: none;
+  border-radius: 6px; font-size: 13px; cursor: pointer; color: white; font-weight: 600;
+  transition: background .15s;
+}
+#load-btn:hover:not(:disabled) { background: #2d5187; }
+#load-btn:disabled { background: #94a3b8; cursor: not-allowed; }
+#count-badge {
+  background: #1e3a5f; color: white; border-radius: 20px;
+  padding: 3px 10px; font-size: 12px; font-weight: 600;
+}
+#status-msg { font-size: 12px; color: #64748b; flex-shrink: 0; }
+
+/* ── Main ── */
+#main { display: flex; flex: 1; overflow: hidden; }
+#map { flex: 1; }
+
+/* ── Detail panel ── */
+#detail-panel {
+  width: 370px; flex-shrink: 0; background: white; overflow-y: auto;
+  border-left: 2px solid #e2e8f0; display: flex; flex-direction: column;
+  transition: width .2s;
+}
+#detail-panel.hidden { width: 0; overflow: hidden; border: none; }
+#panel-header {
+  background: #1e3a5f; color: white; padding: 12px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+  font-weight: 700; font-size: 14px; flex-shrink: 0;
+  position: sticky; top: 0; z-index: 10;
+}
+#panel-close {
+  cursor: pointer; font-size: 18px; line-height: 1;
+  background: none; border: none; color: white; padding: 0 4px;
+}
+#panel-body { padding: 16px; flex: 1; }
+
+.detail-section { margin-bottom: 16px; }
+.detail-section h3 {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  color: #94a3b8; letter-spacing: .8px; margin-bottom: 6px;
+  border-bottom: 1px solid #f1f5f9; padding-bottom: 4px;
+}
+.detail-row { display: flex; gap: 8px; margin-bottom: 5px; font-size: 13px; }
+.detail-label { color: #64748b; flex-shrink: 0; min-width: 100px; font-weight: 500; }
+.detail-value { color: #1e293b; word-break: break-word; }
+
+.badge {
+  display: inline-block; padding: 2px 8px; border-radius: 12px;
+  font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .3px;
+}
+.badge-COMPLETADA      { background: #dcfce7; color: #166534; }
+.badge-PENDIENTE       { background: #fef9c3; color: #854d0e; }
+.badge-EN_CURSO        { background: #dbeafe; color: #1e40af; }
+.badge-REVISION_PENDIENTE { background: #f3e8ff; color: #6b21a8; }
+.badge-CANCELED        { background: #fee2e2; color: #991b1b; }
+.badge-CANCELADA       { background: #fee2e2; color: #991b1b; }
+.badge-APPROVED        { background: #dcfce7; color: #166534; }
+.badge-REJECTED        { background: #fee2e2; color: #991b1b; }
+.badge-PENDING_REVIEW  { background: #fef3c7; color: #92400e; }
+.badge-CHANGES_REQUIRED { background: #ffedd5; color: #9a3412; }
+
+/* ── Legend ── */
+#legend {
+  position: absolute; bottom: 28px; left: 12px; z-index: 1000;
+  background: white; border-radius: 9px; padding: 12px 16px;
+  box-shadow: 0 2px 12px rgba(0,0,0,.18); font-size: 12px; min-width: 180px;
+}
+#legend h4 { font-size: 12px; font-weight: 700; color: #1e3a5f; margin-bottom: 8px; }
+.leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.leg-dot { width: 13px; height: 13px; border-radius: 50%; flex-shrink: 0; border: 1.5px solid rgba(0,0,0,.15); }
+.leg-label { color: #334155; }
+
+/* ── Loading spinner ── */
+#loading-overlay {
+  position: absolute; inset: 0; background: rgba(255,255,255,.75);
+  display: none; align-items: center; justify-content: center; z-index: 500;
+  flex-direction: column; gap: 12px;
+}
+#loading-overlay.active { display: flex; }
+.spinner {
+  width: 40px; height: 40px; border: 4px solid #e2e8f0;
+  border-top-color: #1e3a5f; border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+#loading-text { font-size: 14px; color: #475569; font-weight: 600; }
+
+/* ── Empty state ── */
+#empty-state {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  text-align: center; color: #94a3b8; font-size: 14px; z-index: 100;
+  background: white; border-radius: 12px; padding: 28px 36px;
+  box-shadow: 0 2px 20px rgba(0,0,0,.1); display: none;
+}
+#empty-state .icon { font-size: 36px; margin-bottom: 8px; }
+
+/* ── No-GPS notice ── */
+#nogps-banner {
+  background: #fef9c3; border-bottom: 1px solid #fde047;
+  padding: 5px 14px; font-size: 12px; color: #713f12;
+  display: none; align-items: center; gap: 6px; flex-shrink: 0;
+}
+</style>
+</head>
+<body>
+
+<!-- Login overlay -->
+<div id="login-overlay">
+  <div id="login-box">
+    <div id="login-logo">🗺️</div>
+    <h2>SAO – Mapa de Proyectos</h2>
+    <p class="subtitle">Sistema de Administración Operativa</p>
+    <label for="login-email">Correo electrónico</label>
+    <input type="email" id="login-email" placeholder="usuario@ejemplo.com" autocomplete="username"/>
+    <label for="login-pass">Contraseña</label>
+    <input type="password" id="login-pass" placeholder="••••••••" autocomplete="current-password"/>
+    <div id="login-error"></div>
+    <button id="login-submit" onclick="doLogin()">Iniciar sesión</button>
+  </div>
+</div>
+
+<!-- Header -->
+<div id="header">
+  <div id="header-left">
+    <div>
+      <h1>🗺️ SAO – Mapa Interactivo de Proyectos</h1>
+      <div class="subtitle">Actividades georeferenciadas por proyecto</div>
+    </div>
+  </div>
+  <div id="user-info">
+    <span id="user-name-display"></span>
+    <button id="logout-btn" onclick="doLogout()">Cerrar sesión</button>
+  </div>
+</div>
+
+<!-- No GPS banner -->
+<div id="nogps-banner">
+  ⚠️ <span id="nogps-text">Algunas actividades no tienen coordenadas GPS y no se muestran en el mapa.</span>
+</div>
+
+<!-- Toolbar -->
+<div id="toolbar">
+  <div class="filter-group">
+    <label>Proyecto</label>
+    <select id="project-select" onchange="onProjectChange()">
+      <option value="">— Selecciona un proyecto —</option>
+    </select>
+  </div>
+  <button id="load-btn" onclick="loadActivities()" disabled>Cargar mapa</button>
+  <div class="filter-group" style="margin-left:8px">
+    <label>Estado</label>
+    <select id="filter-state" onchange="applyFilters()">
+      <option value="">Todos</option>
+      <option value="PENDIENTE">Pendiente</option>
+      <option value="EN_CURSO">En curso</option>
+      <option value="REVISION_PENDIENTE">En revisión</option>
+      <option value="COMPLETADA">Completada</option>
+      <option value="CANCELED">Cancelada</option>
+      <option value="CANCELADA">Cancelada (legacy)</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Tipo</label>
+    <select id="filter-type" onchange="applyFilters()">
+      <option value="">Todos los tipos</option>
+    </select>
+  </div>
+  <div class="filter-group" id="filter-project-group" style="display:none">
+    <label>Proyecto</label>
+    <select id="filter-project" onchange="applyFilters()">
+      <option value="">Todos los proyectos</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>🔍</label>
+    <input type="text" id="search-input" placeholder="Buscar título, tipo, PK…" oninput="applyFilters()">
+  </div>
+  <button id="clear-btn" onclick="clearFilters()">Limpiar filtros</button>
+  <span id="count-badge" style="display:none">0 actividades</span>
+  <span id="status-msg"></span>
+</div>
+
+<!-- Map area -->
+<div id="main" style="position:relative">
+  <div id="map"></div>
+
+  <!-- Loading overlay -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+    <div id="loading-text">Cargando actividades…</div>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state">
+    <div class="icon">📍</div>
+    <div style="font-weight:700;color:#475569;margin-bottom:4px">Sin actividades con GPS</div>
+    <div style="font-size:12px">Selecciona un proyecto y presiona "Cargar mapa"</div>
+  </div>
+
+  <!-- Detail panel -->
+  <div id="detail-panel" class="hidden">
+    <div id="panel-header">
+      <span id="panel-title">Detalle de actividad</span>
+      <button id="panel-close" onclick="closePanel()">✕</button>
+    </div>
+    <div id="panel-body"></div>
+  </div>
+</div>
+
+<!-- Legend -->
+<div id="legend">
+  <h4>Estado de ejecución</h4>
+  <div class="leg-row"><div class="leg-dot" style="background:#22c55e"></div><span class="leg-label">Completada</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#3b82f6"></div><span class="leg-label">En curso</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#a855f7"></div><span class="leg-label">En revisión</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#f59e0b"></div><span class="leg-label">Pendiente</span></div>
+  <div class="leg-row"><div class="leg-dot" style="background:#ef4444"></div><span class="leg-label">Cancelada</span></div>
+</div>
+
+<script>
+'use strict';
+
+const API = 'https://sao-api-97150883570.us-central1.run.app/api/v1';
+let _token = null;
+let _allRows = [];
+let _markerLayer = null;
+let _map = null;
+
+/* ── State colors ── */
+const STATE_COLORS = {
+  COMPLETADA:          '#22c55e',
+  EN_CURSO:            '#3b82f6',
+  REVISION_PENDIENTE:  '#a855f7',
+  PENDIENTE:           '#f59e0b',
+  CANCELED:            '#ef4444',
+  CANCELADA:           '#ef4444',
+};
+const STATE_LABELS = {
+  COMPLETADA:          'Completada',
+  EN_CURSO:            'En curso',
+  REVISION_PENDIENTE:  'En revisión',
+  PENDIENTE:           'Pendiente',
+  CANCELED:            'Cancelada',
+  CANCELADA:           'Cancelada',
+};
+const REVIEW_LABELS = {
+  NOT_APPLICABLE:   '—',
+  PENDING_REVIEW:   'Pendiente de revisión',
+  CHANGES_REQUIRED: 'Cambios requeridos',
+  APPROVED:         'Aprobada',
+  REJECTED:         'Rechazada',
+};
+
+/* ── Map init ── */
+function initMap() {
+  _map = L.map('map').setView([24.5, -102.5], 5);
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
+    maxZoom: 19
+  }).addTo(_map);
+  _markerLayer = L.layerGroup().addTo(_map);
+}
+
+/* ── Auth helpers ── */
+function authHeaders() {
+  return { 'Authorization': 'Bearer ' + _token, 'Content-Type': 'application/json' };
+}
+
+async function doLogin() {
+  const email    = document.getElementById('login-email').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl    = document.getElementById('login-error');
+  const btn      = document.getElementById('login-submit');
+
+  errEl.textContent = '';
+  if (!email || !password) { errEl.textContent = 'Ingresa correo y contraseña.'; return; }
+
+  btn.disabled = true;
+  btn.textContent = 'Iniciando sesión…';
+
+  try {
+    const res = await fetch(`${API}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      errEl.textContent = body.detail || 'Credenciales incorrectas.';
+      return;
+    }
+    const data = await res.json();
+    _token = data.access_token;
+
+    // Get user info
+    const meRes = await fetch(`${API}/auth/me`, { headers: authHeaders() });
+    if (meRes.ok) {
+      const me = await meRes.json();
+      document.getElementById('user-name-display').textContent =
+        (me.full_name || me.email || 'Usuario') + ' ·';
+    }
+
+    document.getElementById('login-overlay').style.display = 'none';
+    await loadProjects();
+  } catch (e) {
+    errEl.textContent = 'Error de conexión. Verifica tu red.';
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Iniciar sesión';
+  }
+}
+
+document.getElementById('login-email').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('login-pass').focus();
+});
+document.getElementById('login-pass').addEventListener('keydown', e => {
+  if (e.key === 'Enter') doLogin();
+});
+
+function doLogout() {
+  _token = null;
+  _allRows = [];
+  _markerLayer && _markerLayer.clearLayers();
+  document.getElementById('project-select').innerHTML = '<option value="">— Selecciona un proyecto —</option>';
+  document.getElementById('filter-type').innerHTML = '<option value="">Todos los tipos</option>';
+  document.getElementById('filter-project').innerHTML = '<option value="">Todos los proyectos</option>';
+  document.getElementById('filter-project-group').style.display = 'none';
+  document.getElementById('count-badge').style.display = 'none';
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-pass').value = '';
+  document.getElementById('login-error').textContent = '';
+  document.getElementById('login-overlay').style.display = 'flex';
+  document.getElementById('login-submit').disabled = false;
+  document.getElementById('login-submit').textContent = 'Iniciar sesión';
+  closePanel();
+  showEmpty(true);
+}
+
+/* ── Projects ── */
+async function loadProjects() {
+  setStatus('Cargando proyectos…');
+  try {
+    const res = await fetch(`${API}/projects`, { headers: authHeaders() });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const projects = await res.json();
+
+    const filtered = projects
+      .filter(p => p.id && p.id !== 'PROJECT_0' && p.id !== 'P0')
+      .sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+
+    const sel = document.getElementById('project-select');
+    sel.innerHTML = '<option value="">— Selecciona un proyecto —</option>';
+
+    // Opción "todos"
+    const allOpt = document.createElement('option');
+    allOpt.value = '__ALL__';
+    allOpt.textContent = '🌐 Todos los proyectos (' + filtered.length + ')';
+    sel.appendChild(allOpt);
+
+    // Separador visual
+    const sep = document.createElement('option');
+    sep.disabled = true;
+    sep.textContent = '──────────────────';
+    sel.appendChild(sep);
+
+    filtered.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p.id;
+      opt.textContent = p.name ? `${p.name} (${p.id})` : p.id;
+      sel.appendChild(opt);
+    });
+    setStatus(filtered.length + ' proyectos disponibles');
+    showEmpty(true);
+  } catch (e) {
+    setStatus('Error al cargar proyectos: ' + e.message);
+  }
+}
+
+function onProjectChange() {
+  const pid = document.getElementById('project-select').value;
+  document.getElementById('load-btn').disabled = !pid;
+  if (!pid) {
+    _allRows = [];
+    _markerLayer && _markerLayer.clearLayers();
+    document.getElementById('count-badge').style.display = 'none';
+    document.getElementById('filter-type').innerHTML = '<option value="">Todos los tipos</option>';
+    document.getElementById('filter-project').innerHTML = '<option value="">Todos los proyectos</option>';
+    document.getElementById('filter-project-group').style.display = 'none';
+    closePanel();
+    showEmpty(true);
+  }
+}
+
+/* ── Load activities for one project (appends to _allRows) ── */
+async function _fetchProjectActivities(pid, labelForStatus) {
+  let page = 1;
+  let hasNext = true;
+  let total = 0;
+  while (hasNext) {
+    showLoading(true, `Cargando ${escHtml(labelForStatus)}… (pág. ${page})`);
+    const url = `${API}/activities?project_id=${encodeURIComponent(pid)}&page=${page}&page_size=100`;
+    const res = await fetch(url, { headers: authHeaders() });
+    if (!res.ok) throw new Error('HTTP ' + res.status + ' en proyecto ' + pid);
+    const data = await res.json();
+    total = data.total || 0;
+    hasNext = data.has_next || false;
+    _allRows.push(...(data.items || []));
+    page++;
+  }
+  return total;
+}
+
+/* ── Load activities ── */
+async function loadActivities() {
+  const pid = document.getElementById('project-select').value;
+  if (!pid) return;
+
+  showLoading(true, 'Cargando actividades…');
+  showEmpty(false);
+  closePanel();
+  _markerLayer.clearLayers();
+  _allRows = [];
+  document.getElementById('count-badge').style.display = 'none';
+  document.getElementById('nogps-banner').style.display = 'none';
+  document.getElementById('filter-project-group').style.display = 'none';
+
+  try {
+    let grandTotal = 0;
+
+    if (pid === '__ALL__') {
+      // Collect all individual project options
+      const projectOptions = Array.from(document.getElementById('project-select').options)
+        .filter(o => o.value && o.value !== '__ALL__' && !o.disabled);
+      for (const opt of projectOptions) {
+        try {
+          const t = await _fetchProjectActivities(opt.value, opt.textContent);
+          grandTotal += t;
+        } catch (_) {
+          // skip projects the user can't access
+        }
+      }
+    } else {
+      const label = document.getElementById('project-select').selectedOptions[0]?.textContent || pid;
+      grandTotal = await _fetchProjectActivities(pid, label);
+    }
+
+    // Populate type filter
+    const types = [...new Set(_allRows.map(r => r.activity_type_code).filter(Boolean))].sort();
+    const typeSel = document.getElementById('filter-type');
+    typeSel.innerHTML = '<option value="">Todos los tipos</option>';
+    types.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t; opt.textContent = t;
+      typeSel.appendChild(opt);
+    });
+
+    // Populate project filter (only when multiple projects loaded)
+    const projects = [...new Set(_allRows.map(r => r.project_id).filter(Boolean))].sort();
+    const projSel = document.getElementById('filter-project');
+    projSel.innerHTML = '<option value="">Todos los proyectos</option>';
+    projects.forEach(p => {
+      const opt = document.createElement('option');
+      opt.value = p; opt.textContent = p;
+      projSel.appendChild(opt);
+    });
+    if (projects.length > 1) {
+      document.getElementById('filter-project-group').style.display = 'flex';
+    }
+
+    // Clear other filters
+    document.getElementById('filter-state').value = '';
+    document.getElementById('filter-project').value = '';
+    document.getElementById('search-input').value = '';
+
+    const withGPS = _allRows.filter(r => r.latitude && r.longitude);
+    const noGPS   = _allRows.length - withGPS.length;
+
+    if (noGPS > 0) {
+      document.getElementById('nogps-text').textContent =
+        `${noGPS} actividad${noGPS > 1 ? 'es' : ''} sin coordenadas GPS no se muestra${noGPS > 1 ? 'n' : ''} en el mapa.`;
+      document.getElementById('nogps-banner').style.display = 'flex';
+    }
+
+    applyFilters();
+    setStatus(`${_allRows.length} actividades · ${withGPS.length} con GPS · ${projects.length} proyecto${projects.length !== 1 ? 's' : ''}`);
+
+    // Fit map to markers
+    if (withGPS.length > 0) {
+      const lats = withGPS.map(r => parseFloat(r.latitude));
+      const lons = withGPS.map(r => parseFloat(r.longitude));
+      const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+      const minLon = Math.min(...lons), maxLon = Math.max(...lons);
+      _map.fitBounds([[minLat, minLon], [maxLat, maxLon]], { padding: [50, 50], maxZoom: 14 });
+    } else {
+      showEmpty(true);
+    }
+  } catch (e) {
+    setStatus('Error al cargar actividades: ' + e.message);
+    showEmpty(true);
+  } finally {
+    showLoading(false);
+  }
+}
+
+/* ── Render markers ── */
+function applyFilters() {
+  const stateF   = document.getElementById('filter-state').value;
+  const typeF    = document.getElementById('filter-type').value;
+  const projectF = document.getElementById('filter-project').value;
+  const search   = document.getElementById('search-input').value.toLowerCase().trim();
+
+  const filtered = _allRows.filter(r => {
+    if (!r.latitude || !r.longitude) return false;
+    if (stateF) {
+      const normalized = r.execution_state === 'CANCELADA' ? 'CANCELED' : r.execution_state;
+      const filterNorm  = stateF          === 'CANCELADA' ? 'CANCELED' : stateF;
+      if (normalized !== filterNorm) return false;
+    }
+    if (typeF    && r.activity_type_code !== typeF)    return false;
+    if (projectF && r.project_id         !== projectF) return false;
+    if (search) {
+      const hay = [
+        r.title, r.activity_type_code, r.description,
+        r.assigned_to_user_name, formatPK(r.pk_start), formatPK(r.pk_end),
+        r.execution_state, r.front_id
+      ].filter(Boolean).join(' ').toLowerCase();
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  renderMarkers(filtered);
+
+  const badge = document.getElementById('count-badge');
+  if (_allRows.length > 0) {
+    badge.style.display = 'inline-block';
+    badge.textContent = `${filtered.length} actividad${filtered.length !== 1 ? 'es' : ''}`;
+  }
+
+  if (filtered.length === 0 && _allRows.length > 0) {
+    showEmpty(true, 'Sin resultados', 'Intenta con otros filtros.');
+  } else {
+    showEmpty(false);
+  }
+}
+
+function renderMarkers(rows) {
+  _markerLayer.clearLayers();
+  rows.forEach(row => {
+    const lat = parseFloat(row.latitude);
+    const lon = parseFloat(row.longitude);
+    if (isNaN(lat) || isNaN(lon)) return;
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return;
+
+    const color   = STATE_COLORS[row.execution_state] || '#6b7280';
+    const opacity = row.execution_state === 'COMPLETADA' ? 1 : 0.8;
+    const marker  = L.marker([lat, lon], { icon: makeIcon(color, opacity) });
+
+    const pkLabel = buildPKLabel(row.pk_start, row.pk_end);
+    marker.bindTooltip(
+      `<b>${escHtml(row.title || row.activity_type_code || 'Actividad')}</b><br>` +
+      `${escHtml(STATE_LABELS[row.execution_state] || row.execution_state)}` +
+      (pkLabel ? ` · ${escHtml(pkLabel)}` : '') +
+      (row.project_id ? ` <span style="opacity:.7">· ${escHtml(row.project_id)}</span>` : ''),
+      { offset: [0, -28], direction: 'top' }
+    );
+    marker.on('click', () => {
+      showDetail(row);
+      _map.panTo([lat, lon], { animate: true });
+    });
+    _markerLayer.addLayer(marker);
+  });
+}
+
+/* ── Marker icon ── */
+function makeIcon(color, opacity) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="26" height="34" viewBox="0 0 26 34">
+    <path fill="${color}" fill-opacity="${opacity}" stroke="white" stroke-width="1.8"
+      d="M13 2C8.03 2 4 6.03 4 11c0 7.25 9 21 9 21s9-13.75 9-21c0-4.97-4.03-9-9-9z"/>
+    <circle cx="13" cy="11" r="4.5" fill="white" fill-opacity=".9"/>
+  </svg>`;
+  return L.divIcon({
+    html: svg,
+    className: '',
+    iconSize: [26, 34],
+    iconAnchor: [13, 34],
+    popupAnchor: [0, -34]
+  });
+}
+
+/* ── Detail panel ── */
+function showDetail(row) {
+  const title = row.title || row.activity_type_code || 'Actividad';
+  document.getElementById('panel-title').textContent = title;
+
+  const execState    = row.execution_state || '—';
+  const reviewState  = row.review_state || 'NOT_APPLICABLE';
+  const pkLabel      = buildPKLabel(row.pk_start, row.pk_end);
+  const lat          = parseFloat(row.latitude);
+  const lon          = parseFloat(row.longitude);
+  const gpsStr       = (!isNaN(lat) && !isNaN(lon)) ? `${lat.toFixed(6)}, ${lon.toFixed(6)}` : '—';
+  const createdAt    = row.created_at ? new Date(row.created_at).toLocaleString('es-MX') : '—';
+  const updatedAt    = row.updated_at ? new Date(row.updated_at).toLocaleString('es-MX') : '—';
+
+  const mapsLink = (!isNaN(lat) && !isNaN(lon))
+    ? `<a href="https://www.google.com/maps?q=${lat},${lon}" target="_blank" rel="noopener noreferrer"
+         style="font-size:11px;color:#3b82f6;text-decoration:none;">📍 Ver en Google Maps</a>`
+    : '';
+
+  document.getElementById('panel-body').innerHTML = `
+    <div class="detail-section">
+      <h3>Identificación</h3>
+      <div class="detail-row">
+        <span class="detail-label">Tipo</span>
+        <span class="detail-value">${escHtml(row.activity_type_code || '—')}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Estado ejec.</span>
+        <span class="detail-value"><span class="badge badge-${escHtml(execState)}">${escHtml(STATE_LABELS[execState] || execState)}</span></span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Revisión</span>
+        <span class="detail-value"><span class="badge badge-${escHtml(reviewState)}">${escHtml(REVIEW_LABELS[reviewState] || reviewState)}</span></span>
+      </div>
+      ${row.title ? `<div class="detail-row"><span class="detail-label">Título</span><span class="detail-value">${escHtml(row.title)}</span></div>` : ''}
+      ${row.description ? `<div class="detail-row"><span class="detail-label">Descripción</span><span class="detail-value">${escHtml(row.description)}</span></div>` : ''}
+    </div>
+
+    <div class="detail-section">
+      <h3>Ubicación</h3>
+      <div class="detail-row">
+        <span class="detail-label">Proyecto</span>
+        <span class="detail-value">${escHtml(row.project_id || '—')}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">Frente</span>
+        <span class="detail-value">${escHtml(row.front_id || '—')}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">PK</span>
+        <span class="detail-value">${escHtml(pkLabel || '—')}</span>
+      </div>
+      <div class="detail-row">
+        <span class="detail-label">GPS</span>
+        <span class="detail-value" style="font-size:11px;color:#64748b">${gpsStr}</span>
+      </div>
+      ${mapsLink ? `<div style="margin-top:4px">${mapsLink}</div>` : ''}
+    </div>
+
+    <div class="detail-section">
+      <h3>Responsables</h3>
+      <div class="detail-row">
+        <span class="detail-label">Asignado a</span>
+        <span class="detail-value">${escHtml(row.assigned_to_user_name || '—')}</span>
+      </div>
+      ${row.completed_by_user_id ? `<div class="detail-row"><span class="detail-label">Completó</span><span class="detail-value" style="font-size:11px;color:#64748b">${escHtml(String(row.completed_by_user_id))}</span></div>` : ''}
+      ${row.completed_at ? `<div class="detail-row"><span class="detail-label">Completada el</span><span class="detail-value">${new Date(row.completed_at).toLocaleString('es-MX')}</span></div>` : ''}
+    </div>
+
+    ${row.review_comment ? `
+    <div class="detail-section">
+      <h3>Comentario de revisión</h3>
+      <div style="font-size:13px;color:#1e293b;background:#f8fafc;border-radius:6px;padding:8px 10px;line-height:1.5">${escHtml(row.review_comment)}</div>
+    </div>` : ''}
+
+    <div class="detail-section">
+      <h3>Fechas</h3>
+      <div class="detail-row"><span class="detail-label">Creada</span><span class="detail-value">${createdAt}</span></div>
+      <div class="detail-row"><span class="detail-label">Actualizada</span><span class="detail-value">${updatedAt}</span></div>
+      ${row.assignment_start_at ? `<div class="detail-row"><span class="detail-label">Programada</span><span class="detail-value">${new Date(row.assignment_start_at).toLocaleString('es-MX')}</span></div>` : ''}
+    </div>
+
+    <div style="font-size:10px;color:#cbd5e1;margin-top:12px;word-break:break-all">UUID: ${escHtml(String(row.uuid || ''))}</div>
+  `;
+
+  document.getElementById('detail-panel').classList.remove('hidden');
+}
+
+function closePanel() {
+  document.getElementById('detail-panel').classList.add('hidden');
+}
+
+/* ── Helpers ── */
+function formatPK(raw) {
+  if (raw == null || raw === '' || raw === undefined) return null;
+  const n = parseInt(String(raw).replace(/\D/g, ''), 10);
+  if (isNaN(n)) return String(raw);
+  const km = Math.floor(n / 1000);
+  const m  = n % 1000;
+  return `${km}+${String(m).padStart(3, '0')}`;
+}
+
+function buildPKLabel(start, end) {
+  const s = formatPK(start);
+  const e = formatPK(end);
+  if (s && e) return `${s} – ${e}`;
+  if (s) return s;
+  return null;
+}
+
+function escHtml(str) {
+  if (str == null) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function clearFilters() {
+  document.getElementById('filter-state').value   = '';
+  document.getElementById('filter-type').value    = '';
+  document.getElementById('filter-project').value = '';
+  document.getElementById('search-input').value   = '';
+  applyFilters();
+}
+
+function setStatus(msg) {
+  document.getElementById('status-msg').textContent = msg;
+}
+
+function showLoading(active, text) {
+  const el = document.getElementById('loading-overlay');
+  el.classList.toggle('active', active);
+  if (text) document.getElementById('loading-text').textContent = text;
+}
+
+function showEmpty(visible, title, subtitle) {
+  const el = document.getElementById('empty-state');
+  el.style.display = visible ? 'block' : 'none';
+  const msg = title || (visible ? 'Sin actividades con GPS' : null);
+  const sub = title ? (subtitle || '') : (visible ? 'Selecciona un proyecto y presiona "Cargar mapa"' : null);
+  if (msg !== null) {
+    el.innerHTML = `<div class="icon">📍</div>
+      <div style="font-weight:700;color:#475569;margin-bottom:4px">${escHtml(msg)}</div>
+      <div style="font-size:12px">${escHtml(sub)}</div>`;
+  }
+}
+
+/* ── Boot ── */
+initMap();
+showEmpty(true);
+</script>
+</body>
+</html>

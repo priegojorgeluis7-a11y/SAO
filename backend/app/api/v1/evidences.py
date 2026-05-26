@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from google.auth.transport.requests import Request as GoogleAuthRequest
 from google.cloud import storage
 
-from app.api.deps import require_any_role, user_has_permission, verify_project_access
+from app.api.deps import require_any_role, user_has_any_role, user_has_permission, verify_project_access
 from app.core.rate_limit import enforce_rate_limit
 from app.core.config import settings
 from app.core.firestore import get_firestore_client
@@ -284,11 +284,11 @@ def upload_init(
     if normalized_mime not in _ALLOWED_MIME_TYPES:
         allowed_values = ", ".join(sorted(_ALLOWED_MIME_TYPES))
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Invalid mime_type. Allowed values: {allowed_values}",
         )
     if request.sizeBytes > _MAX_UPLOAD_SIZE_BYTES:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail="File too large. Maximum allowed size is 20MB")
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="File too large. Maximum allowed size is 20MB")
 
     evidence_id = uuid4()
     object_path = f"activities/{activity_uuid}/evidences/{evidence_id}{_sanitize_suffix(request.fileName)}"
@@ -337,10 +337,21 @@ def upload_complete(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Missing permission: activity.edit for project: {project_id}",
         )
-    if str(payload.get("created_by") or "") != str(getattr(current_user, "id", "")):
+    # Owner check: the user who initiated the upload OR any member of the same
+    # project with edit permission can complete it. The strict same-user restriction
+    # prevented evidences uploaded from a different device or session from ever
+    # being confirmed, leaving them with object_path=None permanently.
+    _is_owner = str(payload.get("created_by") or "") == str(getattr(current_user, "id", ""))
+    _has_elevated_role = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
+    if not _is_owner and not _has_elevated_role:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to complete this upload")
     object_path = payload.get("pending_object_path")
     if not object_path:
+        # Idempotency guard: if object_path is already set the upload was already
+        # confirmed — return success so retries after a lost HTTP response don't
+        # confuse the client into thinking the upload failed.
+        if payload.get("object_path"):
+            return UploadCompleteResponse(ok=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evidence upload not initialized")
     if not _object_exists(str(object_path)):
         detail = "Uploaded object not found in local storage" if _is_local_backend() else "Uploaded object not found in storage"
@@ -472,7 +483,10 @@ async def local_upload(
     if not snap.exists:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Evidence {evidence_id} not found")
     payload = snap.to_dict() or {}
-    if str(payload.get("created_by") or "") != str(getattr(current_user, "id", "")):
+    _upload_owner = str(payload.get("created_by") or "")
+    _is_upload_owner = _upload_owner == str(getattr(current_user, "id", ""))
+    _upload_elevated = user_has_any_role(current_user, ["ADMIN", "COORD", "SUPERVISOR"], None)
+    if not _is_upload_owner and not _upload_elevated:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized to upload this evidence")
     object_path = payload.get("pending_object_path")
     if not object_path:

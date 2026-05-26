@@ -134,6 +134,7 @@ class AgendaController extends StateNotifier<AgendaState> {
         'AgendaController.initialize resources=${resources.length} '
         'project=$projectId offline=$isOffline',
       );
+      if (!mounted) return;
       state = state.copyWith(
         selectedFilterId: selectedFilterId,
         resources: resources,
@@ -142,6 +143,7 @@ class AgendaController extends StateNotifier<AgendaState> {
       );
     } catch (e) {
       appLogger.e('AgendaController.initialize users load error: $e');
+      if (!mounted) return;
       final fallbackResources = _withSelfFirst(const [], selfResource);
       final selectedFilterId = _resolveFilterSelection(
         currentFilterId: state.selectedFilterId,
@@ -161,6 +163,7 @@ class AgendaController extends StateNotifier<AgendaState> {
   }
 
   Future<void> _loadCurrentWeekAssignments() async {
+    if (!mounted) return;
     if (_projectIds.isEmpty) {
       state = state.copyWith(items: const [], loadingAssignments: false);
       return;
@@ -185,9 +188,11 @@ class AgendaController extends StateNotifier<AgendaState> {
           to: to,
           isOffline: _isOffline,
         );
+        if (!mounted) return;
         allItems.addAll(items);
       } on DioException catch (e) {
         appLogger.w('AgendaController: assignments API failed for $pid — $e');
+        if (!mounted) return;
         if (_projectIds.length == 1) {
           state = state.copyWith(loadingAssignments: false, hasSyncError: true);
           return;
@@ -196,6 +201,7 @@ class AgendaController extends StateNotifier<AgendaState> {
       }
     }
 
+    if (!mounted) return;
     // Dedup by assignment id
     final seen = <String>{};
     final merged = allItems.where((item) => seen.add(item.id)).toList();

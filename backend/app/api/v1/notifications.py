@@ -17,6 +17,7 @@ from app.services.notification_service import (
 from app.services.push_notification_service import (
     disable_device_push_token,
     notify_daily_agenda,
+    notify_inactive_users,
     notify_user,
     register_device_push_token,
 )
@@ -97,6 +98,37 @@ def trigger_daily_agenda(
     return result
 
 
+@router.post("/inactivity-reminder", status_code=status.HTTP_200_OK)
+def trigger_inactivity_reminder(
+    request: Request,
+    project_id: str | None = Query(default=None, description="Limit to a specific project (optional)"),
+    threshold_hours: int = Query(default=24, ge=1, le=168, description="Hours of inactivity before sending reminder"),
+):
+    """Send a reminder push to users who have not registered any activity in the last N hours.
+
+    Protected by a shared secret passed as a Bearer token in the Authorization header.
+    Intended to be called by Cloud Scheduler once a day (e.g. 18:00 America/Mexico_City).
+    """
+    secret = settings.SCHEDULER_SECRET
+    if not secret:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Inactivity reminder notifications are not configured",
+        )
+
+    auth_header = request.headers.get("Authorization", "")
+    provided = auth_header.removeprefix("Bearer ").strip()
+    if provided != secret:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid scheduler secret",
+        )
+
+    result = notify_inactive_users(project_id=project_id, threshold_hours=threshold_hours)
+    logger.info("INACTIVITY_REMINDER_TRIGGER result=%s", result)
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Admin: send push to a specific user
 # ---------------------------------------------------------------------------
@@ -110,6 +142,7 @@ class AdminPushUserRequest(BaseModel):
     body: str = Field(..., min_length=1, max_length=300, description="Notification body")
     type: str = Field(default="admin_message", description="FCM data.type value seen by the app")
     project_id: str | None = Field(default=None, description="Scope to tokens for this project only")
+    activity_id: str | None = Field(default=None, description="Activity UUID related to this notification")
 
 
 @router.post("/admin/push-user", status_code=status.HTTP_200_OK)
@@ -135,6 +168,8 @@ def admin_push_user(
     data: dict[str, str] = {"type": body.type.strip() or "admin_message"}
     if body.project_id:
         data["project_id"] = body.project_id.strip().upper()
+    if body.activity_id:
+        data["activity_id"] = body.activity_id.strip()
 
     result = notify_user(
         user_id=target_user_id,

@@ -740,6 +740,7 @@ def list_completed_activities(
             "topics":           _topics,
             "activity_group_id": str(doc.get("activity_group_id") or "").strip() or None,
             # Internal: legacy dedup key for activities without activity_group_id.
+            # 7-field canonical key — must match assignments.py, activities.py, reports.py.
             "_lkey": "|".join([
                 str(doc.get("project_id") or ""),
                 str(doc.get("activity_type_code") or ""),
@@ -1030,7 +1031,7 @@ def get_completed_activity_detail(
         "front":            front_name,
         "estado":           str(doc.get("estado") or doc.get("state") or ""),
         "municipio":        str(doc.get("municipio") or doc.get("municipality") or ""),
-        "has_report":       bool(doc.get("report_generated_at")) or bool(documents),
+        "has_report":       bool(doc.get("report_generated_at")),
         "reviewed_at":      _iso(doc.get("last_reviewed_at")),
         "created_at":       _iso(doc.get("created_at")),
         "completed_at":     _iso(doc.get("completed_at")),

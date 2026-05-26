@@ -43,8 +43,7 @@ const Map<String, Set<String>> _fallbackVisibleRolesByModule =
     'SUPERVISOR',
     'OPERATIVO',
     'LECTOR',
-  },
-  'Configuración': <String>{
+  },  'Configuración': <String>{
     'ADMIN',
     'COORD',
     'SUPERVISOR',

@@ -47,6 +47,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
   Timer? _autoSaveDebounce;
   int step = 0;
   bool _savingOnExit = false;
+  bool _resumeStepApplied = false;
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
     );
 
     c.addListener(_scheduleAutoSave);
+    c.addListener(_applyResumeStepOnce);
 
     // ignore: unawaited_futures
     c.init();
@@ -81,6 +83,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
     _autoSaveDebounce?.cancel();
     unawaited(c.saveDraftSilently());
     c.removeListener(_scheduleAutoSave);
+    c.removeListener(_applyResumeStepOnce);
     _pager.dispose();
     c.dispose();
     super.dispose();
@@ -106,6 +109,19 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
     }
   }
 
+  void _applyResumeStepOnce() {
+    if (!c.loading && !_resumeStepApplied) {
+      _resumeStepApplied = true;
+      c.removeListener(_applyResumeStepOnce);
+      final target = c.resumeStep;
+      if (target > 0 && target < _stepCount) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) jumpToStep(target);
+        });
+      }
+    }
+  }
+
   void _scheduleAutoSave() {
     if (c.loading) {
       _autoSaveDebounce?.cancel();
@@ -123,6 +139,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
     if (step < _stepCount - 1) {
       _pager.nextPage(duration: const Duration(milliseconds: 250), curve: Curves.easeInOut);
       setState(() => step++);
+      c.setCurrentStep(step);
     }
   }
 
@@ -130,6 +147,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
     if (step > 0) {
       _pager.previousPage(duration: const Duration(milliseconds: 250), curve: Curves.easeInOut);
       setState(() => step--);
+      c.setCurrentStep(step);
     } else {
       // Save draft before leaving so data is not lost.
       _persistDraftNow().then((_) {
@@ -140,6 +158,7 @@ class _ActivityWizardPageState extends ConsumerState<ActivityWizardPage>
 
   void jumpToStep(int targetStep) {
     if (targetStep < 0 || targetStep >= _stepCount || targetStep == step) return;
+    c.setCurrentStep(targetStep);
     _pager.animateToPage(
       targetStep,
       duration: const Duration(milliseconds: 300),

@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:developer' show log;
+import 'dart:ui' as ui;
 import 'package:http/http.dart' as http;
+import 'package:printing/printing.dart';
 import '../../core/compat/io_compat.dart';
 
 import 'package:drift/drift.dart';
@@ -910,6 +912,40 @@ Future<List<ReportActivityItem>> loadApprovedActivitiesForPdf({
   }
 }
 
+/// Carga TODAS las actividades del periodo (sin filtro de aprobación)
+/// para calcular KPIs reales: total, pendientes, rechazadas, etc.
+Future<List<ReportActivityItem>> loadAllActivitiesForKpis({
+  required String projectId,
+  required DateTime dateFrom,
+  required DateTime dateTo,
+  int limit = 500,
+}) async {
+  const client = BackendApiClient();
+  final dateRange = ReportDateRange(start: dateFrom, end: dateTo);
+  try {
+    final queryParams = [
+      'project_id=${Uri.encodeQueryComponent(projectId)}',
+      'date_from=${Uri.encodeQueryComponent(dateFrom.toUtc().toIso8601String())}',
+      'date_to=${Uri.encodeQueryComponent(dateTo.toUtc().toIso8601String())}',
+      'include_already_reported=true',
+      'page_size=$limit',
+    ];
+    final decoded =
+        await client.getJson('/api/v1/reports/activities?${queryParams.join("&")}');
+    if (decoded is Map<String, dynamic>) {
+      final items = (decoded['items'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map((e) => ReportActivityItem.fromJson(e))
+          .where((item) => _matchesSelectedProject(item, projectId))
+          .where((item) => _isWithinSelectedRange(item.createdAt, dateRange))
+          .take(limit)
+          .toList(growable: false);
+      if (items.isNotEmpty) return items;
+    }
+  } catch (_) {}
+  return [];
+}
+
 Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
   const client = BackendApiClient();
 
@@ -1127,8 +1163,22 @@ Future<ReportActivityItem> _hydrateReportItem(
           };
         })
         .toList(growable: false);
+
+    // PDF evidences live in the `documents` list of the detail endpoint.
+    // Include them so they are available even when the review endpoint fails.
+    final detailDocuments = (normalized['documents'] as List? ?? const [])
+        .whereType<Map<String, dynamic>>()
+        .map((doc) => <String, dynamic>{
+              'id': doc['id'],
+              'file_path': doc['gcs_path'] ?? '',
+              'file_type': 'PDF',
+              'caption': (doc['description'] ?? '').toString().trim(),
+              'created_at': doc['uploaded_at'] ?? '',
+            })
+        .toList(growable: false);
+
     final detailEvidenceById = <String, Map<String, dynamic>>{
-      for (final evidence in detailEvidences)
+      for (final evidence in [...detailEvidences, ...detailDocuments])
         (evidence['id'] ?? '').toString(): evidence,
     };
 
@@ -1165,14 +1215,17 @@ Future<ReportActivityItem> _hydrateReportItem(
             })
             .where((evidence) {
               if ((evidence['id'] ?? '').toString().isEmpty) return false;
-              // Exclude document evidences (PDFs) so only images reach the PDF
-              // generator. The review endpoint returns all evidences regardless
-              // of type, but the detail endpoint already filters them. Passing
-              // PDFs to the PDF generator wastes bandwidth and can cause slow
-              // downloads that time out before photo evidences are loaded.
-              final path = (evidence['file_path'] ?? '').toString().toLowerCase();
-              if (path.endsWith('.pdf')) return false;
               return true;
+            })
+            .map((evidence) {
+              // Ensure PDFs are explicitly typed so the PDF generator can
+              // rasterize and annex them rather than treating them as images.
+              final path = (evidence['file_path'] ?? '').toString().toLowerCase();
+              final type = (evidence['file_type'] ?? '').toString().toUpperCase();
+              if (path.endsWith('.pdf') || type.contains('PDF') || type.contains('DOCUMENT')) {
+                return Map<String, dynamic>.from(evidence)..['file_type'] = 'PDF';
+              }
+              return evidence;
             })
             .toList(growable: false);
       }
@@ -1192,7 +1245,11 @@ Future<ReportActivityItem> _hydrateReportItem(
     normalized['state'] ??= item.state;
     normalized['completed_at'] ??= item.createdAt;
     normalized['created_at'] ??= item.createdAt;
-    final resolvedEvidences = reviewEvidences.isNotEmpty ? reviewEvidences : detailEvidences;
+    // When review endpoint succeeds, use its list (it returns both photos and
+    // PDFs). Otherwise fall back to the detail endpoint's evidences + documents
+    // combined, so PDF evidences still appear even if review is unavailable.
+    final detailAll = [...detailEvidences, ...detailDocuments];
+    final resolvedEvidences = reviewEvidences.isNotEmpty ? reviewEvidences : detailAll;
     if (resolvedEvidences.isNotEmpty) {
       normalized['evidences'] = resolvedEvidences;
     } else {
@@ -1457,6 +1514,8 @@ Future<Uint8List> buildActivitiesPdfBytes(
       // the split even when most images fail to load, leaving the first page
       // without any photos and the second page nearly empty.
       final resolvedEvidences = <_ResolvedEvidence>[];
+      // PDF evidences are collected separately and rasterized for the annex.
+      final resolvedPdfPages = <_ResolvedPdfPage>[];
       if (includeAttachments && item.evidences.isNotEmpty) {
         final sortedEvidences = item.evidences
             .where((e) => e.filePath.trim().isNotEmpty || e.id.trim().isNotEmpty)
@@ -1467,10 +1526,32 @@ Future<Uint8List> buildActivitiesPdfBytes(
             return ad.compareTo(bd);
           });
         for (final evidence in sortedEvidences) {
-          // Skip document evidences early — no need to download a PDF to
-          // determine it cannot be rendered as an image.
           final lowerPath = evidence.filePath.toLowerCase();
-          if (lowerPath.endsWith('.pdf')) continue;
+          final fileType = evidence.fileType.trim().toUpperCase();
+          final isPdf = lowerPath.endsWith('.pdf') ||
+              fileType == 'PDF' ||
+              fileType == 'DOCUMENT';
+
+          if (isPdf) {
+            // Rasterize each page of the PDF evidence so it can be annexed.
+            // Use _loadRawBytes (no image-format validation) because PDFs are
+            // not images and _loadEvidenceBytes would reject them.
+            final bytes = await _loadRawBytes(evidence);
+            if (bytes == null) continue;
+            try {
+              await for (final page in Printing.raster(bytes, dpi: 120)) {
+                final pngBytes = await page.toPng();
+                resolvedPdfPages.add(_ResolvedPdfPage(
+                  evidence: evidence,
+                  image: pw.MemoryImage(pngBytes),
+                ));
+              }
+            } catch (_) {
+              // If rasterization fails, skip this PDF evidence page.
+            }
+            continue;
+          }
+
           final bytes = await _loadEvidenceBytes(evidence);
           if (bytes == null || !_isSupportedImageFormat(bytes)) continue;
           pw.MemoryImage? image;
@@ -1541,32 +1622,113 @@ Future<Uint8List> buildActivitiesPdfBytes(
       );
 
       if (includeAttachments && resolvedEvidences.isNotEmpty && shouldUseTwoPages) {
-        pdf.addPage(
-          pw.MultiPage(
-            pageTheme:
-              _buildPageTheme(page2Background ?? page1Background, annexPageMargin),
-            footer: (_) => pw.SizedBox(),
-            build: (_) => [
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        // Split evidence into pairs (rows) and give each row its own pw.Page
+        // so a single evidence card can never exceed the page content area.
+        final evidencePageTheme = _buildPageTheme(
+          page2Background ?? page1Background,
+          annexPageMargin,
+        );
+        final evidencePairs = <List<_ResolvedEvidence>>[];
+        for (var i = 0; i < resolvedEvidences.length; i += 2) {
+          evidencePairs.add([
+            resolvedEvidences[i],
+            if (i + 1 < resolvedEvidences.length) resolvedEvidences[i + 1],
+          ]);
+        }
+        for (var pi = 0; pi < evidencePairs.length; pi++) {
+          final pair = evidencePairs[pi];
+          pdf.addPage(
+            pw.Page(
+              pageTheme: evidencePageTheme,
+              build: (context) => pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
                 children: [
-                  pw.Text(
-                    'Anexo fotográfico',
-                    style: const pw.TextStyle(fontSize: 9, color: _textGray),
-                  ),
-                  pw.Text(
-                    'Hoja 2 de 2',
-                    style: const pw.TextStyle(fontSize: 8, color: _textGray),
+                  if (pi == 0) ...[  
+                    pw.Row(
+                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                      children: [
+                        pw.Text(
+                          'Anexo fotográfico',
+                          style: const pw.TextStyle(fontSize: 9, color: _textGray),
+                        ),
+                        pw.Text(
+                          'Hoja 2 de 2',
+                          style: const pw.TextStyle(fontSize: 8, color: _textGray),
+                        ),
+                      ],
+                    ),
+                    pw.SizedBox(height: 6),
+                    _buildSectionTitle('4. EVIDENCIA FOTOGRÁFICA'),
+                    pw.SizedBox(height: 8),
+                  ],
+                  pw.Row(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Expanded(
+                        child: _buildEvidenceCard(pair[0], compact: false),
+                      ),
+                      pw.SizedBox(width: 10),
+                      pw.Expanded(
+                        child: pair.length > 1
+                            ? _buildEvidenceCard(pair[1], compact: false)
+                            : pw.SizedBox(),
+                      ),
+                    ],
                   ),
                 ],
               ),
-              pw.SizedBox(height: 6),
-              _buildSectionTitle('4. EVIDENCIA FOTOGRÁFICA'),
-              pw.SizedBox(height: 8),
-              ..._buildEvidenceGrid(resolvedEvidences, compact: false),
-            ],
+            ),
+          );
+        }
+      }
+
+      // Annex: PDF document evidences — one pw.Page per rasterized page so
+      // the image is never taller than the available content area.
+      if (includeAttachments && resolvedPdfPages.isNotEmpty) {
+        final annexTheme = _buildPageTheme(
+          page2Background ?? page1Background,
+          _buildAdaptiveMargin(
+            hasTemplate: hasTemplate,
+            textLength: 0,
+            evidenceCount: 1,
+            isAnnex: true,
           ),
         );
+        for (var pi = 0; pi < resolvedPdfPages.length; pi++) {
+          final pdfPage = resolvedPdfPages[pi];
+          final caption = (pdfPage.evidence.caption ?? '').trim();
+          pdf.addPage(
+            pw.Page(
+              pageTheme: annexTheme,
+              build: (context) => pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+                children: [
+                  // Section header only on first page
+                  if (pi == 0) ...[
+                    pw.Text(
+                      'Documentos adjuntos',
+                      style: const pw.TextStyle(fontSize: 9, color: _textGray),
+                    ),
+                    pw.SizedBox(height: 6),
+                    _buildSectionTitle('5. DOCUMENTOS ADJUNTOS'),
+                    pw.SizedBox(height: 8),
+                  ],
+                  if (caption.isNotEmpty) ...[
+                    pw.Text(
+                      caption,
+                      style: const pw.TextStyle(fontSize: 8, color: _textGray),
+                    ),
+                    pw.SizedBox(height: 4),
+                  ],
+                  // Image fills remaining vertical space
+                  pw.Expanded(
+                    child: pw.Image(pdfPage.image, fit: pw.BoxFit.contain),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
       }
     }
   }
@@ -2101,9 +2263,13 @@ pw.Widget _buildEvidenceCard(
         ),
         pw.SizedBox(height: 4),
         pw.Text(
-          evidence.evidence.caption?.trim().isNotEmpty == true
-              ? evidence.evidence.caption!
-              : 'Sin pie de foto',
+          () {
+            final raw = evidence.evidence.caption?.trim().isNotEmpty == true
+                ? evidence.evidence.caption!
+                : 'Sin pie de foto';
+            // Truncate very long captions to prevent PDF page overflow.
+            return raw.length > 200 ? '${raw.substring(0, 200)}\u2026' : raw;
+          }(),
           style: pw.TextStyle(fontSize: compact ? 7.5 : 8.5, color: _textDark),
         ),
         pw.SizedBox(height: 2),
@@ -2361,6 +2527,8 @@ Future<String?> _resolveEvidenceSource(ReportEvidenceItem evidence) {
       return url;
     } catch (e) {
       log('[PDF-IMG] id=${evidence.id} getDownloadSignedUrl failed: $e');
+      // No almacenar en caché fallos — permitir reintentos en la próxima generación.
+      _evidenceSourceCache.remove(cacheKey);
       return null;
     }
   });
@@ -2374,30 +2542,89 @@ Future<Uint8List?> _loadEvidenceBytes(ReportEvidenceItem evidence) async {
   }
 
   try {
+    Uint8List? rawBytes;
     if (path.startsWith('http://') || path.startsWith('https://')) {
       final response = await http
           .get(Uri.parse(path))
           .timeout(const Duration(seconds: 20));
       if (response.statusCode >= 200 && response.statusCode < 300) {
         log('[PDF-IMG] id=${evidence.id} → HTTP ${response.statusCode} OK (${response.bodyBytes.length} bytes)');
-        return response.bodyBytes;
+        rawBytes = response.bodyBytes;
+      } else {
+        log('[PDF-IMG] id=${evidence.id} → HTTP ${response.statusCode} FAIL url=$path');
+        return null;
       }
-      log('[PDF-IMG] id=${evidence.id} → HTTP ${response.statusCode} FAIL url=$path');
-      return null;
+    } else {
+      final file = path.startsWith('file://')
+          ? File(Uri.parse(path).toFilePath())
+          : File(path);
+      if (await file.exists()) {
+        rawBytes = await file.readAsBytes();
+      } else {
+        log('[PDF-IMG] id=${evidence.id} local file not found: $path');
+        return null;
+      }
     }
 
-    final file = path.startsWith('file://')
-        ? File(Uri.parse(path).toFilePath())
-        : File(path);
-    if (await file.exists()) {
-      return file.readAsBytes();
+    if (_isSupportedImageFormat(rawBytes)) return rawBytes;
+
+    // Intenta transcodificar formatos no soportados por el paquete pdf (p. ej.
+    // HEIC/HEIF subidos desde iOS) a PNG usando el codec nativo de la plataforma.
+    try {
+      final codec = await ui.instantiateImageCodec(rawBytes);
+      final frame = await codec.getNextFrame();
+      final image = frame.image;
+      final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      image.dispose();
+      codec.dispose();
+      if (byteData != null) {
+        final pngBytes = byteData.buffer.asUint8List();
+        log('[PDF-IMG] id=${evidence.id} formato no soportado transcodificado a PNG (${pngBytes.length} bytes)');
+        return pngBytes;
+      }
+    } catch (e) {
+      log('[PDF-IMG] id=${evidence.id} transcodificación fallida: $e');
     }
-    log('[PDF-IMG] id=${evidence.id} local file not found: $path');
+
+    log('[PDF-IMG] id=${evidence.id} formato de imagen no soportado, omitiendo');
+    return null;
   } catch (e) {
     log('[PDF-IMG] id=${evidence.id} exception: $e');
     return null;
   }
-  return null;
+}
+
+/// Descarga los bytes crudos de una evidencia sin validar formato de imagen.
+/// Usar para evidencias PDF cuyo magic bytes no pasa [_isSupportedImageFormat].
+Future<Uint8List?> _loadRawBytes(ReportEvidenceItem evidence) async {
+  final path = await _resolveEvidenceSource(evidence);
+  if (path == null || path.trim().isEmpty) {
+    log('[PDF-RAW] id=${evidence.id} → source=null → skip');
+    return null;
+  }
+  try {
+    if (path.startsWith('http://') || path.startsWith('https://')) {
+      final response = await http
+          .get(Uri.parse(path))
+          .timeout(const Duration(seconds: 30));
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        log('[PDF-RAW] id=${evidence.id} → HTTP OK (${response.bodyBytes.length} bytes)');
+        return response.bodyBytes;
+      }
+      log('[PDF-RAW] id=${evidence.id} → HTTP ${response.statusCode} FAIL');
+      return null;
+    } else {
+      final file = path.startsWith('file://')
+          ? File(Uri.parse(path).toFilePath())
+          : File(path);
+      if (await file.exists()) return await file.readAsBytes();
+      log('[PDF-RAW] id=${evidence.id} local file not found: $path');
+      return null;
+    }
+  } catch (e) {
+    log('[PDF-RAW] id=${evidence.id} exception: $e');
+    return null;
+  }
 }
 
 Future<pw.MemoryImage?> _loadMembreteImage({
@@ -2638,4 +2865,11 @@ class _ResolvedEvidence {
   final pw.MemoryImage? image;
 
   const _ResolvedEvidence({required this.evidence, required this.image});
+}
+
+class _ResolvedPdfPage {
+  final ReportEvidenceItem evidence;
+  final pw.MemoryImage image;
+
+  const _ResolvedPdfPage({required this.evidence, required this.image});
 }

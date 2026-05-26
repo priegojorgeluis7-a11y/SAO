@@ -1413,6 +1413,7 @@ class _ActivityTray extends StatelessWidget {
                     final item = items[i];
                     final approved = _isApproved(item);
                     return _TrayItem(
+                      key: ValueKey(item.id),
                       item: item,
                       isApproved: approved,
                       isSelected: selectedIds.contains(item.id),
@@ -1532,6 +1533,7 @@ class _TrayItem extends StatefulWidget {
   final VoidCallback? onToggle;
 
   const _TrayItem({
+    super.key,
     required this.item,
     required this.isApproved,
     required this.isSelected,

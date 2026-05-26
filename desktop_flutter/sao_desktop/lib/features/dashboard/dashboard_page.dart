@@ -733,6 +733,10 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
   bool _exportingPdf = false;
 
+  // ── Expediente General (solo admin@sao.mx) ─────────────────────────────────
+
+  bool _exportingExpediente = false;
+
   // Calcula la fecha de inicio según el rango del dashboard
   DateTime _dashboardRangeStart(DashboardRange range) {
     final now = DateTime.now();
@@ -751,27 +755,68 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
   }
 
   Future<void> _exportDashboardSummaryPdf(
-      DashboardData data, String projectId) async {
+      DashboardData data, String projectId,
+      {DateTime? customDateFrom, DateTime? customDateTo}) async {
     if (_exportingPdf) return;
     if (!mounted) return;
     setState(() => _exportingPdf = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final dateFrom = _dashboardRangeStart(data.range);
-      final dateTo = DateTime.now();
+      final dateFrom = customDateFrom ?? _dashboardRangeStart(data.range);
+      final dateTo   = customDateTo   ?? DateTime.now();
 
-      // Cargar actividades con acuerdos/resultados del backend
+      // Cargar actividades aprobadas para el cuerpo del reporte
       final activities = await loadApprovedActivitiesForPdf(
         projectId: projectId,
         dateFrom: dateFrom,
         dateTo: dateTo,
         limit: 100,
       );
+      // KPIs: cargar TODAS las actividades del proyecto (paginadas) y filtrar
+      // por el mismo campo de fecha que usa el cuerpo del PDF (created_at).
+      DashboardActivityMetrics? kpiMetrics;
+      try {
+        const _kpiApiClient = BackendApiClient();
+        final allRawItems = <Map<String, dynamic>>[];
+        int kpiPage = 1;
+        bool kpiHasNext = true;
+        while (kpiHasNext && kpiPage <= 10) {
+          final kpiResult = await _kpiApiClient.getJson(
+            '/api/v1/activities?project_id=${Uri.encodeQueryComponent(projectId)}&page_size=100&page=$kpiPage',
+          );
+          if (kpiResult is Map<String, dynamic>) {
+            final pageItems = (kpiResult['items'] as List? ?? [])
+                .whereType<Map<String, dynamic>>()
+                .toList();
+            allRawItems.addAll(pageItems);
+            kpiHasNext = kpiResult['has_next'] == true;
+          } else {
+            kpiHasNext = false;
+          }
+          kpiPage++;
+        }
 
-      // DEBUG: log first 3 activities
-      for (final act in activities.take(3)) {
-        // ignore: avoid_print
-        print('[PDF-DBG] type=${act.activityType} front=${act.frontName} muni=${act.municipality} sub=${act.subcategory} topics=${act.topics}');
+        // Filtrar por rango de fechas usando los mismos campos que el cuerpo del PDF:
+        //   created_at ?? completed_at ?? reviewed_at ?? last_reviewed_at
+        final dfFrom = DateTime(dateFrom.year, dateFrom.month, dateFrom.day);
+        final dfTo   = DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59, 999);
+        DateTime? _tryParseKpiDate(String? raw) {
+          if (raw == null || raw.isEmpty) return null;
+          try { return DateTime.parse(raw); } catch (_) { return null; }
+        }
+        final filteredRaw = allRawItems.where((item) {
+          final rawDate = (item['created_at']        ??
+                           item['completed_at']      ??
+                           item['reviewed_at']       ??
+                           item['last_reviewed_at']  ?? '')?.toString() ?? '';
+          final dt = _tryParseKpiDate(rawDate);
+          if (dt == null) return true; // sin fecha → incluir
+          return !dt.isBefore(dfFrom) && !dt.isAfter(dfTo);
+        }).toList();
+
+        kpiMetrics = summarizeDashboardActivityMetrics(filteredRaw);
+      } catch (e) {
+        debugPrint('[PDF-KPI] Error cargando actividades para KPI: $e');
       }
 
       // Buscar reportes PDF locales ya descargados para cada actividad
@@ -793,8 +838,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       for (final act in activities) {
         if (localPdfPaths.containsKey(act.id)) continue;
         if (!act.hasReport) continue;
-        // ignore: avoid_print
-        print('[PDF-DL] Descargando reporte para ${act.id} (${act.activityType})');
+        debugPrint('[PDF-DL] Descargando reporte para ${act.id} (${act.activityType})');
         try {
           final decoded = await apiClient.getJson(
               '/api/v1/completed-activities/${Uri.encodeComponent(act.id)}');
@@ -802,22 +846,20 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
           final detail = CompletedActivityDetail.fromJson(decoded);
           final pdfEvidence = _selectPdfEvidenceForDownload(detail);
           if (pdfEvidence == null) {
-            // ignore: avoid_print
-            print('[PDF-DL] Sin evidencia PDF para ${act.id}');
+            debugPrint('[PDF-DL] Sin evidencia PDF para ${act.id}');
             continue;
           }
           final file = await _downloadPdfFromCloud(detail, pdfEvidence);
           localPdfPaths[act.id] = file.path;
-          // ignore: avoid_print
-          print('[PDF-DL] OK: ${file.path}');
+          debugPrint('[PDF-DL] OK: ${file.path}');
         } catch (e) {
-          // ignore: avoid_print
-          print('[PDF-DL] ERROR ${act.id}: $e');
+          debugPrint('[PDF-DL] ERROR ${act.id}: $e');
         }
       }
 
       final bytes = await _buildDashboardSummaryPdfBytes(
           data, projectId, activities, dateFrom, dateTo,
+          kpiMetrics: kpiMetrics,
           localPdfPaths: localPdfPaths);
 
       final now = DateTime.now();
@@ -855,6 +897,155 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     }
   }
 
+  // ── Diálogo de selección de proyectos para exportar PDF ────────────────
+
+  Future<void> _showPdfProjectSelectionDialog(
+    DashboardData data,
+    String currentProjectId,
+    List<String> projectOptions,
+  ) async {
+    if (_exportingPdf) return;
+    if (!mounted) return;
+
+    final available = projectOptions.where((p) => p.isNotEmpty).toList()..sort();
+    // Pre-seleccionar el proyecto activo
+    final selected = <String>{
+      if (currentProjectId.isNotEmpty && available.contains(currentProjectId))
+        currentProjectId,
+    };
+
+    // Rango de fechas por defecto: igual al rango activo del dashboard
+    var pickedFrom = _dashboardRangeStart(data.range);
+    var pickedTo   = DateTime.now();
+
+    final confirmed = await showDialog<(Set<String>, DateTime, DateTime)>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (ctx, setDlgState) {
+          final allSelected = selected.length == available.length;
+          return AlertDialog(
+            title: const Text('Exportar PDF'),
+            content: SizedBox(
+              width: 340,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // ─ Rango de fechas ────────────────────────────────────────────
+                  const Text('Rango de fechas:',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DatePickerButton(
+                          label: 'Desde',
+                          date: pickedFrom,
+                          firstDate: DateTime(2020),
+                          lastDate: pickedTo,
+                          onPicked: (d) => setDlgState(() => pickedFrom = d),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _DatePickerButton(
+                          label: 'Hasta',
+                          date: pickedTo,
+                          firstDate: pickedFrom,
+                          lastDate: DateTime.now(),
+                          onPicked: (d) => setDlgState(() => pickedTo = d),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  // ─ Proyectos ───────────────────────────────────────────────────
+                  const Text(
+                    'Proyectos a incluir:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  CheckboxListTile(
+                    title: Text(
+                      allSelected ? 'Deseleccionar todos' : 'Seleccionar todos',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    value: allSelected,
+                    tristate: true,
+                    onChanged: (_) {
+                      setDlgState(() {
+                        if (allSelected) selected.clear();
+                        else selected.addAll(available);
+                      });
+                    },
+                    controlAffinity: ListTileControlAffinity.leading,
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  const Divider(height: 8),
+                  if (available.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No hay proyectos disponibles.',
+                          style: TextStyle(color: Colors.grey)),
+                    )
+                  else
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 220),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: available.map((pid) {
+                            return CheckboxListTile(
+                              title: Text(pid, style: const TextStyle(fontSize: 13)),
+                              value: selected.contains(pid),
+                              onChanged: (checked) {
+                                setDlgState(() {
+                                  if (checked == true) selected.add(pid);
+                                  else selected.remove(pid);
+                                });
+                              },
+                              controlAffinity: ListTileControlAffinity.leading,
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: selected.isEmpty
+                    ? null
+                    : () => Navigator.pop(ctx, (Set<String>.from(selected), pickedFrom, pickedTo)),
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
+                label: Text(
+                  selected.isEmpty ? 'Exportar' : 'Exportar (${selected.length})',
+                ),
+              ),
+            ],
+          );
+        });
+      },
+    );
+
+    if (confirmed == null || confirmed.$1.isEmpty) return;
+
+    final (projects, dateFrom, dateTo) = confirmed;
+    final sorted = projects.toList()..sort();
+    for (final pid in sorted) {
+      await _exportDashboardSummaryPdf(data, pid,
+          customDateFrom: dateFrom,
+          customDateTo: DateTime(dateTo.year, dateTo.month, dateTo.day, 23, 59, 59));
+    }
+  }
+
   // ── Catálogo de nombres por código de tipo de actividad ──────────────────
   static const Map<String, String> _activityTypeNames = {
     'CAM'    : 'Caminamiento',
@@ -889,7 +1080,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
       List<ReportActivityItem> activities,
       DateTime dateFrom,
       DateTime dateTo,
-      {Map<String, String> localPdfPaths = const {}}) async {
+      {DashboardActivityMetrics? kpiMetrics,
+      Map<String, String> localPdfPaths = const {}}) async {
     // ── Fuentes Unicode ──────────────────────────────────────────────────
     final baseFont = await _loadSystemPdfFont(
             '/System/Library/Fonts/Supplemental/Arial.ttf') ??
@@ -899,13 +1091,18 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         await _loadSystemPdfFont('/Library/Fonts/Arial Bold.ttf');
 
     // ── Rasterizar PDFs locales para incrustar ────────────────────────────
+    // Limitado a primera página (portada) a 96 DPI para evitar OOM.
+    // Se procesan máximo 10 PDFs por exportación.
+    const _kMaxRasterized = 10;
     final Map<String, List<pw.MemoryImage>> rasterizedPages = {};
     for (final entry in localPdfPaths.entries) {
+      if (rasterizedPages.length >= _kMaxRasterized) break;
       try {
         final pdfBytes = await File(entry.value).readAsBytes();
         final pages = <pw.MemoryImage>[];
-        await for (final raster in Printing.raster(pdfBytes, dpi: 150)) {
+        await for (final raster in Printing.raster(pdfBytes, dpi: 96, pages: [0])) {
           pages.add(pw.MemoryImage(await raster.toPng()));
+          break; // Solo primera página
         }
         if (pages.isNotEmpty) rasterizedPages[entry.key] = pages;
       } catch (_) {}
@@ -938,29 +1135,26 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final dateStr          = DateFormat('dd/MM/yyyy HH:mm', 'es').format(now);
     final fmtD            = DateFormat('dd/MM/yyyy', 'es');
     final rangeStr         = '${fmtD.format(dateFrom)} – ${fmtD.format(dateTo)}';
-    // Etiqueta contextual: aclara si es acumulado o un sprint concreto
-    final (rangeLabel, rangeHeader) = switch (data.range) {
-      DashboardRange.all   => (
-          'Progreso acumulado del proyecto  (al ${fmtD.format(dateTo)})',
-          'Acumulado al ${fmtD.format(dateTo)}',
-        ),
-      DashboardRange.today => (
-          'Resumen del día  –  ${fmtD.format(dateTo)}',
-          rangeStr,
-        ),
-      DashboardRange.week  => (
-          'Resumen semanal  –  $rangeStr',
-          rangeStr,
-        ),
-      DashboardRange.month => (
-          'Resumen mensual  –  $rangeStr',
-          rangeStr,
-        ),
-    };
+    // Etiqueta basada en las fechas reales del reporte exportado
+    final rangeLabel = 'Reporte del periodo  –  $rangeStr';
+    final rangeHeader = rangeStr;
     final project          = projectId.trim().isEmpty ? 'GENERAL' : projectId.trim();
     final fronteLabel      = project.toUpperCase() == 'TSNL' ? 'Segmento' : 'Frente';
-    final progressPct      = (data.avancePct * 100).round();
-    final progressFraction = data.avancePct.clamp(0.0, 1.0);
+
+    // KPIs calculados desde el universo completo de actividades del periodo
+    // kpiMetrics viene del endpoint assignments (todos los estados, no solo aprobados)
+    // Si no hay datos del endpoint assignments, fallback a actividades aprobadas
+    final _rApproved  = kpiMetrics?.approved ?? activities.where((a) => a.isApprovedForReport).length;
+    final _rRejected  = kpiMetrics?.rejected ?? activities.where((a) {
+      final rs = (a.reviewStatus ?? '').trim().toUpperCase();
+      return rs == 'REJECTED' || a.status.trim().toUpperCase() == 'RECHAZADO';
+    }).length;
+    final _rNeedsFix  = kpiMetrics?.needsFix ?? activities.where((a) =>
+        (a.reviewStatus ?? '').trim().toUpperCase() == 'CHANGES_REQUIRED').length;
+    final _rTotal     = kpiMetrics?.total ?? activities.length;
+    final _rPending   = kpiMetrics?.pending ?? (_rTotal - _rApproved - _rRejected - _rNeedsFix).clamp(0, _rTotal);
+    final progressPct      = _rTotal == 0 ? 0 : (_rApproved / _rTotal * 100).round();
+    final progressFraction = _rTotal == 0 ? 0.0 : (_rApproved / _rTotal).clamp(0.0, 1.0);
 
     // Agrupar actividades por nombre de tipo
     final byType = <String, List<ReportActivityItem>>{};
@@ -970,14 +1164,30 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     final sortedTypes = byType.entries.toList()
       ..sort((a, b) => b.value.length.compareTo(a.value.length));
 
-    // ── Mapa de calor: URL + tiles OSM ──────────────────────────
-    final heatmapUrl = project.toUpperCase() == 'TSNL'
-        ? 'https://storage.googleapis.com/sao-web-desktop-v2/heatmap_TSNL.html?v=4'
-        : 'https://storage.googleapis.com/sao-web-desktop-v2/heatmap_$project.html';
+    // ── Mapa interactivo: URL del servicio SAO ──────────────────
+    const heatmapUrl = 'https://sao-api-97150883570.us-central1.run.app/map';
 
     const tileCols = 3;
     const tileRows = 3;
-    final gpts = data.geoPoints.where((p) => p.lat != 0 && p.lon != 0).toList();
+
+    // Derivar geopoints de las actividades cargadas para este reporte y proyecto.
+    // Esto garantiza que el mapa haga zoom al área real del periodo seleccionado.
+    final _actGpts = activities
+        .where((a) => a.technicalLatitude != null && a.technicalLongitude != null)
+        .map((a) {
+          final lat = double.tryParse(a.technicalLatitude!) ?? 0.0;
+          final lon = double.tryParse(a.technicalLongitude!) ?? 0.0;
+          return (lat: lat, lon: lon, risk: a.riskLevel ?? '');
+        })
+        .where((p) => p.lat != 0.0 && p.lon != 0.0)
+        .toList();
+    // Fallback a los geopoints del dashboard si las actividades no tienen GPS
+    final gpts = _actGpts.isNotEmpty
+        ? _actGpts
+        : data.geoPoints
+            .where((p) => p.lat != 0 && p.lon != 0)
+            .map((p) => (lat: p.lat, lon: p.lon, risk: p.risk))
+            .toList();
     final Map<String, pw.MemoryImage> tileImages = {};
     var gridLonMin = 0.0, gridLonMax = 1.0;
     var gridLatMin = 0.0, gridLatMax = 1.0;
@@ -1182,7 +1392,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                     fontSize: 18, fontWeight: pw.FontWeight.bold,
                     color: progressPct >= 70 ? accentGreen
                         : progressPct >= 40 ? accentOrange : accentRed)),
-                pw.Text('${data.approvedCount} aprobadas / ${data.totalInQueue} total',
+                pw.Text('$_rApproved aprobadas / $_rTotal total',
                     style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey400)),
               ]),
             ]),
@@ -1204,17 +1414,17 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
         // ─── 2. KPIs de estado ────────────────────────────────────────
         w.add(pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-          kpiCard('Actividades en el periodo', '${activities.length}', accentBlue),
-          kpiCard('Aprobadas', '${data.approvedCount}', accentGreen),
-          kpiCard('Pendientes revisión', '${data.pendingCount}', accentOrange),
-          kpiCard('Rechazadas', '${data.rejectedCount}', accentRed),
+          kpiCard('Actividades en el periodo', '$_rTotal', accentBlue),
+          kpiCard('Aprobadas', '$_rApproved', accentGreen),
+          kpiCard('Pendientes revisión', '$_rPending', accentOrange),
+          kpiCard('Rechazadas', '$_rRejected', accentRed),
           pw.Expanded(child: pw.Container(
             padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 10),
             decoration: pw.BoxDecoration(color: PdfColors.white,
               border: pw.Border.all(color: borderGray),
               borderRadius: const pw.BorderRadius.all(pw.Radius.circular(6))),
             child: pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-              pw.Text('${data.needsFixCount}', style: pw.TextStyle(
+              pw.Text('$_rNeedsFix', style: pw.TextStyle(
                   fontSize: 20, fontWeight: pw.FontWeight.bold, color: accentRed)),
               pw.SizedBox(height: 2),
               pw.Text('Necesita corrección',
@@ -1381,7 +1591,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
             child: pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
               children: [
-                pw.Text('Ver mapa de calor interactivo',
+                pw.Text('Ver mapa interactivo de actividades',
                     style: pw.TextStyle(
                         fontSize: 10,
                         fontWeight: pw.FontWeight.bold,
@@ -1685,11 +1895,11 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
                 ),
               ),
               _buildProjectSelector(selectedProjectId, projectOptions),
-              const SizedBox(width: 12),
-              _buildUserSelector(userOptions),
-              const SizedBox(width: 12),
-              _buildRangeSelector(range),
               const SizedBox(width: 8),
+              _buildUserSelector(userOptions),
+              const SizedBox(width: 8),
+              _buildRangeSelector(range),
+              const SizedBox(width: 4),
               IconButton(
                 onPressed: () => ref.invalidate(dashboardProvider),
                 icon: const Icon(Icons.refresh_rounded, color: Colors.white),
@@ -1697,12 +1907,32 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
               ),
               if (ref.watch(currentAppUserProvider)?.isAdmin == true) ...
                 [
-                  const SizedBox(width: 4),
                   Tooltip(
                     message: 'Exportar resumen ejecutivo (solo admin)',
                     child: IconButton(
-                      onPressed: () => _exportDashboardSummaryPdf(data, selectedProjectId),
+                      onPressed: () => _showPdfProjectSelectionDialog(data, selectedProjectId, projectOptions),
                       icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white),
+                    ),
+                  ),
+                ],
+              if ((ref.watch(currentAppUserProvider)?.email ?? '').toLowerCase() == 'admin@sao.mx') ...
+                [
+                  Tooltip(
+                    message: 'Descargar expediente general (solo admin@sao.mx)',
+                    child: IconButton(
+                      onPressed: _exportingExpediente
+                          ? null
+                          : () => _showBulkExpedienteDialog(projectOptions),
+                      icon: _exportingExpediente
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : const Icon(Icons.folder_zip_rounded, color: Colors.white),
                     ),
                   ),
                 ],
@@ -3371,6 +3601,562 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
     ref.read(appShellIndexProvider.notifier).state = 2;
     ref.read(appRefreshTokenProvider.notifier).state++;
   }
+
+  // ── Expediente General: Diálogo y Export (solo admin@sao.mx) ─────────────
+
+  /// Muestra el diálogo de confirmación para descargar el expediente general.
+  Future<void> _showBulkExpedienteDialog(List<String> projectOptions) async {
+    if (_exportingExpediente || !mounted) return;
+
+    final available = projectOptions.where((p) => p.isNotEmpty).toList()..sort();
+    final selected = <String>{...available};
+
+    // Rango de fechas por defecto: último año
+    var pickedFrom = DateTime.now().subtract(const Duration(days: 365));
+    var pickedTo   = DateTime.now();
+
+    final confirmed = await showDialog<(Set<String>, DateTime, DateTime)>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          final allSelected = selected.length == available.length;
+          return AlertDialog(
+            title: const Row(
+              children: [
+                Icon(Icons.folder_zip_rounded),
+                SizedBox(width: 8),
+                Text('Descargar Expediente General'),
+              ],
+            ),
+            content: SizedBox(
+              width: 380,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Se descargará una carpeta SAO_Expediente organizada por proyectos, '
+                    'frentes y actividades, con el PDF y evidencias de cada una.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                  const SizedBox(height: 14),
+                  // ─ Rango de fechas ──────────────────────────────────────────
+                  const Text(
+                    'Período de actividades:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _DatePickerButton(
+                          label: 'Desde',
+                          date: pickedFrom,
+                          firstDate: DateTime(2020),
+                          lastDate: pickedTo,
+                          onPicked: (d) => setDlgState(() => pickedFrom = d),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: _DatePickerButton(
+                          label: 'Hasta',
+                          date: pickedTo,
+                          firstDate: pickedFrom,
+                          lastDate: DateTime.now(),
+                          onPicked: (d) => setDlgState(() => pickedTo = d),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  const Text(
+                    'Proyectos a incluir:',
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  ),
+                  const SizedBox(height: 4),
+                  if (available.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text('No hay proyectos disponibles.'),
+                    )
+                  else ...[
+                    CheckboxListTile(
+                      title: Text(
+                        allSelected ? 'Deseleccionar todos' : 'Seleccionar todos',
+                        style: const TextStyle(fontSize: 13),
+                      ),
+                      value: allSelected,
+                      tristate: true,
+                      onChanged: (_) {
+                        setDlgState(() {
+                          if (allSelected) {
+                            selected.clear();
+                          } else {
+                            selected.addAll(available);
+                          }
+                        });
+                      },
+                      controlAffinity: ListTileControlAffinity.leading,
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: available
+                              .map(
+                                (p) => CheckboxListTile(
+                                  title: Text(p, style: const TextStyle(fontSize: 13)),
+                                  value: selected.contains(p),
+                                  onChanged: (v) {
+                                    setDlgState(() {
+                                      if (v == true) {
+                                        selected.add(p);
+                                      } else {
+                                        selected.remove(p);
+                                      }
+                                    });
+                                  },
+                                  controlAffinity: ListTileControlAffinity.leading,
+                                  dense: true,
+                                  contentPadding: EdgeInsets.zero,
+                                ),
+                              )
+                              .toList(),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.shade300),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, size: 16, color: Colors.amber),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Esta operación puede tardar varios minutos dependiendo '
+                            'del número de actividades y evidencias.',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: selected.isEmpty
+                    ? null
+                    : () => Navigator.pop(
+                          ctx,
+                          (Set<String>.from(selected), pickedFrom, pickedTo),
+                        ),
+                icon: const Icon(Icons.download_rounded, size: 16),
+                label: const Text('Descargar expediente'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    if (confirmed == null || confirmed.$1.isEmpty || !mounted) return;
+    await _runBulkExpedienteExport(
+      confirmed.$1.toList()..sort(),
+      confirmed.$2,
+      confirmed.$3,
+    );
+  }
+
+  /// Ejecuta la descarga masiva del expediente.
+  Future<void> _runBulkExpedienteExport(
+    List<String> projectIds,
+    DateTime dateFrom,
+    DateTime dateTo,
+  ) async {
+    if (!mounted) return;
+    setState(() => _exportingExpediente = true);
+
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final docsRoot = await _resolveDashboardDocumentsRootPath();
+      final expedienteRoot = Directory('$docsRoot/SAO_Expediente');
+      await expedienteRoot.create(recursive: true);
+
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Obteniendo lista de actividades…'),
+          duration: Duration(seconds: 60),
+        ),
+      );
+
+      final allActivities = <CompletedActivity>[];
+      for (final projectId in projectIds) {
+        try {
+          final fetched = await _fetchAllCompletedActivities({
+            'project_id': projectId,
+            'date_from': dateFrom.toIso8601String(),
+            'date_to': dateTo.toIso8601String(),
+          });
+          allActivities.addAll(fetched);
+        } catch (_) {
+          // continuar con el siguiente proyecto
+        }
+      }
+
+      final total = allActivities.length;
+      int processed = 0;
+      int failed = 0;
+
+      if (total == 0) {
+        if (mounted) {
+          messenger
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(content: Text('No se encontraron actividades para exportar.')),
+            );
+        }
+        return;
+      }
+
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Descargando expediente: $total actividades…'),
+            duration: const Duration(seconds: 120),
+          ),
+        );
+
+      const apiClient = BackendApiClient();
+
+      for (var i = 0; i < allActivities.length; i += 4) {
+        final batch = allActivities.sublist(i, (i + 4).clamp(0, allActivities.length));
+
+        await Future.wait(
+          batch.map((activity) async {
+            try {
+              final decoded = await apiClient
+                  .getJson(
+                    '/api/v1/completed-activities/${Uri.encodeComponent(activity.id)}',
+                  )
+                  .timeout(const Duration(seconds: 30));
+
+              if (decoded is! Map<String, dynamic>) return;
+
+              final detail = CompletedActivityDetail.fromJson(decoded);
+              final actDir = _expedienteActivityDir(expedienteRoot.path, detail.summary);
+              final evidenciasDir = Directory('${actDir.path}/evidencias');
+              await actDir.create(recursive: true);
+              await evidenciasDir.create(recursive: true);
+
+              // Descargar evidencias primero para poder referenciar rutas
+              // locales al generar el PDF (evita doble descarga).
+              final localPaths = await _expedienteDownloadEvidences(evidenciasDir.path, detail);
+              await _expedienteGeneratePdf(actDir.path, detail, localPaths);
+
+              processed++;
+            } catch (_) {
+              failed++;
+            }
+          }),
+        );
+
+        if (mounted) {
+          final done = processed + failed;
+          if (done < total) {
+            messenger
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                SnackBar(
+                  content: Text('Expediente: $done/$total actividades procesadas…'),
+                  duration: const Duration(seconds: 60),
+                ),
+              );
+          }
+        }
+      }
+
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              failed == 0
+                  ? 'Expediente descargado: $processed actividades. '
+                      'Carpeta: ${expedienteRoot.path}'
+                  : 'Expediente: $processed completadas, $failed con error. '
+                      'Carpeta: ${expedienteRoot.path}',
+            ),
+            duration: const Duration(seconds: 20),
+            action: SnackBarAction(
+              label: 'Abrir carpeta',
+              onPressed: () => _openDashboardLocalPath(expedienteRoot.path),
+            ),
+          ),
+        );
+    } catch (e) {
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Error al descargar expediente: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _exportingExpediente = false);
+    }
+  }
+
+  /// Obtiene todas las actividades completadas (paginadas) para el proyecto dado.
+  Future<List<CompletedActivity>> _fetchAllCompletedActivities(
+    Map<String, String> params,
+  ) async {
+    const apiClient = BackendApiClient();
+    const pageSize = 200;
+    const maxItems = 5000;
+
+    final all = <CompletedActivity>[];
+    int page = 1;
+
+    while (true) {
+      final pageParams = <String, String>{
+        ...params,
+        'page': '$page',
+        'page_size': '$pageSize',
+      };
+      final qs = pageParams.entries
+          .map(
+            (e) =>
+                '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}',
+          )
+          .join('&');
+
+      final decoded = await apiClient
+          .getJson('/api/v1/completed-activities?$qs')
+          .timeout(const Duration(seconds: 30));
+
+      if (decoded is! Map<String, dynamic>) break;
+      final items = decoded['items'];
+      if (items is! List || items.isEmpty) break;
+
+      all.addAll(
+        items.whereType<Map<String, dynamic>>().map(CompletedActivity.fromJson),
+      );
+
+      final hasNext = decoded['has_next'] as bool? ?? false;
+      if (!hasNext || all.length >= maxItems) break;
+      page++;
+    }
+
+    return all;
+  }
+
+  /// Genera el PDF de una actividad en su carpeta del expediente.
+  Future<void> _expedienteGeneratePdf(
+    String actDirPath,
+    CompletedActivityDetail detail,
+    Map<String, String> localPaths,
+  ) async {
+    final s = detail.summary;
+    final now = DateTime.now();
+    await generateActivitiesPdf(
+      [
+        ReportActivityItem(
+          id: s.id,
+          projectId: s.projectId,
+          title: s.title,
+          activityType: s.activityType,
+          pk: s.pk,
+          frontName: s.front.isEmpty ? 'Sin frente' : s.front,
+          status: s.reviewDecision.isEmpty ? 'COMPLETADA' : s.reviewDecision,
+          reviewDecision: s.reviewDecision,
+          reviewStatus: s.reviewDecision,
+          createdAt: s.reviewedAt.isNotEmpty ? s.reviewedAt : s.createdAt,
+          assignedName: s.assignedName,
+          municipality: s.municipio,
+          state: s.estado,
+          colony: detail.colonia,
+          notes: detail.reviewNotes,
+          pendingEvidence: detail.evidences.isEmpty,
+          hasReport: s.hasReport,
+          evidences: detail.evidences
+              .map(
+                (e) => ReportEvidenceItem(
+                  id: e.id,
+                  // Usar ruta local si ya fue descargada; de lo contrario
+                  // el generador de PDF la resolverá via signed URL.
+                  filePath: localPaths[e.id] ?? e.gcsPath,
+                  fileType: e.type,
+                  caption: e.description,
+                  capturedAt: e.uploadedAt,
+                ),
+              )
+              .toList(growable: false),
+        ),
+      ],
+      ReportFilters(
+        projectId: s.projectId,
+        frontName: s.front.isEmpty ? 'Todos' : s.front,
+        dateRange: ReportDateRange(
+          start: now.subtract(const Duration(days: 730)),
+          end: now,
+        ),
+        includeAlreadyReported: true,
+      ),
+      executiveSummary: detail.reviewNotes,
+      includeAudit: true,
+      includeNotes: true,
+      includeAttachments: true,
+      saveFilePath: '$actDirPath/reporte_actividad.pdf',
+    );
+  }
+
+  /// Descarga todas las evidencias de una actividad a la carpeta indicada.
+  /// Retorna un mapa de evidenceId → ruta local absoluta para los archivos
+  /// que se descargaron exitosamente (se usa para embeber en el PDF).
+  Future<Map<String, String>> _expedienteDownloadEvidences(
+    String evidenciasDirPath,
+    CompletedActivityDetail detail,
+  ) async {
+    final evidenceRepo = EvidenceRepository();
+    final localPaths = <String, String>{};
+    for (var idx = 0; idx < detail.evidences.length; idx++) {
+      final evidence = detail.evidences[idx];
+      try {
+        final signedUrl = await evidenceRepo
+            .getDownloadSignedUrl(evidence.id)
+            .timeout(const Duration(seconds: 15));
+
+        final ext = _expedienteGuessExtension(evidence, signedUrl);
+        final idLen = detail.summary.id.length.clamp(0, 8);
+        final pkPart = _sanitizeExpedienteSegment(
+          detail.summary.pk.isNotEmpty
+              ? detail.summary.pk
+              : detail.summary.id.substring(0, idLen),
+        );
+        final descPart = _sanitizeExpedienteSegment(
+          evidence.description.isNotEmpty
+              ? evidence.description
+              : 'evidencia_${idx + 1}',
+        );
+        final fileName =
+            '${(idx + 1).toString().padLeft(2, '0')}_${pkPart}_$descPart$ext';
+
+        final targetFile = File('$evidenciasDirPath/$fileName');
+        if (await targetFile.exists() && await targetFile.length() > 0) {
+          localPaths[evidence.id] = targetFile.path;
+          continue;
+        }
+
+        await _expedienteDownloadFile(signedUrl, targetFile);
+        if (await targetFile.exists() && await targetFile.length() > 0) {
+          localPaths[evidence.id] = targetFile.path;
+        }
+      } catch (_) {
+        // Continuar si una evidencia falla individualmente
+      }
+    }
+    return localPaths;
+  }
+
+  /// Descarga un archivo desde una URL firmada a un File local.
+  Future<void> _expedienteDownloadFile(String signedUrl, File targetFile) async {
+    final client = HttpClient()
+      ..connectionTimeout = const Duration(seconds: 30)
+      ..idleTimeout = const Duration(seconds: 30);
+    try {
+      final request = await client.getUrl(Uri.parse(signedUrl));
+      request.followRedirects = true;
+      request.maxRedirects = 5;
+      request.headers.set(HttpHeaders.userAgentHeader, 'SAO-Desktop/1.0');
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('HTTP ${response.statusCode}');
+      }
+      final bytes = await response.fold<List<int>>(
+        <int>[],
+        (buffer, chunk) => buffer..addAll(chunk),
+      );
+      if (bytes.isNotEmpty) {
+        await targetFile.writeAsBytes(bytes, flush: true);
+      }
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  /// Construye el directorio de la actividad dentro del expediente.
+  Directory _expedienteActivityDir(String rootPath, CompletedActivity s) {
+    final project = _sanitizeExpedienteSegment(
+      s.projectId.isNotEmpty ? s.projectId : 'SIN_PROYECTO',
+    );
+    final estado = _sanitizeExpedienteSegment(
+      s.estado.isNotEmpty ? s.estado : 'SIN_ESTADO',
+    );
+    final municipio = _sanitizeExpedienteSegment(
+      s.municipio.isNotEmpty ? s.municipio : 'SIN_MUNICIPIO',
+    );
+    final front = _sanitizeExpedienteSegment(
+      s.front.isNotEmpty ? s.front : 'SIN_FRENTE',
+    );
+    final title = _sanitizeExpedienteSegment(
+      s.title.isNotEmpty ? s.title : 'ACTIVIDAD',
+    );
+    final pk =
+        s.pk.trim().isNotEmpty ? '__${_sanitizeExpedienteSegment(s.pk)}' : '';
+    return Directory('$rootPath/$project/$front/$estado/$municipio/$title$pk');
+  }
+
+  /// Sanitiza un segmento de ruta para el sistema de archivos.
+  String _sanitizeExpedienteSegment(String value) {
+    final cleaned = value.trim().replaceAll(RegExp(r'[\\/:*?"<>|]+'), '_');
+    final compact = cleaned.replaceAll(RegExp(r'\s+'), '_');
+    final result = compact.isEmpty ? 'sin_dato' : compact;
+    return result.length > 80 ? result.substring(0, 80) : result;
+  }
+
+  /// Infiere la extensión del archivo de una evidencia.
+  String _expedienteGuessExtension(EvidenceItem evidence, String signedUrl) {
+    String fromRaw(String raw) {
+      if (raw.trim().isEmpty) return '';
+      final withoutQuery = raw.split('?').first;
+      final dotIdx = withoutQuery.lastIndexOf('.');
+      if (dotIdx < 0 || dotIdx >= withoutQuery.length - 1) return '';
+      return withoutQuery.substring(dotIdx);
+    }
+
+    final fromGcs = fromRaw(evidence.gcsPath);
+    if (fromGcs.isNotEmpty) return fromGcs;
+
+    final fromUrl = fromRaw(signedUrl);
+    if (fromUrl.isNotEmpty) return fromUrl;
+
+    final upper = evidence.type.toUpperCase();
+    if (upper.contains('PDF') || upper.contains('DOCUMENT')) return '.pdf';
+    if (upper.contains('VIDEO')) return '.mp4';
+    return '.jpg';
+  }
 }
 
 class _GroupedGeoPoint {
@@ -3451,6 +4237,7 @@ class _SparklinePainter extends CustomPainter {
   }
 }
 
+
 // ---------------------------------------------------------------------------
 // Shared empty-state widget
 // ---------------------------------------------------------------------------
@@ -3477,6 +4264,65 @@ class _EmptyState extends StatelessWidget {
             Icon(icon, size: 36, color: iconColor.withValues(alpha: 0.6)),
             const SizedBox(height: 8),
             Text(message, style: const TextStyle(color: SaoColors.gray500)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Helper: botón que abre un DatePicker ─────────────────────────────────────
+
+class _DatePickerButton extends StatelessWidget {
+  const _DatePickerButton({
+    required this.label,
+    required this.date,
+    required this.firstDate,
+    required this.lastDate,
+    required this.onPicked,
+  });
+
+  final String label;
+  final DateTime date;
+  final DateTime firstDate;
+  final DateTime lastDate;
+  final ValueChanged<DateTime> onPicked;
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat('dd/MM/yyyy', 'es');
+    return InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () async {
+        final picked = await showDatePicker(
+          context: context,
+          initialDate: date,
+          firstDate: firstDate,
+          lastDate: lastDate,
+          locale: const Locale('es'),
+        );
+        if (picked != null) onPicked(picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade400),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.calendar_today_rounded, size: 14),
+            const SizedBox(width: 6),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(label,
+                    style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                Text(fmt.format(date),
+                    style: const TextStyle(fontSize: 13)),
+              ],
+            ),
           ],
         ),
       ),

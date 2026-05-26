@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:googleapis/calendar/v3.dart' as gcal;
+import 'package:url_launcher/url_launcher.dart';
 
+import '../../core/auth/token_store.dart';
+import '../../core/providers/project_providers.dart';
 import '../auth/app_session_controller.dart';
 import '../calendar/calendar_settings_provider.dart';
 
@@ -374,6 +377,8 @@ class _RightCardsState extends State<_RightCards> {
         if (widget.showCalendar) ...[          const SizedBox(height: 16),
           const _GoogleCalendarCard(),
         ],
+        const SizedBox(height: 16),
+        const _IcalCard(),
       ],
     );
   }
@@ -816,6 +821,193 @@ class _CalendarPickerDialogState extends State<_CalendarPickerDialog> {
           child: const Text('Guardar'),
         ),
       ],
+    );
+  }
+}
+
+// ── iCal calendar card ─────────────────────────────────────────────────────
+
+/// Muestra URLs de suscripción iCal por proyecto para todos los usuarios.
+class _IcalCard extends ConsumerStatefulWidget {
+  const _IcalCard();
+
+  @override
+  ConsumerState<_IcalCard> createState() => _IcalCardState();
+}
+
+const _kProfileGoogleCalendarUrls = <String, String>{
+  'TSNL': 'https://calendar.google.com/calendar/u/1?cid=YTMzOTkxOGY2NDFiZGRmOWE2OTk3MDliYmFmMjlhMmJmYTNkZmYwZWU5NDllMTgzYWI4N2YzZjNhOTY2NzYyY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TAP':  'https://calendar.google.com/calendar/u/1?cid=YWQ4ZjdjZTUxMDIzYmM2NjExODhlYWFhODZlNWMyM2MxY2IxZGQ5YTE0ZWY2MTRiOTEwZGJjY2U3ZDgxMDM1NkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TMQ':  'https://calendar.google.com/calendar/u/1?cid=NGJmMWFjODYwMGE5MTg1YzJjYTYwZTI5ODRhMjQ5OWQwMjA0ODc2OTc5MWM5MzcyMTYxODc2YzJkZjQ3ZDI5MUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TQI':  'https://calendar.google.com/calendar/u/1?cid=MWMxMWI1YWQ0YjZhNGY3M2U5NDI5ZDcwMjc1MDI3NGM0MTFlNWU0ZTBlYmFjZjU3MzA1Nzk4MzZlMWQ3ZTM3YkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TQSL': 'https://calendar.google.com/calendar/u/1?cid=YzU3MWYzNDhjM2NjMTVlZDA3MTk1Y2U0NTQxZGY4YjYzNmVmNDRhNjFjODg5ZDZmODgyYmYxMTA5N2MxNGJhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TSLS': 'https://calendar.google.com/calendar/u/1?cid=MDlhYjdjNjI4NWI3ZDBkNDM3YzQ1MjhlNWNlNjU4ZDhmMjZiYzQyMTE1YzYyZTBlNTg0YmZkYTkyZDZkYTk0OUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+};
+
+class _IcalCardState extends ConsumerState<_IcalCard> {
+  final Map<String, bool> _copied = {};
+
+  Future<void> _copy(String projectId) async {
+    final url = _kProfileGoogleCalendarUrls[projectId];
+    if (url == null) return;
+    await Clipboard.setData(ClipboardData(text: url));
+    setState(() => _copied[projectId] = true);
+    await Future.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _copied[projectId] = false);
+  }
+
+  Future<void> _openCalendar(String projectId) async {
+    final url = _kProfileGoogleCalendarUrls[projectId];
+    if (url == null) return;
+    await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final projectsAsync = ref.watch(availableProjectsProvider);
+    final token = TokenStore.current;
+
+    if (token.isEmpty) return const SizedBox.shrink();
+
+    return projectsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (e, _) => const SizedBox.shrink(),
+      data: (projects) {
+        final gcalProjects = projects
+            .where((p) => _kProfileGoogleCalendarUrls.containsKey(p))
+            .toList();
+        if (gcalProjects.isEmpty) return const SizedBox.shrink();
+
+        return Container(
+          decoration: BoxDecoration(
+            color: cs.surface,
+            border: Border.all(color: ProfilePage._softBorder),
+            borderRadius: BorderRadius.circular(14),
+            boxShadow: ProfilePage._softShadow,
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 13, 16, 11),
+                child: Row(
+                  children: [
+                    Icon(Icons.calendar_month_outlined,
+                        size: 15, color: cs.primary),
+                    const SizedBox(width: 7),
+                    Text(
+                      'Calendarios iCal por proyecto',
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Divider(height: 1, color: Theme.of(context).dividerColor),
+              // Description
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+                child: Text(
+                  'Haz clic en el ícono para abrir el calendario de tu proyecto en Google Calendar.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurface.withValues(alpha: 0.55),
+                  ),
+                ),
+              ),
+              // Per-project rows
+              ...gcalProjects.map((projectId) {
+                final isCopied = _copied[projectId] == true;
+                final url = _kProfileGoogleCalendarUrls[projectId]!;
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: Row(
+                    children: [
+                      // Project badge
+                      Container(
+                        width: 56,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: cs.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          projectId,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: cs.primary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      // URL (truncated)
+                      Expanded(
+                        child: Text(
+                          url,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                            color: cs.onSurface.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      // Copy button
+                      Tooltip(
+                        message: isCopied ? '¡Copiado!' : 'Copiar link',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: () => _copy(projectId),
+                          child: Padding(
+                            padding: const EdgeInsets.all(5),
+                            child: Icon(
+                              isCopied
+                                  ? Icons.check_rounded
+                                  : Icons.copy_rounded,
+                              size: 15,
+                              color: isCopied
+                                  ? Colors.green
+                                  : cs.onSurface.withValues(alpha: 0.4),
+                            ),
+                          ),
+                        ),
+                      ),
+                      // Open in Google Calendar button
+                      Tooltip(
+                        message: 'Abrir en Google Calendar',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(6),
+                          onTap: () => _openCalendar(projectId),
+                          child: Padding(
+                            padding: const EdgeInsets.all(5),
+                            child: Icon(
+                              Icons.open_in_new_rounded,
+                              size: 15,
+                              color: cs.primary,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 }

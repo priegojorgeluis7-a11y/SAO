@@ -1,4 +1,5 @@
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/compat/io_compat.dart';
 
 import 'package:file_picker/file_picker.dart';
@@ -7,8 +8,10 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
+import '../../core/auth/token_store.dart';
 import '../../core/config/data_mode.dart';
 import '../../core/navigation/role_view_access.dart';
+import '../../core/providers/project_providers.dart';
 import '../../core/providers/app_refresh_provider.dart';
 import '../../core/settings/report_export_settings.dart';
 import '../../data/repositories/backend_api_client.dart';
@@ -565,6 +568,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 const SizedBox(height: 28),
               ],
 
+              // ── Calendarios iCal ─────────────────────────────────────────────────
+              const _SectionHeader(
+                title: 'Calendarios de actividades',
+                icon: Icons.calendar_month_rounded,
+              ),
+              const SizedBox(height: 12),
+              const _IcalSection(),
+              const SizedBox(height: 28),
+
               // ── Acerca de ────────────────────────────────────────────────
               const _SectionHeader(
                   title: 'Acerca de', icon: Icons.info_outline_rounded),
@@ -839,6 +851,203 @@ class _CopyRowState extends State<_CopyRow> {
   }
 }
 
+
+// ── iCal project row (con botón Google Calendar) ─────────────────────────
+
+const _kGoogleCalendarUrls = <String, String>{
+  'TSNL': 'https://calendar.google.com/calendar/u/1?cid=YTMzOTkxOGY2NDFiZGRmOWE2OTk3MDliYmFmMjlhMmJmYTNkZmYwZWU5NDllMTgzYWI4N2YzZjNhOTY2NzYyY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TAP':  'https://calendar.google.com/calendar/u/1?cid=YWQ4ZjdjZTUxMDIzYmM2NjExODhlYWFhODZlNWMyM2MxY2IxZGQ5YTE0ZWY2MTRiOTEwZGJjY2U3ZDgxMDM1NkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TMQ':  'https://calendar.google.com/calendar/u/1?cid=NGJmMWFjODYwMGE5MTg1YzJjYTYwZTI5ODRhMjQ5OWQwMjA0ODc2OTc5MWM5MzcyMTYxODc2YzJkZjQ3ZDI5MUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TQI':  'https://calendar.google.com/calendar/u/1?cid=MWMxMWI1YWQ0YjZhNGY3M2U5NDI5ZDcwMjc1MDI3NGM0MTFlNWU0ZTBlYmFjZjU3MzA1Nzk4MzZlMWQ3ZTM3YkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TQSL': 'https://calendar.google.com/calendar/u/1?cid=YzU3MWYzNDhjM2NjMTVlZDA3MTk1Y2U0NTQxZGY4YjYzNmVmNDRhNjFjODg5ZDZmODgyYmYxMTA5N2MxNGJhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TSLS': 'https://calendar.google.com/calendar/u/1?cid=MDlhYjdjNjI4NWI3ZDBkNDM3YzQ1MjhlNWNlNjU4ZDhmMjZiYzQyMTE1YzYyZTBlNTg0YmZkYTkyZDZkYTk0OUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+};
+
+class _IcalProjectRow extends StatefulWidget {
+  final String label;
+  final String icalUrl;
+  final String? googleCalendarUrl;
+  const _IcalProjectRow({
+    required this.label,
+    required this.icalUrl,
+    this.googleCalendarUrl,
+  });
+
+  @override
+  State<_IcalProjectRow> createState() => _IcalProjectRowState();
+}
+
+class _IcalProjectRowState extends State<_IcalProjectRow> {
+  bool _copied = false;
+
+  void _copy() {
+    Clipboard.setData(ClipboardData(text: widget.icalUrl));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
+  void _openGoogleCalendar() {
+    final url = widget.googleCalendarUrl;
+    if (url == null) return;
+    launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 140,
+            child: Text(
+              widget.label,
+              style: TextStyle(
+                  fontSize: 13, color: cs.onSurface.withValues(alpha: 0.5)),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              widget.icalUrl,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+                fontFamily: 'monospace',
+                color: cs.onSurface,
+              ),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: Icon(
+              _copied ? Icons.check_rounded : Icons.copy_rounded,
+              size: 16,
+              color: _copied ? Colors.green : cs.onSurface.withValues(alpha: 0.4),
+            ),
+            tooltip: _copied ? 'Copiado' : 'Copiar URL',
+            onPressed: _copy,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+          ),
+          const SizedBox(width: 2),
+          if (widget.googleCalendarUrl != null)
+            IconButton(
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              tooltip: 'Abrir en Google Calendar',
+              onPressed: _openGoogleCalendar,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+              color: cs.primary,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── iCal sección ──────────────────────────────────────────────────────────
+
+class _IcalSection extends ConsumerWidget {
+  const _IcalSection();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final projectsAsync = ref.watch(availableProjectsProvider);
+    final cs = Theme.of(context).colorScheme;
+
+    return projectsAsync.when(
+      loading: () => _SettingsCard(
+        children: const [
+          _InfoRow(label: 'Calendarios', value: 'Cargando proyectos...'),
+        ],
+      ),
+      error: (_, __) => _SettingsCard(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 18, color: Colors.orange),
+                const SizedBox(width: 10),
+                const Expanded(
+                  child: Text(
+                    'No se pudieron cargar los proyectos. Verifica tu conexión.',
+                    style: TextStyle(fontSize: 13),
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () => ref.invalidate(availableProjectsProvider),
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                  label: const Text('Reintentar'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      data: (projects) {
+        if (projects.isEmpty) {
+          return _SettingsCard(
+            children: const [
+              _InfoRow(
+                label: 'Calendarios',
+                value: 'No tienes proyectos asignados.',
+              ),
+            ],
+          );
+        }
+
+        final gcalProjects = projects
+            .where((p) => _kGoogleCalendarUrls.containsKey(p))
+            .toList();
+
+        if (gcalProjects.isEmpty) {
+          return _SettingsCard(
+            children: const [
+              _InfoRow(
+                label: 'Calendarios',
+                value: 'No hay calendarios disponibles para tus proyectos.',
+              ),
+            ],
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: Text(
+                'Haz clic en el ícono para abrir el calendario en Google Calendar, o copia el link para compartirlo.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: cs.onSurface.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+            _SettingsCard(
+              children: [
+                for (var i = 0; i < gcalProjects.length; i++) ...[
+                  if (i > 0) const _Divider(),
+                  _IcalProjectRow(
+                    label: gcalProjects[i],
+                    icalUrl: _kGoogleCalendarUrls[gcalProjects[i]]!,
+                    googleCalendarUrl: _kGoogleCalendarUrls[gcalProjects[i]],
+                  ),
+                ],
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
 
 class _RoleViewAccessDialog extends StatefulWidget {
   const _RoleViewAccessDialog();

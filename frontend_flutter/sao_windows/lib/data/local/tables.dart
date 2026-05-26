@@ -251,6 +251,9 @@ class Activities extends Table {
   DateTimeColumn get createdAt => dateTime()(); // local
   DateTimeColumn get startedAt => dateTime().nullable()();
   DateTimeColumn get finishedAt => dateTime().nullable()();
+  // Planned/scheduled start date set by supervisor (assignment_start_at from backend).
+  // Falls back to createdAt when not set (activities created before this field existed).
+  DateTimeColumn get assignmentStartAt => dateTime().nullable()();
 
   TextColumn get createdByUserId => text().references(Users, #id)();
   TextColumn get assignedToUserId => text().nullable().references(Users, #id)(); // Usuario asignado desde backend

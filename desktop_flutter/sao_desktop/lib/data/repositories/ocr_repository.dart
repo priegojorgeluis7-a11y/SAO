@@ -10,6 +10,10 @@ import 'backend_api_client.dart';
 
 class OcrDetectedData {
   final String? date;
+  final String? topic;
+  final String? responsible;
+  final String? location;
+  final String? time;
   final List<String> attendees;
   final List<String> agreements;
   final List<String> nextSteps;
@@ -17,6 +21,10 @@ class OcrDetectedData {
 
   const OcrDetectedData({
     required this.date,
+    required this.topic,
+    required this.responsible,
+    required this.location,
+    required this.time,
     required this.attendees,
     required this.agreements,
     required this.nextSteps,
@@ -29,9 +37,17 @@ class OcrDetectedData {
       return raw.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
     }
 
-    final dateRaw = json['date']?.toString().trim();
+    String? parseStr(dynamic raw) {
+      final s = raw?.toString().trim();
+      return (s == null || s.isEmpty) ? null : s;
+    }
+
     return OcrDetectedData(
-      date: (dateRaw == null || dateRaw.isEmpty) ? null : dateRaw,
+      date: parseStr(json['date']),
+      topic: parseStr(json['topic']),
+      responsible: parseStr(json['responsible']),
+      location: parseStr(json['location']),
+      time: parseStr(json['time']),
       attendees: parseList(json['attendees']),
       agreements: parseList(json['agreements']),
       nextSteps: parseList(json['next_steps']),
@@ -42,6 +58,10 @@ class OcrDetectedData {
   Map<String, dynamic> toJson() {
     return {
       'date': date,
+      'topic': topic,
+      'responsible': responsible,
+      'location': location,
+      'time': time,
       'attendees': attendees,
       'agreements': agreements,
       'next_steps': nextSteps,
@@ -55,6 +75,8 @@ class OcrExtractResult {
   final String sourceType;
   final String extractionMode;
   final String text;
+  final String structuredText;
+  final String docType;
   final int textLength;
   final OcrDetectedData detected;
 
@@ -63,6 +85,8 @@ class OcrExtractResult {
     required this.sourceType,
     required this.extractionMode,
     required this.text,
+    required this.structuredText,
+    required this.docType,
     required this.textLength,
     required this.detected,
   });
@@ -73,6 +97,8 @@ class OcrExtractResult {
       sourceType: (json['source_type'] ?? '').toString(),
       extractionMode: (json['extraction_mode'] ?? '').toString(),
       text: (json['text'] ?? '').toString(),
+      structuredText: (json['structured_text'] ?? '').toString(),
+      docType: (json['doc_type'] ?? 'unknown').toString(),
       textLength: (json['text_length'] as num?)?.toInt() ?? 0,
       detected: OcrDetectedData.fromJson((json['detected'] as Map?)?.cast<String, dynamic>() ?? const {}),
     );
@@ -173,28 +199,26 @@ class OcrRepository {
       return envPath;
     }
 
-    // Search for .venv in workspaceRoot and parent folders so packaged
-    // executables started from build/Release can still find D:/SAO/.venv.
-    if (workspaceRoot != null) {
+    // On Windows, look for .venv/Scripts/python.exe walking up from workspaceRoot.
+    // On macOS/Linux the packages are installed in the system Python, so skip the
+    // venv search (a project .venv may have a broken macOS framework dylib).
+    if (Platform.isWindows && workspaceRoot != null) {
       Directory current = Directory(workspaceRoot).absolute;
       for (var i = 0; i < 10; i++) {
-        final candidate = p.join(current.path, '.venv', 'Scripts', 'python.exe');
-        if (File(candidate).existsSync()) {
-          return candidate;
-        }
-
+        final winCandidate = p.join(current.path, '.venv', 'Scripts', 'python.exe');
+        if (File(winCandidate).existsSync()) return winCandidate;
         final parent = current.parent;
-        if (parent.path == current.path) {
-          break;
-        }
+        if (parent.path == current.path) break;
         current = parent;
       }
+      return 'python';
     }
 
-    return 'python';
+    // macOS / Linux: use system python3.
+    return 'python3';
   }
 
-  Future<OcrExtractResult> extractFromPath(String filePath, {int maxPages = 8}) async {
+  Future<OcrExtractResult> extractFromPath(String filePath, {int maxPages = 8, bool forceOcr = false}) async {
     final sourceFile = File(filePath);
     if (!sourceFile.existsSync()) {
       throw FileSystemException('No existe el archivo para OCR local', filePath);
@@ -222,6 +246,7 @@ class OcrRepository {
           maxPages.clamp(1, 25).toString(),
           '--output',
           outputFile.absolute.path,
+          if (forceOcr) '--force-ocr',
         ],
         workingDirectory: workspaceRoot ?? Directory.current.path,
         runInShell: true,

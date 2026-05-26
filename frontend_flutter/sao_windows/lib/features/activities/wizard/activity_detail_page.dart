@@ -2,15 +2,18 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:get_it/get_it.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../core/utils/format_utils.dart';
 import '../../../core/utils/project_terminology.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
 import '../../catalog/catalog_repository.dart';
+import '../../evidence/data/evidence_upload_repository.dart';
 import '../../home/models/today_activity.dart';
 import '../../sync/services/sync_service.dart';
 import '../../../ui/theme/sao_colors.dart';
@@ -38,6 +41,7 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
   Map<String, ActivityField> _fields = {};
   List<Evidence> _evidences = [];
   bool _loading = true;
+  bool _uploadingEvidence = false;
 
   @override
   void initState() {
@@ -568,12 +572,25 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 10),
+                        const SizedBox(height: 12),
                         Text(
                           'Corrige el punto indicado y vuelve a enviar la actividad.',
                           style: SaoTypography.bodyTextSmall.copyWith(
                             color: SaoColors.gray600,
                             fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        SizedBox(
+                          width: double.infinity,
+                          child: FilledButton.icon(
+                            onPressed: () => _openWizardForCorrection(context),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: SaoColors.riskHigh,
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.edit_rounded, size: 18),
+                            label: const Text('Abrir para corregir'),
                           ),
                         ),
                       ],
@@ -739,6 +756,26 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
                               ),
                             ),
                           ],
+                        ),
+                      ),
+                      // Botón agregar evidencia / PDF
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: SizedBox(
+                          width: double.infinity,
+                          child: OutlinedButton.icon(
+                            onPressed:
+                                _uploadingEvidence ? null : _uploadEvidenceToExisting,
+                            icon: _uploadingEvidence
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2))
+                                : const Icon(Icons.upload_file_rounded),
+                            label: Text(_uploadingEvidence
+                                ? 'Subiendo...'
+                                : 'Agregar evidencia o PDF'),
+                          ),
                         ),
                       ),
                       if (_evidences.isNotEmpty)
@@ -973,6 +1010,83 @@ class _ActivityDetailPageState extends State<ActivityDetailPage> {
         ),
       ),
     );
+  }
+
+  void _openWizardForCorrection(BuildContext context) {
+    final id = widget.activity.id;
+    final project = widget.projectCode;
+    context.push('/activity/$id/wizard?project=$project');
+  }
+
+  Future<void> _uploadEvidenceToExisting() async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'pdf'],
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    setState(() => _uploadingEvidence = true);
+    final repo = GetIt.I<EvidenceUploadRepository>();
+
+    try {
+      for (final file in result.files) {
+        final path = file.path;
+        if (path == null) continue;
+        final ext = (file.extension ?? '').toLowerCase();
+        final mime = switch (ext) {
+          'pdf' => 'application/pdf',
+          'png' => 'image/png',
+          'webp' => 'image/webp',
+          'heic' => 'image/heic',
+          _ => 'image/jpeg',
+        };
+        final bytes = await File(path).readAsBytes();
+        try {
+          final init = await repo.uploadInit(
+            activityId: widget.activity.id,
+            mimeType: mime,
+            sizeBytes: bytes.length,
+            fileName: file.name,
+          );
+          await repo.uploadBytesToSignedUrl(
+            signedUrl: init.signedUrl,
+            bytes: bytes,
+            mimeType: mime,
+          );
+          await repo.uploadComplete(evidenceId: init.evidenceId);
+        } catch (_) {
+          // Si falla en línea, encolamos para reintento
+          await repo.enqueuePendingUpload(
+            activityId: widget.activity.id,
+            localPath: path,
+            fileName: file.name,
+            mimeType: mime,
+            sizeBytes: bytes.length,
+          );
+        }
+      }
+      await _loadData();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Evidencia subida correctamente'),
+            backgroundColor: SaoColors.success,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error al subir: $e'),
+            backgroundColor: SaoColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _uploadingEvidence = false);
+    }
   }
 
   Future<void> _openEvidence(Evidence ev) async {

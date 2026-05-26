@@ -39,6 +39,7 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
   final GlobalKey _topicOtherKey = GlobalKey();
   final GlobalKey _resultKey = GlobalKey();
   final GlobalKey _agreementsKey = GlobalKey();
+  final GlobalKey _notesKey = GlobalKey();
 
   // Estados de error
   final Map<String, bool> _fieldErrors = {};
@@ -144,6 +145,9 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
             break;
           case 'report_agreements':
             targetKey = _agreementsKey;
+            break;
+          case 'report_notes':
+            targetKey = _notesKey;
             break;
         }
         
@@ -432,29 +436,59 @@ class _WizardStepFieldsState extends State<WizardStepFields> {
 
             const SizedBox(height: 18),
 
-            _sectionTitle('Minuta / Reporte'),
-            const SizedBox(height: 10),
-
-            TextField(
-              // TODO(priegojorgeluis7): Integrar dictado por voz cuando se defina
-              // el patrón compartido de captura de audio en SAO.
-              minLines: 5,
-              maxLines: 8,
-              keyboardType: TextInputType.multiline,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: const InputDecoration(
-                labelText: 'Desarrollo / Notas',
-                hintText: 'Describe lo ocurrido, contexto, decisiones, solicitudes…',
-                alignLabelWithHint: true,
-                border: OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  onPressed: null,
-                  tooltip: 'Dictado por voz próximamente',
-                  icon: Icon(Icons.mic_none_rounded),
-                ),
+            Container(
+              key: _notesKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _sectionTitle('Minuta / Reporte *'),
+                  if (_fieldErrors['report_notes'] == true)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '⚠️ Escribe lo que ocurrió en la actividad — sin esta descripción el reporte no puede usarse para dar seguimiento al proyecto',
+                        style: SaoTypography.caption.copyWith(
+                          color: SaoColors.error,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    // TODO(priegojorgeluis7): Integrar dictado por voz cuando se defina
+                    // el patrón compartido de captura de audio en SAO.
+                    minLines: 5,
+                    maxLines: 8,
+                    keyboardType: TextInputType.multiline,
+                    textCapitalization: TextCapitalization.sentences,
+                    decoration: InputDecoration(
+                      labelText: 'Desarrollo / Notas',
+                      hintText: 'Describe lo ocurrido, contexto, decisiones, solicitudes…',
+                      alignLabelWithHint: true,
+                      border: const OutlineInputBorder(),
+                      errorBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: SaoColors.error, width: 1.5),
+                      ),
+                      focusedErrorBorder: const OutlineInputBorder(
+                        borderSide: BorderSide(color: SaoColors.error, width: 2),
+                      ),
+                      errorText: _fieldErrors['report_notes'] == true
+                          ? 'Campo obligatorio'
+                          : null,
+                      suffixIcon: const IconButton(
+                        onPressed: null,
+                        tooltip: 'Dictado por voz próximamente',
+                        icon: Icon(Icons.mic_none_rounded),
+                      ),
+                    ),
+                    controller: _notesController,
+                    onChanged: (v) {
+                      c.setReportNotes(v);
+                      _clearError('report_notes');
+                    },
+                  ),
+                ],
               ),
-              controller: _notesController,
-              onChanged: c.setReportNotes,
             ),
 
             const SizedBox(height: 10),

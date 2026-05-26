@@ -347,7 +347,19 @@ class _ActivityMiniCard extends StatelessWidget {
             ],
           ),
           const SizedBox(height: SaoSpacing.xs),
-          Text(activity.activity.id, style: SaoTypography.caption),
+          Tooltip(
+            message: activity.activity.id,
+            child: Text(
+              activity.activity.id.length > 8
+                  ? '${activity.activity.id.substring(0, 8)}…'
+                  : activity.activity.id,
+              style: const TextStyle(
+                fontSize: 10,
+                color: SaoColors.gray400,
+                fontFeatures: [FontFeature.tabularFigures()],
+              ),
+            ),
+          ),
           const SizedBox(height: SaoSpacing.xs),
           Row(
             children: [

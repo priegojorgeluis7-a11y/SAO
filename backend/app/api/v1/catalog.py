@@ -1316,7 +1316,7 @@ def get_catalog_version(
     project_id = str((snap.to_dict() or {}).get("project_id") or "").strip().upper()
     if not project_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Catalog version {version_id} is missing project_id",
         )
     _enforce_catalog_permission(current_user, "catalog.view", project_id)
@@ -1344,7 +1344,7 @@ def publish_catalog_version(
     project_id = str((snap.to_dict() or {}).get("project_id") or "").strip().upper()
     if not project_id:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=f"Catalog version {version_id} is missing project_id",
         )
     _enforce_catalog_permission(current_user, "catalog.publish", project_id)
@@ -1533,6 +1533,17 @@ def apply_project_ops(
     bundle["meta"]["project_id"] = resolved_project
     bundle["meta"]["version_id"] = resolved_version
     _write_current_bundle_firestore(resolved_project, bundle)
+    # Auto-publish so every catalog mutation is immediately visible to all clients
+    # (no manual "Publicar" step required). Errors are logged but do not fail the op.
+    try:
+        _publish_bundle_firestore(resolved_project)
+        logger.info("[project-ops] auto-publish OK for project_id=%s", resolved_project)
+    except Exception:
+        logger.warning(
+            "[project-ops] auto-publish failed for project_id=%s — ops saved, publish skipped",
+            resolved_project,
+            exc_info=True,
+        )
     return bundle
 
 

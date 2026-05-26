@@ -114,6 +114,12 @@ def _activity_dto_from_firestore_payload(payload: dict) -> ActivityDTO:
     normalized["created_at"] = _coerce_firestore_datetime(normalized.get("created_at")) or now
     normalized["updated_at"] = _coerce_firestore_datetime(normalized.get("updated_at")) or now
     normalized["deleted_at"] = _coerce_firestore_datetime(normalized.get("deleted_at"))
+    # Include the supervisor-set scheduled date; fall back to created_at when absent
+    # so clients can always use assignment_start_at for date-based filtering.
+    normalized["assignment_start_at"] = (
+        _coerce_firestore_datetime(normalized.get("assignment_start_at"))
+        or normalized["created_at"]
+    )
     if not isinstance(normalized.get("wizard_payload"), dict):
         normalized["wizard_payload"] = None
     
@@ -189,7 +195,11 @@ def _firestore_pull(request: SyncPullRequest, operative_user_id: str | None = No
         # OPERATIVO filter: only sync activities assigned to (or created by) them.
         if operative_user_id:
             participant_user_ids = _normalized_participant_user_ids(item)
-            if operative_user_id not in participant_user_ids:
+            # If the participant list is empty (both assigned_to_user_id and
+            # created_by_user_id are null in the Firestore doc), include the
+            # activity rather than silently dropping it — a null-assignee doc is
+            # likely a data-quality issue and should still sync to OPERATIVO users.
+            if participant_user_ids and operative_user_id not in participant_user_ids:
                 continue
         try:
             activity_dtos.append(_activity_dto_from_firestore_payload(item))
@@ -210,6 +220,22 @@ def _firestore_pull(request: SyncPullRequest, operative_user_id: str | None = No
         else:
             next_since_version = current_version
             next_after_uuid = None
+    elif page_docs:
+        # All items in this page were malformed/skipped. Advance the cursor past
+        # them so the client does not enter an infinite loop re-requesting the
+        # same stuck page on every sync cycle.
+        last_raw = page_docs[-1]
+        last_doc = (last_raw.to_dict() if hasattr(last_raw, "to_dict") else dict(last_raw or {}))
+        current_version = _coerce_sync_version(last_doc.get("sync_version")) or request.since_version
+        next_since_version = current_version
+        _last_uuid = str(last_doc.get("uuid") or "").strip()
+        next_after_uuid = _last_uuid if (has_more and _last_uuid) else None
+        logger.warning(
+            "SYNC_PULL_ALL_SKIPPED project_id=%s page_size=%d advanced_to_version=%d",
+            request.project_id,
+            len(page_docs),
+            current_version,
+        )
     else:
         current_version = request.since_version
         next_since_version = request.since_version
@@ -682,7 +708,7 @@ def _firestore_push_item(
             else:
                 batch.set(sibling_ref, sibling_payload)
 
-        return len(results) - 1, 1
+        return len(results) - 1, 1 + len(sibling_participant_ids)
 
     existing = snap.to_dict() or {}
     existing_participant_user_ids = _normalized_participant_user_ids(existing)
@@ -811,13 +837,18 @@ def _firestore_push_item(
     incoming_state = str(item.execution_state or "").strip().upper()
     previous_state = str(existing.get("execution_state") or "").strip().upper()
     completed_like_states = {"REVISION_PENDIENTE", "COMPLETADA"}
+    propagation_writes = 0
     if incoming_state in completed_like_states and previous_state not in completed_like_states:
         if item.assigned_to_user_id:
             payload["completed_by_user_id"] = str(item.assigned_to_user_id)
         payload["completed_at"] = now
         # Propagate completion to co-responsible siblings in the same group.
+        # Pass the active batch so sibling writes are committed atomically with
+        # the primary activity update (avoids partial-completion on batch failure).
         if activity_group_id := existing.get("activity_group_id"):
-            _propagate_group_completion(client, activity_group_id, str(item.uuid), payload, now)
+            propagation_writes = _propagate_group_completion(
+                client, batch, activity_group_id, str(item.uuid), payload, now
+            )
     if _should_reset_review_metadata(existing, item):
         payload.update(
             {
@@ -830,19 +861,89 @@ def _firestore_push_item(
         doc_ref.set(payload, merge=True)
     else:
         batch.set(doc_ref, payload, merge=True)
+    cancellation_writes = 0
+    if _is_canceled_execution_state(incoming_state) and not _is_canceled_execution_state(previous_state):
+        # Propagate cancellation to all active siblings so the whole group is cleaned up
+        # atomically — prevents orphaned PENDIENTE siblings after a primary cancel.
+        if activity_group_id := existing.get("activity_group_id"):
+            cancellation_writes = _propagate_group_cancellation(
+                client, batch, activity_group_id, str(item.uuid), item.deleted_at or now, now
+            )
     results.append(_result_item(item.uuid, "UPDATED", existing.get("server_id"), next_sync))
-    return len(results) - 1, 1
+    return len(results) - 1, 1 + propagation_writes + cancellation_writes
+
+
+def _propagate_group_cancellation(
+    client: Any,
+    batch: Any,
+    activity_group_id: str,
+    canceled_uuid: str,
+    canceled_at: datetime,
+    now: datetime,
+) -> int:
+    """When the primary activity in a group is canceled, propagate the cancellation to
+    all active siblings so the whole group is cleaned up in the same batch commit.
+    Returns the number of sibling writes queued.
+    """
+    write_count = 0
+    try:
+        siblings = list(
+            client.collection("activities")
+            .where("activity_group_id", "==", activity_group_id)
+            .stream()
+        )
+        for snap in siblings:
+            sibling = snap.to_dict() or {}
+            sibling_uuid = str(sibling.get("uuid") or snap.id)
+            if sibling_uuid == canceled_uuid:
+                continue
+            if sibling.get("deleted_at") or _is_canceled_execution_state(sibling.get("execution_state")):
+                continue
+            sibling_sync = int(sibling.get("sync_version") or 0) + 1
+            cancellation: dict = {
+                "execution_state": "CANCELED",
+                "deleted_at": canceled_at,
+                "group_canceled_by_source_activity_id": canceled_uuid,
+                "updated_at": now,
+                "sync_version": sibling_sync,
+            }
+            sibling_ref = client.collection("activities").document(snap.id)
+            if batch is not None:
+                batch.set(sibling_ref, cancellation, merge=True)
+            else:
+                sibling_ref.set(cancellation, merge=True)
+            write_count += 1
+            logger.info(
+                "GROUP_CANCELLATION_PROPAGATED group=%s source=%s target=%s",
+                activity_group_id,
+                canceled_uuid,
+                sibling_uuid,
+            )
+    except Exception as exc:
+        logger.warning(
+            "GROUP_CANCELLATION_PROPAGATION_FAILED group=%s source=%s error=%s",
+            activity_group_id,
+            canceled_uuid,
+            exc,
+        )
+    return write_count
 
 
 def _propagate_group_completion(
     client: Any,
+    batch: Any,
     activity_group_id: str,
     completed_uuid: str,
     completion_payload: dict,
     now: datetime,
-) -> None:
+) -> int:
     """When one activity in a group is completed, propagate the same completion data
-    to all sibling activities so every co-responsible is registered as completed."""
+    to all sibling activities so every co-responsible is registered as completed.
+
+    Writes are added to *batch* (when provided) so they are committed atomically
+    with the primary activity update. Returns the number of sibling writes queued.
+    """
+    write_count = 0
     try:
         siblings = list(
             client.collection("activities")
@@ -873,7 +974,12 @@ def _propagate_group_completion(
                 "updated_at": now,
                 "sync_version": sibling_sync,
             }
-            client.collection("activities").document(snap.id).set(propagated, merge=True)
+            sibling_ref = client.collection("activities").document(snap.id)
+            if batch is not None:
+                batch.set(sibling_ref, propagated, merge=True)
+            else:
+                sibling_ref.set(propagated, merge=True)
+            write_count += 1
             logger.info(
                 "GROUP_COMPLETION_PROPAGATED group=%s source=%s target=%s",
                 activity_group_id,
@@ -887,6 +993,7 @@ def _propagate_group_completion(
             completed_uuid,
             exc,
         )
+    return write_count
 
 
 def _utc_now() -> datetime:

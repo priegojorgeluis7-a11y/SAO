@@ -60,6 +60,14 @@ class SaoField extends StatelessWidget {
   final bool isDense;
   final bool isEdited;
 
+  bool get _isTextField =>
+      !obscureText &&
+      (keyboardType == null ||
+          keyboardType == TextInputType.text ||
+          keyboardType == TextInputType.multiline ||
+          keyboardType == TextInputType.name ||
+          keyboardType == TextInputType.streetAddress);
+
   @override
   Widget build(BuildContext context) {
     return TextFormField(
@@ -78,6 +86,10 @@ class SaoField extends StatelessWidget {
       maxLength: maxLength,
       inputFormatters: inputFormatters,
       autofocus: autofocus,
+      autocorrect: _isTextField,
+      enableSuggestions: _isTextField,
+      spellCheckConfiguration:
+          _isTextField ? const SpellCheckConfiguration() : null,
       style: TextStyle(
         fontSize: 14,
         color: enabled ? SaoColors.gray900 : SaoColors.gray500,

@@ -40,6 +40,8 @@ class TodayActivity {
   final String? assignedToUserId;
   final String? assignedToName;
   final bool isCoResponsible;
+  final String? reviewComment;
+  final String? reviewRejectReasonCode;
 
   const TodayActivity({
     required this.id,
@@ -63,6 +65,8 @@ class TodayActivity {
     this.assignedToUserId,
     this.assignedToName,
     this.isCoResponsible = false,
+    this.reviewComment,
+    this.reviewRejectReasonCode,
   });
 
   TodayActivity copyWith({
@@ -79,6 +83,8 @@ class TodayActivity {
     String? assignedToUserId,
     String? assignedToName,
     bool? isCoResponsible,
+    String? reviewComment,
+    String? reviewRejectReasonCode,
   }) {
     return TodayActivity(
       id: id,
@@ -102,6 +108,8 @@ class TodayActivity {
       assignedToUserId: assignedToUserId ?? this.assignedToUserId,
       assignedToName: assignedToName ?? this.assignedToName,
       isCoResponsible: isCoResponsible ?? this.isCoResponsible,
+      reviewComment: reviewComment ?? this.reviewComment,
+      reviewRejectReasonCode: reviewRejectReasonCode ?? this.reviewRejectReasonCode,
     );
   }
 }

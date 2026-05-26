@@ -37,23 +37,7 @@ class _MinimapWithNotesPanelState extends State<MinimapWithNotesPanel> {
   @override
   void initState() {
     super.initState();
-    // TODO: Cargar notas desde Drift SQLite
-    _notes.addAll([
-      InternalNote(
-        id: '1',
-        text: 'Terreno inestable en el costado norte - verificar despues de lluvia',
-        author: 'Juan Perez',
-        timestamp: DateTime.now().subtract(const Duration(hours: 2)),
-        attachments: const [],
-      ),
-      InternalNote(
-        id: '2',
-        text: 'Coordinador de municipio requiere presentacion en terreno - agendar para jueves',
-        author: 'Maria Garcia',
-        timestamp: DateTime.now().subtract(const Duration(hours: 1)),
-        attachments: const [],
-      ),
-    ]);
+    // Las notas se cargarán desde Drift SQLite cuando se implemente la persistencia.
   }
 
   @override

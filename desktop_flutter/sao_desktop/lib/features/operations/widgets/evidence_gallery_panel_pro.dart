@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import '../../../core/compat/io_compat.dart';
 import 'dart:math' as math;
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -9,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../../data/models/activity_model.dart';
 import '../../../data/database/app_database.dart';
 import '../../../data/repositories/evidence_repository.dart';
+import '../../../data/repositories/backend_api_client.dart';
 import '../../../core/config/data_mode.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_spacing.dart';
@@ -26,6 +28,7 @@ class EvidenceGalleryPanelPro extends StatefulWidget {
   final Function(int) onSelectEvidence;
   final Function(String evidenceId, String caption)? onCaptionChanged;
   final EvidenceRepository? evidenceRepository;
+  final VoidCallback? onEvidenceAdded;
 
   const EvidenceGalleryPanelPro({
     super.key,
@@ -34,6 +37,7 @@ class EvidenceGalleryPanelPro extends StatefulWidget {
     required this.onSelectEvidence,
     this.onCaptionChanged,
     this.evidenceRepository,
+    this.onEvidenceAdded,
   });
 
   @override
@@ -50,6 +54,10 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
   final Map<String, Timer> _notesSaveTimers = {};
   final Map<String, String> _persistedNotesCache = {};
   int? _lastPrefetchIndex;
+  bool _isSendingSyncRequest = false;
+  bool _syncRequestSent = false;
+  bool _isUploading = false;
+  String? _uploadError;
 
   EvidenceRepository get _evidenceRepository =>
       widget.evidenceRepository ?? _defaultEvidenceRepository;
@@ -92,9 +100,115 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
         _signedUrlCache.clear();
         _signedUrlFutureCache.clear();
         _lastPrefetchIndex = null;
+        _syncRequestSent = false;
       }
       _initializeControllers();
       unawaited(_loadPersistedInternalNotes());
+    }
+  }
+
+  // ── Subir nueva evidencia (imagen o PDF) ─────────────────────────────────
+  Future<void> _uploadNewEvidence() async {
+    final activity = widget.activity;
+    if (activity == null || _isUploading) return;
+
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['jpg', 'jpeg', 'png', 'webp', 'heic', 'pdf'],
+      allowMultiple: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    setState(() {
+      _isUploading = true;
+      _uploadError = null;
+    });
+
+    try {
+      for (final file in result.files) {
+        final path = file.path;
+        if (path == null) continue;
+
+        final ext = (file.extension ?? '').toLowerCase();
+        final mime = switch (ext) {
+          'pdf' => 'application/pdf',
+          'png' => 'image/png',
+          'webp' => 'image/webp',
+          'heic' => 'image/heic',
+          _ => 'image/jpeg',
+        };
+
+        final bytes = await File(path).readAsBytes();
+        final initResp = await _evidenceRepository.uploadInit(
+          activityId: activity.activity.id,
+          fileName: file.name,
+          sizeBytes: file.size,
+          mimeType: mime,
+        );
+        await _evidenceRepository.uploadToSignedUrl(
+          signedUrl: initResp.signedUrl,
+          bytes: bytes,
+          mimeType: mime,
+        );
+        await _evidenceRepository.uploadComplete(initResp.evidenceId);
+      }
+
+      if (mounted) {
+        setState(() => _isUploading = false);
+        widget.onEvidenceAdded?.call();
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isUploading = false;
+          _uploadError = e.toString();
+        });
+      }
+    }
+  }
+
+  Future<void> _requestSyncFromOperative() async {
+    final activity = widget.activity;
+    if (activity == null) return;
+    final userId = activity.activity.assignedTo;
+    final projectId = activity.activity.projectId;
+    if (userId.isEmpty) return;
+
+    setState(() => _isSendingSyncRequest = true);
+    try {
+      await const BackendApiClient().postJson(
+        '/api/v1/notifications/admin/push-user',
+        {
+          'user_id': userId,
+          'title': 'Sincronización requerida',
+          'body': 'Un validador necesita que sincronices la actividad con evidencias pendientes.',
+          'type': 'sync_required',
+          'project_id': projectId,
+          'activity_id': activity.activity.id,
+        },
+      );
+      if (mounted) {
+        setState(() => _syncRequestSent = true);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Solicitud enviada. Pide al operativo que abra la app.'),
+            backgroundColor: SaoColors.success,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('No se pudo enviar la solicitud de sincronización. Intenta de nuevo.'),
+            backgroundColor: SaoColors.error,
+            duration: Duration(seconds: 4),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSendingSyncRequest = false);
     }
   }
 
@@ -374,6 +488,28 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Reintentar'),
               ),
+              const SizedBox(height: SaoSpacing.sm),
+              if (_syncRequestSent)
+                Text(
+                  'Solicitud enviada. Pide al operativo que abra la app.',
+                  style: SaoTypography.caption.copyWith(
+                    color: SaoColors.success,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                )
+              else
+                FilledButton.icon(
+                  onPressed: _isSendingSyncRequest ? null : _requestSyncFromOperative,
+                  icon: _isSendingSyncRequest
+                      ? const SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.phone_android_rounded),
+                  label: const Text('Solicitar sincronización al operativo'),
+                ),
             ],
           ),
         ),
@@ -581,6 +717,26 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                 style: SaoTypography.bodyText.copyWith(color: mutedTextColor),
               ),
               const SizedBox(height: SaoSpacing.md),
+              if (widget.onEvidenceAdded != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: SaoSpacing.sm),
+                  child: FilledButton.icon(
+                    onPressed: _isUploading ? null : _uploadNewEvidence,
+                    icon: _isUploading
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: SaoColors.onPrimary))
+                        : const Icon(Icons.upload_file_rounded),
+                    label: Text(_isUploading ? 'Subiendo...' : 'Subir evidencia o PDF'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: SaoColors.primary,
+                      foregroundColor: SaoColors.onPrimary,
+                    ),
+                  ),
+                ),
               ElevatedButton.icon(
                 onPressed: () => setState(_initializeControllers),
                 icon: const Icon(Icons.refresh_rounded),
@@ -590,6 +746,16 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                   foregroundColor: SaoColors.onPrimary,
                 ),
               ),
+              if (_uploadError != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: SaoSpacing.sm),
+                  child: Text(
+                    'Error: $_uploadError',
+                    style: SaoTypography.caption
+                        .copyWith(color: SaoColors.error),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
             ],
           ),
         ),
@@ -620,6 +786,35 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
 
     return Column(
       children: [
+        if (_uploadError != null)
+          Container(
+            margin: const EdgeInsets.only(bottom: SaoSpacing.xs),
+            padding: const EdgeInsets.symmetric(
+                horizontal: SaoSpacing.md, vertical: SaoSpacing.xs),
+            decoration: BoxDecoration(
+              color: SaoColors.error.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(SaoRadii.sm),
+              border: Border.all(color: SaoColors.error.withValues(alpha: 0.4)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.error_outline_rounded,
+                    color: SaoColors.error, size: 16),
+                const SizedBox(width: SaoSpacing.xs),
+                Expanded(
+                  child: Text('Error al subir: $_uploadError',
+                      style: SaoTypography.caption
+                          .copyWith(color: SaoColors.error)),
+                ),
+                IconButton(
+                  onPressed: () => setState(() => _uploadError = null),
+                  icon: const Icon(Icons.close_rounded, size: 14),
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ],
+            ),
+          ),
         // VISOR DE EVIDENCIA (principal)
         Expanded(
           flex: 3,
@@ -653,6 +848,21 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                       // Botones de navegación
                       Row(
                         children: [
+                          if (_isUploading)
+                            const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          else
+                            IconButton(
+                              onPressed: widget.onEvidenceAdded != null
+                                  ? _uploadNewEvidence
+                                  : null,
+                              icon: const Icon(Icons.add_photo_alternate_outlined),
+                              tooltip: 'Agregar evidencia o PDF',
+                              color: SaoColors.primary,
+                            ),
                           IconButton(
                             onPressed: safeSelectedIndex > 0
                                 ? () => widget.onSelectEvidence(

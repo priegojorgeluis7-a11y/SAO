@@ -23,7 +23,6 @@ class SaoProjectSwitcher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // TODO: Implementar dropdown con logos y colores por proyecto
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: SaoSpacing.md,
@@ -34,8 +33,8 @@ class SaoProjectSwitcher extends StatelessWidget {
         border: Border.all(color: SaoColors.border),
         borderRadius: BorderRadius.circular(SaoRadii.md),
       ),
-      child: const Text(
-        'Project Switcher (TODO)',
+      child: Text(
+        currentProject,
         style: SaoTypography.projectTitle,
       ),
     );

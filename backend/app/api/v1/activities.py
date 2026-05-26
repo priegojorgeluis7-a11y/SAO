@@ -33,6 +33,23 @@ router = APIRouter(prefix="/activities", tags=["activities"])
 logger = logging.getLogger(__name__)
 
 
+def _wizard_payload_has_custom_ids(wizard_payload: dict | None) -> bool:
+    """Return True if wizard_payload still contains any unresolved CUSTOM_* catalog IDs."""
+    if not wizard_payload:
+        return False
+    for key in ("activity", "subcategory", "purpose", "result"):
+        entry = wizard_payload.get(key)
+        if isinstance(entry, dict) and str(entry.get("id") or "").startswith("CUSTOM_"):
+            return True
+    for key in ("topics", "attendees"):
+        entries = wizard_payload.get(key)
+        if isinstance(entries, list):
+            for entry in entries:
+                if isinstance(entry, dict) and str(entry.get("id") or "").startswith("CUSTOM_"):
+                    return True
+    return False
+
+
 def _enforce_activity_permission(
     current_user: Any,
     permission_code: str,
@@ -487,6 +504,8 @@ async def update_activity(
         val = getattr(update_data, field, None)
         if val is not None:
             updates[field] = val
+    if getattr(update_data, "wizard_payload", None) is not None:
+        updates["wizard_payload"] = update_data.wizard_payload
     if getattr(update_data, "front_id", None) is not None:
         updates["front_id"] = str(update_data.front_id)
     if getattr(update_data, "assigned_to_user_id", None) is not None:
@@ -734,7 +753,9 @@ async def resolve_catalog_values(
     if activity_replacement and isinstance(activity_replacement, dict) and activity_replacement.get("id"):
         updates["activity_type_code"] = activity_replacement["id"]
 
-    if payload.get("clear_catalog_flag"):
+    # Clear catalog_changed if explicitly requested OR if no CUSTOM_* IDs remain
+    # in the updated wizard_payload (all catalog gaps have been resolved).
+    if payload.get("clear_catalog_flag") or not _wizard_payload_has_custom_ids(wizard_payload):
         updates["catalog_changed"] = False
 
     doc_ref.update(updates)

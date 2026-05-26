@@ -183,6 +183,18 @@ class NotificationsRepository {
   }
 
   Future<void> _upsert(UserNotificationDto dto) async {
+    // Preserve a locally-advanced status (read/accepted/declined) even when
+    // the server still returns 'unread' — this happens when markRead/markAllRead
+    // fails silently and the next sync would otherwise reset the badge.
+    final existing = await (_database.select(_database.userNotifications)
+          ..where((t) => t.id.equals(dto.id)))
+        .getSingleOrNull();
+
+    final effectiveStatus =
+        (existing != null && existing.status != 'unread' && dto.status == 'unread')
+            ? existing.status
+            : dto.status;
+
     final companion = UserNotificationsCompanion.insert(
       id: dto.id,
       type: dto.type,
@@ -191,11 +203,11 @@ class NotificationsRepository {
       projectId: dto.projectId,
       fromUserId: drift.Value(dto.fromUserId),
       fromUserName: drift.Value(dto.fromUserName),
-      status: drift.Value(dto.status),
+      status: drift.Value(effectiveStatus),
       requiresAcceptance: drift.Value(dto.requiresAcceptance),
       createdAt: dto.createdAt,
-      readAt: drift.Value(dto.readAt),
-      respondedAt: drift.Value(dto.respondedAt),
+      readAt: drift.Value(dto.readAt ?? existing?.readAt),
+      respondedAt: drift.Value(dto.respondedAt ?? existing?.respondedAt),
       syncedAt: drift.Value(DateTime.now().toUtc()),
       metadataJson: drift.Value(
         dto.metadata.isNotEmpty ? jsonEncode(dto.metadata) : null,
@@ -212,5 +224,29 @@ class NotificationsRepository {
       respondedAt: drift.Value(DateTime.now().toUtc()),
       readAt: drift.Value(DateTime.now().toUtc()),
     ));
+  }
+
+  /// Inserts or replaces a locally-generated notification (e.g. from a
+  /// `sync_required` FCM data message that is not persisted server-side).
+  /// Uses [id] as the primary key; a subsequent backend sync will not
+  /// overwrite it because the server never returns that id.
+  Future<void> upsertLocalNotificationFromPush({
+    required String id,
+    required String type,
+    required String activityId,
+    required String activityTitle,
+    required String projectId,
+  }) async {
+    final dto = UserNotificationDto(
+      id: id,
+      type: type,
+      activityId: activityId,
+      activityTitle: activityTitle,
+      projectId: projectId,
+      status: 'unread',
+      requiresAcceptance: false,
+      createdAt: DateTime.now().toUtc(),
+    );
+    await _upsert(dto);
   }
 }

@@ -468,6 +468,23 @@ class CatalogsController extends StateNotifier<CatalogsPageState> {
     ));
   }
 
+  Future<void> createTopicWithRelations({
+    required String id,
+    required String name,
+    String? type,
+    String? description,
+    List<String> activityIds = const [],
+  }) async {
+    await _mutate(() => _repository.createTopicWithRelations(
+      id: id,
+      name: name,
+      type: type,
+      description: description,
+      activityIds: activityIds,
+      projectId: state.selectedProject,
+    ));
+  }
+
   Future<void> updateTopic(
     String id, {
     String? name,

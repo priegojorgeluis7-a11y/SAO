@@ -151,13 +151,6 @@ class ActivitySyncServiceImpl implements ActivitySyncService {
   }
 }
 
-class AssignmentSyncServiceNoOp implements AssignmentSyncService {
-  @override
-  Future<void> syncPending() async {
-    // TODO: Integrar sync de assignments cuando exista API/queue dedicada.
-  }
-}
-
 class AssignmentSyncServiceImpl implements AssignmentSyncService {
   AssignmentSyncServiceImpl(this._repository);
 

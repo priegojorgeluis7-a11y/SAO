@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -116,7 +117,7 @@ class CatalogRepository {
         _lastBundle = bundle;
         _data = CatalogData.fromBundle(bundle);
         _ready = true;
-        print('[CATALOG] Loaded from /catalog/bundle for project=$_projectId, version=${lastCatalogVersionId ?? "unknown"}');
+        debugPrint('[CATALOG] Loaded from /catalog/bundle for project=$_projectId, version=${lastCatalogVersionId ?? "unknown"}');
         return;
       }
     } catch (_) {}
@@ -129,7 +130,7 @@ class CatalogRepository {
           decoded.containsKey('activities')) {
         _data = CatalogData.fromEffectiveJson(decoded);
         _ready = true;
-        print('[CATALOG] Loaded from /catalog/effective for project=$_projectId');
+        debugPrint('[CATALOG] Loaded from /catalog/effective for project=$_projectId');
         return;
       }
     } catch (_) {}
@@ -142,7 +143,7 @@ class CatalogRepository {
         _data = CatalogData.fromEditorJson(decoded);
         _lastEditorVersionId = _extractVersionIdFromEditor(decoded);
         _ready = true;
-        print('[CATALOG] Loaded from /catalog/editor for project=$_projectId, version=$_lastEditorVersionId');
+        debugPrint('[CATALOG] Loaded from /catalog/editor for project=$_projectId, version=$_lastEditorVersionId');
         return;
       }
     } catch (_) {}
@@ -399,6 +400,46 @@ class CatalogRepository {
     await loadProject(normalizedProjectId);
   }
 
+  /// Crea un tema y sus relaciones actividad→tema en una sola operación batch.
+  Future<void> createTopicWithRelations({
+    required String id,
+    required String name,
+    String? type,
+    String? description,
+    List<String> activityIds = const [],
+    String? projectId,
+  }) async {
+    final normalizedProjectId = (projectId ?? _projectId).trim().toUpperCase();
+    final trimmedId = id.trim();
+    final ops = <Map<String, dynamic>>[
+      {
+        'op': 'upsert',
+        'entity': 'topics',
+        'id': trimmedId,
+        'payload': {
+          'id': trimmedId,
+          'name': name.trim(),
+          'type': type,
+          'description': description,
+          'active': true,
+        },
+      },
+      for (final actId in activityIds)
+        {
+          'op': 'upsert',
+          'entity': 'activity_to_topics_suggested',
+          'id': '$actId|$trimmedId',
+          'payload': {
+            'activity_id': actId,
+            'topic_id': trimmedId,
+            'active': true,
+          },
+        },
+    ];
+    await _patchProjectOps(ops, projectId: normalizedProjectId);
+    await loadProject(normalizedProjectId);
+  }
+
   Future<void> updateTopic(
     String id, {
     String? name,
@@ -647,7 +688,7 @@ class CatalogRepository {
         .map((o) => '${o['op']}:${o['entity']}:${o['id']}')
         .join(', ');
     // ignore: avoid_print
-    print(
+    debugPrint(
         '[catalog_ops] PATCH /project-ops project=$normalizedProjectId ops=[$summary]');
 
     try {
@@ -655,23 +696,19 @@ class CatalogRepository {
           .patchJson('/api/v1/catalog/project-ops?project_id=$queryProject', {
         'ops': enrichedOps,
       });
-      // ignore: avoid_print
-      print('[catalog_ops] project-ops OK');
+      debugPrint('[catalog_ops] project-ops OK');
       return;
     } catch (e) {
-      // ignore: avoid_print
-      print('[catalog_ops] project-ops FAILED: $e — trying bundle path');
+      debugPrint('[catalog_ops] project-ops FAILED: $e — trying bundle path');
       try {
         await _apiClient.patchJson(
             '/api/v1/catalog/bundle/project-ops?project_id=$queryProject', {
           'ops': enrichedOps,
         });
-        // ignore: avoid_print
-        print('[catalog_ops] bundle/project-ops OK');
+        debugPrint('[catalog_ops] bundle/project-ops OK');
         return;
       } catch (e2) {
-        // ignore: avoid_print
-        print(
+        debugPrint(
             '[catalog_ops] bundle/project-ops FAILED: $e2 — falling back to editor CRUD');
         await _applyEditorOpsFallback(ops);
       }
@@ -1116,6 +1153,56 @@ class CatalogRepository {
     );
     // Return only data from loaded bundle, not global fallback
     return dynamicValues;
+  }
+
+  /// Returns municipalities from the bundle that co-occur with [estado].
+  /// Falls back to all municipalities when no state-specific entries found.
+  List<String> getMunicipalitiesForState(String estado) {
+    final normalized = estado.trim().toLowerCase();
+    if (normalized.isEmpty) return getMunicipalities();
+
+    final valuesByKey = <String, String>{};
+
+    void visit(dynamic node) {
+      if (node is Map) {
+        final map = node.cast<dynamic, dynamic>();
+        String? pickValue(List<String> keys) {
+          for (final key in keys) {
+            if (map.containsKey(key)) return map[key]?.toString();
+          }
+          return null;
+        }
+        final stateValue =
+            (pickValue(const ['estado', 'state']) ?? '').trim().toLowerCase();
+        final municipalityValue =
+            (pickValue(const ['municipio', 'municipality']) ?? '').trim();
+        if (stateValue == normalized && municipalityValue.isNotEmpty) {
+          valuesByKey.putIfAbsent(
+              municipalityValue.toLowerCase(), () => municipalityValue);
+        }
+        for (final value in map.values) {
+          visit(value);
+        }
+        return;
+      }
+      if (node is List) {
+        for (final item in node) {
+          visit(item);
+        }
+      }
+    }
+
+    final bundle = _lastBundle;
+    if (bundle != null) {
+      visit(bundle.meta);
+      visit(bundle.editor.layers);
+      visit(bundle.effective.formFields);
+      visit(bundle.effective.rules.workflowJson);
+    }
+
+    if (valuesByKey.isEmpty) return getMunicipalities();
+    return valuesByKey.values.toList(growable: false)
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   }
 
   List<String> getStates() {

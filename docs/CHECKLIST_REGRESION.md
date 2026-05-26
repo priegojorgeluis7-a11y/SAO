@@ -190,6 +190,27 @@ python scripts/e2e_local.py
 
 ---
 
+## L. Bugs de Flujo Operativo — v1.0.10 (2026-05-22)
+
+Casos de regresión para los bugs corregidos en `CHANGELOG.md [1.0.10]`.
+
+| # | Escenario | Resultado esperado | ✅/❌ |
+|---|---|---|---|
+| L1 | Operativo hace swipe-izquierda en actividad y selecciona **Clima** | La actividad vuelve a `pendiente`; aparece un evento en la sección **Eventos** del proyecto; al sincronizar el evento llega al backend (`GET /events?project_id=TSNL`) | |
+| L2 | Operativo hace swipe-izquierda y selecciona **Acceso denegado** | Igual que L1; el evento creado tiene `event_type_code=BLOQUEO` | |
+| L3 | Operativo hace swipe-izquierda y selecciona **Riesgo** | Igual que L1; el evento creado tiene `severity=HIGH` | |
+| L4 | Operativo hace swipe-izquierda y selecciona **Cancelada** | Actividad desaparece del home; sin evento en Eventos; se encola con `entity=ACTIVITY, operational_state=CANCELADA` | |
+| L5 | Recargar la app inmediatamente después de reportar Clima/Acceso/Riesgo | La incidencia **no desaparece**; la actividad permanece en `pendiente`; el evento local persiste | |
+| L6 | El operativo tiene una actividad rechazada localmente (sin conectividad) | El badge de la campana muestra indicador rojo aunque no haya notificaciones remotas sin leer | |
+| L7 | Abrir el panel de **Estado de sincronización** (tocar ícono nube) con items en cola | La fila "Pendientes" muestra el número real (≥ 1), no "N/A" | |
+| L8 | Abrir el panel de **Estado de sincronización** con la cola vacía | La fila "Pendientes" muestra `0` | |
+| L9 | Sección **Por iniciar** con 2 actividades, una marcada como `terminada` localmente | El contador de completadas en el encabezado de sección muestra `1`, no `0` | |
+| L10 | `flutter analyze frontend_flutter/sao_windows/lib/core/sync/pending_sync_services.dart` | `No issues found` (no existe `AssignmentSyncServiceNoOp`) | |
+| L11 | `flutter analyze desktop_flutter/sao_desktop/lib/features/operations/widgets/activity_details_panel_pro.dart` | `No issues found` (no existe `_hasUnresolvedCatalogDecision`) | |
+| L12 | Ejecutar `python backend/scripts/backfill_completada_review_decision.py --dry-run --project TSNL` con credenciales | Imprime lista de IDs afectados o "Total: 0"; sin modificar Firestore | |
+
+---
+
 ## Firma del Checklist
 
 | Campo | Valor |
@@ -207,3 +228,4 @@ python scripts/e2e_local.py
 | Fecha | Responsable | Versión | Resultado | Notas |
 |---|---|---|---|---|
 | 2026-03-04 | (pendiente ejecución manual) | 0.2.2 | — | Primera versión del checklist |
+| 2026-05-22 | (pendiente ejecución manual) | 1.0.10 | — | Sección L agregada — bugs de flujo operativo |

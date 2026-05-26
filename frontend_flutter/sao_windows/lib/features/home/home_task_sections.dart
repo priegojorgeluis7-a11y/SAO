@@ -185,7 +185,9 @@ TaskSectionMetrics calculateSectionMetrics(
   return TaskSectionMetrics.fromSectionId(
     sectionId,
     count: activities.length,
-    completedCount: 0, // TODO: implement completion tracking
+    completedCount: activities
+        .where((a) => a.executionState == ExecutionState.terminada)
+        .length,
     averageTime: averageTime,
     criticalCount: criticalCount,
   );

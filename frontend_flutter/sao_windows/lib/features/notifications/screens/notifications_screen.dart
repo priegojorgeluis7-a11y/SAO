@@ -4,13 +4,15 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
-import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../data/local/app_db.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../core/utils/snackbar.dart';
 import '../data/notifications_repository.dart';
 import '../state/notifications_provider.dart';
+import '../../sync/services/auto_sync_service.dart';
+import '../../sync/services/sync_service.dart';
 
 class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
@@ -122,11 +124,17 @@ class _NotificationTile extends ConsumerWidget {
     final isUnread = notification.status == 'unread';
     final requiresAction =
         notification.requiresAcceptance && notification.status == 'unread';
+    final isSyncRequest =
+        notification.type == 'sync_required' && notification.status == 'unread';
 
     return InkWell(
       onTap: () {
         if (isUnread) {
           GetIt.I<NotificationsRepository>().markRead(notification.id);
+        }
+        if (notification.activityId.isNotEmpty) {
+          final project = Uri.encodeQueryComponent(notification.projectId);
+          context.push('/activity/${notification.activityId}?project=$project');
         }
       },
       child: Container(
@@ -191,12 +199,15 @@ class _NotificationTile extends ConsumerWidget {
                     style: const TextStyle(
                         fontSize: 11, color: SaoColors.gray400),
                   ),
-                  if (requiresAction) ...[
+                  if (isSyncRequest) ...[
+                    const SizedBox(height: 8),
+                    _SyncButton(notification: notification),
+                  ] else if (requiresAction) ...[
                     const SizedBox(height: 8),
                     _ActionButtons(notification: notification),
                   ] else if (notification.status == 'accepted') ...[
                     const SizedBox(height: 4),
-                    const _StatusChip(label: 'Aceptada', color: SaoColors.riskLow),
+                    const _StatusChip(label: 'Iniciada', color: SaoColors.riskLow),
                   ] else if (notification.status == 'declined') ...[
                     const SizedBox(height: 4),
                     const _StatusChip(
@@ -219,6 +230,14 @@ class _NotificationTile extends ConsumerWidget {
         return 'Co-responsable añadido';
       case 'assignment_transferred':
         return 'Actividad transferida a ti';
+      case 'review_approved':
+        return 'Actividad aprobada';
+      case 'review_changes_required':
+        return 'Actividad requiere corrección';
+      case 'assignment_cancelled':
+        return 'Actividad cancelada';
+      case 'sync_required':
+        return 'Sincronización requerida';
       default:
         return 'Notificación';
     }
@@ -232,12 +251,14 @@ class _NotificationTile extends ConsumerWidget {
     if (diff.inHours < 1) return 'Hace ${diff.inMinutes} min';
     if (diff.inDays < 1) return 'Hace ${diff.inHours} h';
     if (diff.inDays == 1) return 'Ayer';
-    return DateFormat('d MMM', 'es').format(local);
+    const meses = ['', 'ene', 'feb', 'mar', 'abr', 'may', 'jun',
+                        'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+    return '${local.day} ${meses[local.month]}';
   }
 }
 
 // ---------------------------------------------------------------------------
-// Accept / Decline buttons
+// Start activity button
 // ---------------------------------------------------------------------------
 
 class _ActionButtons extends StatefulWidget {
@@ -251,28 +272,24 @@ class _ActionButtons extends StatefulWidget {
 class _ActionButtonsState extends State<_ActionButtons> {
   bool _loading = false;
 
-  Future<void> _respond(bool accept) async {
+  Future<void> _iniciar() async {
     if (_loading) return;
     setState(() => _loading = true);
     final repo = GetIt.I<NotificationsRepository>();
-    final success = accept
-        ? await repo.accept(
-            activityId: widget.notification.activityId,
-            notificationId: widget.notification.id,
-          )
-        : await repo.decline(
-            activityId: widget.notification.activityId,
-            notificationId: widget.notification.id,
-          );
+    final success = await repo.accept(
+      activityId: widget.notification.activityId,
+      notificationId: widget.notification.id,
+    );
     if (mounted) {
       setState(() => _loading = false);
       if (success) {
-        showTransientSnackBar(
-          context,
-          appSnackBar(message: accept ? 'Actividad aceptada' : 'Actividad rechazada'),
-        );
+        final project =
+            Uri.encodeQueryComponent(widget.notification.projectId);
+        context.push(
+            '/activity/${widget.notification.activityId}?project=$project');
       } else {
-        showTransientSnackBar(context, appSnackBar(message: 'Error al procesar. Intenta de nuevo.'));
+        showTransientSnackBar(context,
+            appSnackBar(message: 'Error al procesar. Intenta de nuevo.'));
       }
     }
   }
@@ -291,38 +308,19 @@ class _ActionButtonsState extends State<_ActionButtons> {
         ),
       );
     }
-    return Row(
-      children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: () => _respond(false),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: SaoColors.riskPriority,
-              side: const BorderSide(color: SaoColors.riskPriority),
-              visualDensity: VisualDensity.compact,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              textStyle: const TextStyle(fontSize: 12),
-            ),
-            child: const Text('Rechazar'),
-          ),
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton(
+        onPressed: _iniciar,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: SaoColors.actionPrimary,
+          foregroundColor: Colors.white,
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          textStyle: const TextStyle(fontSize: 12),
         ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: ElevatedButton(
-            onPressed: () => _respond(true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: SaoColors.actionPrimary,
-              foregroundColor: Colors.white,
-              visualDensity: VisualDensity.compact,
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              textStyle: const TextStyle(fontSize: 12),
-            ),
-            child: const Text('Aceptar'),
-          ),
-        ),
-      ],
+        child: const Text('Iniciar'),
+      ),
     );
   }
 }
@@ -341,6 +339,10 @@ class _TypeIcon extends StatelessWidget {
       'new_assignment' => (Icons.assignment_turned_in_rounded, SaoColors.actionPrimary),
       'co_responsable_added' => (Icons.group_add_rounded, SaoColors.riskMedium),
       'assignment_transferred' => (Icons.swap_horiz_rounded, SaoColors.riskHigh),
+      'review_approved' => (Icons.check_circle_rounded, SaoColors.riskLow),
+      'review_changes_required' => (Icons.error_rounded, SaoColors.riskPriority),
+      'assignment_cancelled' => (Icons.cancel_rounded, SaoColors.gray500),
+      'sync_required' => (Icons.cloud_upload_rounded, SaoColors.info),
       _ => (Icons.notifications_rounded, SaoColors.gray500),
     };
     return CircleAvatar(
@@ -403,6 +405,97 @@ class _StatusChip extends StatelessWidget {
         label,
         style: TextStyle(
             fontSize: 11, color: color, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Sync request button
+// ---------------------------------------------------------------------------
+
+class _SyncButton extends StatefulWidget {
+  const _SyncButton({required this.notification});
+  final UserNotification notification;
+
+  @override
+  State<_SyncButton> createState() => _SyncButtonState();
+}
+
+class _SyncButtonState extends State<_SyncButton> {
+  bool _loading = false;
+  bool _done = false;
+
+  Future<void> _triggerSync() async {
+    if (_loading || _done) return;
+    setState(() => _loading = true);
+    try {
+      // Push any pending queue items first.
+      await GetIt.I<AutoSyncService>().triggerPushOnce('notification_action');
+
+      // Then pull latest activity state from server so the operative's local
+      // record reflects any changes made on the backend.
+      final projectId = widget.notification.projectId.trim().toUpperCase();
+      if (projectId.isNotEmpty) {
+        try {
+          await GetIt.I<SyncService>().pullChanges(projectId: projectId);
+        } catch (_) {}
+      }
+
+      // Mark notification as read so the button disappears.
+      await GetIt.I<NotificationsRepository>().markRead(widget.notification.id);
+
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _done = true;
+        });
+        showTransientSnackBar(
+          context,
+          appSnackBar(message: 'Sincronización completada'),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _loading = false);
+        showTransientSnackBar(
+          context,
+          appSnackBar(message: 'Error al sincronizar. Intenta de nuevo.'),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_done) {
+      return const _StatusChip(label: 'Sincronizado', color: SaoColors.riskLow);
+    }
+    if (_loading) {
+      return const SizedBox(
+        height: 28,
+        child: Center(
+          child: SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
+    }
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _triggerSync,
+        icon: const Icon(Icons.cloud_upload_rounded, size: 16),
+        label: const Text('Sincronizar ahora'),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: SaoColors.info,
+          foregroundColor: Colors.white,
+          visualDensity: VisualDensity.compact,
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+        ),
       ),
     );
   }

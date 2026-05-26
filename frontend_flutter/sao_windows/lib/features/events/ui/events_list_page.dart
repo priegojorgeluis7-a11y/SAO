@@ -389,10 +389,10 @@ class _EventCard extends StatelessWidget {
   }
 
   Color _severityColor(EventSeverity s) => switch (s) {
-        EventSeverity.low => const Color(0xFF4CAF50),
-        EventSeverity.medium => const Color(0xFFFFC107),
-        EventSeverity.high => const Color(0xFFFF9800),
-        EventSeverity.critical => const Color(0xFFF44336),
+        EventSeverity.low => SaoColors.riskLow,
+        EventSeverity.medium => SaoColors.riskMedium,
+        EventSeverity.high => SaoColors.riskHigh,
+        EventSeverity.critical => SaoColors.riskCritical,
       };
 
   String _formatPk(int meters) {
@@ -452,9 +452,9 @@ class _SyncBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, color) = switch (syncStatus) {
-      'SYNCED' => (Icons.cloud_done_outlined, const Color(0xFF4CAF50)),
-      'ERROR' => (Icons.cloud_off_outlined, const Color(0xFFF44336)),
-      _ => (Icons.cloud_upload_outlined, const Color(0xFFFFC107)),
+      'SYNCED' => (Icons.cloud_done_outlined, SaoColors.success),
+      'ERROR' => (Icons.cloud_off_outlined, SaoColors.error),
+      _ => (Icons.cloud_upload_outlined, SaoColors.warning),
     };
 
     return Icon(icon, size: 14, color: color);

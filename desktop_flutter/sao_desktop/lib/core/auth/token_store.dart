@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:developer' as developer;
 
 import '../compat/io_compat.dart';
 import '../session/legacy_file_session_store.dart';
@@ -72,8 +73,14 @@ class TokenStore {
   static Future<T> _withStoreFallback<T>(Future<T> Function() action) async {
     try {
       return await action();
-    } catch (_) {
+    } catch (e) {
       if (!_canFallbackToFileStore) rethrow;
+      developer.log(
+        'SecureSessionStore falló, degradando a PlainFileSessionStore. '
+        'Los tokens se almacenarán en texto claro. Error: $e',
+        name: 'TokenStore',
+        level: 900, // WARNING
+      );
       _store = _fallbackStore;
       return action();
     }

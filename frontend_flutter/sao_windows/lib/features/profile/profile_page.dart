@@ -754,11 +754,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     if (confirm != true || !mounted) return;
 
     await ref.read(authControllerProvider.notifier).logout();
-    ref.invalidate(authStateProvider);
-    ref.invalidate(sessionProvider);
-    ref.invalidate(currentUserProvider);
-    ref.invalidate(isAuthenticatedProvider);
-    ref.invalidate(authControllerProvider);
 
     if (!mounted) return;
     router.go('/auth/login');

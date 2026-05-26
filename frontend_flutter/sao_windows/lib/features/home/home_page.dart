@@ -19,6 +19,7 @@ import '../../core/notifications/push_notifications_service.dart';
 import '../../core/sync/pending_sync_services.dart';
 import '../../core/sync/sync_orchestrator.dart';
 import '../../core/flow/activity_flow_projection.dart';
+import '../sync/services/auto_sync_service.dart';
 import '../../core/utils/project_terminology.dart';
 import '../../data/local/app_db.dart';
 import '../../data/local/dao/activity_dao.dart';
@@ -37,8 +38,18 @@ import 'home_task_sections.dart';
 import 'models/today_activity.dart';
 import 'widgets/home_task_inbox.dart';
 import '../notifications/state/notifications_provider.dart';
+import '../notifications/data/notifications_repository.dart';
+import '../sync/services/sync_service.dart';
+import '../events/data/events_provider.dart';
+import '../events/models/event_dto.dart';
+import '../../core/utils/uuid.dart' show uuidV4;
+import '../sync/data/sync_provider.dart' show syncRepositoryProvider;
 
 enum FilterMode { totales, vencidas, completadas, pendienteSync }
+
+enum DateFilter { todos, ayer, hoy, manana }
+
+enum AssigneeFilter { soloYo, todos }
 
 bool canTransferResponsibilityForViewer({
   required bool isPrivilegedAssignmentManager,
@@ -106,6 +117,8 @@ class _HomePageState extends ConsumerState<HomePage>
 
   // Filtros interactivos
   FilterMode _filterMode = FilterMode.totales;
+  DateFilter _dateFilter = DateFilter.hoy;
+  AssigneeFilter _assigneeFilter = AssigneeFilter.soloYo;
 
   static const _filterModeKey = 'home_filter_mode';
   static const Duration _catalogAutoCheckInterval = Duration(minutes: 5);
@@ -116,7 +129,9 @@ class _HomePageState extends ConsumerState<HomePage>
   bool _canViewOnlineUsers = false;
   bool _hasPrivilegedAssignmentTransferAccess = false;
   // Default: filterrar por asignado al usuario (seguro por defecto) hasta que se resuelva el rol.
-  bool _isOperativeViewer = true;
+  // false = mostrar filtro "Solo yo / Todos"; se corrige a true para OPERATIVO
+  // en _initViewerRoleFromAuthToken() (síncrono) antes del primer build.
+  bool _isOperativeViewer = false;
 
   // DAO único — evita instanciar en cada método
   late final ActivityDao _dao;
@@ -163,6 +178,9 @@ class _HomePageState extends ConsumerState<HomePage>
           .read(kvStoreProvider)
           .setString('selected_project', widget.selectedProject);
     }
+    // Determinación inmediata (sincrónica) del rol desde el token de auth,
+    // evitando que el filtro quede oculto hasta que termine el query async a la DB.
+    _initViewerRoleFromAuthToken();
     // ignore: unawaited_futures
     _loadFilterMode();
     // ignore: unawaited_futures
@@ -292,6 +310,8 @@ class _HomePageState extends ConsumerState<HomePage>
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.inactive) {
       _remoteHomeRefreshTimer?.cancel();
+      // Flush pendientes antes de ir a fondo — silencioso, no bloquea la UI.
+      unawaited(GetIt.I<AutoSyncService>().triggerPushOnce('app_background'));
     }
   }
 
@@ -464,6 +484,43 @@ class _HomePageState extends ConsumerState<HomePage>
         return;
       }
 
+      if (shouldTriggerSyncPushFromPushType(type)) {
+        final activityId = (data['activity_id'] ?? '').toString().trim();
+
+        // Store a local notification so the operative can see it in the
+        // notification center and manually retry if auto-sync was not enough.
+        final notifId = 'sync_req_${activityId.isNotEmpty ? activityId : DateTime.now().millisecondsSinceEpoch}';
+        unawaited(GetIt.I<NotificationsRepository>().upsertLocalNotificationFromPush(
+          id: notifId,
+          type: 'sync_required',
+          activityId: activityId,
+          activityTitle: 'Sincronización requerida',
+          projectId: pushProject,
+        ));
+
+        // Push any pending items; then pull latest activity state from server.
+        // This handles the case where the activity is already SYNCED locally
+        // but the server is missing evidence or has a newer version.
+        unawaited(() async {
+          await GetIt.I<AutoSyncService>().triggerPushOnce('remote_request');
+          if (pushProject.isNotEmpty) {
+            try {
+              await GetIt.I<SyncService>().pullChanges(projectId: pushProject);
+            } catch (_) {}
+          }
+        }());
+
+        if (!mounted) return;
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+            message: homeRefreshMessageForPushType(type),
+            backgroundColor: SaoColors.info,
+          ),
+        );
+        return;
+      }
+
       if (!shouldRefreshHomeFromPushType(type)) {
         return;
       }
@@ -555,7 +612,61 @@ class _HomePageState extends ConsumerState<HomePage>
     return ref.read(kvStoreProvider).setString(_filterModeKey, mode.name);
   }
 
+  void _setDateFilter(DateFilter filter) {
+    setState(() => _dateFilter = filter);
+  }
+
+  void _setAssigneeFilter(AssigneeFilter filter) {
+    setState(() {
+      _assigneeFilter = filter;
+      // Cuando se activa "Solo Yo", resetear el filtro de fecha a "Todos"
+      // para que el usuario vea todas sus actividades asignadas sin importar
+      // la fecha de programación. El filtro de fecha puede ajustarse después.
+      if (filter == AssigneeFilter.soloYo) {
+        _dateFilter = DateFilter.todos;
+      }
+    });
+  }
+
+  String _emptyStateSubtitle() {
+    final dateLabel = switch (_dateFilter) {
+      DateFilter.hoy => 'hoy',
+      DateFilter.ayer => 'ayer',
+      DateFilter.manana => 'mañana',
+      DateFilter.todos => null,
+    };
+    final onlyMine = !_isOperativeViewer && _assigneeFilter == AssigneeFilter.soloYo;
+
+    if (dateLabel != null && onlyMine) {
+      return 'No tienes actividades programadas para $dateLabel.';
+    }
+    if (dateLabel != null) {
+      return 'No hay actividades programadas para $dateLabel.';
+    }
+    if (onlyMine) {
+      return 'No tienes actividades programadas.';
+    }
+    return 'No hay actividades programadas.';
+  }
+
+  /// Determinación inmediata (sin await) del rol usando los roles del token
+  /// de auth. Corre en initState antes del primer build para que el filtro
+  /// "Solo yo / Todos" nunca quede oculto por la demora del query a la DB.
+  void _initViewerRoleFromAuthToken() {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      _isOperativeViewer = false;
+      return;
+    }
+    final authRoles = user.roles.map((r) => r.trim().toUpperCase()).toSet();
+    if (authRoles.isEmpty) {
+      return;
+    }
+    _isOperativeViewer = authRoles.contains('OPERATIVO');
+  }
+
   Future<void> _resolveViewerRole() async {
+    try {
     final user = ref.read(currentUserProvider);
     if (user == null) {
       if (!mounted) return;
@@ -592,18 +703,46 @@ class _HomePageState extends ConsumerState<HomePage>
     final email = user.email.trim().toLowerCase();
     final isAdminByEmail =
         email == 'admin@sao.mx' || email.startsWith('admin.');
+
+    // Roles del token de auth (/me endpoint) — usados como fallback cuando
+    // el DB local aún no tiene datos (instalación nueva o primer sync).
+    final authRoles =
+        user.roles.map((r) => r.trim().toUpperCase()).toSet();
+    final isOperativeByAuthRole = authRoles.contains('OPERATIVO');
+    final isAdminByAuthRole = authRoles.any(
+      (r) => r == 'ADMIN' || r == 'ADMINISTRADOR' || r == 'ADMINISTRATOR',
+    );
+    final isPrivilegedManagerByAuthRole = authRoles.any(
+      (r) =>
+          r == 'COORD' ||
+          r == 'COORDINADOR' ||
+          r == 'COORDINATOR' ||
+          r == 'SUPERVISOR',
+    );
+    final isSupervisorByAuthRole = authRoles.contains('SUPERVISOR');
+
     final isSupervisorByRole =
-      localUser?.roleId == 3 || normalizedRoleName == 'SUPERVISOR';
+        localUser?.roleId == 3 || normalizedRoleName == 'SUPERVISOR';
     final nextCanViewOnlineUsers =
-      isAdminByRole || isAdminByEmail || isSupervisorByRole;
+        isAdminByRole || isAdminByEmail || isSupervisorByRole ||
+        isSupervisorByAuthRole;
 
     if (!mounted) return;
-    final nextIsAdmin = isAdminByRole || isAdminByEmail;
+    final nextIsAdmin = isAdminByRole || isAdminByEmail || isAdminByAuthRole;
     final nextHasPrivilegedAssignmentTransferAccess =
-        nextIsAdmin || isPrivilegedManagerByRole;
-    // Least-privilege fallback: if role cannot be resolved locally and user is not admin,
-    // keep strict assignee filtering to avoid exposing activities from other operatives.
-    final nextIsOperative = hasKnownRole ? isOperativeByRole : !nextIsAdmin;
+        nextIsAdmin || isPrivilegedManagerByRole || isPrivilegedManagerByAuthRole;
+    // Prioridad para determinar si el usuario es operativo:
+    // 1. Roles del token (/auth/me → Firestore, siempre fresco y canónico)
+    // 2. DB local (puede estar desactualizada o tener roleId incorrecto)
+    // 3. Mantener valor actual si no hay información disponible
+    final bool nextIsOperative;
+    if (authRoles.isNotEmpty) {
+      nextIsOperative = isOperativeByAuthRole;
+    } else if (hasKnownRole) {
+      nextIsOperative = isOperativeByRole;
+    } else {
+      nextIsOperative = _isOperativeViewer; // sin info de rol: no cambiar
+    }
     final changed =
         nextIsAdmin != _isAdminViewer ||
         nextCanViewOnlineUsers != _canViewOnlineUsers ||
@@ -620,6 +759,11 @@ class _HomePageState extends ConsumerState<HomePage>
 
     if (changed) {
       await _loadHomeActivities();
+    }
+    } catch (e, st) {
+      // Si el query a la DB falla, dejar el valor ya resuelto por
+      // _initViewerRoleFromAuthToken() o el default. No ocultar el filtro.
+      appLogger.w('_resolveViewerRole falló, usando rol previo: $e | $st');
     }
   }
 
@@ -889,20 +1033,26 @@ class _HomePageState extends ConsumerState<HomePage>
   /// of the same type (e.g., two "Inspección" tasks assigned to the same user)
   /// would otherwise be incorrectly merged and one hidden from the operative.
   List<TodayActivity> _deduplicateFinalItems(List<TodayActivity> items) {
-    final pkToIdx = <int, int>{};
+    // Key: (pk, normalised title) — two activities at the same km-point are only
+    // merged when they also share the same title (i.e. same activity type).
+    // This prevents hiding legitimate simultaneous activities assigned at the
+    // same hour to the same user when they differ only in their pk location or,
+    // more importantly, when different activities share the same pk.
+    final pkToIdx = <(int, String), int>{};
     final result = <TodayActivity>[];
 
     for (final item in items) {
       final pk = item.pk;
       if (pk != null && pk > 0) {
-        final existingIdx = pkToIdx[pk];
+        final key = (pk, item.title.trim().toUpperCase());
+        final existingIdx = pkToIdx[key];
         if (existingIdx != null) {
           if (_hasMoreLocalState(item, result[existingIdx])) {
             result[existingIdx] = item;
           }
           continue;
         }
-        pkToIdx[pk] = result.length;
+        pkToIdx[key] = result.length;
       }
       result.add(item);
     }
@@ -1209,7 +1359,7 @@ class _HomePageState extends ConsumerState<HomePage>
       id: normalizedId,
       title: item.title.trim().isNotEmpty ? item.title.trim() : 'Actividad',
       frente: _canonicalFrente(
-        item.frente.trim().isNotEmpty ? item.frente.trim() : 'Sin frente',
+        item.frente.trim().isNotEmpty ? item.frente.trim() : '',
       ),
       municipio: item.municipio,
       estado: item.estado,
@@ -1645,12 +1795,12 @@ class _HomePageState extends ConsumerState<HomePage>
     return TodayActivity(
       id: activity.id,
       title: title,
-      frente: _canonicalFrente(normalizedSegment ?? normalizedFront ?? 'Sin frente'),
+      frente: _canonicalFrente(normalizedSegment ?? normalizedFront ?? ''),
       municipio: normalizedMunicipio ?? '',
       estado: normalizedEstado ?? '',
       pk: activity.pk,
       status: _statusFromRow(activity, executionState, isAssigned: hasAssignee),
-      createdAt: activity.createdAt,
+      createdAt: activity.assignmentStartAt ?? activity.createdAt,
       executionState: executionState,
       horaInicio: activity.startedAt,
       horaFin: activity.finishedAt,
@@ -1663,6 +1813,8 @@ class _HomePageState extends ConsumerState<HomePage>
       nextAction: nextAction,
       assignedToUserId: row.assignedToUserId,
       assignedToName: row.assignedToName,
+      reviewComment: row.reviewComment,
+      reviewRejectReasonCode: row.reviewRejectReasonCode,
     );
   }
 
@@ -1768,6 +1920,7 @@ class _HomePageState extends ConsumerState<HomePage>
     if (value.isEmpty) return null;
     final normalized = value.toLowerCase();
     if (normalized == 'sin frente' ||
+        normalized == 'sin segmento' ||
         normalized == 'sin ubicación' ||
         normalized == 'sin ubicacion' ||
         normalized == 'sin municipio' ||
@@ -1779,11 +1932,18 @@ class _HomePageState extends ConsumerState<HomePage>
 
   /// Normalizes front/frente abbreviations so that grouping treats them as
   /// the same unit. For example: "F1" and "Frente 1" both become "Frente 1".
+  /// Also translates legacy "sin frente" / "sin segmento" to the project-
+  /// specific term (e.g. "Sin segmento" for TSNL, "Sin frente" for others).
   String _canonicalFrente(String raw) {
     final frontLabel = frontTerminology(widget.selectedProject, capitalize: true);
     final frontLabelLower = frontTerminology(widget.selectedProject);
     final value = raw.trim();
     if (value.isEmpty) return 'Sin $frontLabelLower';
+    // Normalize legacy or cross-project "sin X" values to the project-specific term.
+    final lowered = value.toLowerCase();
+    if (lowered == 'sin frente' || lowered == 'sin segmento') {
+      return 'Sin $frontLabelLower';
+    }
     // Match patterns like "F1", "F2", "F10", "F 1", case-insensitive.
     final abbrev = RegExp(r'^[Ff]\s*(\d+)$').firstMatch(value);
     if (abbrev != null) {
@@ -1890,7 +2050,7 @@ class _HomePageState extends ConsumerState<HomePage>
     if (executionState == ExecutionState.revisionPendiente) {
       return ActivityStatus.vencida;
     }
-    final created = activity.createdAt;
+    final created = activity.assignmentStartAt ?? activity.createdAt;
     final today = DateTime.now();
     final createdDay = DateTime(created.year, created.month, created.day);
     final todayDay = DateTime(today.year, today.month, today.day);
@@ -2491,7 +2651,37 @@ class _HomePageState extends ConsumerState<HomePage>
       return;
     }
 
-    // Para otras incidencias (Clima, Acceso, Riesgo): resetear visualmente a pendiente
+    // Para otras incidencias (Clima, Acceso, Riesgo): persistir como evento
+    // local + encolar para sync, y resetear visualmente a pendiente.
+    final userId = ref.read(currentUserProvider)?.id.trim() ?? '';
+    final now = DateTime.now().toUtc();
+    final eventTypeCode = reason == 'Acceso denegado' ? 'BLOQUEO' : 'OTRO';
+    final severity = reason == 'Riesgo' ? 'HIGH' : 'MEDIUM';
+    final eventTitle = 'Bloqueo de actividad: $reason';
+    final eventDescription =
+        'Actividad bloqueada por incidencia "$reason": ${a.title}'
+        '${a.pk != null ? " (PK ${_formatPk(a.pk)})" : ""}';
+
+    final event = EventDTO(
+      uuid: uuidV4(),
+      projectId: widget.selectedProject,
+      reportedByUserId: userId,
+      eventTypeCode: eventTypeCode,
+      title: eventTitle,
+      description: eventDescription,
+      severity: severity,
+      locationPkMeters: a.pk,
+      occurredAt: now.toIso8601String(),
+    );
+
+    try {
+      await ref.read(eventsLocalRepositoryProvider).saveEvent(event);
+    } catch (e) {
+      appLogger.w('No se pudo persistir incidencia como evento local: $e');
+    }
+
+    if (!mounted) return;
+
     final currentActivity = _findById(a.id) ?? a;
     final updated = currentActivity.copyWith(
       executionState: ExecutionState.pendiente,
@@ -2744,7 +2934,15 @@ class _HomePageState extends ConsumerState<HomePage>
                 const SizedBox(height: 6),
                 Text('Timestamp: $timestamp'),
                 const SizedBox(height: 6),
-                const Text('Pendientes: N/A'),
+                FutureBuilder<int>(
+                  future: ref.read(syncRepositoryProvider).countPendingItems(),
+                  builder: (ctx, snap) {
+                    final label = snap.connectionState == ConnectionState.done
+                        ? '${snap.data ?? 0}'
+                        : '…';
+                    return Text('Pendientes: $label');
+                  },
+                ),
                 if (state.errorMessage != null &&
                     state.errorMessage!.isNotEmpty) ...[
                   const SizedBox(height: 12),
@@ -2843,6 +3041,18 @@ class _HomePageState extends ConsumerState<HomePage>
     // ====== Filtrado por búsqueda ======
     var filtered = baseItems.where((a) => _matchesQuery(a, _query)).toList();
 
+    // ====== Filtrado por asignado (Solo Yo / Todos) — solo roles no operativos ======
+    if (!_isOperativeViewer && _assigneeFilter == AssigneeFilter.soloYo) {
+      filtered = filtered
+          .where(
+            (a) => _isAssignedToCurrentUser(
+              assignedToUserId: a.assignedToUserId,
+              assignedToName: a.assignedToName,
+            ),
+          )
+          .toList();
+    }
+
     // ====== Filtrado por modo (Totales / Vencidas / Completadas / Pend. Sync) ======
     if (_filterMode == FilterMode.vencidas) {
       filtered = filtered
@@ -2860,6 +3070,27 @@ class _HomePageState extends ConsumerState<HomePage>
                 a.syncState == ActivitySyncState.pending,
           )
           .toList();
+    }
+
+    // ====== Filtrado por fecha (Ayer / Hoy / Mañana) ======
+    if (_dateFilter != DateFilter.todos) {
+      final today = DateTime.now();
+      final todayDay = DateTime(today.year, today.month, today.day);
+      final targetDay = switch (_dateFilter) {
+        DateFilter.ayer => todayDay.subtract(const Duration(days: 1)),
+        DateFilter.hoy => todayDay,
+        DateFilter.manana => todayDay.add(const Duration(days: 1)),
+        DateFilter.todos => todayDay,
+      };
+      filtered = filtered.where((a) {
+        final dateToUse = (a.horaInicio ?? a.createdAt).toLocal();
+        final actDay = DateTime(
+          dateToUse.year,
+          dateToUse.month,
+          dateToUse.day,
+        );
+        return actDay == targetDay;
+      }).toList();
     }
 
     // ====== Bandeja por siguiente accion y subagrupado por frente ======
@@ -2911,6 +3142,7 @@ class _HomePageState extends ConsumerState<HomePage>
             pinned: true,
             floating: true,
             snap: true,
+            toolbarHeight: 44,
             titleSpacing: 12,
             title: Row(
               children: [
@@ -3000,7 +3232,7 @@ class _HomePageState extends ConsumerState<HomePage>
               ],
             ),
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(104),
+              preferredSize: Size.fromHeight(_isOperativeViewer ? 150 : 194),
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
                 child: Column(
@@ -3028,7 +3260,7 @@ class _HomePageState extends ConsumerState<HomePage>
                               decoration: InputDecoration(
                                 border: InputBorder.none,
                                 hintText:
-                                    'Buscar PK, ${frontTerminology(widget.selectedProject, capitalize: true)}, Municipio…',
+                                    'Buscar por PK, ${frontTerminology(widget.selectedProject)} o municipio…',
                                 hintStyle: const TextStyle(color: SaoColors.gray400),
                               ),
                             ),
@@ -3042,6 +3274,97 @@ class _HomePageState extends ConsumerState<HomePage>
                                 color: SaoColors.gray600,
                               ),
                             ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Filtro de fecha + toggle Solo yo/Todos en la misma fila
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(
+                        children: [
+                          _DateChip(
+                            label: 'Todas',
+                            isSelected: _dateFilter == DateFilter.todos,
+                            onTap: () => _setDateFilter(DateFilter.todos),
+                          ),
+                          const SizedBox(width: 6),
+                          _DateChip(
+                            label: 'Ayer',
+                            isSelected: _dateFilter == DateFilter.ayer,
+                            onTap: () => _setDateFilter(DateFilter.ayer),
+                          ),
+                          const SizedBox(width: 6),
+                          _DateChip(
+                            label: 'Hoy',
+                            isSelected: _dateFilter == DateFilter.hoy,
+                            onTap: () => _setDateFilter(DateFilter.hoy),
+                          ),
+                          const SizedBox(width: 6),
+                          _DateChip(
+                            label: 'Mañana',
+                            isSelected: _dateFilter == DateFilter.manana,
+                            onTap: () => _setDateFilter(DateFilter.manana),
+                          ),
+                          if (!_isOperativeViewer) ...[
+                            const SizedBox(width: 12),
+                            Container(
+                              width: 1,
+                              height: 18,
+                              color: SaoColors.gray200,
+                            ),
+                            const SizedBox(width: 12),
+                            GestureDetector(
+                              onTap: () => _setAssigneeFilter(
+                                _assigneeFilter == AssigneeFilter.soloYo
+                                    ? AssigneeFilter.todos
+                                    : AssigneeFilter.soloYo,
+                              ),
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: _assigneeFilter == AssigneeFilter.soloYo
+                                      ? SaoColors.primary.withValues(alpha: 0.12)
+                                      : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(999),
+                                  border: Border.all(
+                                    color: _assigneeFilter == AssigneeFilter.soloYo
+                                        ? SaoColors.primary.withValues(alpha: 0.5)
+                                        : SaoColors.gray200,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _assigneeFilter == AssigneeFilter.soloYo
+                                          ? Icons.person_rounded
+                                          : Icons.group_rounded,
+                                      size: 13,
+                                      color: _assigneeFilter == AssigneeFilter.soloYo
+                                          ? SaoColors.primary
+                                          : SaoColors.gray600,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      _assigneeFilter == AssigneeFilter.soloYo
+                                          ? 'Solo yo'
+                                          : 'Todos',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w700,
+                                        color: _assigneeFilter == AssigneeFilter.soloYo
+                                            ? SaoColors.primary
+                                            : SaoColors.gray600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -3291,7 +3614,7 @@ class _HomePageState extends ConsumerState<HomePage>
                     ? 'Sin actividades'
                     : 'Sin resultados',
                 subtitle: _query.trim().isEmpty
-                    ? 'No tienes actividades programadas para hoy.'
+                    ? _emptyStateSubtitle()
                     : 'Prueba con otro PK, municipio o ${frontTerminology(widget.selectedProject)}.',
                 onClear: _query.trim().isEmpty ? null : _clearSearch,
               ),
@@ -3306,12 +3629,79 @@ class _HomePageState extends ConsumerState<HomePage>
                   iconForSection: _taskSectionIcon,
                   childrenBuilder: (context, section) {
                     final groupedByFrente = section.groupedByFrente;
+                    final sinFrenteKey =
+                        'Sin ${frontTerminology(widget.selectedProject)}';
+
+                    // Extracted tile builder to avoid code duplication.
+                    Widget buildTile(TodayActivity a) {
+                      final currentActivity = _findById(a.id) ?? a;
+                      final barColor = _effectiveBarColor(a.id, a.status);
+                      final icon = _effectiveIcon(a.id, a.status);
+                      final footer = _effectiveFooterText(a.id, a.status);
+                      return _SwipeActivityTile(
+                        key: ValueKey(a.id),
+                        a: a,
+                        isRejected: currentActivity.isRejected,
+                        executionState: currentActivity.executionState,
+                        syncState: currentActivity.syncState,
+                        barColor: barColor,
+                        footerIcon: icon,
+                        footerText: footer,
+                        pkText: _formatPk(a.pk),
+                        showFrenteInsideCard: showFrenteInsideCard,
+                        onTapOpenWizard: _isAdminViewer
+                            ? () => context.push(
+                                '/activity/${a.id}?project=${widget.selectedProject}',
+                                extra: currentActivity,
+                              )
+                            : () => _openRegisterWizard(a),
+                        onSwipeRight: () => _onSwipeRight(a),
+                        onSwipeLeftIncident: () => _reportIncident(a),
+                        assigneeLabel: _assigneeLabelFor(currentActivity),
+                        onTransferResponsibility:
+                            _canTransferResponsibility(currentActivity)
+                            ? () => _openTransferResponsibilitySheet(
+                                currentActivity,
+                              )
+                            : null,
+                        transferInProgress:
+                            _transferringActivityIds.contains(a.id),
+                        onAddCoResponsible:
+                            _canAddCoResponsible(currentActivity)
+                            ? () => _openAddCoResponsibleSheet(currentActivity)
+                            : null,
+                        onSyncCompleted:
+                            (currentActivity.executionState ==
+                                    ExecutionState.terminada &&
+                                currentActivity.syncState !=
+                                    ActivitySyncState.synced)
+                            ? () => _syncCompletedActivity(currentActivity)
+                            : null,
+                        onDelete: _canDeleteActivity(currentActivity)
+                            ? () => _confirmDeleteActivity(currentActivity)
+                            : null,
+                      );
+                    }
+
                     return groupedByFrente.entries.map((entry) {
                       final frente = entry.key;
                       final items = entry.value;
-                      final expansionKey = '${section.id}::$frente';
-                      final expanded = _expandedByFrente[expansionKey] ?? true;
 
+                      // Activities without a segment/frente: render inline
+                      // without a section header to avoid repeating
+                      // "Segmento: Sin segmento" across multiple status
+                      // sections.
+                      if (frente == sinFrenteKey) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: items.map(buildTile).toList(),
+                        );
+                      }
+
+                      final expansionKey = '${section.id}::$frente';
+                      final expanded =
+                          _expandedByFrente[expansionKey] ?? true;
                       return _FrenteSection(
                         frente: frente,
                         frontLabel: frontTerminology(
@@ -3321,74 +3711,11 @@ class _HomePageState extends ConsumerState<HomePage>
                         count: items.length,
                         expanded: expanded,
                         onToggle: () => setState(
-                          () => _expandedByFrente[expansionKey] = !expanded,
+                          () =>
+                              _expandedByFrente[expansionKey] = !expanded,
                         ),
                         children: expanded
-                            ? items.map((a) {
-                                final currentActivity = _findById(a.id) ?? a;
-                                final barColor = _effectiveBarColor(
-                                  a.id,
-                                  a.status,
-                                );
-                                final icon = _effectiveIcon(a.id, a.status);
-                                final footer = _effectiveFooterText(
-                                  a.id,
-                                  a.status,
-                                );
-
-                                return _SwipeActivityTile(
-                                  key: ValueKey(a.id),
-                                  a: a,
-                                  isRejected: currentActivity.isRejected,
-                                  executionState:
-                                      currentActivity.executionState,
-                                  syncState: currentActivity.syncState,
-                                  barColor: barColor,
-                                  footerIcon: icon,
-                                  footerText: footer,
-                                  pkText: _formatPk(a.pk),
-                                  showFrenteInsideCard: showFrenteInsideCard,
-                                  onTapOpenWizard: _isAdminViewer
-                                      ? () => context.push(
-                                          '/activity/${a.id}?project=${widget.selectedProject}',
-                                          extra: currentActivity,
-                                        )
-                                      : () => _openRegisterWizard(a),
-                                  onSwipeRight: () => _onSwipeRight(a),
-                                  onSwipeLeftIncident: () => _reportIncident(a),
-                                  assigneeLabel: _assigneeLabelFor(
-                                    currentActivity,
-                                  ),
-                                  onTransferResponsibility:
-                                      _canTransferResponsibility(
-                                        currentActivity,
-                                      )
-                                      ? () => _openTransferResponsibilitySheet(
-                                          currentActivity,
-                                        )
-                                      : null,
-                                  transferInProgress: _transferringActivityIds
-                                      .contains(a.id),
-                                  onAddCoResponsible:
-                                      _canAddCoResponsible(currentActivity)
-                                      ? () => _openAddCoResponsibleSheet(
-                                          currentActivity,
-                                        )
-                                      : null,
-                                  onSyncCompleted:
-                                      (currentActivity.executionState ==
-                                              ExecutionState.terminada &&
-                                          currentActivity.syncState !=
-                                              ActivitySyncState.synced)
-                                      ? () => _syncCompletedActivity(
-                                          currentActivity,
-                                        )
-                                      : null,
-                                  onDelete: _canDeleteActivity(currentActivity)
-                                      ? () => _confirmDeleteActivity(currentActivity)
-                                      : null,
-                                );
-                              }).toList()
+                            ? items.map(buildTile).toList()
                             : const [],
                       );
                     }).toList();
@@ -3686,6 +4013,50 @@ class _TransferResponsibilitySheetState
 /* =========================
    COMPONENTES
 ========================= */
+
+class _DateChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _DateChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const color = SaoColors.primary;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? color.withValues(alpha: 0.15)
+              : SaoColors.gray100,
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: isSelected
+                ? color.withValues(alpha: 0.5)
+                : SaoColors.gray200,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+            color: isSelected ? color : SaoColors.gray600,
+          ),
+        ),
+      ),
+    );
+  }
+}
 
 class _MetricBadge extends StatelessWidget {
   final String label;
@@ -4402,6 +4773,45 @@ class _ActivityTile extends StatelessWidget {
                               color: SaoColors.gray600,
                             ),
                           ),
+                        if (isRejected &&
+                            a.reviewComment != null &&
+                            a.reviewComment!.trim().isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: SaoColors.riskHigh.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: SaoColors.riskHigh.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                  Icons.comment_rounded,
+                                  size: 13,
+                                  color: SaoColors.riskHigh,
+                                ),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    a.reviewComment!.trim(),
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                      color: SaoColors.riskHigh,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                         const SizedBox(height: 10),
                         Row(
                           children: [

@@ -14,6 +14,7 @@ const AndroidNotificationChannel _assignmentChannel = AndroidNotificationChannel
   'Actividades asignadas',
   description: 'Notificaciones de nuevas actividades y transferencias.',
   importance: Importance.high,
+  sound: RawResourceAndroidNotificationSound('sao_notify'),
 );
 
 final FlutterLocalNotificationsPlugin _localNotifications = FlutterLocalNotificationsPlugin();
@@ -55,16 +56,39 @@ class PushNotificationsService {
         await Firebase.initializeApp();
       }
 
-      // Initialise flutter_local_notifications for foreground messages (Android only).
-      if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-        const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-        await _localNotifications.initialize(
-          const InitializationSettings(android: androidInit),
-        );
-        await _localNotifications
-            .resolvePlatformSpecificImplementation<
-                AndroidFlutterLocalNotificationsPlugin>()
-            ?.createNotificationChannel(_assignmentChannel);
+      // Initialise flutter_local_notifications for foreground messages.
+      if (!kIsWeb) {
+        if (defaultTargetPlatform == TargetPlatform.android) {
+          const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+          await _localNotifications.initialize(
+            const InitializationSettings(android: androidInit),
+          );
+          await _localNotifications
+              .resolvePlatformSpecificImplementation<
+                  AndroidFlutterLocalNotificationsPlugin>()
+              ?.createNotificationChannel(_assignmentChannel);
+        } else if (defaultTargetPlatform == TargetPlatform.iOS) {
+          // On iOS, initialise flutter_local_notifications so it acts as the
+          // UNUserNotificationCenterDelegate.  This lets _showForegroundLocalNotification
+          // call show() and have notifications appear in the iOS notification
+          // center even when the app is in the foreground.
+          const iosInit = DarwinInitializationSettings(
+            requestAlertPermission: false,
+            requestBadgePermission: false,
+            requestSoundPermission: false,
+          );
+          await _localNotifications.initialize(
+            const InitializationSettings(iOS: iosInit),
+          );
+        } else if (defaultTargetPlatform == TargetPlatform.macOS) {
+          // On macOS, let Firebase Messaging show system banners directly.
+          await FirebaseMessaging.instance
+              .setForegroundNotificationPresentationOptions(
+            alert: true,
+            badge: true,
+            sound: true,
+          );
+        }
       }
 
       final messaging = FirebaseMessaging.instance;
@@ -149,19 +173,51 @@ class PushNotificationsService {
     await _messagesController.close();
   }
 
-  /// Shows a local notification banner when an assignment message arrives while
-  /// the app is in the foreground. Only runs on Android (not web/iOS/desktop).
+  /// Shows a local notification banner when a relevant message arrives while
+  /// the app is in the foreground. Runs on Android and iOS.
+  /// On iOS, flutter_local_notifications acts as UNUserNotificationCenterDelegate
+  /// and adds the notification to the system notification center.
   void _showForegroundLocalNotification(RemoteMessage message) {
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb) {
+      return;
+    }
+    if (defaultTargetPlatform != TargetPlatform.android &&
+        defaultTargetPlatform != TargetPlatform.iOS) {
+      return;
+    }
 
     final notification = message.notification;
     final data = message.data;
-    final type = data['type'] as String? ?? '';
+    final type = (data['type'] as String? ?? '').trim().toLowerCase();
 
-    // Only show banner for assignment events; other events can be added here.
-    if (type != 'new_assignment' && type != 'assignment_transferred') return;
+    // Show banners for all relevant event types.
+    const visibleTypes = {
+      'new_assignment',
+      'assignment_transferred',
+      'assignment_update',
+      'review_approved',
+      'review_changes_required',
+      'review_decision',
+      'activity_update',
+      'assignment_cancelled',
+      'admin_message',
+    };
+    if (!visibleTypes.contains(type)) return;
 
-    final title = notification?.title ?? (type == 'assignment_transferred' ? 'Actividad transferida' : 'Nueva actividad asignada');
+    final defaultTitle = switch (type) {
+      'assignment_transferred' => 'Actividad transferida',
+      'review_approved' => 'Actividad aprobada',
+      'review_changes_required' => 'Actividad requiere corrección',
+      'review_decision' => 'Decisión de revisión',
+      'activity_update' => 'Actividad actualizada',
+      'assignment_cancelled' => 'Actividad cancelada',
+      'assignment_update' => 'Agenda actualizada',
+      'admin_message' => 'Mensaje del administrador',
+      _ => 'Nueva actividad asignada',
+    };
+    final title = (notification?.title?.trim().isNotEmpty ?? false)
+        ? notification!.title!
+        : defaultTitle;
     final body = notification?.body ?? '';
 
     _localNotifications.show(
@@ -176,6 +232,11 @@ class PushNotificationsService {
           importance: Importance.high,
           priority: Priority.high,
           icon: '@mipmap/ic_launcher',
+          sound: const RawResourceAndroidNotificationSound('sao_notify'),
+        ),
+        iOS: const DarwinNotificationDetails(
+          sound: 'sao_notify.mp3',
+          presentSound: true,
         ),
       ),
     );

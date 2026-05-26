@@ -126,7 +126,9 @@ class _SaoValidationSearchBarState extends State<SaoValidationSearchBar> {
                         if (canChangeProject)
                           DropdownButtonHideUnderline(
                             child: DropdownButton<String>(
-                              value: (widget.projectName ?? '').trim(),
+                              value: widget.projectOptions!.contains((widget.projectName ?? '').trim())
+                                  ? (widget.projectName ?? '').trim()
+                                  : '',
                               isDense: true,
                               borderRadius: BorderRadius.circular(SaoRadii.md),
                               icon: const Icon(

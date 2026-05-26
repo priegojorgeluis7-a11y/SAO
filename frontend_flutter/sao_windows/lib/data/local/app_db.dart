@@ -41,7 +41,7 @@ class AppDb extends _$AppDb {
   AppDb() : super(_openConnection());
 
   @override
-  int get schemaVersion => 15;
+  int get schemaVersion => 16;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -119,6 +119,10 @@ class AppDb extends _$AppDb {
             await m.addColumn(agendaAssignments, agendaAssignments.pkEnd);
             await m.addColumn(agendaAssignments, agendaAssignments.lugar);
             await m.addColumn(agendaAssignments, agendaAssignments.locationType);
+          }
+          if (from < 16) {
+            // Supervisor-set scheduled start date for activities (assignment_start_at from backend).
+            await m.addColumn(activities, activities.assignmentStartAt);
           }
         },
         beforeOpen: (details) async {

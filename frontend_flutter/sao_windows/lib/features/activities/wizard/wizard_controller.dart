@@ -87,6 +87,20 @@ class WizardController extends ChangeNotifier {
   bool _draftHydrationReady = false;
   bool get loading => _loading;
 
+  /// Step the user last reached in this wizard session, restored from draft.
+  int _resumeStep = 0;
+  int _currentStep = 0;
+
+  /// The step to jump to when the wizard reopens (read after [init] completes).
+  int get resumeStep => _resumeStep;
+
+  /// Called by [WizardPage] whenever the active step changes.
+  void setCurrentStep(int step) {
+    if (step != _currentStep) {
+      _currentStep = step;
+    }
+  }
+
   // ── Co-responsables ────────────────────────────────────
   /// IDs seleccionados como co-responsables (incluye siempre al usuario actual).
   final Set<String> _coAssigneeIds = {};
@@ -1438,6 +1452,17 @@ class WizardController extends ChangeNotifier {
       );
     }
 
+    // Minuta / Notas (obligatorio)
+    if (reportNotes.trim().isEmpty) {
+      errors.add(
+        ValidationError(
+          fieldKey: 'report_notes',
+          message: 'Escribe lo que ocurrió en la actividad — sin esta descripción el reporte no puede usarse para dar seguimiento al proyecto',
+          step: 'fields',
+        ),
+      );
+    }
+
     if (reportAgreements.any((item) => item.trim().isEmpty)) {
       errors.add(
         ValidationError(
@@ -2412,6 +2437,13 @@ class WizardController extends ChangeNotifier {
       }
     }
 
+    // Último paso alcanzado — para reabrir el wizard en el mismo paso
+    final lastStepField = fields['wizard_last_step'];
+    if (lastStepField?.valueText != null) {
+      final parsed = int.tryParse(lastStepField!.valueText!.trim()) ?? 0;
+      _resumeStep = parsed.clamp(0, 3);
+    }
+
     // Evidencias guardadas en DB
     await _rehydrateEvidences();
   }
@@ -3107,6 +3139,9 @@ class WizardController extends ChangeNotifier {
       ),
     );
     add('has_evidence', text: hasEvidence ? 'true' : 'false');
+    if (_currentStep > 0) {
+      add('wizard_last_step', text: _currentStep.toString());
+    }
     return fields;
   }
 

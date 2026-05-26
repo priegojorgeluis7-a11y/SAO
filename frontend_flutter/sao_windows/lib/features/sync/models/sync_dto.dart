@@ -90,6 +90,8 @@ class ActivityDTO {
   final DateTime createdAt;
   final DateTime updatedAt;
   final DateTime? deletedAt;
+  // Planned/scheduled start date set by supervisor. Falls back to createdAt when absent.
+  final DateTime? assignmentStartAt;
   final int syncVersion;
   final bool isPrimaryResponsible;
 
@@ -122,6 +124,7 @@ class ActivityDTO {
     required this.createdAt,
     required this.updatedAt,
     this.deletedAt,
+    this.assignmentStartAt,
     required this.syncVersion,
     this.isPrimaryResponsible = true,
   });
@@ -183,6 +186,9 @@ class ActivityDTO {
       deletedAt: asStringOrNull('deleted_at') != null
           ? DateTime.tryParse(asStringOrNull('deleted_at')!)?.toUtc()
           : null,
+      assignmentStartAt: asStringOrNull('assignment_start_at') != null
+          ? DateTime.tryParse(asStringOrNull('assignment_start_at')!)?.toUtc()
+          : null,
       syncVersion: asInt('sync_version'),
       isPrimaryResponsible: (json['is_primary_responsible'] as bool?) ?? true,
     );
@@ -217,6 +223,7 @@ class ActivityDTO {
       'created_at': createdAt.toIso8601String(),
       'updated_at': updatedAt.toIso8601String(),
       'deleted_at': deletedAt?.toIso8601String(),
+      if (assignmentStartAt != null) 'assignment_start_at': assignmentStartAt!.toIso8601String(),
       'sync_version': syncVersion,
       'is_primary_responsible': isPrimaryResponsible,
     };

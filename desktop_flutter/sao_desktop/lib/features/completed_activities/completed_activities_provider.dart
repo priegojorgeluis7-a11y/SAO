@@ -613,24 +613,43 @@ final completedFilterOptionsProvider =
 Future<List<CompletedActivity>> _fetchCompletedActivities(
   Map<String, String> params,
 ) async {
-  final qs = params.entries
-      .map((e) =>
-          '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
-      .join('&');
-  final queryString = params.isEmpty ? '' : '?$qs';
-
   const client = BackendApiClient();
-  final decoded =
-      await client.getJson('/api/v1/completed-activities$queryString');
+  const pageSize = 200;
+  const maxItems = 3000; // safety cap to avoid runaway fetches
 
-  if (decoded is! Map<String, dynamic>) return const [];
-  final items = decoded['items'];
-  if (items is! List) return const [];
+  final allItems = <CompletedActivity>[];
+  int page = 1;
 
-  return items
-      .whereType<Map<String, dynamic>>()
-      .map(CompletedActivity.fromJson)
-      .toList(growable: false);
+  while (true) {
+    final pageParams = <String, String>{
+      ...params,
+      'page': '$page',
+      'page_size': '$pageSize',
+    };
+    final qs = pageParams.entries
+        .map((e) =>
+            '${Uri.encodeQueryComponent(e.key)}=${Uri.encodeQueryComponent(e.value)}')
+        .join('&');
+
+    final decoded =
+        await client.getJson('/api/v1/completed-activities?$qs');
+
+    if (decoded is! Map<String, dynamic>) break;
+    final items = decoded['items'];
+    if (items is! List || items.isEmpty) break;
+
+    allItems.addAll(
+      items
+          .whereType<Map<String, dynamic>>()
+          .map(CompletedActivity.fromJson),
+    );
+
+    final hasNext = decoded['has_next'] as bool? ?? false;
+    if (!hasNext || allItems.length >= maxItems) break;
+    page++;
+  }
+
+  return allItems;
 }
 
 final completedExplorerActivitiesProvider =

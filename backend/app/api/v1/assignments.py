@@ -941,6 +941,37 @@ def cancel_assignment(
             "reason": cancel_reason,
         },
     )
+
+    # Notify the previously assigned user that their activity was cancelled.
+    if current_assignee_user_id:
+        _cancel_project_id = str(doc.get("project_id") or "").strip().upper()
+        _cancel_title = str(doc.get("title") or doc.get("activity_type_code") or "Actividad").strip()
+        try:
+            from app.services.push_notification_service import notify_user as _notify_user
+            _notify_user(
+                user_id=current_assignee_user_id,
+                title="Actividad cancelada",
+                body=f'"{_cancel_title}" fue cancelada.' + (f" Motivo: {cancel_reason}." if cancel_reason else ""),
+                data={"type": "activity_update", "project_id": _cancel_project_id, "activity_id": str(assignment_id)},
+                project_id=_cancel_project_id or None,
+            )
+        except Exception:
+            logger.exception("notify_user (cancel) failed for activity %s", assignment_id)
+        try:
+            create_user_notification(
+                recipient_user_id=current_assignee_user_id,
+                notification_type="assignment_cancelled",
+                activity_id=str(assignment_id),
+                activity_title=_cancel_title,
+                project_id=_cancel_project_id,
+                from_user_id=str(getattr(current_user, "id", "")),
+                from_user_name=getattr(current_user, "full_name", None),
+                requires_acceptance=False,
+                metadata={"reason": cancel_reason},
+            )
+        except Exception:
+            logger.exception("create_user_notification (cancel) failed for activity %s", assignment_id)
+
     return AssignmentCancelResponse(
         id=str(assignment_id),
         canceled=True,
@@ -1214,9 +1245,25 @@ def add_participant(
     )
 
     try:
+        notify_new_assignment(
+            project_id=project_id,
+            activity_id=str(assignment_id),
+            activity_title=str(doc.get("title") or doc.get("activity_type_code") or "Actividad"),
+            assignee_user_id=new_participant_id,
+            assigned_by_name=getattr(current_user, "full_name", None),
+            is_transfer=False,
+            municipio=str(doc.get("municipio") or "").strip() or None,
+            estado=str(doc.get("estado") or "").strip() or None,
+            frente=str(doc.get("frente") or "").strip() or None,
+            start_at=str(doc.get("assignment_start_at") or "").strip() or None,
+        )
+    except Exception:
+        logger.exception("notify_new_assignment (add_participant) failed for activity %s", assignment_id)
+
+    try:
         create_user_notification(
             recipient_user_id=new_participant_id,
-            notification_type="co_responsible_added",
+            notification_type="co_responsable_added",
             activity_id=str(assignment_id),
             activity_title=str(doc.get("title") or doc.get("activity_type_code") or "Actividad"),
             project_id=project_id,

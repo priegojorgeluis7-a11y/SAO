@@ -7253,6 +7253,18 @@ class $ActivitiesTable extends Activities
     type: DriftSqlType.dateTime,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _assignmentStartAtMeta = const VerificationMeta(
+    'assignmentStartAt',
+  );
+  @override
+  late final GeneratedColumn<DateTime> assignmentStartAt =
+      GeneratedColumn<DateTime>(
+        'assignment_start_at',
+        aliasedName,
+        true,
+        type: DriftSqlType.dateTime,
+        requiredDuringInsert: false,
+      );
   static const VerificationMeta _createdByUserIdMeta = const VerificationMeta(
     'createdByUserId',
   );
@@ -7368,6 +7380,7 @@ class $ActivitiesTable extends Activities
     createdAt,
     startedAt,
     finishedAt,
+    assignmentStartAt,
     createdByUserId,
     assignedToUserId,
     status,
@@ -7473,6 +7486,15 @@ class $ActivitiesTable extends Activities
       context.handle(
         _finishedAtMeta,
         finishedAt.isAcceptableOrUnknown(data['finished_at']!, _finishedAtMeta),
+      );
+    }
+    if (data.containsKey('assignment_start_at')) {
+      context.handle(
+        _assignmentStartAtMeta,
+        assignmentStartAt.isAcceptableOrUnknown(
+          data['assignment_start_at']!,
+          _assignmentStartAtMeta,
+        ),
       );
     }
     if (data.containsKey('created_by_user_id')) {
@@ -7603,6 +7625,10 @@ class $ActivitiesTable extends Activities
         DriftSqlType.dateTime,
         data['${effectivePrefix}finished_at'],
       ),
+      assignmentStartAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}assignment_start_at'],
+      ),
       createdByUserId: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}created_by_user_id'],
@@ -7661,6 +7687,7 @@ class Activity extends DataClass implements Insertable<Activity> {
   final DateTime createdAt;
   final DateTime? startedAt;
   final DateTime? finishedAt;
+  final DateTime? assignmentStartAt;
   final String createdByUserId;
   final String? assignedToUserId;
   final String status;
@@ -7683,6 +7710,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     required this.createdAt,
     this.startedAt,
     this.finishedAt,
+    this.assignmentStartAt,
     required this.createdByUserId,
     this.assignedToUserId,
     required this.status,
@@ -7721,6 +7749,9 @@ class Activity extends DataClass implements Insertable<Activity> {
     }
     if (!nullToAbsent || finishedAt != null) {
       map['finished_at'] = Variable<DateTime>(finishedAt);
+    }
+    if (!nullToAbsent || assignmentStartAt != null) {
+      map['assignment_start_at'] = Variable<DateTime>(assignmentStartAt);
     }
     map['created_by_user_id'] = Variable<String>(createdByUserId);
     if (!nullToAbsent || assignedToUserId != null) {
@@ -7772,6 +7803,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       finishedAt: finishedAt == null && nullToAbsent
           ? const Value.absent()
           : Value(finishedAt),
+      assignmentStartAt: assignmentStartAt == null && nullToAbsent
+          ? const Value.absent()
+          : Value(assignmentStartAt),
       createdByUserId: Value(createdByUserId),
       assignedToUserId: assignedToUserId == null && nullToAbsent
           ? const Value.absent()
@@ -7814,6 +7848,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       createdAt: serializer.fromJson<DateTime>(json['createdAt']),
       startedAt: serializer.fromJson<DateTime?>(json['startedAt']),
       finishedAt: serializer.fromJson<DateTime?>(json['finishedAt']),
+      assignmentStartAt: serializer.fromJson<DateTime?>(
+        json['assignmentStartAt'],
+      ),
       createdByUserId: serializer.fromJson<String>(json['createdByUserId']),
       assignedToUserId: serializer.fromJson<String?>(json['assignedToUserId']),
       status: serializer.fromJson<String>(json['status']),
@@ -7841,6 +7878,7 @@ class Activity extends DataClass implements Insertable<Activity> {
       'createdAt': serializer.toJson<DateTime>(createdAt),
       'startedAt': serializer.toJson<DateTime?>(startedAt),
       'finishedAt': serializer.toJson<DateTime?>(finishedAt),
+      'assignmentStartAt': serializer.toJson<DateTime?>(assignmentStartAt),
       'createdByUserId': serializer.toJson<String>(createdByUserId),
       'assignedToUserId': serializer.toJson<String?>(assignedToUserId),
       'status': serializer.toJson<String>(status),
@@ -7866,6 +7904,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     DateTime? createdAt,
     Value<DateTime?> startedAt = const Value.absent(),
     Value<DateTime?> finishedAt = const Value.absent(),
+    Value<DateTime?> assignmentStartAt = const Value.absent(),
     String? createdByUserId,
     Value<String?> assignedToUserId = const Value.absent(),
     String? status,
@@ -7890,6 +7929,9 @@ class Activity extends DataClass implements Insertable<Activity> {
     createdAt: createdAt ?? this.createdAt,
     startedAt: startedAt.present ? startedAt.value : this.startedAt,
     finishedAt: finishedAt.present ? finishedAt.value : this.finishedAt,
+    assignmentStartAt: assignmentStartAt.present
+        ? assignmentStartAt.value
+        : this.assignmentStartAt,
     createdByUserId: createdByUserId ?? this.createdByUserId,
     assignedToUserId: assignedToUserId.present
         ? assignedToUserId.value
@@ -7926,6 +7968,9 @@ class Activity extends DataClass implements Insertable<Activity> {
       finishedAt: data.finishedAt.present
           ? data.finishedAt.value
           : this.finishedAt,
+      assignmentStartAt: data.assignmentStartAt.present
+          ? data.assignmentStartAt.value
+          : this.assignmentStartAt,
       createdByUserId: data.createdByUserId.present
           ? data.createdByUserId.value
           : this.createdByUserId,
@@ -7963,6 +8008,7 @@ class Activity extends DataClass implements Insertable<Activity> {
           ..write('createdAt: $createdAt, ')
           ..write('startedAt: $startedAt, ')
           ..write('finishedAt: $finishedAt, ')
+          ..write('assignmentStartAt: $assignmentStartAt, ')
           ..write('createdByUserId: $createdByUserId, ')
           ..write('assignedToUserId: $assignedToUserId, ')
           ..write('status: $status, ')
@@ -7990,6 +8036,7 @@ class Activity extends DataClass implements Insertable<Activity> {
     createdAt,
     startedAt,
     finishedAt,
+    assignmentStartAt,
     createdByUserId,
     assignedToUserId,
     status,
@@ -8016,6 +8063,7 @@ class Activity extends DataClass implements Insertable<Activity> {
           other.createdAt == this.createdAt &&
           other.startedAt == this.startedAt &&
           other.finishedAt == this.finishedAt &&
+          other.assignmentStartAt == this.assignmentStartAt &&
           other.createdByUserId == this.createdByUserId &&
           other.assignedToUserId == this.assignedToUserId &&
           other.status == this.status &&
@@ -8040,6 +8088,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
   final Value<DateTime> createdAt;
   final Value<DateTime?> startedAt;
   final Value<DateTime?> finishedAt;
+  final Value<DateTime?> assignmentStartAt;
   final Value<String> createdByUserId;
   final Value<String?> assignedToUserId;
   final Value<String> status;
@@ -8063,6 +8112,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     this.createdAt = const Value.absent(),
     this.startedAt = const Value.absent(),
     this.finishedAt = const Value.absent(),
+    this.assignmentStartAt = const Value.absent(),
     this.createdByUserId = const Value.absent(),
     this.assignedToUserId = const Value.absent(),
     this.status = const Value.absent(),
@@ -8087,6 +8137,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     required DateTime createdAt,
     this.startedAt = const Value.absent(),
     this.finishedAt = const Value.absent(),
+    this.assignmentStartAt = const Value.absent(),
     required String createdByUserId,
     this.assignedToUserId = const Value.absent(),
     this.status = const Value.absent(),
@@ -8116,6 +8167,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     Expression<DateTime>? createdAt,
     Expression<DateTime>? startedAt,
     Expression<DateTime>? finishedAt,
+    Expression<DateTime>? assignmentStartAt,
     Expression<String>? createdByUserId,
     Expression<String>? assignedToUserId,
     Expression<String>? status,
@@ -8140,6 +8192,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
       if (createdAt != null) 'created_at': createdAt,
       if (startedAt != null) 'started_at': startedAt,
       if (finishedAt != null) 'finished_at': finishedAt,
+      if (assignmentStartAt != null) 'assignment_start_at': assignmentStartAt,
       if (createdByUserId != null) 'created_by_user_id': createdByUserId,
       if (assignedToUserId != null) 'assigned_to_user_id': assignedToUserId,
       if (status != null) 'status': status,
@@ -8166,6 +8219,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     Value<DateTime>? createdAt,
     Value<DateTime?>? startedAt,
     Value<DateTime?>? finishedAt,
+    Value<DateTime?>? assignmentStartAt,
     Value<String>? createdByUserId,
     Value<String?>? assignedToUserId,
     Value<String>? status,
@@ -8190,6 +8244,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
       createdAt: createdAt ?? this.createdAt,
       startedAt: startedAt ?? this.startedAt,
       finishedAt: finishedAt ?? this.finishedAt,
+      assignmentStartAt: assignmentStartAt ?? this.assignmentStartAt,
       createdByUserId: createdByUserId ?? this.createdByUserId,
       assignedToUserId: assignedToUserId ?? this.assignedToUserId,
       status: status ?? this.status,
@@ -8242,6 +8297,9 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
     if (finishedAt.present) {
       map['finished_at'] = Variable<DateTime>(finishedAt.value);
     }
+    if (assignmentStartAt.present) {
+      map['assignment_start_at'] = Variable<DateTime>(assignmentStartAt.value);
+    }
     if (createdByUserId.present) {
       map['created_by_user_id'] = Variable<String>(createdByUserId.value);
     }
@@ -8290,6 +8348,7 @@ class ActivitiesCompanion extends UpdateCompanion<Activity> {
           ..write('createdAt: $createdAt, ')
           ..write('startedAt: $startedAt, ')
           ..write('finishedAt: $finishedAt, ')
+          ..write('assignmentStartAt: $assignmentStartAt, ')
           ..write('createdByUserId: $createdByUserId, ')
           ..write('assignedToUserId: $assignedToUserId, ')
           ..write('status: $status, ')
@@ -21334,6 +21393,7 @@ typedef $$ActivitiesTableCreateCompanionBuilder =
       required DateTime createdAt,
       Value<DateTime?> startedAt,
       Value<DateTime?> finishedAt,
+      Value<DateTime?> assignmentStartAt,
       required String createdByUserId,
       Value<String?> assignedToUserId,
       Value<String> status,
@@ -21359,6 +21419,7 @@ typedef $$ActivitiesTableUpdateCompanionBuilder =
       Value<DateTime> createdAt,
       Value<DateTime?> startedAt,
       Value<DateTime?> finishedAt,
+      Value<DateTime?> assignmentStartAt,
       Value<String> createdByUserId,
       Value<String?> assignedToUserId,
       Value<String> status,
@@ -21582,6 +21643,11 @@ class $$ActivitiesTableFilterComposer
 
   ColumnFilters<DateTime> get finishedAt => $composableBuilder(
     column: $table.finishedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get assignmentStartAt => $composableBuilder(
+    column: $table.assignmentStartAt,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -21865,6 +21931,11 @@ class $$ActivitiesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<DateTime> get assignmentStartAt => $composableBuilder(
+    column: $table.assignmentStartAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get status => $composableBuilder(
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
@@ -22056,6 +22127,11 @@ class $$ActivitiesTableAnnotationComposer
 
   GeneratedColumn<DateTime> get finishedAt => $composableBuilder(
     column: $table.finishedAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get assignmentStartAt => $composableBuilder(
+    column: $table.assignmentStartAt,
     builder: (column) => column,
   );
 
@@ -22327,6 +22403,7 @@ class $$ActivitiesTableTableManager
                 Value<DateTime> createdAt = const Value.absent(),
                 Value<DateTime?> startedAt = const Value.absent(),
                 Value<DateTime?> finishedAt = const Value.absent(),
+                Value<DateTime?> assignmentStartAt = const Value.absent(),
                 Value<String> createdByUserId = const Value.absent(),
                 Value<String?> assignedToUserId = const Value.absent(),
                 Value<String> status = const Value.absent(),
@@ -22350,6 +22427,7 @@ class $$ActivitiesTableTableManager
                 createdAt: createdAt,
                 startedAt: startedAt,
                 finishedAt: finishedAt,
+                assignmentStartAt: assignmentStartAt,
                 createdByUserId: createdByUserId,
                 assignedToUserId: assignedToUserId,
                 status: status,
@@ -22375,6 +22453,7 @@ class $$ActivitiesTableTableManager
                 required DateTime createdAt,
                 Value<DateTime?> startedAt = const Value.absent(),
                 Value<DateTime?> finishedAt = const Value.absent(),
+                Value<DateTime?> assignmentStartAt = const Value.absent(),
                 required String createdByUserId,
                 Value<String?> assignedToUserId = const Value.absent(),
                 Value<String> status = const Value.absent(),
@@ -22398,6 +22477,7 @@ class $$ActivitiesTableTableManager
                 createdAt: createdAt,
                 startedAt: startedAt,
                 finishedAt: finishedAt,
+                assignmentStartAt: assignmentStartAt,
                 createdByUserId: createdByUserId,
                 assignedToUserId: assignedToUserId,
                 status: status,

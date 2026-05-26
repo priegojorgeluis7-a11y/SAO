@@ -148,6 +148,9 @@ class _TextFieldRendererState extends State<TextFieldRenderer> {
           controller: _controller,
           onChanged: widget.onChanged,
           onTap: widget.onTouched,
+          autocorrect: true,
+          enableSuggestions: true,
+          spellCheckConfiguration: const SpellCheckConfiguration(),
           decoration: InputDecoration(
             hintText: widget.fieldState.fieldLabel,
             border: OutlineInputBorder(
@@ -670,6 +673,9 @@ class _TextAreaFieldRendererState extends State<TextAreaFieldRenderer> {
           onChanged: widget.onChanged,
           onTap: widget.onTouched,
           maxLines: 4,
+          autocorrect: true,
+          enableSuggestions: true,
+          spellCheckConfiguration: const SpellCheckConfiguration(),
           decoration: InputDecoration(
             hintText: widget.fieldState.fieldLabel,
             border: OutlineInputBorder(

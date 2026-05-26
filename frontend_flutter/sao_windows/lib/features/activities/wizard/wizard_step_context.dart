@@ -398,6 +398,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
               else
                 TextField(
                   controller: _coloniaController,
+                  autocorrect: true,
+                  enableSuggestions: true,
+                  spellCheckConfiguration: const SpellCheckConfiguration(),
                   decoration: const InputDecoration(
                     labelText: 'Referencia / Lugar',
                     hintText: 'Descripción de la ubicación',
@@ -459,6 +462,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
                       children: [
                         TextField(
                           controller: _riskController,
+                          autocorrect: true,
+                          enableSuggestions: true,
+                          spellCheckConfiguration: const SpellCheckConfiguration(),
                           decoration: const InputDecoration(
                             labelText: 'Riesgo (texto libre)',
                             hintText: 'Captura el nivel de riesgo',
@@ -682,6 +688,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   else
                     TextField(
                       controller: _estadoController,
+                      autocorrect: true,
+                      enableSuggestions: true,
+                      spellCheckConfiguration: const SpellCheckConfiguration(),
                       decoration: const InputDecoration(
                         hintText: 'Captura el estado',
                         hintStyle: TextStyle(color: SaoColors.gray400),
@@ -728,6 +737,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   else
                     TextField(
                       controller: _municipioController,
+                      autocorrect: true,
+                      enableSuggestions: true,
+                      spellCheckConfiguration: const SpellCheckConfiguration(),
                       decoration: const InputDecoration(
                         hintText: 'Captura el municipio',
                         hintStyle: TextStyle(color: SaoColors.gray400),
@@ -752,6 +764,9 @@ class _WizardStepContextState extends State<WizardStepContext> {
                   const SizedBox(height: 4),
                   TextField(
                     controller: _coloniaController,
+                    autocorrect: true,
+                    enableSuggestions: true,
+                    spellCheckConfiguration: const SpellCheckConfiguration(),
                     decoration: const InputDecoration(
                       hintText: 'Nombre de la colonia',
                       hintStyle: TextStyle(color: SaoColors.gray400),

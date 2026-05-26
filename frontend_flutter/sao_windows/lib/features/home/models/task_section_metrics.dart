@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../../../ui/theme/sao_colors.dart';
+
 /// Priority tier for visual grouping in home sections
 enum SectionPriority {
   critical('CRITICAL', 'Action Required'),
@@ -15,17 +17,17 @@ enum SectionPriority {
 extension SectionPriorityColors on SectionPriority {
   Color get color {
     return switch (this) {
-      SectionPriority.critical => const Color(0xFFEF4444), // Red
-      SectionPriority.active => const Color(0xFF3B82F6), // Blue
-      SectionPriority.awaiting => const Color(0xFF9CA3AF), // Gray
+      SectionPriority.critical => SaoColors.error,
+      SectionPriority.active => SaoColors.info,
+      SectionPriority.awaiting => SaoColors.gray400,
     };
   }
 
   Color get backgroundColor {
     return switch (this) {
-      SectionPriority.critical => const Color(0xFFFEE2E2),
-      SectionPriority.active => const Color(0xFFEFF6FF),
-      SectionPriority.awaiting => const Color(0xFFF3F4F6),
+      SectionPriority.critical => SaoColors.errorLight,
+      SectionPriority.active => SaoColors.infoBg,
+      SectionPriority.awaiting => SaoColors.gray100,
     };
   }
 

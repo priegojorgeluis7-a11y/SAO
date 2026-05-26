@@ -1,11 +1,16 @@
 // lib/features/admin/stats/admin_activity_stats_page.dart
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../../core/constants.dart';
 import '../../../core/utils/snackbar.dart';
@@ -24,6 +29,8 @@ class AdminActivityStatsPage extends StatefulWidget {
 class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
   static const _rangeOptions = <int>[14, 30];
 
+  final _exportButtonKey = GlobalKey();
+  final _pdfButtonKey = GlobalKey();
   ActivityStats? _stats;
   bool _loading = true;
   late final ActivityDao _dao;
@@ -111,9 +118,16 @@ class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
         ),
         actions: [
           IconButton(
+            key: _exportButtonKey,
             icon: const Icon(Icons.download_rounded),
             tooltip: 'Exportar CSV',
             onPressed: (_loading || _stats == null) ? null : _exportCsv,
+          ),
+          IconButton(
+            key: _pdfButtonKey,
+            icon: const Icon(Icons.picture_as_pdf_rounded),
+            tooltip: 'Exportar PDF',
+            onPressed: (_loading || _stats == null) ? null : _exportPdf,
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -411,6 +425,378 @@ class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
     final stats = _stats;
     if (stats == null) return;
 
+    final isMobile = Platform.isIOS || Platform.isAndroid;
+
+    if (isMobile) {
+      await _exportCsvMobile(stats);
+    } else {
+      await _exportCsvDesktop(stats);
+    }
+  }
+
+  /// Export en móvil: escribe en directorio temporal y comparte via share sheet.
+  Future<void> _exportCsvMobile(ActivityStats stats) async {
+    try {
+      final now = DateTime.now();
+      final safeProject = _selectedProject.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9_-]'), '_');
+      final baseName = 'admin_stats_${safeProject}_${_selectedRangeDays}d';
+
+      final tempDir = await getTemporaryDirectory();
+      final summaryPath = p.join(tempDir.path, '${baseName}_resumen.csv');
+      final detailPath = p.join(tempDir.path, '${baseName}_detalle.csv');
+
+      final summaryCsv = _buildCsv(stats, generatedAt: now);
+      await File(summaryPath).writeAsString(summaryCsv, flush: true);
+
+      final allRecords = await _dao.listAllActivitiesForAdmin();
+      final detailRecords = allRecords.where(_matchesActiveFilters).toList();
+      final detailCsv = _buildDetailCsv(detailRecords, generatedAt: now);
+      await File(detailPath).writeAsString(detailCsv, flush: true);
+
+      if (!mounted) return;
+      final box = _exportButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final origin = box != null
+          ? box.localToGlobal(Offset.zero) & box.size
+          : Rect.fromLTWH(0, 0, 1, 1);
+      await Share.shareXFiles(
+        [
+          XFile(summaryPath, mimeType: 'text/csv'),
+          XFile(detailPath, mimeType: 'text/csv'),
+        ],
+        subject: 'Estadísticas SAO – $baseName',
+        sharePositionOrigin: origin,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'No se pudo exportar CSV: $e', backgroundColor: SaoColors.error),
+      );
+    }
+  }
+
+  // ── PDF Export ─────────────────────────────────────────────────
+
+  Future<void> _exportPdf() async {
+    final stats = _stats;
+    if (stats == null) return;
+    try {
+      final now = DateTime.now();
+      final safeProject =
+          _selectedProject.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9_-]'), '_');
+      final fileName = 'estadisticas_SAO_${safeProject}_${_selectedRangeDays}d.pdf';
+
+      final doc = pw.Document(title: 'Estadísticas SAO', author: 'SAO');
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(36),
+          build: (pw.Context ctx) => _buildPdfContent(stats, now),
+        ),
+      );
+
+      final Uint8List bytes = await doc.save();
+      if (!mounted) return;
+
+      final box = _pdfButtonKey.currentContext?.findRenderObject() as RenderBox?;
+      final bounds = box != null
+          ? box.localToGlobal(Offset.zero) & box.size
+          : const Rect.fromLTWH(0, 0, 1, 1);
+
+      await Printing.sharePdf(bytes: bytes, filename: fileName, bounds: bounds);
+    } catch (e) {
+      if (!mounted) return;
+      showTransientSnackBar(
+        context,
+        appSnackBar(message: 'No se pudo exportar PDF: $e', backgroundColor: SaoColors.error),
+      );
+    }
+  }
+
+  List<pw.Widget> _buildPdfContent(ActivityStats stats, DateTime now) {
+    const headerColor = PdfColor.fromInt(0xFF1E3A5F);
+    const barPrimary = PdfColor.fromInt(0xFF1565C0);
+    const barSuccess = PdfColor.fromInt(0xFF2E7D32);
+    const barWarning = PdfColor.fromInt(0xFFF57F17);
+    const barPurple = PdfColor.fromInt(0xFF4527A0);
+    const barTeal = PdfColor.fromInt(0xFF00695C);
+    const barRed = PdfColor.fromInt(0xFFC62828);
+    const barOrange = PdfColor.fromInt(0xFFE65100);
+
+    final widgets = <pw.Widget>[];
+
+    // Header
+    widgets.add(
+      pw.Container(
+        color: headerColor,
+        padding: const pw.EdgeInsets.all(16),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              'Estadísticas de Actividades SAO',
+              style: pw.TextStyle(
+                  fontSize: 20,
+                  fontWeight: pw.FontWeight.bold,
+                  color: PdfColors.white),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'Proyecto: $_selectedProject   |   Últimos $_selectedRangeDays días',
+              style: pw.TextStyle(fontSize: 11, color: PdfColors.grey200),
+            ),
+            pw.SizedBox(height: 2),
+            pw.Text(
+              'Generado: ${_pdfFmt(now)}',
+              style: pw.TextStyle(fontSize: 10, color: PdfColors.grey300),
+            ),
+          ],
+        ),
+      ),
+    );
+    widgets.add(pw.SizedBox(height: 20));
+
+    // KPIs
+    widgets.add(pw.Text('Resumen',
+        style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)));
+    widgets.add(pw.SizedBox(height: 8));
+    widgets.add(
+      pw.Table(
+        border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
+        columnWidths: const {
+          0: pw.FlexColumnWidth(),
+          1: pw.FlexColumnWidth(),
+          2: pw.FlexColumnWidth(),
+        },
+        children: [
+          pw.TableRow(
+            decoration: const pw.BoxDecoration(color: PdfColors.grey100),
+            children: [
+              _pdfKpiCell('Total', '${stats.total}', barPrimary),
+              _pdfKpiCell('Completadas', '${stats.completed}', barSuccess),
+              _pdfKpiCell('Sincronizadas', '${stats.synced}', barPrimary),
+            ],
+          ),
+          pw.TableRow(
+            children: [
+              _pdfKpiCell('Borradores', '${stats.draft}', PdfColors.grey700),
+              _pdfKpiCell(
+                  'Rev. Pendiente', '${stats.revisionPendiente}', barWarning),
+              _pdfKpiCell('Error', '${stats.error}', barRed),
+            ],
+          ),
+        ],
+      ),
+    );
+    widgets.add(pw.SizedBox(height: 16));
+
+    // Completion rate bar
+    final pct = stats.completionRate;
+    final pctStr = (pct * 100).toStringAsFixed(1);
+    final filledW = (pct * 200).clamp(0.0, 200.0);
+    widgets.add(
+      pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text('Tasa de completado: $pctStr%',
+              style: pw.TextStyle(
+                  fontSize: 12,
+                  fontWeight: pw.FontWeight.bold,
+                  color: barSuccess)),
+          pw.SizedBox(height: 4),
+          pw.Row(
+            children: [
+              if (filledW > 0)
+                pw.Container(
+                    width: filledW, height: 12, color: barSuccess),
+              if (filledW < 200)
+                pw.Container(
+                    width: 200 - filledW,
+                    height: 12,
+                    color: PdfColors.grey200),
+              pw.SizedBox(width: 8),
+              pw.Text('${stats.completed} de ${stats.total}',
+                  style:
+                      pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+            ],
+          ),
+        ],
+      ),
+    );
+    widgets.add(pw.SizedBox(height: 20));
+
+    // Avance por proyecto (completion %)
+    if (stats.completionByProject.isNotEmpty) {
+      widgets.add(pw.Text('Avance por Proyecto',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      for (final proj in stats.completionByProject) {
+        final projPct =
+            proj.total == 0 ? 0.0 : proj.completed / proj.total;
+        final bar = (projPct * 180).clamp(0.0, 180.0);
+        widgets.add(
+            _pdfBarRow(proj.projectCode, proj.completed, proj.total, bar, barSuccess));
+      }
+      widgets.add(pw.SizedBox(height: 20));
+    }
+
+    // Actividades por proyecto (counts)
+    if (stats.byProject.isNotEmpty) {
+      widgets.add(pw.Text('Actividades por Proyecto',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      final sorted = _pdfSortedEntries(stats.byProject);
+      final maxVal = sorted.first.value;
+      for (final e in sorted) {
+        final bar =
+            maxVal == 0 ? 0.0 : (e.value / maxVal * 180).clamp(0.0, 180.0);
+        widgets.add(_pdfBarRow(e.key, e.value, null, bar, barPrimary));
+      }
+      widgets.add(pw.SizedBox(height: 20));
+    }
+
+    // Por tipo de actividad
+    if (stats.byActivityType.isNotEmpty) {
+      widgets.add(pw.Text('Por Tipo de Actividad',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      final sorted = _pdfSortedEntries(stats.byActivityType);
+      final maxVal = sorted.first.value;
+      for (final e in sorted) {
+        final bar =
+            maxVal == 0 ? 0.0 : (e.value / maxVal * 180).clamp(0.0, 180.0);
+        widgets.add(_pdfBarRow(e.key, e.value, null, bar, barPurple));
+      }
+      widgets.add(pw.SizedBox(height: 20));
+    }
+
+    // Por frente
+    if (stats.byFrente.isNotEmpty) {
+      widgets.add(pw.Text('Por Frente',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      final sorted = _pdfSortedEntries(stats.byFrente);
+      final maxVal = sorted.first.value;
+      for (final e in sorted) {
+        final bar =
+            maxVal == 0 ? 0.0 : (e.value / maxVal * 180).clamp(0.0, 180.0);
+        widgets.add(_pdfBarRow(e.key, e.value, null, bar, barTeal));
+      }
+      widgets.add(pw.SizedBox(height: 20));
+    }
+
+    // Por tema
+    if (stats.byTopic.isNotEmpty) {
+      widgets.add(pw.Text('Por Tema',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      final sorted = _pdfSortedEntries(stats.byTopic);
+      final maxVal = sorted.first.value;
+      for (final e in sorted) {
+        final bar =
+            maxVal == 0 ? 0.0 : (e.value / maxVal * 180).clamp(0.0, 180.0);
+        widgets.add(_pdfBarRow(e.key, e.value, null, bar, barOrange));
+      }
+      widgets.add(pw.SizedBox(height: 20));
+    }
+
+    // Por riesgo
+    if (stats.byRisk.isNotEmpty) {
+      widgets.add(pw.Text('Por Riesgo',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      final sorted = _pdfSortedEntries(stats.byRisk);
+      final maxVal = sorted.first.value;
+      for (final e in sorted) {
+        final bar =
+            maxVal == 0 ? 0.0 : (e.value / maxVal * 180).clamp(0.0, 180.0);
+        widgets.add(_pdfBarRow(e.key, e.value, null, bar, barRed));
+      }
+      widgets.add(pw.SizedBox(height: 20));
+    }
+
+    // Por día
+    if (stats.byDay.isNotEmpty) {
+      widgets.add(pw.Text('Actividades por Día',
+          style:
+              pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold)));
+      widgets.add(pw.SizedBox(height: 8));
+      final sorted = stats.byDay.entries.toList()
+        ..sort((a, b) => a.key.compareTo(b.key));
+      final maxVal = sorted.map((e) => e.value).reduce(math.max);
+      for (final e in sorted) {
+        final bar =
+            maxVal == 0 ? 0.0 : (e.value / maxVal * 200).clamp(0.0, 200.0);
+        widgets.add(_pdfBarRow(e.key, e.value, null, bar, PdfColors.blue600));
+      }
+    }
+
+    return widgets;
+  }
+
+  pw.Widget _pdfKpiCell(String label, String value, PdfColor color) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.all(10),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(label,
+              style: pw.TextStyle(fontSize: 9, color: PdfColors.grey600)),
+          pw.SizedBox(height: 4),
+          pw.Text(value,
+              style: pw.TextStyle(
+                  fontSize: 18,
+                  fontWeight: pw.FontWeight.bold,
+                  color: color)),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _pdfBarRow(
+      String label, int value, int? total, double barWidth, PdfColor color) {
+    final countText = total != null ? '$value / $total' : '$value';
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 3),
+      child: pw.Row(
+        children: [
+          pw.SizedBox(
+            width: 120,
+            child: pw.Text(label,
+                style: pw.TextStyle(fontSize: 9),
+                maxLines: 2,
+                overflow: pw.TextOverflow.clip),
+          ),
+          pw.SizedBox(width: 8),
+          if (barWidth > 0) pw.Container(width: barWidth, height: 10, color: color),
+          pw.SizedBox(width: 6),
+          pw.Text(countText,
+              style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
+        ],
+      ),
+    );
+  }
+
+  List<MapEntry<String, int>> _pdfSortedEntries(Map<String, int> map) {
+    return map.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+  }
+
+  String _pdfFmt(DateTime dt) {
+    final d = dt.day.toString().padLeft(2, '0');
+    final m = dt.month.toString().padLeft(2, '0');
+    final h = dt.hour.toString().padLeft(2, '0');
+    final min = dt.minute.toString().padLeft(2, '0');
+    return '$d/$m/${dt.year}  $h:$min';
+  }
+
+  /// Export en escritorio: muestra diálogo de directorio y guarda los archivos.
+  Future<void> _exportCsvDesktop(ActivityStats stats) async {
     try {
       final now = DateTime.now();
       final safeProject = _selectedProject.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9_-]'), '_');

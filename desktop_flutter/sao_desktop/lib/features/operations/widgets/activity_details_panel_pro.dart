@@ -1446,10 +1446,18 @@ class _ActivityDetailsPanelProState
     );
     final munOptions = _resolveMunicipalityOptions(catalogRepo, activity);
     final pendingFields = <String>[
-      if (_requiresCatalogDecision(capturedSubcategoria, subcatOptions)) 'Subcategoría',
-      if (_requiresCatalogDecision(capturedTema, temaOptions)) 'Tema',
-      if (_requiresCatalogDecision(capturedProposito, propOptions)) 'Propósito',
-      if (_requiresCatalogDecision(capturedMunicipio, munOptions)) 'Municipio',
+      if (!_catalogApplied.contains('Subcategoría') &&
+          _requiresCatalogDecision(capturedSubcategoria, subcatOptions))
+        'Subcategoría',
+      if (!_catalogApplied.contains('Tema') &&
+          _requiresCatalogDecision(capturedTema, temaOptions))
+        'Tema',
+      if (!_catalogApplied.contains('Propósito') &&
+          _requiresCatalogDecision(capturedProposito, propOptions))
+        'Propósito',
+      if (!_catalogApplied.contains('Municipio') &&
+          _requiresCatalogDecision(capturedMunicipio, munOptions))
+        'Municipio',
     ];
 
     return Container(
@@ -1994,7 +2002,13 @@ class _ActivityDetailsPanelProState
       return optionSet.toList(growable: false);
     }
 
-    return const <String>[];
+    // Fallback: si no hay entradas para este tipo de actividad específico,
+    // mostrar todas las subcategorías activas del catálogo.
+    return catalogRepo
+        .getAllSubcategories()
+        .map((e) => e.name.trim())
+        .where((n) => n.isNotEmpty)
+        .toList(growable: false);
   }
 
   List<String> _resolveTemaOptions(
@@ -2018,7 +2032,13 @@ class _ActivityDetailsPanelProState
       return optionSet.toList(growable: false);
     }
 
-    return const <String>[];
+    // Fallback: si no hay temas asociados a este tipo de actividad,
+    // mostrar todos los temas activos del catálogo.
+    return catalogRepo
+        .getAllTopics()
+        .map((e) => e.name.trim())
+        .where((n) => n.isNotEmpty)
+        .toList(growable: false);
   }
 
   List<String> _resolvePurposeOptions(
@@ -2046,7 +2066,13 @@ class _ActivityDetailsPanelProState
       return optionSet.toList(growable: false);
     }
 
-    return const <String>[];
+    // Fallback: si no hay propósitos para este tipo de actividad,
+    // mostrar todos los propósitos activos del catálogo.
+    return catalogRepo
+        .getAllPurposes()
+        .map((e) => e.name.trim())
+        .where((n) => n.isNotEmpty)
+        .toList(growable: false);
   }
 
   List<String> _resolveMunicipalityOptions(
@@ -2346,68 +2372,6 @@ class _ActivityDetailsPanelProState
       // Trigger refresh
       widget.onFieldChanged?.call('_catalog_resolved', 'true');
     }
-  }
-
-  bool _hasUnresolvedCatalogDecision(ActivityWithDetails activity) {
-    final payload = activity.wizardPayload;
-    final payloadSubcategory =
-        _wizardPayloadText(payload, const ['subcategory', 'name']);
-    final payloadTemaPrimary =
-        _wizardPayloadText(payload, const ['topics', '0', 'name']);
-    final payloadPurpose =
-        _wizardPayloadText(payload, const ['purpose', 'name']);
-    final payloadMunicipio =
-        _wizardPayloadText(payload, const ['location', 'municipio']);
-
-    final capturedSubcategoria = (payloadSubcategory ??
-            _extractLabeledField(activity.activity.description, const [
-              'Subcategoría',
-              'Subcategoria',
-            ]) ??
-            activity.activity.title)
-        .trim();
-    final capturedTema = (payloadTemaPrimary ??
-            _extractLabeledField(activity.activity.description, const [
-              'Tema',
-              'Temas',
-            ]) ??
-            '')
-        .trim();
-    final capturedProposito = (payloadPurpose ??
-            _extractPurposeFromDescription(activity.activity.description))
-        .trim();
-    final capturedMunicipio = (payloadMunicipio ??
-            _extractLinkedMunicipality(activity.activity.description) ??
-            activity.municipality?.name ??
-            'Sin municipio')
-        .trim();
-
-    final catalogRepo = ref.read(catalogRepositoryProvider);
-    final subcatOptions = _resolveSubcategoryOptions(catalogRepo, activity);
-    final effectiveSubcategoryId = _resolveEffectiveSubcategoryId(
-      catalogRepo: catalogRepo,
-      activity: activity,
-      subcategoryOptions: subcatOptions,
-      capturedSubcategory: capturedSubcategoria,
-    );
-    final temaOptions = _resolveTemaOptions(catalogRepo, activity);
-    final propOptions = _resolvePurposeOptions(
-      catalogRepo,
-      activity,
-      subcategoryId: effectiveSubcategoryId,
-    );
-    final munOptions = _resolveMunicipalityOptions(catalogRepo, activity);
-
-    bool unresolved(String captured, List<String> options) {
-      final normalized = _normalizeCatalogValue(captured);
-      if (normalized.isEmpty) return false;
-      return _findBestCatalogOption(captured, options) == null;
-    }
-
-    return unresolved(capturedSubcategoria, subcatOptions) ||
-        unresolved(capturedTema, temaOptions) ||
-        unresolved(capturedProposito, propOptions) ||
-        unresolved(capturedMunicipio, munOptions);
   }
 
   Widget _buildGPSValidationBanner(ActivityWithDetails activity) {

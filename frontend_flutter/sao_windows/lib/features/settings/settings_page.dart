@@ -1,10 +1,13 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../auth/application/auth_providers.dart';
 import '../auth/data/auth_service.dart';
+import '../../core/auth/token_storage.dart';
 import '../sync/data/sync_api_repository.dart';
 import '../catalog/data/catalog_api_repository.dart';
 import '../catalog/data/catalog_local_repository.dart';
@@ -33,8 +36,27 @@ final _biometricStateProvider =
 
 final _scopedProjectsProvider =
     FutureProvider.autoDispose<List<ProjectDto>>((ref) async {
-  final repository = ref.watch(projectsRepositoryProvider);
-  return repository.getMyProjects();
+  // Llamamos directamente al ApiClient para que los errores de red/auth
+  // se propaguen al FutureProvider (estado error) en lugar de ser
+  // silenciados por getMyProjects() que devuelve [] al fallar.
+  final apiClient = getIt<ApiClient>();
+  final response = await apiClient.get<dynamic>('/me/projects');
+  final data = response.data;
+  if (data is List) {
+    return data
+        .map((item) => ProjectDto.fromJson(item as Map<String, dynamic>))
+        .where((p) => p.code.trim().isNotEmpty)
+        .toList();
+  } else if (data is Map && data.containsKey('projects')) {
+    final projects = data['projects'];
+    if (projects is List) {
+      return projects
+          .map((item) => ProjectDto.fromJson(item as Map<String, dynamic>))
+          .where((p) => p.code.trim().isNotEmpty)
+          .toList();
+    }
+  }
+  return [];
 });
 
 // ---------------------------------------------------------------------------
@@ -394,6 +416,9 @@ class SettingsPage extends ConsumerWidget {
           ),
           const Divider(),
 
+          // Calendarios por proyecto
+          const _CalendarUrlSection(),
+
           // DEBUG ONLY
           if (kDebugMode) ...[
             ListTile(
@@ -657,11 +682,6 @@ class SettingsPage extends ConsumerWidget {
 
               if (confirm == true && context.mounted) {
                 await ref.read(authControllerProvider.notifier).logout();
-                ref.invalidate(authStateProvider);
-                ref.invalidate(sessionProvider);
-                ref.invalidate(currentUserProvider);
-                ref.invalidate(isAuthenticatedProvider);
-                ref.invalidate(authControllerProvider);
                 if (context.mounted) {
                   context.go('/auth/login');
                 }
@@ -1021,6 +1041,184 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
           child: const Text('Guardar'),
         ),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Widget: sección de URLs de calendario iCal por proyecto
+// ---------------------------------------------------------------------------
+
+const _kGoogleCalendarUrls = <String, String>{
+  'TSNL': 'https://calendar.google.com/calendar/u/1?cid=YTMzOTkxOGY2NDFiZGRmOWE2OTk3MDliYmFmMjlhMmJmYTNkZmYwZWU5NDllMTgzYWI4N2YzZjNhOTY2NzYyY0Bncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TAP':  'https://calendar.google.com/calendar/u/1?cid=YWQ4ZjdjZTUxMDIzYmM2NjExODhlYWFhODZlNWMyM2MxY2IxZGQ5YTE0ZWY2MTRiOTEwZGJjY2U3ZDgxMDM1NkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TMQ':  'https://calendar.google.com/calendar/u/1?cid=NGJmMWFjODYwMGE5MTg1YzJjYTYwZTI5ODRhMjQ5OWQwMjA0ODc2OTc5MWM5MzcyMTYxODc2YzJkZjQ3ZDI5MUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TQI':  'https://calendar.google.com/calendar/u/1?cid=MWMxMWI1YWQ0YjZhNGY3M2U5NDI5ZDcwMjc1MDI3NGM0MTFlNWU0ZTBlYmFjZjU3MzA1Nzk4MzZlMWQ3ZTM3YkBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TQSL': 'https://calendar.google.com/calendar/u/1?cid=YzU3MWYzNDhjM2NjMTVlZDA3MTk1Y2U0NTQxZGY4YjYzNmVmNDRhNjFjODg5ZDZmODgyYmYxMTA5N2MxNGJhYUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+  'TSLS': 'https://calendar.google.com/calendar/u/1?cid=MDlhYjdjNjI4NWI3ZDBkNDM3YzQ1MjhlNWNlNjU4ZDhmMjZiYzQyMTE1YzYyZTBlNTg0YmZkYTkyZDZkYTk0OUBncm91cC5jYWxlbmRhci5nb29nbGUuY29t',
+};
+
+class _CalendarUrlSection extends ConsumerStatefulWidget {
+  const _CalendarUrlSection();
+
+  @override
+  ConsumerState<_CalendarUrlSection> createState() =>
+      _CalendarUrlSectionState();
+}
+
+class _CalendarUrlSectionState extends ConsumerState<_CalendarUrlSection> {
+  String? _token;
+  final Map<String, bool> _copied = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadToken();
+  }
+
+  Future<void> _loadToken() async {
+    // Usar TokenStorage (clave 'auth_token_data') en lugar de AuthService
+    // (clave 'access_token' legada) — el login moderno solo escribe en TokenStorage.
+    final token = await getIt<TokenStorage>().getAccessToken();
+    if (mounted) setState(() => _token = token);
+  }
+
+  String _buildUrl(String projectId) {
+    // baseUrl ya incluye /api/v1 (ej: https://host/api/v1)
+    final base = getIt<ApiConfig>().baseUrl;
+    return '$base/assignments/ical/$projectId?token=${_token ?? ''}';
+  }
+
+  Future<void> _copy(String projectId) async {
+    await Clipboard.setData(ClipboardData(text: _buildUrl(projectId)));
+    setState(() => _copied[projectId] = true);
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _copied[projectId] = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final projectsAsync = ref.watch(_scopedProjectsProvider);
+    final theme = Theme.of(context);
+
+    if (_token == null) return const SizedBox.shrink();
+
+    return projectsAsync.when(
+      loading: () => const ListTile(
+        leading: Icon(Icons.calendar_month_outlined),
+        title: Text('Calendarios de actividades'),
+        subtitle: Text('Cargando proyectos...'),
+      ),
+      error: (_, _) => Column(
+        children: [
+          ListTile(
+            leading: const Icon(
+              Icons.calendar_month_outlined,
+              color: SaoColors.warning,
+            ),
+            title: const Text('Calendarios de actividades'),
+            subtitle: const Text(
+              'No se pudieron cargar los proyectos. Verifica tu conexión.',
+            ),
+            trailing: TextButton(
+              onPressed: () => ref.invalidate(_scopedProjectsProvider),
+              child: const Text('Reintentar'),
+            ),
+          ),
+          const Divider(),
+        ],
+      ),
+      data: (projects) {
+        final projectCodes = projects
+            .where((p) => p.isActive)
+            .map((p) => p.code.trim().toUpperCase())
+            .where((c) => c.isNotEmpty)
+            .toSet()
+            .toList()
+          ..sort();
+
+        if (projectCodes.isEmpty) {
+          return Column(
+            children: [
+              ListTile(
+                leading: const Icon(Icons.calendar_month_outlined),
+                title: const Text('Calendarios de actividades'),
+                subtitle: const Text(
+                  'No tienes proyectos activos asignados.',
+                ),
+                trailing: IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Reintentar',
+                  onPressed: () => ref.invalidate(_scopedProjectsProvider),
+                ),
+              ),
+              const Divider(),
+            ],
+          );
+        }
+
+        return Column(
+          children: [
+            const ListTile(
+              leading: Icon(Icons.calendar_month_outlined),
+              title: Text('Calendarios de actividades'),
+              subtitle: Text(
+                'Suscríbete en Google Calendar, Apple Calendar u Outlook',
+              ),
+            ),
+            ...projectCodes.map((projectId) {
+              final isCopied = _copied[projectId] == true;
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 0,
+                ),
+                leading: const Icon(Icons.link_rounded, size: 20),
+                title: Text('Proyecto $projectId'),
+                subtitle: Text(
+                  _buildUrl(projectId),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Tooltip(
+                      message: isCopied ? '¡Copiado!' : 'Copiar URL',
+                      child: IconButton(
+                        onPressed: () => _copy(projectId),
+                        icon: Icon(
+                          isCopied ? Icons.check_rounded : Icons.copy_rounded,
+                          size: 20,
+                          color: isCopied ? SaoColors.success : null,
+                        ),
+                      ),
+                    ),
+                    Tooltip(
+                      message: 'Abrir en Google Calendar',
+                      child: IconButton(
+                        onPressed: () {
+                          final gcalUrl = _kGoogleCalendarUrls[projectId];
+                          if (gcalUrl == null) return;
+                          launchUrl(
+                            Uri.parse(gcalUrl),
+                            mode: LaunchMode.externalApplication,
+                          );
+                        },
+                        icon: const Icon(Icons.open_in_new_rounded, size: 20),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }),
+            const Divider(),
+          ],
+        );
+      },
     );
   }
 }

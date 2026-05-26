@@ -104,20 +104,15 @@ def get_user_notifications(
 
     try:
         client = get_firestore_client()
+        # Single-field filter only (no order_by) — avoids requiring a composite
+        # index while the Firestore index for (recipient_user_id, created_at DESC)
+        # is still building. Sorting and slicing are done in Python.
         query = (
             client.collection(_COLLECTION)
             .where("recipient_user_id", "==", normalized_user)
-            .order_by("created_at", direction="DESCENDING")
-            .limit(limit)
         )
         if unread_only:
-            query = (
-                client.collection(_COLLECTION)
-                .where("recipient_user_id", "==", normalized_user)
-                .where("status", "==", "unread")
-                .order_by("created_at", direction="DESCENDING")
-                .limit(limit)
-            )
+            query = query.where("status", "==", "unread")
 
         items: list[UserNotificationItem] = []
         for doc in query.stream():
@@ -126,7 +121,10 @@ def get_user_notifications(
                 items.append(_doc_to_item(doc.id, data))
             except Exception:
                 logger.warning("Skipping malformed notification doc id=%s", doc.id)
-        return items
+
+        # Sort newest-first and apply limit in Python.
+        items.sort(key=lambda n: n.created_at, reverse=True)
+        return items[:limit]
     except Exception:
         logger.exception("GET_USER_NOTIFICATIONS_FAILED user=%s", user_id)
         return []

@@ -19,6 +19,12 @@ class CatalogsPage extends ConsumerStatefulWidget {
 class _CatalogsPageState extends ConsumerState<CatalogsPage> {
   static const List<String> _fallbackProjects = ['TMQ', 'TAP'];
   List<CatalogActivityItem>? _activityReorderDraft;
+  bool _isActivityDialogOpen = false;
+  bool _isSubcategoryDialogOpen = false;
+  bool _isPurposeDialogOpen = false;
+  bool _isTopicDialogOpen = false;
+  bool _isResultDialogOpen = false;
+  bool _isAssistantDialogOpen = false;
 
   @override
   Widget build(BuildContext context) {
@@ -190,8 +196,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
         .replaceAll(RegExp(r'^_|_$'), '');
 
     if (upper.isEmpty) {
-      final stamp = DateTime.now().millisecondsSinceEpoch;
-      return '${prefix}_$stamp';
+      return '${prefix}_ITEM';
     }
 
     return '${prefix}_$upper';
@@ -778,6 +783,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     CatalogActivityItem? item,
     CatalogActivityItem? duplicateFrom,
   }) async {
+    if (item == null && _isActivityDialogOpen) return;
+    if (item == null) setState(() => _isActivityDialogOpen = true);
+
     final source = item ?? duplicateFrom;
     final isCreate = item == null;
     final isDuplicate = duplicateFrom != null && item == null;
@@ -789,11 +797,23 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final name = TextEditingController(text: source?.name ?? '');
     final description = TextEditingController(text: source?.description ?? '');
 
+    final existingActivities =
+        ref.read(catalogsControllerProvider).catalog.activities;
+
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final canSave = name.text.trim().isNotEmpty;
+          final trimmedName = name.text.trim();
+          final normalizedInput = trimmedName.toLowerCase();
+          final hasDuplicateName = isCreate &&
+              normalizedInput.isNotEmpty &&
+              existingActivities.any(
+                (a) =>
+                    a.name.trim().toLowerCase() == normalizedInput &&
+                    a.id != (item?.id ?? ''),
+              );
+          final canSave = trimmedName.isNotEmpty && !hasDuplicateName;
           return AlertDialog(
             title: Text(
               item != null
@@ -814,7 +834,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre *',
+                        errorText: hasDuplicateName
+                            ? 'Ya existe una actividad con este nombre. Escribe un nombre distinto para continuar.'
+                            : null,
+                      ),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
@@ -841,6 +866,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       ),
     );
 
+    if (item == null) setState(() => _isActivityDialogOpen = false);
     if (saved != true) return;
 
     final controller = ref.read(catalogsControllerProvider.notifier);
@@ -863,6 +889,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     CatalogSubcategoryItem? item,
     CatalogSubcategoryItem? duplicateFrom,
   }) async {
+    if (item == null && _isSubcategoryDialogOpen) return;
+    if (item == null) setState(() => _isSubcategoryDialogOpen = true);
+
     final source = item ?? duplicateFrom;
     final isCreate = item == null;
     final isDuplicate = duplicateFrom != null && item == null;
@@ -895,8 +924,19 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
           final selectedActivityActive =
               selectedActivityItem?.isActive ?? false;
 
-          final canSave =
-              name.text.trim().isNotEmpty && selectedActivity.isNotEmpty;
+          final trimmedSubName = name.text.trim();
+          final normalizedSubName = trimmedSubName.toLowerCase();
+          final hasDuplicateSubName = isCreate &&
+              normalizedSubName.isNotEmpty &&
+              state.catalog.subcategories.any(
+                (s) =>
+                    s.activityId == selectedActivity &&
+                    s.name.trim().toLowerCase() == normalizedSubName &&
+                    s.id != (item?.id ?? ''),
+              );
+          final canSave = trimmedSubName.isNotEmpty &&
+              selectedActivity.isNotEmpty &&
+              !hasDuplicateSubName;
           return AlertDialog(
             title: Text(
               item != null
@@ -966,7 +1006,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre *',
+                        errorText: hasDuplicateSubName
+                            ? 'Ya existe una subcategoría con ese nombre en la actividad seleccionada. Escribe un nombre distinto para continuar.'
+                            : null,
+                      ),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
@@ -993,6 +1038,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       ),
     );
 
+    if (item == null) setState(() => _isSubcategoryDialogOpen = false);
     if (saved != true) return;
 
     final state = ref.read(catalogsControllerProvider);
@@ -1032,6 +1078,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     CatalogPurposeItem? item,
     CatalogPurposeItem? duplicateFrom,
   }) async {
+    if (item == null && _isPurposeDialogOpen) return;
+    if (item == null) setState(() => _isPurposeDialogOpen = true);
+
     final source = item ?? duplicateFrom;
     final isCreate = item == null;
     final isDuplicate = duplicateFrom != null && item == null;
@@ -1095,8 +1144,20 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
           final selectedSubcategoryActive =
               selectedSubcategoryItem?.isActive ?? false;
 
-          final canSave =
-              name.text.trim().isNotEmpty && selectedActivity.isNotEmpty;
+          final trimmedPurposeName = name.text.trim();
+          final normalizedPurposeName = trimmedPurposeName.toLowerCase();
+          final hasDuplicatePurposeName = isCreate &&
+              normalizedPurposeName.isNotEmpty &&
+              state.catalog.purposes.any(
+                (p) =>
+                    p.activityId == selectedActivity &&
+                    p.subcategoryId == selectedSubcategory &&
+                    p.name.trim().toLowerCase() == normalizedPurposeName &&
+                    p.id != (item?.id ?? ''),
+              );
+          final canSave = trimmedPurposeName.isNotEmpty &&
+              selectedActivity.isNotEmpty &&
+              !hasDuplicatePurposeName;
           return AlertDialog(
             title: Text(
               item != null
@@ -1214,7 +1275,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre *',
+                        errorText: hasDuplicatePurposeName
+                            ? 'Ya existe un propósito con ese nombre en la actividad y subcategoría seleccionadas. Escribe un nombre distinto para continuar.'
+                            : null,
+                      ),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                   ],
@@ -1235,6 +1301,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       ),
     );
 
+    if (item == null) setState(() => _isPurposeDialogOpen = false);
     if (saved != true) return;
 
     final state = ref.read(catalogsControllerProvider);
@@ -1282,6 +1349,10 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     CatalogTopicItem? item,
     CatalogTopicItem? duplicateFrom,
   }) async {
+    // Guard: evita abrir múltiples diálogos simultáneos al crear
+    if (item == null && _isTopicDialogOpen) return;
+    if (item == null) setState(() => _isTopicDialogOpen = true);
+
     final source = item ?? duplicateFrom;
     final isCreate = item == null;
     final isDuplicate = duplicateFrom != null && item == null;
@@ -1294,11 +1365,29 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final type = TextEditingController(text: source?.type ?? '');
     final description = TextEditingController(text: source?.description ?? '');
 
+    // Captura los temas existentes antes de abrir el diálogo para validar duplicados
+    final existingTopics = ref.read(catalogsControllerProvider).catalog.topics;
+    // Actividades disponibles para asignar relaciones al crear un nuevo tema
+    final allActivities =
+        ref.read(catalogsControllerProvider).catalog.activities;
+    // Actividades seleccionadas (mutable, accedido por closure en StatefulBuilder)
+    final selectedActivityIds = <String>{};
+
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final canSave = name.text.trim().isNotEmpty;
+          final trimmedName = name.text.trim();
+          final normalizedInput = trimmedName.toLowerCase();
+          // Detecta nombre duplicado: solo al crear, ignorando el propio ítem al editar
+          final hasDuplicateName = isCreate &&
+              normalizedInput.isNotEmpty &&
+              existingTopics.any(
+                (t) =>
+                    t.name.trim().toLowerCase() == normalizedInput &&
+                    t.id != (item?.id ?? ''),
+              );
+          final canSave = trimmedName.isNotEmpty && !hasDuplicateName;
           return AlertDialog(
             title: Text(
               item != null
@@ -1319,7 +1408,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre *',
+                        errorText: hasDuplicateName
+                            ? 'Ya existe un tema con este nombre. Escribe un nombre distinto para continuar.'
+                            : null,
+                      ),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
@@ -1332,6 +1426,31 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                       decoration:
                           const InputDecoration(labelText: 'Descripción'),
                     ),
+                    // Selector de actividades: solo visible al crear
+                    if (isCreate && allActivities.isNotEmpty) ...[
+                      const SizedBox(height: 16),
+                      const Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          'Actividades relacionadas',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      ...allActivities.map((act) => CheckboxListTile(
+                            dense: true,
+                            contentPadding: EdgeInsets.zero,
+                            title: Text(act.name, style: const TextStyle(fontSize: 13)),
+                            value: selectedActivityIds.contains(act.id),
+                            onChanged: (checked) => setLocalState(() {
+                              if (checked == true) {
+                                selectedActivityIds.add(act.id);
+                              } else {
+                                selectedActivityIds.remove(act.id);
+                              }
+                            }),
+                          )),
+                    ],
                   ],
                 ),
               ),
@@ -1350,6 +1469,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       ),
     );
 
+    if (item == null) setState(() => _isTopicDialogOpen = false);
     if (saved != true) return;
 
     final controller = ref.read(catalogsControllerProvider.notifier);
@@ -1359,11 +1479,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       fallbackName: name.text,
     );
     if (item == null) {
-      await controller.createTopic(
+      await controller.createTopicWithRelations(
         id: resolvedId,
         name: name.text,
         type: type.text,
         description: description.text,
+        activityIds: selectedActivityIds.toList(),
       );
     } else {
       await controller.updateTopic(
@@ -1454,6 +1575,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     CatalogResultItem? item,
     CatalogResultItem? duplicateFrom,
   }) async {
+    if (item == null && _isResultDialogOpen) return;
+    if (item == null) setState(() => _isResultDialogOpen = true);
+
     final source = item ?? duplicateFrom;
     final isCreate = item == null;
     final isDuplicate = duplicateFrom != null && item == null;
@@ -1466,12 +1590,25 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final name = TextEditingController(text: source?.name ?? '');
     final description = TextEditingController(text: source?.description ?? '');
 
+    final existingResults =
+        ref.read(catalogsControllerProvider).catalog.results;
+
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final canSave =
-              name.text.trim().isNotEmpty && category.text.trim().isNotEmpty;
+          final trimmedResName = name.text.trim();
+          final normalizedResName = trimmedResName.toLowerCase();
+          final hasDuplicateResName = isCreate &&
+              normalizedResName.isNotEmpty &&
+              existingResults.any(
+                (r) =>
+                    r.name.trim().toLowerCase() == normalizedResName &&
+                    r.id != (item?.id ?? ''),
+              );
+          final canSave = trimmedResName.isNotEmpty &&
+              category.text.trim().isNotEmpty &&
+              !hasDuplicateResName;
           return AlertDialog(
             title: Text(
               item != null
@@ -1499,7 +1636,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre *',
+                        errorText: hasDuplicateResName
+                            ? 'Ya existe un resultado con este nombre. Escribe un nombre distinto para continuar.'
+                            : null,
+                      ),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
@@ -1526,6 +1668,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       ),
     );
 
+    if (item == null) setState(() => _isResultDialogOpen = false);
     if (saved != true) return;
 
     final controller = ref.read(catalogsControllerProvider.notifier);
@@ -1556,6 +1699,9 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     CatalogAssistantItem? item,
     CatalogAssistantItem? duplicateFrom,
   }) async {
+    if (item == null && _isAssistantDialogOpen) return;
+    if (item == null) setState(() => _isAssistantDialogOpen = true);
+
     final source = item ?? duplicateFrom;
     final isCreate = item == null;
     final isDuplicate = duplicateFrom != null && item == null;
@@ -1568,12 +1714,25 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
     final name = TextEditingController(text: source?.name ?? '');
     final description = TextEditingController(text: source?.description ?? '');
 
+    final existingAssistants =
+        ref.read(catalogsControllerProvider).catalog.assistants;
+
     final saved = await showDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setLocalState) {
-          final canSave =
-              name.text.trim().isNotEmpty && type.text.trim().isNotEmpty;
+          final trimmedAstName = name.text.trim();
+          final normalizedAstName = trimmedAstName.toLowerCase();
+          final hasDuplicateAstName = isCreate &&
+              normalizedAstName.isNotEmpty &&
+              existingAssistants.any(
+                (a) =>
+                    a.name.trim().toLowerCase() == normalizedAstName &&
+                    a.id != (item?.id ?? ''),
+              );
+          final canSave = trimmedAstName.isNotEmpty &&
+              type.text.trim().isNotEmpty &&
+              !hasDuplicateAstName;
           return AlertDialog(
             title: Text(
               item != null
@@ -1600,7 +1759,12 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
                     const SizedBox(height: 8),
                     TextField(
                       controller: name,
-                      decoration: const InputDecoration(labelText: 'Nombre *'),
+                      decoration: InputDecoration(
+                        labelText: 'Nombre *',
+                        errorText: hasDuplicateAstName
+                            ? 'Ya existe un asistente con este nombre. Escribe un nombre distinto para continuar.'
+                            : null,
+                      ),
                       onChanged: (_) => setLocalState(() {}),
                     ),
                     const SizedBox(height: 8),
@@ -1627,6 +1791,7 @@ class _CatalogsPageState extends ConsumerState<CatalogsPage> {
       ),
     );
 
+    if (item == null) setState(() => _isAssistantDialogOpen = false);
     if (saved != true) return;
 
     final controller = ref.read(catalogsControllerProvider.notifier);

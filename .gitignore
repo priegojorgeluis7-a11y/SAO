@@ -51,3 +51,4 @@ desktop_flutter/sao_desktop/dist/
 sao_desktop_release/
 dist/android_release/*.apk
 dist/android_release/*.aab
+service_account_gcal.json

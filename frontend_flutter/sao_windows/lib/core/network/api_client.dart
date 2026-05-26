@@ -9,6 +9,9 @@ import 'exceptions.dart';
 // Evita bucles infinitos si el token nuevo también devuelve 401.
 const _kRetryHeader = 'x-sao-retry';
 
+// Campos sensibles que se enmascaran en los logs del interceptor HTTP.
+const _kSensitiveFields = {'password', 'token', 'refresh_token', 'access_token', 'pin', 'secret'};
+
 /// HTTP API client con rotación automática de JWT.
 ///
 /// Bugs corregidos vs versión anterior:
@@ -276,7 +279,20 @@ class ApiClient {
     return InterceptorsWrapper(
       onRequest: (options, handler) {
         appLogger.d('→ ${options.method} ${options.path}');
-        if (options.data != null) appLogger.d('  Body: ${options.data}');
+        if (options.data != null) {
+          final body = options.data;
+          final loggable = (body is Map)
+              ? Map.fromEntries(
+                  (body as Map<dynamic, dynamic>).entries.map(
+                    (e) => MapEntry(
+                      e.key,
+                      _kSensitiveFields.contains(e.key) ? '***' : e.value,
+                    ),
+                  ),
+                )
+              : body;
+          appLogger.d('  Body: $loggable');
+        }
         return handler.next(options);
       },
       onResponse: (response, handler) {

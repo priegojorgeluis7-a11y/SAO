@@ -175,4 +175,8 @@ class AutoSyncService {
       _isSyncing = false;
     }
   }
+
+  /// Best-effort push flush, safe to call on app background/pause.
+  /// Does nothing if already syncing or no network is available.
+  Future<void> triggerPushOnce(String reason) => _triggerSync(reason);
 }

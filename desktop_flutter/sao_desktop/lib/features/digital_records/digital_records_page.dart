@@ -2334,6 +2334,7 @@ class _RelatedHistorySectionState
         if (widget.canManageLinks) ...[
           const SizedBox(height: 12),
           Container(
+            width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: DigitalRecordColors.mutedSurfaceFor(context),
@@ -2341,6 +2342,7 @@ class _RelatedHistorySectionState
               border: Border.all(color: DigitalRecordColors.borderFor(context)),
             ),
             child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 DropdownButtonFormField<String>(
                   initialValue: _selectedActivityId,

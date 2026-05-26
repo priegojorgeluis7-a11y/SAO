@@ -16,6 +16,7 @@ from app.api.v1 import (
     assignments,
     audit,
     auth,
+    calendar_ical,
     catalog,
     catalog_candidates,
     invitations,
@@ -160,6 +161,7 @@ app.include_router(me.router, prefix=settings.API_V1_STR)
 app.include_router(users.router, prefix=settings.API_V1_STR)
 app.include_router(invitations.router, prefix=settings.API_V1_STR)
 app.include_router(assignments.router, prefix=settings.API_V1_STR)
+app.include_router(calendar_ical.router, prefix=settings.API_V1_STR)
 app.include_router(projects.router, prefix=settings.API_V1_STR)
 app.include_router(territory.router, prefix=settings.API_V1_STR)
 app.include_router(audit.router, prefix=settings.API_V1_STR)
@@ -171,6 +173,13 @@ app.include_router(dashboard.router, prefix=settings.API_V1_STR)
 app.include_router(system_config.router, prefix=settings.API_V1_STR)
 app.include_router(dashboard_kpis.router, prefix=settings.API_V1_STR)
 app.include_router(completed_activities.router, prefix=settings.API_V1_STR)
+
+
+@app.get("/map", response_class=HTMLResponse, include_in_schema=False)
+def map_page():
+    """Mapa interactivo de proyectos (la página maneja su propio login)."""
+    html_path = Path(__file__).parent / "static" / "mapa_proyectos.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
 
 
 @app.get("/privacy-policy", response_class=HTMLResponse, include_in_schema=False)

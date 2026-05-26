@@ -2,6 +2,7 @@
 import 'dart:io';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:get_it/get_it.dart';
@@ -160,6 +161,31 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
     }
   }
 
+  Future<void> _pickPdf() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['pdf'],
+        allowMultiple: true,
+      );
+      if (result == null || result.files.isEmpty) return;
+      for (final file in result.files) {
+        final path = file.path;
+        if (path == null) continue;
+        widget.controller.addPhotoWithMetadata(path);
+      }
+    } catch (e) {
+      if (mounted) {
+        showTransientSnackBar(
+          context,
+          appSnackBar(
+              message: 'Error al seleccionar PDF: $e',
+              backgroundColor: SaoColors.error),
+        );
+      }
+    }
+  }
+
   void _handleNext() {
     final emptyDescIndex = widget.controller.evidencias.indexWhere(
       (e) => e.descripcion.trim().isEmpty,
@@ -308,6 +334,22 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
                       Text('Galería'),
                       Text(
                         'Seleccionar existente',
+                        style: SaoTypography.monoSmall,
+                      ),
+                    ],
+                  ),
+                ),
+                OutlinedButton(
+                  onPressed: _pickPdf,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.picture_as_pdf_rounded,
+                          color: Colors.red),
+                      SizedBox(height: 4),
+                      Text('PDF / Minuta'),
+                      Text(
+                        'Seleccionar archivo',
                         style: SaoTypography.monoSmall,
                       ),
                     ],
@@ -463,6 +505,24 @@ class _WizardStepEvidenceState extends State<WizardStepEvidence> {
       color: SaoColors.gray100,
       child: const Icon(Icons.broken_image, color: SaoColors.gray400),
     );
+
+    // PDF: mostrar ícono en lugar de imagen
+    if (evidencia.localPath.toLowerCase().endsWith('.pdf')) {
+      return Container(
+        width: size,
+        height: size,
+        color: SaoColors.gray100,
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.picture_as_pdf_rounded, color: Colors.red, size: 32),
+            Text('PDF',
+                style: TextStyle(fontSize: 11, color: Colors.red)),
+          ],
+        ),
+      );
+    }
+
     // On web, dart:io File cannot read blob URLs — use pre-read bytes instead.
     if (kIsWeb && evidencia.cachedBytes != null) {
       return Image.memory(

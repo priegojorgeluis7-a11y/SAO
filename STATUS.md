@@ -1,6 +1,6 @@
 # SAO — Estado del Proyecto
-**Fecha:** 2026-03-10 (actualizado cierre Firestore)
-**Versión:** 0.2.3
+**Fecha:** 2026-05-22
+**Versión:** 1.0.10
 **Deployment:** ✅ Cloud Run en producción (`sao-api` / `sao-prod-488416`) — revision `sao-api-00062-v8v`
 **Auditoría:** Completada 2026-03-04 (ver `docs/AUDIT_REPORT.md`)
 **Plan 100% local:** Iniciado 2026-03-04 (ver `docs/PLAN_100_LOCAL.md`)
@@ -12,6 +12,40 @@
 **L3 completado:** 2026-03-04 — L3.1 (ya implementado) · L3.2 `EventsPage` desktop + NavigationRail · L3.3 `FlagResolutionDialog` (PATCH /flags) · L3.4 Color hardcodes (3 archivos) · L3.5 59 tests desktop (vs 5 antes)
 **L4 completado:** 2026-03-04 — L4.1 `backend/scripts/e2e_local.py` (13-step E2E local, stdlib puro) · L4.2 `docs/CHECKLIST_REGRESION.md` (80+ casos A-K)
 **L5 completado:** 2026-03-05 — L5.1 Settings móvil con backend URL runtime (persistencia + apply en caliente) · L5.2 edición/eliminación de eventos móvil + sync `UPDATE/DELETE`
+
+---
+
+## Actualización v1.0.10 — Corrección de bugs críticos de flujo (2026-05-22)
+
+**Auditoría de flujo completa ejecutada.** Se identificaron y corrigieron 4 bugs funcionales, se eliminaron 2 clases muertas y se agregó un script de backfill para datos corruptos en Firestore.
+
+### Bugs corregidos
+
+| # | Severidad | Componente | Bug | Fix |
+|---|-----------|------------|-----|-----|
+| 1 | 🔴 Crítico | App Móvil | Incidencias de campo (Clima/Acceso/Riesgo) se perdían al recargar la app | Persisten en `local_events` + `sync_queue` vía `EventsLocalRepository` |
+| 2 | 🟠 Alto | App Móvil | Badge de campana ignoraba notificaciones locales críticas | Condición cambiada de `backendUnreadCount` a `totalBellCount` |
+| 3 | 🟡 Medio | App Móvil | Sheet de sync siempre mostraba "Pendientes: N/A" | `FutureBuilder` con `syncRepositoryProvider.countPendingItems()` |
+| 4 | 🟡 Medio | App Móvil | Progreso de secciones del Home siempre mostraba 0 completadas | Cuenta actividades con `executionState == terminada` |
+
+### Dead code eliminado
+
+- `AssignmentSyncServiceNoOp` (`pending_sync_services.dart`) — clase nunca instanciada con TODO engañoso
+- `_hasUnresolvedCatalogDecision` (`activity_details_panel_pro.dart`) — método huérfano confirmado por `flutter analyze`
+
+### Datos en Firestore
+
+- Identificado: actividades con `execution_state=COMPLETADA` y `review_decision=null` (condición de carrera remanente de v1.0.9)
+- Agregado: `backend/scripts/backfill_completada_review_decision.py` para corregirlos
+- **Acción pendiente**: ejecutar el script en producción con `--dry-run` primero para validar alcance
+
+### Archivos modificados
+
+- `frontend_flutter/sao_windows/lib/features/home/home_page.dart`
+- `frontend_flutter/sao_windows/lib/features/home/home_task_sections.dart`
+- `frontend_flutter/sao_windows/lib/core/sync/pending_sync_services.dart`
+- `desktop_flutter/sao_desktop/lib/features/operations/widgets/activity_details_panel_pro.dart`
+- `backend/scripts/backfill_completada_review_decision.py` (nuevo)
 
 ---
 
