@@ -369,16 +369,18 @@ jobs:
           pip install -r requirements.txt
 
       - name: Validate required secrets
+        id: validate_secrets
         shell: bash
         run: |
           set -euo pipefail
 
-          missing=0
+          missing_core=0
+          missing_e2e=0
 
           for name in GCP_PROJECT_ID; do
             if [ -z "${!name:-}" ]; then
               echo "::error title=Missing secret::$name is not configured"
-              missing=1
+              missing_core=1
             fi
           done
 
@@ -387,7 +389,7 @@ jobs:
             for name in GCP_WORKLOAD_IDENTITY_PROVIDER GCP_SERVICE_ACCOUNT; do
               if [ -z "${!name:-}" ]; then
                 echo "::error title=Missing secret::$name is required when GCP_SA_KEY is not configured"
-                missing=1
+                missing_core=1
               fi
             done
           fi
@@ -398,35 +400,43 @@ jobs:
             SAO_E2E_SUPERVISOR_EMAIL \
             SAO_E2E_SUPERVISOR_PASSWORD; do
             if [ -z "${!name:-}" ]; then
-              echo "::error title=Missing secret::$name is not configured"
-              missing=1
+              echo "::warning title=Missing E2E secret::$name is not configured; skipping post-deploy E2E flow"
+              missing_e2e=1
             fi
           done
 
-          if [ "$missing" -ne 0 ]; then
+          if [ "$missing_core" -ne 0 ]; then
             exit 1
           fi
 
+          if [ "$missing_e2e" -ne 0 ]; then
+            echo "run_e2e=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run_e2e=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Authenticate to Google Cloud (SA key)
-        if: env.GCP_SA_KEY != ''
+        if: steps.validate_secrets.outputs.run_e2e == 'true' && env.GCP_SA_KEY != ''
         uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ env.GCP_SA_KEY }}
 
       - name: Authenticate to Google Cloud (WIF fallback)
-        if: env.GCP_SA_KEY == ''
+        if: steps.validate_secrets.outputs.run_e2e == 'true' && env.GCP_SA_KEY == ''
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ env.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           service_account: ${{ env.GCP_SERVICE_ACCOUNT }}
 
       - name: Set up gcloud
+        if: steps.validate_secrets.outputs.run_e2e == 'true'
         uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ env.GCP_PROJECT_ID }}
 
       - name: Resolve Cloud Run URL
         id: resolve_url
+        if: steps.validate_secrets.outputs.run_e2e == 'true'
         shell: bash
         run: |
           SERVICE_URL="$(gcloud run services describe sao-api \
@@ -437,6 +447,7 @@ jobs:
 
       - name: Fetch identity token for Cloud Run
         id: id_token
+        if: steps.validate_secrets.outputs.run_e2e == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -451,6 +462,7 @@ jobs:
           echo "token=$TOKEN" >> "$GITHUB_OUTPUT"
 
       - name: Run E2E staging flow
+        if: steps.validate_secrets.outputs.run_e2e == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -468,8 +480,13 @@ jobs:
           # Propagate non-zero exit from the python script through tee
           test "${PIPESTATUS[0]}" -eq 0
 
+      - name: Skip E2E due to missing secrets
+        if: steps.validate_secrets.outputs.run_e2e != 'true'
+        run: |
+          echo "Post-deploy E2E skipped: one or more SAO_E2E_* secrets are not configured."
+
       - name: Upload E2E evidence
-        if: always()
+        if: always() && steps.validate_secrets.outputs.run_e2e == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: e2e-evidence-${{ github.sha }}
