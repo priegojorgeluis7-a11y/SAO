@@ -435,8 +435,9 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     // Synthetic placeholder IDs (ev-{activityId}-{index}) are created locally
     // when the activity list endpoint returns only an evidence_count. They don't
     // correspond to real Firestore documents so they can never be resolved.
-    // Treat them as pending until the activity is fully hydrated.
-    if (evidence.id.startsWith('ev-') && lowerPath.startsWith('backend://')) {
+    // Keep this narrow to avoid classifying real ids like "ev-remote" as pending.
+    if (lowerPath.startsWith('backend://') &&
+        evidence.id.startsWith('ev-${evidence.activityId}-')) {
       return true;
     }
     if (lowerPath.startsWith('backend://') ||
@@ -1083,9 +1084,11 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                     borderRadius: BorderRadius.circular(SaoRadii.md),
                     border: Border.all(color: borderColor),
                   ),
-                  child: Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Theme(
+                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
                       initiallyExpanded: false,
                       tilePadding: const EdgeInsets.symmetric(
                         horizontal: SaoSpacing.md,
@@ -1141,6 +1144,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                         ),
                       ],
                     ),
+                    ),
                   ),
                 ),
 
@@ -1152,9 +1156,11 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                     borderRadius: BorderRadius.circular(SaoRadii.md),
                     border: Border.all(color: borderColor),
                   ),
-                  child: Theme(
-                    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-                    child: ExpansionTile(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: Theme(
+                      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+                      child: ExpansionTile(
                       initiallyExpanded: false,
                       tilePadding: const EdgeInsets.symmetric(
                         horizontal: SaoSpacing.md,
@@ -1204,6 +1210,7 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
                           ),
                         ),
                       ],
+                    ),
                     ),
                   ),
                 ),

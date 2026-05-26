@@ -243,32 +243,35 @@ class _FlagCard extends StatelessWidget {
               : AppColors.border,
         ),
       ),
-      child: CheckboxListTile(
-        value: value,
-        onChanged: (v) => onChanged(v ?? false),
-        secondary: Icon(icon, color: value ? iconColor : AppColors.gray400),
-        title: Text(
-          title,
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 13,
-            color: value ? iconColor : AppColors.gray700,
+      child: Material(
+        color: Colors.transparent,
+        child: CheckboxListTile(
+          value: value,
+          onChanged: (v) => onChanged(v ?? false),
+          secondary: Icon(icon, color: value ? iconColor : AppColors.gray400),
+          title: Text(
+            title,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              color: value ? iconColor : AppColors.gray700,
+            ),
           ),
-        ),
-        subtitle: Text(
-          description,
-          style: const TextStyle(
-            fontSize: 11,
-            color: AppColors.gray500,
+          subtitle: Text(
+            description,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.gray500,
+            ),
           ),
+          controlAffinity: ListTileControlAffinity.trailing,
+          activeColor: iconColor,
+          checkboxShape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(4),
+          ),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         ),
-        controlAffinity: ListTileControlAffinity.trailing,
-        activeColor: iconColor,
-        checkboxShape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(4),
-        ),
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       ),
     );
   }

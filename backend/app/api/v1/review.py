@@ -909,11 +909,16 @@ def review_decision(
         except Exception:
             logger.exception("REVIEW_IN_APP_NOTIFY_FAILED activity_id=%s", activity_uuid)
 
-    assignee_principal = (
-        get_firestore_user_by_id(effective_assignee_user_id)
-        if effective_assignee_user_id
-        else None
-    )
+    assignee_principal = None
+    if effective_assignee_user_id:
+        try:
+            assignee_principal = get_firestore_user_by_id(effective_assignee_user_id)
+        except Exception:
+            logger.warning(
+                "REVIEW_ASSIGNEE_LOOKUP_FAILED activity_id=%s assignee_user_id=%s",
+                activity_uuid,
+                effective_assignee_user_id,
+            )
     write_firestore_audit_log(
         action=action,
         entity="activity",

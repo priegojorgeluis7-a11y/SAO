@@ -19,6 +19,9 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      DATA_BACKEND: firestore
+      FIRESTORE_PROJECT_ID: ci-firestore-project
     defaults:
       run:
         working-directory: backend
@@ -45,6 +48,9 @@ jobs:
   firestore-smoke:
     name: Firestore Regression Smoke
     runs-on: ubuntu-latest
+    env:
+      DATA_BACKEND: firestore
+      FIRESTORE_PROJECT_ID: ci-firestore-project
     defaults:
       run:
         working-directory: backend
