@@ -1,8 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/project_providers.dart';
 import '../../data/repositories/backend_api_client.dart';
 import '../../features/auth/app_session_controller.dart';
+
+/// Provider que permite forzar la invalidación del dashboard desde cualquier parte.
+final dashboardInvalidatorProvider = StateProvider<int>((_) => 0);
 
 enum DashboardRange { today, week, month, all }
 
@@ -203,159 +208,173 @@ String resolveDashboardProjectSelection(
   return '';
 }
 
-final dashboardProvider = FutureProvider.autoDispose<DashboardData>((ref) async {
-  final client = ref.watch(backendApiClientProvider);
-  final user = ref.watch(currentAppUserProvider);
-  final activeProjectId = ref.watch(activeProjectIdProvider).trim().toUpperCase();
-  final availableProjects = await ref.watch(availableProjectsProvider.future);
-  final effectiveProjectId = resolveDashboardProjectSelection(activeProjectId, availableProjects);
-  final range = ref.watch(selectedDashboardRangeProvider);
+/// Intervalo de auto-refresh del dashboard en segundos.
+const _dashboardRefreshInterval = Duration(seconds: 30);
 
-  final now = DateTime.now();
-  final currentStart = _rangeStart(now, range);
-  final currentEnd = _rangeEnd(now, range);
-  final projectQuery = effectiveProjectId.isEmpty
-      ? ''
-      : '?project_id=${Uri.encodeQueryComponent(effectiveProjectId)}';
+/// Provider que emite datos del dashboard con auto-refresh cada 30 segundos.
+final dashboardProvider = StreamProvider.autoDispose<DashboardData>((ref) async* {
+  // Escuchar cambios en las dependencias para reiniciar el stream
+  ref.watch(backendApiClientProvider);
+  ref.watch(currentAppUserProvider);
+  ref.watch(activeProjectIdProvider);
+  ref.watch(availableProjectsProvider);
+  ref.watch(selectedDashboardRangeProvider);
+  ref.watch(dashboardInvalidatorProvider);
 
-  try {
-    final decoded = await _tryGetJsonMap(client, '/api/v1/dashboard/kpis$projectQuery');
+  while (true) {
+    final client = ref.read(backendApiClientProvider);
+    final user = ref.read(currentAppUserProvider);
+    final activeProjectId = ref.read(activeProjectIdProvider).trim().toUpperCase();
+    final availableProjects = await ref.read(availableProjectsProvider.future);
+    final effectiveProjectId = resolveDashboardProjectSelection(activeProjectId, availableProjects);
+    final range = ref.read(selectedDashboardRangeProvider);
 
-    final queueDecoded = await _tryGetJsonMap(client, '/api/v1/review/queue$projectQuery');
-    final reportsCurrent = await _tryGetJsonMap(
-      client,
-      '/api/v1/reports/activities${_reportsQuery(projectId: effectiveProjectId, from: currentStart, to: currentEnd)}',
-    );
-    final activitiesDecoded = await _loadActivitiesDataset(
-      client,
-      activeProjectId: effectiveProjectId,
-      availableProjects: availableProjects,
-    );
+    final now = DateTime.now();
+    final currentStart = _rangeStart(now, range);
+    final currentEnd = _rangeEnd(now, range);
+    final projectQuery = effectiveProjectId.isEmpty
+        ? ''
+        : '?project_id=${Uri.encodeQueryComponent(effectiveProjectId)}';
 
-    final counters = ((decoded?['kpis'] as Map<String, dynamic>?) ?? decoded ?? const <String, dynamic>{});
-    final backlogByState = _asStringIntMap(counters['backlog_by_state']);
-    final queueItemsRaw = queueDecoded?['items'] as List<dynamic>? ?? const [];
-    final queueSourceItems = queueItemsRaw
-        .whereType<Map<String, dynamic>>()
-        .toList(growable: false);
-    final reportCurrentItems = (reportsCurrent?['items'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .toList(growable: false);
-    final activityItems = (activitiesDecoded?['items'] as List<dynamic>? ?? const [])
-        .whereType<Map<String, dynamic>>()
-        .toList(growable: false);
-    final assignmentItems = await _loadAssignmentsDataset(
-      client,
-      activeProjectId: effectiveProjectId,
-      availableProjects: availableProjects,
-      from: currentStart,
-      to: currentEnd,
-    );
+    try {
+      final decoded = await _tryGetJsonMap(client, '/api/v1/dashboard/kpis$projectQuery');
 
-    final mergedActivityItems = mergeDashboardMapSourceItems(activityItems, assignmentItems);
-    final mergedSourceItems = mergeDashboardMapSourceItems(mergedActivityItems, reportCurrentItems);
-    final scopedSourceItems = scopeDashboardItemsToAssignments(mergedSourceItems, assignmentItems);
-    final hydratedQueueSourceItems = hydrateDashboardSubsetItems(
-      queueSourceItems,
-      mergedSourceItems,
-    );
-    final scopedQueueSourceItems = scopeDashboardItemsToAssignments(
-      hydratedQueueSourceItems,
-      assignmentItems,
-    );
-    final allActivityItems = scopedSourceItems.isNotEmpty ? scopedSourceItems : mergedSourceItems;
-    final activityScopeItems = filterDashboardItemsByRange(allActivityItems, range, now);
-    final mapSourceItems = filterDashboardItemsByRange(allActivityItems, range, now);
-    final filteredQueueSourceItems = filterDashboardItemsByRange(scopedQueueSourceItems, range, now);
-    final visualItems = filterDashboardItemsByRange(allActivityItems, range, now);
-    final activityMetrics = summarizeDashboardActivityMetrics(activityScopeItems);
-    final trendMetrics = buildDashboardTrends(allActivityItems, range, now);
-    final scopedPendingCount = activityMetrics.pending;
-    final scopedTotalCount = activityMetrics.total > 0
-        ? activityMetrics.total
-        : activityScopeItems.length;
-    final shouldUseScopedCounts = range != DashboardRange.all ||
-        activityItems.isNotEmpty ||
-        reportCurrentItems.isNotEmpty ||
-        assignmentItems.isNotEmpty;
+      final queueDecoded = await _tryGetJsonMap(client, '/api/v1/review/queue$projectQuery');
+      final reportsCurrent = await _tryGetJsonMap(
+        client,
+        '/api/v1/reports/activities${_reportsQuery(projectId: effectiveProjectId, from: currentStart, to: currentEnd)}',
+      );
+      final activitiesDecoded = await _loadActivitiesDataset(
+        client,
+        activeProjectId: effectiveProjectId,
+        availableProjects: availableProjects,
+      );
 
-    final pendingCount = shouldUseScopedCounts
-        ? scopedPendingCount
-        : (counters['review_queue_count'] as num?)?.toInt() ??
-            (counters['pending_review'] as num?)?.toInt() ??
-            backlogByState['REVISION_PENDIENTE'] ??
-            0;
-    final approvedCount = shouldUseScopedCounts
-        ? activityMetrics.approved
-        : (counters['completed'] as num?)?.toInt() ??
-            (counters['completed_today'] as num?)?.toInt() ??
-            (counters['approved'] as num?)?.toInt() ??
-            backlogByState['COMPLETADA'] ??
-            0;
-    final rejectedCount = shouldUseScopedCounts
-        ? activityMetrics.rejected
-        : (counters['overdue_review_count'] as num?)?.toInt() ??
-            (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ??
-            0;
-    final needsFixCount = shouldUseScopedCounts
-        ? activityMetrics.needsFix
-        : (counters['in_progress'] as num?)?.toInt() ??
-            (counters['pending_today'] as num?)?.toInt() ??
-            backlogByState['EN_CURSO'] ??
-            0;
+      final counters = ((decoded?['kpis'] as Map<String, dynamic>?) ?? decoded ?? const <String, dynamic>{});
+      final backlogByState = _asStringIntMap(counters['backlog_by_state']);
+      final queueItemsRaw = queueDecoded?['items'] as List<dynamic>? ?? const [];
+      final queueSourceItems = queueItemsRaw
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+      final reportCurrentItems = (reportsCurrent?['items'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+      final activityItems = (activitiesDecoded?['items'] as List<dynamic>? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .toList(growable: false);
+      final assignmentItems = await _loadAssignmentsDataset(
+        client,
+        activeProjectId: effectiveProjectId,
+        availableProjects: availableProjects,
+        from: currentStart,
+        to: currentEnd,
+      );
 
-    final projectId = ((decoded ?? const <String, dynamic>{})['project_id'] ??
-            (effectiveProjectId.isEmpty ? 'ALL' : effectiveProjectId))
-        .toString();
+      final mergedActivityItems = mergeDashboardMapSourceItems(activityItems, assignmentItems);
+      final mergedSourceItems = mergeDashboardMapSourceItems(mergedActivityItems, reportCurrentItems);
+      final scopedSourceItems = scopeDashboardItemsToAssignments(mergedSourceItems, assignmentItems);
+      final hydratedQueueSourceItems = hydrateDashboardSubsetItems(
+        queueSourceItems,
+        mergedSourceItems,
+      );
+      final scopedQueueSourceItems = scopeDashboardItemsToAssignments(
+        hydratedQueueSourceItems,
+        assignmentItems,
+      );
+      final allActivityItems = scopedSourceItems.isNotEmpty ? scopedSourceItems : mergedSourceItems;
+      final activityScopeItems = filterDashboardItemsByRange(allActivityItems, range, now);
+      final mapSourceItems = filterDashboardItemsByRange(allActivityItems, range, now);
+      final filteredQueueSourceItems = filterDashboardItemsByRange(scopedQueueSourceItems, range, now);
+      final visualItems = filterDashboardItemsByRange(allActivityItems, range, now);
+      final activityMetrics = summarizeDashboardActivityMetrics(activityScopeItems);
+      final trendMetrics = buildDashboardTrends(allActivityItems, range, now);
+      // Siempre usar conteos locales (scoped) cuando hay datos disponibles.
+      // Solo caer al backend cuando no hay datos locales (activityItems vacío).
+      final hasLocalData = activityItems.isNotEmpty ||
+          reportCurrentItems.isNotEmpty ||
+          assignmentItems.isNotEmpty;
+      final scopedPendingCount = activityMetrics.pending;
+      final scopedTotalCount = activityMetrics.total > 0
+          ? activityMetrics.total
+          : activityScopeItems.length;
 
-    final queueItems = filteredQueueSourceItems
-        .map<ValidationQueueItem>(_mapQueueItem)
-        .toList(growable: false);
-    final geoPoints = _buildGeoPoints(mapSourceItems);
+      final pendingCount = hasLocalData
+          ? scopedPendingCount
+          : (counters['pending_review'] as num?)?.toInt() ??
+              backlogByState['REVISION_PENDIENTE'] ??
+              0;
+      final approvedCount = hasLocalData
+          ? activityMetrics.approved
+          : (counters['completed'] as num?)?.toInt() ??
+              (counters['approved'] as num?)?.toInt() ??
+              backlogByState['COMPLETADA'] ??
+              0;
+      final rejectedCount = hasLocalData
+          ? activityMetrics.rejected
+          : (queueDecoded?['counters']?['rejected'] as num?)?.toInt() ??
+              0;
+      final needsFixCount = hasLocalData
+          ? activityMetrics.needsFix
+          : (counters['in_progress'] as num?)?.toInt() ??
+              backlogByState['EN_CURSO'] ??
+              0;
 
-    final topErrors = _buildTopErrors(filteredQueueSourceItems);
-    final locationCounts = _buildLocationCounts(geoPoints).take(8).toList(growable: false);
-    final riskCounts = _buildRiskCounts(geoPoints);
-    final frontProgress = _buildFrontProgress(activityScopeItems);
+      final projectId = ((decoded ?? const <String, dynamic>{})['project_id'] ??
+              (effectiveProjectId.isEmpty ? 'ALL' : effectiveProjectId))
+          .toString();
 
-    final approvedTrend = trendMetrics['approved']!;
-    final pendingTrend = trendMetrics['pending']!;
-    final needsFixTrend = trendMetrics['needsFix']!;
-    final rejectedTrend = trendMetrics['rejected']!;
+      final queueItems = filteredQueueSourceItems
+          .map<ValidationQueueItem>(_mapQueueItem)
+          .toList(growable: false);
+      final geoPoints = _buildGeoPoints(mapSourceItems);
 
-    final avgValidationHours = _computeAvgValidationHours(visualItems, now);
-    final totalInScope = shouldUseScopedCounts
-        ? scopedTotalCount
-        : (activityMetrics.total > 0 ? activityMetrics.total : activityScopeItems.length);
+      final topErrors = _buildTopErrors(filteredQueueSourceItems);
+      final locationCounts = _buildLocationCounts(geoPoints).take(8).toList(growable: false);
+      final riskCounts = _buildRiskCounts(geoPoints);
+      final frontProgress = _buildFrontProgress(activityScopeItems);
 
-    return DashboardData(
-      pendingCount: pendingCount,
-      approvedCount: approvedCount,
-      rejectedCount: rejectedCount,
-      needsFixCount: needsFixCount,
-      totalInQueue: shouldUseScopedCounts
-          ? totalInScope
-          : (totalInScope > 0
-              ? totalInScope
-              : (counters['total_activities'] as num?)?.toInt() ??
-                  (counters['total'] as num?)?.toInt() ??
-                  (pendingCount + approvedCount + rejectedCount + needsFixCount)),
-      projectId: projectId,
-      range: range,
-      approvedTrend: approvedTrend,
-      rejectedTrend: rejectedTrend,
-      needsFixTrend: needsFixTrend,
-      pendingTrend: pendingTrend,
-      queueItems: queueItems,
-      geoPoints: geoPoints,
-      topErrors: topErrors,
-      locationCounts: locationCounts,
-      riskCounts: riskCounts,
-      frontProgress: frontProgress,
-      avgValidationHours: avgValidationHours,
-    );
-  } catch (_) {
-    return _empty(user, range);
+      final approvedTrend = trendMetrics['approved']!;
+      final pendingTrend = trendMetrics['pending']!;
+      final needsFixTrend = trendMetrics['needsFix']!;
+      final rejectedTrend = trendMetrics['rejected']!;
+
+      final avgValidationHours = _computeAvgValidationHours(visualItems, now);
+      final totalInScope = hasLocalData
+          ? scopedTotalCount
+          : (activityMetrics.total > 0 ? activityMetrics.total : activityScopeItems.length);
+
+      yield DashboardData(
+        pendingCount: pendingCount,
+        approvedCount: approvedCount,
+        rejectedCount: rejectedCount,
+        needsFixCount: needsFixCount,
+        totalInQueue: hasLocalData
+            ? totalInScope
+            : (totalInScope > 0
+                ? totalInScope
+                : (counters['total_activities'] as num?)?.toInt() ??
+                    (counters['total'] as num?)?.toInt() ??
+                    (pendingCount + approvedCount + rejectedCount + needsFixCount)),
+        projectId: projectId,
+        range: range,
+        approvedTrend: approvedTrend,
+        rejectedTrend: rejectedTrend,
+        needsFixTrend: needsFixTrend,
+        pendingTrend: pendingTrend,
+        queueItems: queueItems,
+        geoPoints: geoPoints,
+        topErrors: topErrors,
+        locationCounts: locationCounts,
+        riskCounts: riskCounts,
+        frontProgress: frontProgress,
+        avgValidationHours: avgValidationHours,
+      );
+    } catch (_) {
+      yield _empty(user, range);
+    }
+
+    // Esperar el intervalo de refresh antes de la siguiente iteración
+    await Future.delayed(_dashboardRefreshInterval);
   }
 });
 
@@ -710,12 +729,15 @@ DashboardActivityMetrics summarizeDashboardActivityMetrics(List<Map<String, dyna
   for (final item in items) {
     if (item['deleted_at'] != null) continue;
 
-    total += 1;
-    final state = _normalizeDashboardExecutionState(item['status'] ?? item['execution_state']);
+    // FIX: Priorizar execution_state sobre status para evitar bugs con valores como "PROGRAMADA"
+    final state = _normalizeDashboardExecutionState(
+      item['execution_state'] ?? item['status'],
+    );
     final review = _normalizeDashboardReviewState(
       item['review_status'] ?? item['reviewStatus'] ?? item['review_decision'] ?? item['reviewDecision'],
     );
 
+    // Primero evaluar la decisión de revisión (tiene prioridad sobre el estado de ejecución)
     if (review == 'REJECTED') {
       rejected += 1;
       continue;
@@ -726,20 +748,31 @@ DashboardActivityMetrics summarizeDashboardActivityMetrics(List<Map<String, dyna
     }
     if (review == 'APPROVED') {
       approved += 1;
+      // Solo approved + pending cuentan para el total del periodo
+      total += 1;
       continue;
     }
 
+    // Sin decisión de revisión: usar el estado de ejecución
     switch (state) {
       case 'COMPLETADA':
-        approved += 1;
+        // COMPLETADA sin decisión de revisión = pendiente de revisión
+        pending += 1;
+        // Solo approved + pending cuentan para el total del periodo
+        total += 1;
         break;
       case 'EN_CURSO':
         needsFix += 1;
         break;
       case 'REVISION_PENDIENTE':
-      case 'PENDIENTE':
-      default:
         pending += 1;
+        total += 1;
+        break;
+      case 'PENDIENTE':
+        // PENDIENTE = actividad sin completar por el operario, NO cuenta en el periodo
+        break;
+      default:
+        // Estados no reconocidos no cuentan
         break;
     }
   }

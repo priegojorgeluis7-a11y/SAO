@@ -1,4 +1,4 @@
-﻿import json
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -74,7 +74,10 @@ def _review_status_from_firestore(activity_payload: dict) -> str:
         return "CHANGES_REQUIRED"
     if execution_state == REVISION_PENDIENTE:
         return "PENDING_REVIEW"
-    return "PENDING_REVIEW"
+    # Si la actividad está completada pero sin decisión, no está pendiente de revisión
+    if execution_state == COMPLETADA:
+        return "NOT_REVIEWED"
+    return "NOT_REVIEWED"
 
 
 def _safe_dt(value: object, fallback: datetime) -> datetime:

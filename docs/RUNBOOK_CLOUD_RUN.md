@@ -26,7 +26,7 @@ $DB_PASS="REEMPLAZAR_PASSWORD_FUERTE"
 $CPU="1"
 $MEMORY="512Mi"
 $MIN_INSTANCES=0
-$MAX_INSTANCES=10
+$MAX_INSTANCES=3
 $TIMEOUT=300
 $CONCURRENCY=80
 ```
@@ -112,7 +112,7 @@ gcloud run deploy sao-api `
 - `CPU: 1` (ajusta a 2 si ves spike de CPU)
 - `Memory: 512Mi` (sube a 1Gi si ves OOM)
 - `Min instances: 0` (ahorra dinero; cambia a 1 si quieres evitar cold start)
-- `Max instances: 10` (ajusta luego según tráfico real)
+- `Max instances: 3` (sube solo si el tráfico lo exige)
 - `Timeout: 300s` (5 min; baja a 60-120s si tus endpoints son rápidos)
 - `Concurrency: 80` (buena base; baja a 20-40 si haces CPU/DB heavy)
 

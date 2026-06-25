@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import lru_cache
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
@@ -203,6 +204,7 @@ def update_last_login(user_id: UUID) -> None:
     client.collection("users").document(str(user_id)).set(
         {"last_login_at": now, "last_activity_at": now}, merge=True
     )
+    _clear_user_list_cache()
 
 
 def update_last_logout(user_id: UUID) -> None:
@@ -210,6 +212,7 @@ def update_last_logout(user_id: UUID) -> None:
     client.collection("users").document(str(user_id)).set(
         {"last_logout_at": datetime.now(timezone.utc).isoformat()}, merge=True
     )
+    _clear_user_list_cache()
 
 
 def update_last_activity(user_id: UUID) -> None:
@@ -217,6 +220,7 @@ def update_last_activity(user_id: UUID) -> None:
     client.collection("users").document(str(user_id)).set(
         {"last_activity_at": datetime.now(timezone.utc).isoformat()}, merge=True
     )
+    _clear_user_list_cache()
 
 
 def _matches_requested_role(principal_roles: list[str], requested_role: str | None) -> bool:
@@ -232,12 +236,13 @@ def _matches_requested_role(principal_roles: list[str], requested_role: str | No
     return any(role in allowed for role in normalized_roles)
 
 
-# ---------------------------------------------------------------------------
-# User management (Firestore-only mode)
-# ---------------------------------------------------------------------------
+def _normalize_role_cache_key(role: str | None) -> str | None:
+    normalized = str(role or "").strip().upper()
+    return normalized or None
 
-def list_firestore_users(role: str | None = None) -> list[FirestoreUserPrincipal]:
-    """List all users from Firestore, optionally filtered by role."""
+
+@lru_cache(maxsize=64)
+def _cached_list_firestore_users(role_key: str | None) -> tuple[FirestoreUserPrincipal, ...]:
     client = get_firestore_client()
     docs = client.collection("users").stream()
     result: list[FirestoreUserPrincipal] = []
@@ -245,11 +250,24 @@ def list_firestore_users(role: str | None = None) -> list[FirestoreUserPrincipal
         principal = _principal_from_doc(doc.to_dict() or {})
         if principal is None:
             continue
-        if not _matches_requested_role(principal.roles, role):
+        if not _matches_requested_role(principal.roles, role_key):
             continue
         result.append(principal)
     result.sort(key=lambda u: u.full_name.lower())
-    return result
+    return tuple(result)
+
+
+def _clear_user_list_cache() -> None:
+    _cached_list_firestore_users.cache_clear()
+
+
+# ---------------------------------------------------------------------------
+# User management (Firestore-only mode)
+# ---------------------------------------------------------------------------
+
+def list_firestore_users(role: str | None = None) -> list[FirestoreUserPrincipal]:
+    """List all users from Firestore, optionally filtered by role."""
+    return list(_cached_list_firestore_users(_normalize_role_cache_key(role)))
 
 
 def create_firestore_user(
@@ -295,6 +313,7 @@ def create_firestore_user(
         payload["birth_date"] = birth_date
     client = get_firestore_client()
     client.collection("users").document(str(user_id)).set(payload)
+    _clear_user_list_cache()
     principal = _principal_from_doc(payload)
     if principal is None:
         raise RuntimeError("Failed to build principal from created user payload")
@@ -345,6 +364,7 @@ def update_firestore_user(
 
     if updates:
         ref.set(updates, merge=True)
+        _clear_user_list_cache()
 
     refreshed = ref.get()
     return _principal_from_doc(refreshed.to_dict() or {})
@@ -368,6 +388,7 @@ def reset_firestore_user_password(
         },
         merge=True,
     )
+    _clear_user_list_cache()
 
     refreshed = ref.get()
     return _principal_from_doc(refreshed.to_dict() or {})
@@ -381,4 +402,5 @@ def delete_firestore_user(user_id: UUID) -> bool:
     if not snap.exists:
         return False
     ref.delete()
+    _clear_user_list_cache()
     return True

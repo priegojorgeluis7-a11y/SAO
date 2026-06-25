@@ -16,7 +16,7 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 def _normalize_review_decision(value: Any) -> str:
     normalized = str(value or "").strip().upper().replace(" ", "_")
-    if normalized in {"APPROVE", "APPROVED", "APROBADO", "APROBADA"}:
+    if normalized in {"APPROVE", "APPROVED", "APROBADO", "APROBADA", "APPROVE_EXCEPTION"}:
         return "APPROVED"
     if normalized in {"REJECT", "REJECTED", "RECHAZADO", "RECHAZADA"}:
         return "REJECTED"
@@ -84,16 +84,36 @@ def _dashboard_kpis_firestore(project_id: str | None, now: datetime, *, scoped_p
         updated_at_raw = payload.get("updated_at")
         updated_at_str = updated_at_raw.isoformat() if hasattr(updated_at_raw, "isoformat") else str(updated_at_raw or "")
 
-        if review_decision == "APPROVED" or state == "COMPLETADA":
+        # Lógica unificada con _review_status_from_firestore en review.py:
+        # - APPROVED: review_decision es APPROVE o APPROVE_EXCEPTION
+        # - PENDING_REVIEW: execution_state es REVISION_PENDIENTE sin decisión
+        # - NOT_REVIEWED: execution_state es COMPLETADA sin decisión
+        # 
+        # Una actividad solo cuenta como pendiente de revisión si:
+        # 1. Está en estado REVISION_PENDIENTE, Y
+        # 2. No tiene una decisión de revisión ya tomada (APPROVED/REJECTED/CHANGES_REQUIRED)
+        if review_decision == "APPROVED":
             completed += 1
             if updated_at_str >= day_start:
                 completed_today += 1
         elif review_decision == "REJECTED":
-            pending_review += 0
-        elif review_decision == "CHANGES_REQUIRED" or state == "EN_CURSO":
+            pass  # No cuenta en ningún contador
+        elif review_decision == "CHANGES_REQUIRED":
             in_progress += 1
         elif state == "REVISION_PENDIENTE":
+            # Solo cuenta como pendiente si no tiene decisión de revisión ya tomada.
+            # Las actividades con APPROVE/APPROVE_EXCEPTION/APPROVED ya fueron manejadas arriba.
+            # Las actividades con CHANGES_REQUIRED (rechazadas) también fueron manejadas.
+            # Aquí solo llegan actividades genuinamente pendientes de revisión.
             pending_review += 1
+        elif state == "COMPLETADA":
+            # Actividad completada sin decisión de revisión - cuenta como completada
+            # (está ejecutada, solo falta la revisión formal)
+            completed += 1
+            if updated_at_str >= day_start:
+                completed_today += 1
+        elif state == "EN_CURSO":
+            in_progress += 1
 
         recent_docs.append({
             "id": str(payload.get("uuid") or doc.id),

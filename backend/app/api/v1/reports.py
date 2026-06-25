@@ -22,13 +22,12 @@ def _parse_dt(value: object) -> datetime | None:
 
 
 def _report_dt(doc: dict) -> datetime | None:
-    # Prioritize the review/update date so date filters on the reports endpoint
-    # match when the activity was last actioned, not when it was originally created.
-    return (
-        _parse_dt(doc.get("last_reviewed_at"))
-        or _parse_dt(doc.get("updated_at"))
-        or _parse_dt(doc.get("created_at"))
-    )
+    # Use created_at as the primary date for filtering so that activities
+    # are found regardless of when they were reviewed or when the PDF was generated.
+    # This ensures that when a user selects a date range, all activities created
+    # within that range are included, even if their updated_at has changed due to
+    # report generation or other post-processing.
+    return _parse_dt(doc.get("created_at"))
 
 
 def _risk_from_activity(doc: dict) -> str:
@@ -52,7 +51,10 @@ def _review_status_from_activity(doc: dict) -> str:
         return "CHANGES_REQUIRED"
     if str(doc.get("execution_state") or "") == "REVISION_PENDIENTE":
         return "PENDING_REVIEW"
-    return "PENDING_REVIEW"
+    # Si la actividad está completada pero sin decisión, no está pendiente de revisión
+    if str(doc.get("execution_state") or "") == "COMPLETADA":
+        return "NOT_REVIEWED"
+    return "NOT_REVIEWED"
 
 
 def _name_from_email(raw: str) -> str:
@@ -168,14 +170,42 @@ def list_report_activities(
     is_operativo = caller_roles == {"OPERATIVO"} or ("OPERATIVO" in caller_roles and "SUPERVISOR" not in caller_roles and "ADMIN" not in caller_roles)
     caller_user_id = str(_current_user.id)
 
+    # OPTIMIZATION: Use indexed query instead of full table scan
     query = client.collection("activities")
     if project_filter:
         # Verify the requesting user has access to this specific project
         if not has_global_scope and project_filter not in allowed_project_ids:
             return {"items": [], "total": 0, "page": page, "page_size": page_size}
         query = query.where("project_id", "==", project_filter)
-
-    docs = [d.to_dict() or {} for d in query.stream()]
+        
+        # Add date range filters if provided to reduce document reads
+        if date_from:
+            query = query.where("created_at", ">=", date_from)
+        if date_to:
+            query = query.where("created_at", "<=", date_to)
+        
+        # Order by created_at DESC to use the new index efficiently
+        query = query.order_by("created_at", direction="DESCENDING")
+        
+        # Apply pagination at Firestore level to reduce reads
+        offset = (page - 1) * page_size
+        query = query.limit(page_size).offset(offset)
+    
+    # Only execute query if we have a project filter (use indexed query)
+    # For queries without project filter, use a more selective approach
+    if project_filter:
+        docs = [d.to_dict() or {} for d in query.stream()]
+    else:
+        # Without project filter, load all (legacy behavior, but with date limits if provided)
+        base_query = client.collection("activities")
+        if date_from:
+            base_query = base_query.where("created_at", ">=", date_from)
+        if date_to:
+            base_query = base_query.where("created_at", "<=", date_to)
+        base_query = base_query.order_by("created_at", direction="DESCENDING")
+        
+        # Limit initial fetch for non-filtered queries
+        docs = [d.to_dict() or {} for d in base_query.limit(1000).stream()]
 
     # If no specific project requested, restrict to allowed projects for non-global users
     if not project_filter and not has_global_scope:

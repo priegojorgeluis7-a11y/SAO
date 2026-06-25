@@ -1,4 +1,4 @@
-﻿import logging
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -218,6 +218,37 @@ def _normalize_project_id(project_id: str | None) -> str:
     return (project_id or "").strip().upper()
 
 
+def _stream_project_activities_with_fallback(
+    client: Any,
+    *,
+    normalized_project_id: str,
+    limit: int = 1000,
+) -> list[Any]:
+    """Load project activities using indexed query.
+    
+    OPTIMIZATION: Removed full table scan fallback to reduce Firestore costs.
+    Only uses indexed equality queries on project_id field.
+    """
+    docs: list[Any] = []
+    seen_doc_ids: set[str] = set()
+
+    # Use indexed equality query on project_id
+    query = client.collection("activities").where("project_id", "==", normalized_project_id)
+    
+    # Apply limit to prevent excessive reads
+    query = query.limit(limit)
+    
+    for doc in query.stream():
+        doc_id = str(getattr(doc, "id", "") or "")
+        if doc_id and doc_id in seen_doc_ids:
+            continue
+        if doc_id:
+            seen_doc_ids.add(doc_id)
+        docs.append(doc)
+
+    return docs
+
+
 def _project_aliases(payload: dict[str, Any], doc_id: str) -> set[str]:
     aliases = {
         _normalize_project_id(doc_id),
@@ -356,6 +387,7 @@ def _build_assignment_list_item(
         )
         estado = estado or parsed_estado
         municipio = municipio or parsed_municipio
+    safe_title = _safe_assignment_title(payload)
     return AssignmentListItem(
         id=str(payload.get("uuid") or doc_id),
         project_id=str(payload.get("project_id") or project_id),
@@ -363,7 +395,7 @@ def _build_assignment_list_item(
         assignee_name=(assignee_principal.full_name if assignee_principal else "Sin responsable"),
         assignee_email=(assignee_principal.email if assignee_principal else None),
         activity_id=str(payload.get("uuid") or doc_id),
-        title=str(payload.get("title") or payload.get("activity_type_code") or ""),
+        title=safe_title,
         frente=raw_front,
         municipio=municipio,
         estado=estado,
@@ -373,6 +405,26 @@ def _build_assignment_list_item(
         risk="bajo",
         status=("PROGRAMADA" if state == "PENDIENTE" else state),
     )
+
+
+def _safe_assignment_title(payload: dict[str, Any]) -> str:
+    """Return a title compatible with legacy mobile local constraints.
+
+    Older clients derive an activity-type seed from assignment title when opening
+    agenda actions. Their local catalog code field is capped to 40 chars.
+    """
+    title = str(payload.get("title") or "").strip()
+    activity_type_code = str(payload.get("activity_type_code") or "").strip()
+
+    if title and len(title) <= 40:
+        return title
+    if activity_type_code and len(activity_type_code) <= 40:
+        return activity_type_code
+    if title:
+        return title[:40].rstrip()
+    if activity_type_code:
+        return activity_type_code[:40].rstrip()
+    return "Actividad"
 
 
 @router.get("", response_model=list[AssignmentListItem])
@@ -435,7 +487,12 @@ def list_assignments(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="No access to this project",
             )
-        docs = client.collection("activities").where("project_id", "==", normalized_project_id).stream()
+        docs = iter(
+            _stream_project_activities_with_fallback(
+                client,
+                normalized_project_id=normalized_project_id,
+            )
+        )
 
     items: list[AssignmentListItem] = []
     seeded_project_ids: set[str] = set()
@@ -501,15 +558,22 @@ def list_assignments(
                     continue
                 _seen_legacy_assign.add(_lka)
         principal = principal_by_id.get(effective_assignee_user_id)
+        response_project_id = payload_project_id or str(payload.get("project_id") or "").strip().upper()
+        if not response_project_id and normalized_project_id != _ALL_PROJECTS_SENTINEL:
+            response_project_id = normalized_project_id
+        if not response_project_id:
+            # Skip malformed payloads in all-project views to avoid leaking sentinel values.
+            continue
+
         items.append(
             AssignmentListItem(
                 id=str(payload.get("uuid") or doc.id),
-                project_id=str(payload.get("project_id") or normalized_project_id),
+                project_id=response_project_id,
                 assignee_user_id=effective_assignee_user_id,
                 assignee_name=(principal.full_name if principal else "Sin responsable"),
                 assignee_email=(principal.email if principal else None),
                 activity_id=str(payload.get("uuid") or doc.id),
-                title=str(payload.get("title") or payload.get("activity_type_code") or ""),
+                title=_safe_assignment_title(payload),
                 frente=raw_front,
                 municipio=municipio,
                 estado=estado,
@@ -617,7 +681,63 @@ def list_assignees(
     return options
 
 
-@router.post("", response_model=AssignmentListItem, status_code=status.HTTP_201_CREATED)
+def _resolve_front_ids_to_assign(
+    client: Any,
+    project_id: str,
+    payload: AssignmentCreate,
+) -> list[tuple[str | None, str]]:
+    """Resolve which fronts to assign based on payload flags.
+    
+    Returns a list of (front_id, front_name) tuples.
+    """
+    # Case 1: all_fronts flag - query all fronts from the project
+    if payload.all_fronts:
+        front_docs = list(
+            client.collection("fronts")
+            .where("project_id", "==", project_id)
+            .stream()
+        )
+        result = []
+        for doc in front_docs:
+            doc_data = doc.to_dict() or {}
+            front_id = doc.id
+            front_name = str(doc_data.get("name") or "").strip()
+            result.append((front_id, front_name))
+        return result if result else [(None, payload.front_ref or "")]
+    
+    # Case 2: explicit front_ids list
+    if payload.front_ids:
+        result = []
+        for fid in payload.front_ids:
+            front_id_str = str(fid)
+            # Get front name from firestore
+            front_doc = client.collection("fronts").document(front_id_str).get()
+            if front_doc.exists:
+                front_name = str(front_doc.to_dict().get("name") or "").strip()
+            else:
+                front_name = ""
+            result.append((front_id_str, front_name))
+        return result
+    
+    # Case 3: backward compatibility - single front_id
+    if payload.front_id:
+        front_id_str = str(payload.front_id)
+        front_doc = client.collection("fronts").document(front_id_str).get()
+        if front_doc.exists:
+            front_name = str(front_doc.to_dict().get("name") or "").strip()
+        else:
+            front_name = (payload.front_ref or "").strip()
+        return [(front_id_str, front_name)]
+    
+    # Case 4: only front_ref (no front_id)
+    if payload.front_ref:
+        return [(None, (payload.front_ref or "").strip())]
+    
+    # No front specified
+    return []
+
+
+@router.post("", response_model=list[AssignmentListItem], status_code=status.HTTP_201_CREATED)
 def create_assignment(
     payload: AssignmentCreate,
     current_user: Any = Depends(require_any_role(["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"])),
@@ -651,7 +771,17 @@ def create_assignment(
     if payload.end_at <= payload.start_at:
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="ASSIGNMENT_INVALID_DATE_RANGE", message="end_at must be greater than start_at")
 
-    front_ref = (payload.front_ref or "").strip()
+    client = get_firestore_client()
+    
+    # Resolve fronts to assign
+    fronts_to_assign = _resolve_front_ids_to_assign(client, project_id, payload)
+    if not fronts_to_assign:
+        raise api_error(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            code="ASSIGNMENT_FRONT_REQUIRED",
+            message="At least one front is required. Use 'front_ids' for specific fronts or 'all_fronts' for all project fronts.",
+        )
+    
     estado = (payload.estado or "").strip()
     municipio = (payload.municipio or "").strip()
     description_parts = [f"planned:{payload.risk.strip().lower()}"]
@@ -661,8 +791,6 @@ def create_assignment(
         description_parts.append(f"municipio={municipio}")
     description_value = ";".join(description_parts)
 
-    client = get_firestore_client()
-    activity_uuid = uuid4()
     type_code = payload.activity_type_code.strip().upper()
     title = payload.title.strip() if payload.title and payload.title.strip() else type_code
     assignee_principal = get_firestore_user_by_id(primary_assignee_user_id)
@@ -673,11 +801,10 @@ def create_assignment(
             participant_principals.append(principal)
     
     # Resolve current catalog version for the project
-    normalized_project = project_id.strip().upper()
     catalog_version_id = None
     
     # Try to get catalog_current first
-    current_snap = client.collection("catalog_current").document(normalized_project).get()
+    current_snap = client.collection("catalog_current").document(project_id).get()
     if current_snap.exists:
         payload_snap = current_snap.to_dict() or {}
         catalog_version_id = str(payload_snap.get("version_id") or "").strip() or None
@@ -686,7 +813,7 @@ def create_assignment(
     if not catalog_version_id:
         catalog_docs = (
             client.collection("catalog_versions")
-            .where("project_id", "==", normalized_project)
+            .where("project_id", "==", project_id)
             .where("is_current", "==", True)
             .limit(1)
             .stream()
@@ -702,14 +829,14 @@ def create_assignment(
         try:
             activities_in_catalog = _resolve_catalog_activity_codes(
                 client,
-                project_id=normalized_project,
+                project_id=project_id,
                 catalog_version_id=catalog_version_id,
             )
             if activities_in_catalog and type_code not in activities_in_catalog:
                 logger.warning(
                     "Assignment activity_type_code not present in resolved catalog; continuing "
                     "project=%s type_code=%s version=%s candidates=%s",
-                    normalized_project,
+                    project_id,
                     type_code,
                     catalog_version_id,
                     sorted(activities_in_catalog),
@@ -720,63 +847,91 @@ def create_assignment(
             logger.warning(f"Failed to validate activity type against catalog: {e}")
             # Continue anyway with the assignment
     
-    # When multiple participants, create one activity per participant linked by activity_group_id.
-    # Each participant gets their own activity document so they can independently register
-    # and the completion of any one propagates to the rest.
-    activity_group_id = str(uuid4()) if len(participant_user_ids) > 1 else None
+    # Create one activity per front, with each participant having their own document
+    # linked by activity_group_id when multiple participants or multiple fronts exist.
+    should_use_groups = len(fronts_to_assign) > 1 or len(participant_user_ids) > 1
+    activity_group_id = str(uuid4()) if should_use_groups else None
     base_sync_version = _next_project_sync_version(client, project_id)
 
-    created_uuids: list[tuple[str, str, Any]] = []  # (uuid, user_id, principal)
-    for idx, participant_id in enumerate(participant_user_ids):
-        participant_uuid = uuid4() if idx > 0 else activity_uuid
-        participant_principal_obj = participant_principals[idx] if idx < len(participant_principals) else None
-        doc_payload = {
-            "uuid": str(participant_uuid),
-            "server_id": None,
-            "project_id": project_id,
-            "front_id": str(payload.front_id) if payload.front_id else None,
-            "frente": front_ref,
-            "estado": estado or None,
-            "municipio": municipio or None,
-            "colonia": (payload.colonia or "").strip() or None,
-            "pk_start": payload.pk,
-            "pk_end": None,
-            "execution_state": "PENDIENTE",
-            **_assignment_assignee_projection(
-                participant_id,
-                participant_principal_obj,
-                participant_principals=[participant_principal_obj] if participant_principal_obj else [],
-            ),
-            "created_by_user_id": str(current_user.id),
-            "catalog_version_id": catalog_version_id,
-            "activity_type_code": type_code,
-            "title": title,
-            "description": description_value,
-            "gps_mismatch": False,
-            "catalog_changed": type_code.startswith("CUSTOM_"),
-            "latitude": str(payload.latitude) if payload.latitude is not None else None,
-            "longitude": str(payload.longitude) if payload.longitude is not None else None,
-            "assignment_start_at": payload.start_at.isoformat(),
-            "assignment_end_at": payload.end_at.isoformat(),
-            "created_at": payload.start_at.isoformat(),
-            "updated_at": payload.end_at.isoformat(),
-            "deleted_at": None,
-            "sync_version": base_sync_version + idx,
-            "activity_group_id": activity_group_id,
-        }
-        client.collection("activities").document(str(participant_uuid)).set(doc_payload)
-        created_uuids.append((str(participant_uuid), participant_id, participant_principal_obj))
+    created_items: list[AssignmentListItem] = []
+    global_sync_offset = 0
+    
+    for front_id, front_name in fronts_to_assign:
+        # For each front, create one activity per participant
+        for idx, participant_id in enumerate(participant_user_ids):
+            participant_uuid = uuid4()
+            participant_principal_obj = participant_principals[idx] if idx < len(participant_principals) else None
+            doc_payload = {
+                "uuid": str(participant_uuid),
+                "server_id": None,
+                "project_id": project_id,
+                "front_id": front_id,
+                "frente": front_name,
+                "estado": estado or None,
+                "municipio": municipio or None,
+                "colonia": (payload.colonia or "").strip() or None,
+                "pk_start": payload.pk,
+                "pk_end": None,
+                "execution_state": "PENDIENTE",
+                **_assignment_assignee_projection(
+                    participant_id,
+                    participant_principal_obj,
+                    participant_principals=[participant_principal_obj] if participant_principal_obj else [],
+                ),
+                "created_by_user_id": str(current_user.id),
+                "catalog_version_id": catalog_version_id,
+                "activity_type_code": type_code,
+                "title": title,
+                "description": description_value,
+                "gps_mismatch": False,
+                "catalog_changed": type_code.startswith("CUSTOM_"),
+                "latitude": str(payload.latitude) if payload.latitude is not None else None,
+                "longitude": str(payload.longitude) if payload.longitude is not None else None,
+                "assignment_start_at": payload.start_at.isoformat(),
+                "assignment_end_at": payload.end_at.isoformat(),
+                "created_at": payload.start_at.isoformat(),
+                "updated_at": payload.end_at.isoformat(),
+                "deleted_at": None,
+                "sync_version": base_sync_version + global_sync_offset,
+                "activity_group_id": activity_group_id,
+                "is_primary_responsible": (idx == 0 and fronts_to_assign.index((front_id, front_name)) == 0),
+            }
+            client.collection("activities").document(str(participant_uuid)).set(doc_payload)
+            global_sync_offset += 1
+            
+            # Build response item for this created activity
+            created_items.append(
+                AssignmentListItem(
+                    id=str(participant_uuid),
+                    project_id=project_id,
+                    assignee_user_id=UUID(participant_id),
+                    assignee_name=(participant_principal_obj.full_name if participant_principal_obj else "Sin responsable"),
+                    assignee_email=(participant_principal_obj.email if participant_principal_obj else None),
+                    activity_id=str(participant_uuid),
+                    title=title,
+                    frente=front_name,
+                    municipio=municipio,
+                    estado=estado,
+                    pk=payload.pk,
+                    start_at=payload.start_at,
+                    end_at=payload.end_at,
+                    risk=payload.risk,
+                    status="PROGRAMADA",
+                    latitude=payload.latitude,
+                    longitude=payload.longitude,
+                )
+            )
 
     # When the activity type code is CUSTOM_*, create a catalog_candidates
     # entry so admins can review / approve it from the Verificación tab.
-    # Use `title` as the human-readable name (set by the planner when creating
-    # the assignment — it equals the custom name when no explicit title is given).
     if type_code.startswith("CUSTOM_"):
         now = datetime.now(timezone.utc)
         coll = client.collection("catalog_candidates")
         doc_id = f"{project_id}__activity__{type_code}"
         ref = coll.document(doc_id)
         snap = ref.get()
+        # Use the first activity's UUID for tracking
+        first_activity_uuid = created_items[0].id if created_items else str(uuid4())
         if not snap.exists:
             ref.set({
                 "id": doc_id,
@@ -785,7 +940,7 @@ def create_assignment(
                 "name": title,
                 "project_id": project_id,
                 "proposed_by_user_id": str(current_user.id),
-                "activity_id": str(activity_uuid),
+                "activity_id": first_activity_uuid,
                 "status": "pending",
                 "proposed_at": now,
                 "last_seen_at": now,
@@ -800,12 +955,12 @@ def create_assignment(
                 project_id,
             )
         elif (snap.to_dict() or {}).get("status") == "pending":
-            ref.set({"last_seen_at": now, "activity_id": str(activity_uuid)}, merge=True)
+            ref.set({"last_seen_at": now, "activity_id": first_activity_uuid}, merge=True)
 
     write_firestore_audit_log(
         action="ASSIGNMENT_CREATED",
         entity="activity",
-        entity_id=str(activity_uuid),
+        entity_id=str(created_items[0].id if created_items else ""),
         actor=current_user,
         details={
             "project_id": project_id,
@@ -818,35 +973,36 @@ def create_assignment(
             "start_at": payload.start_at.isoformat(),
             "end_at": payload.end_at.isoformat(),
             "risk": payload.risk,
+            "num_fronts_assigned": len(fronts_to_assign),
         },
     )
 
     # Fire-and-forget push notification + in-app notification to all participants.
-    is_multi_participant = len(created_uuids) > 1
+    is_multi_participant = len(participant_user_ids) > 1
     actor_name = getattr(current_user, "full_name", None)
-    for p_uuid, p_user_id, _p_principal in created_uuids:
+    for item in created_items:
         try:
             notify_new_assignment(
                 project_id=project_id,
-                activity_id=p_uuid,
+                activity_id=item.id,
                 activity_title=title,
-                assignee_user_id=p_user_id,
+                assignee_user_id=str(item.assignee_user_id),
                 assigned_by_name=actor_name,
                 is_transfer=False,
                 municipio=municipio or None,
                 estado=estado or None,
-                frente=front_ref or None,
+                frente=item.frente or None,
                 start_at=payload.start_at.isoformat(),
             )
         except Exception:
-            logger.exception("notify_new_assignment failed for activity %s", p_uuid)
+            logger.exception("notify_new_assignment failed for activity %s", item.id)
 
         try:
-            notif_type = "co_responsable_added" if (is_multi_participant and p_user_id != primary_assignee_user_id) else "new_assignment"
+            notif_type = "co_responsable_added" if (is_multi_participant and str(item.assignee_user_id) != primary_assignee_user_id) else "new_assignment"
             create_user_notification(
-                recipient_user_id=p_user_id,
+                recipient_user_id=str(item.assignee_user_id),
                 notification_type=notif_type,
-                activity_id=p_uuid,
+                activity_id=item.id,
                 activity_title=title,
                 project_id=project_id,
                 from_user_id=str(current_user.id),
@@ -856,33 +1012,15 @@ def create_assignment(
                     "activity_group_id": activity_group_id,
                     "municipio": municipio or None,
                     "estado": estado or None,
-                    "frente": front_ref or None,
+                    "frente": item.frente or None,
                     "start_at": payload.start_at.isoformat(),
                     "end_at": payload.end_at.isoformat(),
                 },
             )
         except Exception:
-            logger.exception("create_user_notification failed for activity %s", p_uuid)
+            logger.exception("create_user_notification failed for activity %s", item.id)
 
-    return AssignmentListItem(
-        id=str(activity_uuid),
-        project_id=project_id,
-        assignee_user_id=UUID(primary_assignee_user_id),
-        assignee_name=(assignee_principal.full_name if assignee_principal else "Sin responsable"),
-        assignee_email=(assignee_principal.email if assignee_principal else None),
-        activity_id=str(activity_uuid),
-        title=title,
-        frente=front_ref,
-        municipio=municipio,
-        estado=estado,
-        pk=payload.pk,
-        start_at=payload.start_at,
-        end_at=payload.end_at,
-        risk=payload.risk,
-        status="PROGRAMADA",
-        latitude=payload.latitude,
-        longitude=payload.longitude,
-    )
+    return created_items
 
 
 @router.post("/{assignment_id}/cancel", response_model=AssignmentCancelResponse)

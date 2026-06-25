@@ -45,73 +45,55 @@ class ProjectsCatalog {
   
   static const tmq = ProjectType(
     id: 'TMQ',
-    label: 'TMQ',
+    label: 'Tren México-Querétaro',
     acronym: 'TMQ',
-    description: 'Tren Maya Quintana Roo',
+    description: 'Tren México-Querétaro',
     accentColor: Color(0xFF059669),
     isActive: true,
   );
 
   static const tap = ProjectType(
     id: 'TAP',
-    label: 'Tren Aeropuerto - Pachuca',
+    label: 'Tren AIFA-Pachuca',
     acronym: 'TAP',
-    description: 'Proyecto Tren Interurbano México-Toluca',
+    description: 'Tren AIFA-Pachuca',
     accentColor: Color(0xFF3B82F6),
     isActive: true,
   );
 
-  static const snl = ProjectType(
-    id: 'SNL',
-    label: 'Sistema Nacional de Logística',
-    acronym: 'SNL',
-    description: 'Infraestructura logística nacional',
+  static const tqi = ProjectType(
+    id: 'TQI',
+    label: 'Tren Querétaro-Irapuato',
+    acronym: 'TQI',
+    description: 'Tren Querétaro-Irapuato',
     accentColor: Color(0xFF8B5CF6),
     isActive: true,
   );
 
-  static const qir = ProjectType(
-    id: 'QIR',
-    label: 'Querétaro - Irapuato',
-    acronym: 'QIR',
-    description: 'Carretera Querétaro - Irapuato',
+  static const tsnl = ProjectType(
+    id: 'TSNL',
+    label: 'Tren Suburbano Nuevo León',
+    acronym: 'TSNL',
+    description: 'Tren Suburbano Nuevo León',
     accentColor: Color(0xFFF59E0B),
     isActive: true,
   );
 
-  static const csr = ProjectType(
-    id: 'CSR',
-    label: 'Corredor Siervo de la Nación',
-    acronym: 'CSR',
-    description: 'Mejoramiento de carreteras federales',
+  static const tqsl = ProjectType(
+    id: 'TQSL',
+    label: 'Tren Querétaro-San Luis Potosí',
+    acronym: 'TQSL',
+    description: 'Tren Querétaro-San Luis Potosí',
     accentColor: Color(0xFFEC4899),
     isActive: true,
   );
 
-  static const ipp = ProjectType(
-    id: 'IPP',
-    label: 'Infraestructura Portuaria',
-    acronym: 'IPP',
-    description: 'Modernización de puertos estratégicos',
+  static const tsls = ProjectType(
+    id: 'TSLS',
+    label: 'Tren Saltillo-San Luis Potosí',
+    acronym: 'TSLS',
+    description: 'Tren Saltillo-San Luis Potosí',
     accentColor: Color(0xFF06B6D4),
-    isActive: true,
-  );
-
-  static const aer = ProjectType(
-    id: 'AER',
-    label: 'Aeropuertos Estratégicos',
-    acronym: 'AER',
-    description: 'Red de aeropuertos regionales',
-    accentColor: Color(0xFF6366F1),
-    isActive: true,
-  );
-
-  static const gen = ProjectType(
-    id: 'GEN',
-    label: 'Proyecto General',
-    acronym: 'GEN',
-    description: 'Actividades generales sin proyecto específico',
-    accentColor: SaoColors.gray600,
     isActive: true,
   );
 
@@ -121,13 +103,12 @@ class ProjectsCatalog {
   static const List<ProjectType> all = [
     tmq,
     tap,
-    snl,
-    qir,
-    csr,
-    ipp,
-    aer,
-    gen,
+    tqi,
+    tsnl,
+    tqsl,
+    tsls,
   ];
+
 
   // ============================================================
   // HELPERS
@@ -219,7 +200,8 @@ class ProjectsCatalog {
 
   /// Chip widget para proyecto
   static Widget chip(String projectId, {double? fontSize}) {
-    final project = findById(projectId) ?? gen;
+    final project = findById(projectId) ?? tmq;
+
     
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -256,7 +238,8 @@ class ProjectsCatalog {
 
   /// Badge con nombre completo
   static Widget badge(String projectId, {double? fontSize, bool showFull = false}) {
-    final project = findById(projectId) ?? gen;
+    final project = findById(projectId) ?? tmq;
+
     
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

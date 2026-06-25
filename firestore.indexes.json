@@ -82,6 +82,49 @@
         { "fieldPath": "status",            "order": "ASCENDING" },
         { "fieldPath": "created_at",        "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "project_id",    "order": "ASCENDING" },
+        { "fieldPath": "created_at",    "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "project_id",        "order": "ASCENDING" },
+        { "fieldPath": "execution_state",  "order": "ASCENDING" },
+        { "fieldPath": "created_at",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "project_id",        "order": "ASCENDING" },
+        { "fieldPath": "review_decision",   "order": "ASCENDING" },
+        { "fieldPath": "created_at",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "project_id",        "order": "ASCENDING" },
+        { "fieldPath": "front_id",          "order": "ASCENDING" },
+        { "fieldPath": "created_at",        "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "activities",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "activity_group_id", "order": "ASCENDING" },
+        { "fieldPath": "sync_version",      "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []

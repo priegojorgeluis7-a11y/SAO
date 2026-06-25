@@ -30,8 +30,18 @@ class AssignmentCreate(BaseModel):
     assignee_user_ids: list[UUID] = Field(default_factory=list)
     activity_type_code: str = Field(..., min_length=1, max_length=50)
     title: str | None = Field(default=None, max_length=200)
+    # Single front (backward compatibility)
     front_id: UUID | None = None
     front_ref: str | None = Field(default=None, max_length=255)
+    # Multiple fronts selection
+    front_ids: list[UUID] = Field(
+        default_factory=list,
+        description="Lista de IDs de frentes a asignar. Si 'all_fronts' es true, este campo se ignora."
+    )
+    all_fronts: bool = Field(
+        default=False,
+        description="Si true, se crea una asignación por cada frente del proyecto."
+    )
     estado: str | None = Field(default=None, max_length=100)
     municipio: str | None = Field(default=None, max_length=100)
     colonia: str | None = Field(default=None, max_length=200)

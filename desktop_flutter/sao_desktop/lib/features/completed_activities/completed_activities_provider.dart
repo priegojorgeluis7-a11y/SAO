@@ -614,8 +614,8 @@ Future<List<CompletedActivity>> _fetchCompletedActivities(
   Map<String, String> params,
 ) async {
   const client = BackendApiClient();
-  const pageSize = 200;
-  const maxItems = 3000; // safety cap to avoid runaway fetches
+  const pageSize = 500;
+  const maxItems = 50000; // Sin límite - mostrar todos los expedientes
 
   final allItems = <CompletedActivity>[];
   int page = 1;

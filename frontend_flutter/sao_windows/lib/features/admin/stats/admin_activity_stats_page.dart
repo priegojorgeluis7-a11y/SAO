@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:get_it/get_it.dart';
 import 'package:go_router/go_router.dart';
 import 'package:path/path.dart' as p;
@@ -16,23 +17,57 @@ import '../../../core/constants.dart';
 import '../../../core/utils/snackbar.dart';
 import '../../../data/local/app_db.dart';
 import '../../../data/local/dao/activity_dao.dart';
+import '../../auth/application/auth_providers.dart';
 import '../../../ui/theme/sao_colors.dart';
 import '../../../ui/theme/sao_typography.dart';
 
-class AdminActivityStatsPage extends StatefulWidget {
+bool canViewAdminStats({
+  required Set<String> authRoles,
+  required String email,
+  int? localRoleId,
+  String? localRoleName,
+}) {
+  final normalizedEmail = email.trim().toLowerCase();
+  final normalizedAuthRoles = authRoles
+      .map((role) => role.trim().toUpperCase())
+      .where((role) => role.isNotEmpty)
+      .toSet();
+
+  final canViewFromAuth = normalizedAuthRoles.any(
+        (role) => role == 'ADMIN' || role == 'ADMINISTRADOR' || role == 'ADMINISTRATOR',
+      ) ||
+      normalizedAuthRoles.contains('SUPERVISOR') ||
+      normalizedEmail == 'admin@sao.mx' ||
+      normalizedEmail.startsWith('admin.');
+
+  if (canViewFromAuth) {
+    return true;
+  }
+
+  final normalizedRoleName = localRoleName?.trim().toUpperCase();
+  return localRoleId == 1 ||
+      localRoleId == 3 ||
+      normalizedRoleName == 'ADMIN' ||
+      normalizedRoleName == 'ADMINISTRADOR' ||
+      normalizedRoleName == 'ADMINISTRATOR' ||
+      normalizedRoleName == 'SUPERVISOR';
+}
+
+class AdminActivityStatsPage extends ConsumerStatefulWidget {
   const AdminActivityStatsPage({super.key});
 
   @override
-  State<AdminActivityStatsPage> createState() => _AdminActivityStatsPageState();
+  ConsumerState<AdminActivityStatsPage> createState() => _AdminActivityStatsPageState();
 }
 
-class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
+class _AdminActivityStatsPageState extends ConsumerState<AdminActivityStatsPage> {
   static const _rangeOptions = <int>[14, 30];
 
   final _exportButtonKey = GlobalKey();
   final _pdfButtonKey = GlobalKey();
   ActivityStats? _stats;
   bool _loading = true;
+  bool _canViewStats = false;
   late final ActivityDao _dao;
   List<String> _projectOptions = const [kAllProjects];
   String _selectedProject = kAllProjects;
@@ -42,7 +77,7 @@ class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
   void initState() {
     super.initState();
     _dao = ActivityDao(GetIt.I<AppDb>());
-    _load();
+    _resolveAccessAndLoad();
   }
 
   DateTime _rangeStart() {
@@ -70,6 +105,59 @@ class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
     }
     final uri = Uri(path: '/admin/history', queryParameters: query.isEmpty ? null : query);
     context.push(uri.toString());
+  }
+
+  Future<void> _resolveAccessAndLoad() async {
+    final user = ref.read(currentUserProvider);
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _canViewStats = false;
+        _loading = false;
+      });
+      return;
+    }
+
+    final authRoles = user.roles.map((r) => r.trim().toUpperCase()).toSet();
+    final email = user.email.trim().toLowerCase();
+
+    bool canView = canViewAdminStats(authRoles: authRoles, email: email);
+
+    if (!canView) {
+      final db = GetIt.I<AppDb>();
+      try {
+        final localUser = await (db.select(
+          db.users,
+        )..where((t) => t.id.equals(user.id))).getSingleOrNull();
+        final role = localUser == null
+            ? null
+            : await (db.select(
+                db.roles,
+              )..where((t) => t.id.equals(localUser.roleId))).getSingleOrNull();
+        final normalizedRoleName = role?.name.trim().toUpperCase();
+        canView = canViewAdminStats(
+          authRoles: authRoles,
+          email: email,
+          localRoleId: localUser?.roleId,
+          localRoleName: normalizedRoleName,
+        );
+      } catch (_) {
+        // Keep the auth-role decision if the local DB is temporarily unavailable.
+      }
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _canViewStats = canView;
+    });
+
+    if (_canViewStats) {
+      await _load();
+      return;
+    }
+
+    if (!mounted) return;
+    setState(() => _loading = false);
   }
 
   Future<void> _load() async {
@@ -107,6 +195,50 @@ class _AdminActivityStatsPageState extends State<AdminActivityStatsPage> {
 
   @override
   Widget build(BuildContext context) {
+    if (!_loading && !_canViewStats) {
+      return Scaffold(
+        backgroundColor: SaoColors.gray50,
+        appBar: AppBar(
+          backgroundColor: SaoColors.surface,
+          surfaceTintColor: SaoColors.surface,
+          title: const Text(
+            'Estadísticas de Actividades',
+            style: TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: _card(
+              title: 'Acceso restringido',
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.lock_outline_rounded,
+                    size: 48,
+                    color: SaoColors.warning,
+                  ),
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Las estadísticas solo están disponibles para administradores y supervisores.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 16),
+                  FilledButton.tonalIcon(
+                    onPressed: () => context.go('/'),
+                    icon: const Icon(Icons.home_rounded),
+                    label: const Text('Volver al inicio'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: SaoColors.gray50,
       appBar: AppBar(

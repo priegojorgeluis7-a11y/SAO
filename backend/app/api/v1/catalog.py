@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+from functools import lru_cache
 from datetime import datetime, timezone
 from typing import Any, Optional
 from uuid import NAMESPACE_URL, UUID, uuid5
@@ -96,14 +97,17 @@ def _as_uuid_or_none(value: Any) -> UUID | None:
         return None
 
 
-def _resolve_current_version_id_firestore(project_id: str | None = None) -> str:
-    """Resolve current catalog version from Firestore for firestore-only mode."""
+def _clear_catalog_read_cache() -> None:
+    _cached_resolve_current_version_id_firestore.cache_clear()
+    _cached_latest_catalog_doc_firestore.cache_clear()
+    _cached_catalog_versions_firestore.cache_clear()
+
+
+@lru_cache(maxsize=128)
+def _cached_resolve_current_version_id_firestore(project_id: str | None = None) -> str:
     client = get_firestore_client()
     normalized_project = (project_id or "").strip().upper()
 
-    # Project-specific resolution: choose the freshest published/current payload.
-    # This avoids serving stale versions when catalog_current wasn't updated
-    # but a newer published row already exists in catalog_versions.
     if normalized_project:
         latest_payload = _latest_catalog_doc_firestore(normalized_project)
         if latest_payload:
@@ -114,7 +118,6 @@ def _resolve_current_version_id_firestore(project_id: str | None = None) -> str:
             if version_id:
                 return version_id
 
-    # Legacy global fallback when no project_id is provided.
     docs = (
         client.collection("catalog_versions")
         .where("is_current", "==", True)
@@ -140,13 +143,16 @@ def _resolve_current_version_id_firestore(project_id: str | None = None) -> str:
     )
 
 
-def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
-    """Return latest catalog version payload from Firestore for a project."""
+def _resolve_current_version_id_firestore(project_id: str | None = None) -> str:
+    return _cached_resolve_current_version_id_firestore(project_id)
+
+
+@lru_cache(maxsize=128)
+def _cached_latest_catalog_doc_firestore(project_id: str) -> tuple[tuple[str, Any], ...] | None:
     client = get_firestore_client()
     normalized_project = project_id.strip().upper()
     candidates: list[dict[str, Any]] = []
 
-    # Candidate 1: explicit current pointer with embedded metadata.
     current_snap = client.collection("catalog_current").document(normalized_project).get()
     if current_snap.exists:
         payload = current_snap.to_dict() or {}
@@ -155,7 +161,6 @@ def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
             payload.setdefault("_source_priority", 3)
             candidates.append(payload)
 
-    # Candidate 2: is_current row in catalog_versions.
     try:
         docs = (
             client.collection("catalog_versions")
@@ -173,7 +178,6 @@ def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
     except Exception:
         logger.exception("Failed querying current catalog_versions for project_id=%s", normalized_project)
 
-    # Candidate 3: latest published_at row.
     try:
         docs = (
             client.collection("catalog_versions")
@@ -203,7 +207,76 @@ def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
     )
     best = dict(candidates[0])
     best.pop("_source_priority", None)
-    return best
+    return tuple(best.items())
+
+
+def _latest_catalog_doc_firestore(project_id: str) -> dict[str, Any] | None:
+    cached = _cached_latest_catalog_doc_firestore(project_id)
+    return dict(cached) if cached is not None else None
+
+
+@lru_cache(maxsize=128)
+def _cached_catalog_versions_firestore(
+    project_id: str,
+    status_filter: Optional[CatalogStatus],
+    limit: int,
+) -> tuple[CatalogVersionResponse, ...]:
+    client = get_firestore_client()
+    normalized_project = project_id.strip().upper()
+
+    docs = (
+        client.collection("catalog_versions")
+        .where("project_id", "==", normalized_project)
+        .limit(max(limit, 1))
+        .stream()
+    )
+
+    rows: list[CatalogVersionResponse] = []
+    for doc in docs:
+        payload = doc.to_dict() or {}
+
+        raw_version_id = payload.get("version_id") or payload.get("id") or doc.id
+        version_id = _as_uuid_or_none(raw_version_id)
+        if version_id is None:
+            version_id = uuid5(NAMESPACE_URL, f"catalog-version:{normalized_project}:{raw_version_id}")
+        published_at = _as_utc_datetime(payload.get("published_at")) if payload.get("published_at") else None
+        created_at = _as_utc_datetime(payload.get("created_at")) if payload.get("created_at") else None
+        updated_at = _as_utc_datetime(payload.get("updated_at")) if payload.get("updated_at") else None
+
+        response = CatalogVersionResponse(
+            id=version_id,
+            version_id=version_id,
+            version_number=(payload.get("version_number") or str(raw_version_id or "") or None),
+            project_id=normalized_project,
+            status=(payload.get("status") or CatalogStatus.PUBLISHED.value),
+            hash=(payload.get("hash") or payload.get("catalog_hash") or None),
+            created_at=created_at,
+            updated_at=updated_at,
+            published_at=published_at,
+            is_current=bool(payload.get("is_current")),
+        )
+        if status_filter is not None and response.status != status_filter.value:
+            continue
+        rows.append(response)
+
+    rows.sort(
+        key=lambda item: (
+            item.published_at or datetime.min.replace(tzinfo=timezone.utc),
+            item.created_at or datetime.min.replace(tzinfo=timezone.utc),
+            item.updated_at or datetime.min.replace(tzinfo=timezone.utc),
+            str(item.id),
+        ),
+        reverse=True,
+    )
+    return tuple(rows[: max(limit, 1)])
+
+
+def _catalog_versions_firestore(
+    project_id: str,
+    status_filter: Optional[CatalogStatus],
+    limit: int,
+) -> list[CatalogVersionResponse]:
+    return list(_cached_catalog_versions_firestore(project_id, status_filter, limit))
 
 
 def _catalog_digest_firestore(project_id: str) -> CatalogVersionDigest:
@@ -230,65 +303,6 @@ def _catalog_digest_firestore(project_id: str) -> CatalogVersionDigest:
         hash=(payload.get("hash") or payload.get("catalog_hash")),
         published_at=published_at,
     )
-
-
-def _catalog_versions_firestore(
-    project_id: str,
-    status_filter: Optional[CatalogStatus],
-    limit: int,
-) -> list[CatalogVersionResponse]:
-    """Return detailed catalog versions list from Firestore for one project."""
-    client = get_firestore_client()
-    normalized_project = project_id.strip().upper()
-
-    docs = (
-        client.collection("catalog_versions")
-        .where("project_id", "==", normalized_project)
-        .limit(max(limit, 1))
-        .stream()
-    )
-
-    rows: list[CatalogVersionResponse] = []
-    for doc in docs:
-        payload = doc.to_dict() or {}
-
-        raw_version_id = payload.get("version_id") or payload.get("id") or doc.id
-        version_id = _as_uuid_or_none(raw_version_id)
-        if version_id is None:
-            # Keep compatibility with UUID response model using deterministic UUID.
-            version_id = uuid5(NAMESPACE_URL, f"catalog-version:{normalized_project}:{raw_version_id}")
-
-        status_raw = str(payload.get("status") or "published").strip().lower()
-        if status_raw not in {s.value for s in CatalogStatus}:
-            status_raw = CatalogStatus.PUBLISHED.value
-        status_value = CatalogStatus(status_raw)
-
-        if status_filter and status_value != status_filter:
-            continue
-
-        created_at = _as_utc_datetime(payload.get("created_at"))
-        updated_at = _as_utc_datetime(payload.get("updated_at"))
-        published_at_raw = payload.get("published_at")
-        published_at = _as_utc_datetime(published_at_raw) if published_at_raw else None
-        published_by_id = _as_uuid_or_none(payload.get("published_by_id"))
-
-        rows.append(
-            CatalogVersionResponse(
-                id=version_id,
-                project_id=normalized_project,
-                version_number=str(payload.get("version_number") or raw_version_id),
-                status=status_value,
-                hash=payload.get("hash") or payload.get("catalog_hash"),
-                notes=payload.get("notes"),
-                published_by_id=published_by_id,
-                published_at=published_at,
-                created_at=created_at,
-                updated_at=updated_at,
-            )
-        )
-
-    rows.sort(key=lambda item: item.created_at, reverse=True)
-    return rows[:limit]
 
 
 def _as_utc_datetime(value: Any) -> datetime:
@@ -1144,6 +1158,8 @@ def _publish_bundle_firestore(project_id: str) -> dict:
             version_id,
         )
 
+    _clear_catalog_read_cache()
+
     return {"version_id": version_id, "published_at": now, "status": "published"}
 
 
@@ -1204,6 +1220,8 @@ def _rollback_bundle_firestore(project_id: str, to_version: str) -> dict:
             project,
             to_version,
         )
+
+    _clear_catalog_read_cache()
 
     return {"version_id": to_version, "restored_at": now}
 

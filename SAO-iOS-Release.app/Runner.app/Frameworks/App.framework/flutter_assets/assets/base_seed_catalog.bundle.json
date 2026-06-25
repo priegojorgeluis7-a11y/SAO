@@ -1,0 +1,215 @@
+{
+  "schema": "sao.catalog.bundle.v1",
+  "meta": {
+    "project_id": "TMQ",
+    "bundle_id": "TMQ@2026-03-02T18:00:00Z",
+    "generated_at": "2026-03-02T18:00:00Z",
+    "versions": {
+      "base": "base@2026-03-01T00:00:00Z",
+      "project": "TMQ@2026-03-02T17:50:00Z",
+      "effective": "TMQ@2026-03-02T18:00:00Z"
+    }
+  },
+  "effective": {
+    "entities": {
+      "activities": [
+        {"id":"CAM","name":"Caminamiento","description":"Recorrido físico en campo para verificar DDV, accesos y afectaciones.","active":true,"order":0},
+        {"id":"REU","name":"Reunión","description":"Coordinación técnica, social o institucional.","active":true,"order":1},
+        {"id":"ASP","name":"Asamblea Protocolizada","description":"Acto formal agrario para aprobar acuerdos y Convenio de Ocupación Previa (COP).","active":true,"order":2},
+        {"id":"CIN","name":"Consulta Indígena","description":"Proceso de participación conforme al Convenio 169.","active":true,"order":3},
+        {"id":"SOC","name":"Socialización","description":"Presentación y sensibilización comunitaria.","active":true,"order":4},
+        {"id":"AIN","name":"Acompañamiento Institucional","description":"Supervisión y documentación interinstitucional.","active":true,"order":5}
+      ],
+      "subcategories": [
+        {"id":"CAM_DDV","activity_id":"CAM","name":"Verificación de DDV","description":"Revisión de límites del DDV en campo.","active":true,"order":0},
+        {"id":"CAM_MAR","activity_id":"CAM","name":"Marcaje de afectaciones","description":"Señalamiento físico de áreas afectadas.","active":true,"order":1},
+        {"id":"CAM_ACC","activity_id":"CAM","name":"Revisión de accesos / BDT","description":"Confirmación de caminos y bienes distintos a la tierra.","active":true,"order":2},
+        {"id":"CAM_SEG","activity_id":"CAM","name":"Seguimiento técnico","description":"Monitoreo y control de avances.","active":true,"order":3},
+        {"id":"REU_TEC","activity_id":"REU","name":"Técnica / Interinstitucional","description":"Coordinación entre dependencias.","active":true,"order":0},
+        {"id":"REU_EJI","activity_id":"REU","name":"Ejidal / Comisariado","description":"Diálogo con autoridades ejidales.","active":true,"order":1},
+        {"id":"REU_MUN","activity_id":"REU","name":"Municipal / Estatal / PCivil","description":"Vinculación con gobiernos locales.","active":true,"order":2},
+        {"id":"REU_SEG","activity_id":"REU","name":"Seguimiento / Evaluación","description":"Revisión de cumplimiento de acuerdos.","active":true,"order":3},
+        {"id":"REU_INF","activity_id":"REU","name":"Informativa","description":"Presentación de avances.","active":true,"order":4},
+        {"id":"REU_MES","activity_id":"REU","name":"Mesa Técnica","description":"Análisis puntual de temas técnicos/sociales.","active":true,"order":5},
+        {"id":"ASP_1AP","activity_id":"ASP","name":"1ª Asamblea Protocolizada (1AP)","description":"Convocatoria inicial, presentación del proyecto.","active":true,"order":0},
+        {"id":"ASP_1AP_PER","activity_id":"ASP","name":"1ª Asamblea Protocolizada Permanente","description":"Continúa otro día (con quórum legal).","active":true,"order":1},
+        {"id":"ASP_2AP","activity_id":"ASP","name":"2ª Asamblea Protocolizada (2AP)","description":"Con quórum legal para acuerdos.","active":true,"order":2},
+        {"id":"ASP_2AP_PER","activity_id":"ASP","name":"2ª Asamblea Protocolizada Permanente","description":"Continúa otro día.","active":true,"order":3},
+        {"id":"ASP_INF","activity_id":"ASP","name":"Asamblea Informativa","description":"Sesión explicativa previa.","active":true,"order":4},
+        {"id":"CIN_INF","activity_id":"CIN","name":"Etapa Informativa","description":"Difusión del proyecto.","active":true,"order":0},
+        {"id":"CIN_CON","activity_id":"CIN","name":"Etapa de Construcción de Acuerdos","description":"Definición de compromisos.","active":true,"order":1},
+        {"id":"CIN_ACT","activity_id":"CIN","name":"Etapa de Actos y Acuerdos","description":"Firma de actas finales.","active":true,"order":2},
+        {"id":"SOC_PRE","activity_id":"SOC","name":"Presentación Comunitaria","description":"Exposición general.","active":true,"order":0},
+        {"id":"SOC_DIF","activity_id":"SOC","name":"Difusión de Información","description":"Entrega de materiales.","active":true,"order":1},
+        {"id":"SOC_ATN","activity_id":"SOC","name":"Atención a Inquietudes","description":"Gestión de dudas o quejas.","active":true,"order":2},
+        {"id":"AIN_TEC","activity_id":"AIN","name":"Técnico","description":"Supervisión de obras/trazos.","active":true,"order":0},
+        {"id":"AIN_SOC","activity_id":"AIN","name":"Social","description":"Seguimiento a compromisos.","active":true,"order":1},
+        {"id":"AIN_DOC","activity_id":"AIN","name":"Documental","description":"Registro y evidencias oficiales.","active":true,"order":2}
+      ],
+      "purposes": [
+        {"id":"PRS_GEN_REU","activity_id":"REU","subcategory_id":"REU_INF","name":"Presentación general del proyecto","description":"","active":true,"order":0},
+        {"id":"DOC_CONV_REU","activity_id":"REU","subcategory_id":"REU_INF","name":"Entrega de documentación / Convocatorias","description":"","active":true,"order":1},
+        {"id":"SOC_CON_REU","activity_id":"REU","subcategory_id":"REU_SEG","name":"Atención a inconformidades o conflictos","description":"","active":true,"order":2},
+        {"id":"CONC_FER_REU","activity_id":"REU","subcategory_id":"REU_TEC","name":"Coordinación con concesionarios ferroviarios","description":"","active":true,"order":3},
+        {"id":"COOR_INST_REU","activity_id":"REU","subcategory_id":"REU_TEC","name":"Coordinación institucional","description":"","active":true,"order":4},
+        {"id":"PLAN_ACT_REU","activity_id":"REU","subcategory_id":"REU_SEG","name":"Planeación de nuevas actividades","description":"","active":true,"order":5},
+        {"id":"SEG_DOC_REU","activity_id":"REU","subcategory_id":"REU_SEG","name":"Seguimiento administrativo / documental","description":"","active":true,"order":6},
+        {"id":"PRS_GEN_ASP","activity_id":"ASP","subcategory_id":"ASP_1AP","name":"Presentación general del proyecto","description":"","active":true,"order":0},
+        {"id":"DOC_CONV_ASP","activity_id":"ASP","subcategory_id":"ASP_1AP","name":"Entrega de documentación / Convocatorias","description":"","active":true,"order":1},
+        {"id":"COP_FIR_ASP","activity_id":"ASP","subcategory_id":"ASP_2AP","name":"Obtención de anuencia o firma de COP","description":"","active":true,"order":2},
+        {"id":"AVAL_VAL_ASP","activity_id":"ASP","subcategory_id":null,"name":"Validación o ajuste de avalúos","description":"","active":true,"order":3},
+        {"id":"AFEC_VER_CAM","activity_id":"CAM","subcategory_id":"CAM_DDV","name":"Verificación de afectaciones","description":"","active":true,"order":0},
+        {"id":"DDV_MAR_CAM","activity_id":"CAM","subcategory_id":"CAM_MAR","name":"Marcaje o actualización de DDV / trazo","description":"","active":true,"order":1},
+        {"id":"ACC_ALT_CAM","activity_id":"CAM","subcategory_id":"CAM_ACC","name":"Análisis de accesos y pasos alternos","description":"","active":true,"order":2}
+      ],
+      "topics": [
+        {"id":"TOP_GAL","type":"Tecnico","name":"Gálibos ferroviarios","description":"Revisión de alturas/ancho de estructuras","active":true,"order":0},
+        {"id":"TOP_ACC","type":"Tecnico","name":"Accesos y pasos vehiculares","description":"Conectividad vial","active":true,"order":1},
+        {"id":"TOP_TEN","type":"Social/Agrario","name":"Tenencia de la tierra","description":"Propiedad/posesión","active":true,"order":10},
+        {"id":"TOP_AVA","type":"Social/Agrario","name":"Avalúos y pagos","description":"Valor m² y compensación","active":true,"order":11},
+        {"id":"TOP_ARB","type":"Ambiental","name":"Arbolado / vegetación","description":"Tala/reforestación","active":true,"order":20},
+        {"id":"TOP_INAH","type":"Patrimonial","name":"Sitios arqueológicos / INAH","description":"Protección patrimonial","active":true,"order":30},
+        {"id":"TOP_CONS","type":"Indigena","name":"Consulta previa","description":"Derecho de participación","active":true,"order":40}
+      ],
+      "results": [
+        {"id":"R01","category":"Ejecución regular o exitosa","name":"Actividad realizada conforme al programa","description":"","active":true,"order":1},
+        {"id":"R02","category":"Ejecución regular o exitosa","name":"Asamblea con quórum legal y acuerdos aprobados","description":"","active":true,"order":2},
+        {"id":"R03","category":"Casos sociales o administrativos","name":"Sin quórum / segunda convocatoria programada","description":"","active":true,"order":3},
+        {"id":"R04","category":"Ejecución regular o exitosa","name":"Firma de acta informativa / COP","description":"","active":true,"order":4},
+        {"id":"R05","category":"Ejecución regular o exitosa","name":"Se obtienen anuencias / permisos","description":"","active":true,"order":5},
+        {"id":"R06","category":"Reajustes o cambios técnicos","name":"Se ajusta superficie o valor de afectación","description":"","active":true,"order":6},
+        {"id":"R07","category":"Reajustes o cambios técnicos","name":"Nuevas afectaciones identificadas","description":"","active":true,"order":7},
+        {"id":"R08","category":"Reajustes o cambios técnicos","name":"Solicitud canalizada a dependencia","description":"","active":true,"order":8},
+        {"id":"R09","category":"Seguimiento y compromisos interinstitucionales","name":"Se acuerda mantenimiento o intervención","description":"","active":true,"order":9},
+        {"id":"R10","category":"Casos sociales o administrativos","name":"Proceso en revisión / sin acuerdo final","description":"","active":true,"order":10},
+        {"id":"R11","category":"Casos sociales o administrativos","name":"Sin acuerdos / reunión informativa únicamente","description":"","active":true,"order":11},
+        {"id":"R12","category":"Seguimiento y compromisos interinstitucionales","name":"Se programa nueva reunión o seguimiento","description":"","active":true,"order":12}
+      ],
+      "assistants": [
+        {"id":"AST1","type":"Dependencia","name":"ARTF","description":"Agencia Reguladora del Transporte Ferroviario","active":true,"order":1},
+        {"id":"AST2","type":"Dependencia","name":"SEDATU","description":"Secretaría de Desarrollo Agrario","active":true,"order":2},
+        {"id":"AST3","type":"Dependencia","name":"Defensa (SEDENA)","description":"Secretaría de la Defensa Nacional","active":true,"order":3}
+      ]
+    },
+    "relations": {
+      "activity_to_topics_suggested": [
+        {"activity_id":"CAM","topic_id":"TOP_GAL","active":true},
+        {"activity_id":"CAM","topic_id":"TOP_ACC","active":true},
+        {"activity_id":"CAM","topic_id":"TOP_TEN","active":true},
+        {"activity_id":"CAM","topic_id":"TOP_AVA","active":true},
+        {"activity_id":"CAM","topic_id":"TOP_ARB","active":true},
+        {"activity_id":"CAM","topic_id":"TOP_INAH","active":true},
+        {"activity_id":"REU","topic_id":"TOP_GAL","active":true},
+        {"activity_id":"REU","topic_id":"TOP_AVA","active":true}
+      ]
+    },
+    "color_tokens": {
+      "status": {
+        "borrador": "#6B7280",
+        "nuevo": "#2563EB",
+        "en_revision": "#D97706",
+        "aprobado": "#059669",
+        "rechazado": "#DC2626"
+      },
+      "severity": {
+        "baja": "#10B981",
+        "media": "#F59E0B",
+        "alta": "#EF4444"
+      }
+    },
+    "form_fields": [
+      {
+        "entity_type": "activity",
+        "type_id": "CAM",
+        "fields": [
+          {"key": "tramo", "label": "Tramo", "widget": "text", "required": true},
+          {"key": "pk_inicio", "label": "PK Inicio", "widget": "text", "required": true}
+        ]
+      },
+      {
+        "entity_type": "activity",
+        "type_id": "REU",
+        "fields": [
+          {"key": "dependencia", "label": "Dependencia", "widget": "text", "required": true}
+        ]
+      }
+    ],
+    "rules": {
+      "cascades": {
+        "subcategories_by_activity": true,
+        "purposes_by_activity_and_subcategory": true
+      },
+      "null_semantics": {
+        "purpose.subcategory_id": "null => propósito aplica a toda la actividad (global)."
+      },
+      "constraints": [
+        {
+          "code": "PARENT_INACTIVE_BLOCKS_CHILD_CREATE",
+          "severity": "error",
+          "applies_to": ["subcategories.create", "purposes.create"],
+          "message": "No puedes crear si el padre está inactivo."
+        }
+      ],
+      "workflow": {
+        "global": {
+          "states": [
+            "borrador",
+            "nuevo",
+            "en_revision",
+            "requiere_cambios",
+            "aprobado",
+            "rechazado",
+            "sincronizado"
+          ],
+          "transitions": [
+            {
+              "from": "borrador",
+              "to": ["nuevo"],
+              "roles": ["operativo", "coordinador", "admin"]
+            },
+            {
+              "from": "nuevo",
+              "to": ["en_revision", "rechazado"],
+              "roles": ["coordinador", "admin"]
+            },
+            {
+              "from": "en_revision",
+              "to": ["aprobado", "rechazado", "requiere_cambios"],
+              "roles": ["coordinador", "admin"]
+            },
+            {
+              "from": "requiere_cambios",
+              "to": ["en_revision"],
+              "roles": ["operativo", "coordinador", "admin"],
+              "required_permissions": ["edit_activity"]
+            },
+            {
+              "from": "aprobado",
+              "to": ["sincronizado"],
+              "roles": ["admin"],
+              "required_permissions": ["approve_activity"]
+            }
+          ]
+        },
+        "by_activity_type": {
+          "CAM": {
+            "transitions": [
+              {
+                "from": "borrador",
+                "to": ["nuevo", "en_revision"],
+                "roles": ["operativo", "coordinador", "admin"]
+              }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "editor": {
+    "layers": {
+      "base": {"read_only": true, "entities": {}, "relations": {}},
+      "project": {"read_only": false, "ops": []}
+    },
+    "validation": {"status": "ok", "issues": []}
+  }
+}

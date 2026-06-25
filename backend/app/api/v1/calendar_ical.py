@@ -31,13 +31,14 @@ router = APIRouter(prefix="/assignments", tags=["assignments"])
 logger = logging.getLogger(__name__)
 
 _ACTIVITY_TYPE_LABELS: dict[str, str] = {
-    "CAM": "Caminata",
+    "CAM": "Caminamiento",
     "REU": "Reunión",
-    "ASP": "Aspecto",
-    "CIN": "Cinta",
-    "SOC": "Socio",
-    "AIN": "Acción de Inspección",
+    "ASP": "Asamblea Protocolizada",
+    "CIN": "Consulta Indígena",
+    "SOC": "Socialización",
+    "AIN": "Acompañamiento Institucional",
 }
+
 
 
 def _label_for_type(code: str) -> str:

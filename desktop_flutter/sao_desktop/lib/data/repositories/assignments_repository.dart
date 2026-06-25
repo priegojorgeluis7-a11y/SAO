@@ -712,7 +712,15 @@ class AssignmentsRepository {
         .toList();
   }
 
-  Future<AssignmentItem> createAssignment({
+  /// Creates one or more assignments.
+  /// 
+  /// For single front assignment (backward compatible), returns one item.
+  /// For multiple fronts or all fronts, returns a list of items.
+  /// 
+  /// Parameters:
+  /// - [frontIds]: List of front IDs to assign. If empty and [allFronts] is false, uses [frontId].
+  /// - [allFronts]: If true, creates one assignment per every front in the project.
+  Future<List<AssignmentItem>> createAssignment({
     required String projectId,
     required String assigneeUserId,
     List<String> assigneeUserIds = const <String>[],
@@ -721,6 +729,10 @@ class AssignmentsRepository {
     required DateTime endAt,
     String? title,
     String? frontId,
+    /// Multiple front IDs to assign (NUEVO)
+    List<String> frontIds = const <String>[],
+    /// Assign to all project fronts (NUEVO)
+    bool allFronts = false,
     String? estado,
     String? municipio,
     String? colonia,
@@ -743,18 +755,34 @@ class AssignmentsRepository {
       normalizedAssigneeUserIds.insert(0, fallbackAssignee);
     }
 
+    // Normalize front_ids - filter valid UUIDs only
+    final normalizedFrontIds = <String>[];
+    final seenFrontIds = <String>{};
+    for (final fid in frontIds) {
+      final value = fid.trim();
+      if (value.isEmpty) continue;
+      if (_isUuid(value) && seenFrontIds.add(value)) {
+        normalizedFrontIds.add(value);
+      }
+    }
+
     final normalizedFrontId =
         frontId != null && _isUuid(frontId) ? frontId : null;
     final frontRef = normalizedFrontId == null ? frontId?.trim() : null;
-    final decoded = await _client.postJson('/api/v1/assignments', {
+    
+    final payload = <String, dynamic>{
       'project_id': projectId,
       'assignee_user_id': assigneeUserId,
       if (normalizedAssigneeUserIds.isNotEmpty)
         'assignee_user_ids': normalizedAssigneeUserIds,
       'activity_type_code': activityTypeCode,
       'title': title,
-      'front_id': normalizedFrontId,
-      'front_ref': frontRef,
+      // Single front (backward compatibility)
+      if (normalizedFrontId != null) 'front_id': normalizedFrontId,
+      if (frontRef != null) 'front_ref': frontRef,
+      // Multiple fronts (NUEVO)
+      if (normalizedFrontIds.isNotEmpty) 'front_ids': normalizedFrontIds,
+      if (allFronts) 'all_fronts': true,
       'estado': estado,
       'municipio': municipio,
       'colonia': colonia,
@@ -764,8 +792,20 @@ class AssignmentsRepository {
       'risk': risk,
       if (latitude != null) 'latitude': latitude,
       if (longitude != null) 'longitude': longitude,
-    });
-    return AssignmentItem.fromJson((decoded as Map).cast<String, dynamic>());
+    };
+    
+    final decoded = await _client.postJson('/api/v1/assignments', payload);
+    
+    // Handle both single item and list response
+    if (decoded is List) {
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map((e) => AssignmentItem.fromJson(e))
+          .toList();
+    } else if (decoded is Map<String, dynamic>) {
+      return [AssignmentItem.fromJson(decoded)];
+    }
+    return [];
   }
 
   Future<AssignmentItem> transferAssignment({

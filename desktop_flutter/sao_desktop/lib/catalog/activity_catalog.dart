@@ -63,63 +63,43 @@ class ActivityCatalog {
   );
 
   static const asamblea = ActivityType(
-    id: 'ASA',
-    label: 'Asamblea',
+    id: 'ASP',
+    label: 'Asamblea Protocolizada',
     icon: Icons.people,
     defaultRisk: 'alto',
     requiresEvidence: true,
-    description: 'Asamblea comunitaria',
+    description: 'Acto formal agrario para aprobar acuerdos y COP',
     allowedRoles: ['coordinador', 'admin'],
   );
 
   static const consulta = ActivityType(
-    id: 'CON',
-    label: 'Consulta',
+    id: 'CIN',
+    label: 'Consulta Indígena',
     icon: Icons.chat_bubble_outline,
-    defaultRisk: 'bajo',
-    requiresEvidence: false,
-    description: 'Consulta o entrevista',
-    allowedRoles: ['operativo', 'coordinador', 'admin'],
-  );
-
-  static const supervision = ActivityType(
-    id: 'SUP',
-    label: 'Supervisión',
-    icon: Icons.assessment,
-    defaultRisk: 'medio',
+    defaultRisk: 'alto',
     requiresEvidence: true,
-    description: 'Supervisión de obra o proyecto',
-    allowedRoles: ['coordinador', 'admin', 'auditor'],
-  );
-
-  static const capacitacion = ActivityType(
-    id: 'CAP',
-    label: 'Capacitación',
-    icon: Icons.school,
-    defaultRisk: 'bajo',
-    requiresEvidence: true,
-    description: 'Sesión de capacitación',
+    description: 'Proceso de participación conforme al Convenio 169 OIT',
     allowedRoles: ['coordinador', 'admin'],
   );
 
-  static const inspeccion = ActivityType(
-    id: 'INS',
-    label: 'Inspección',
-    icon: Icons.search,
-    defaultRisk: 'alto',
-    requiresEvidence: true,
-    description: 'Inspección técnica',
-    allowedRoles: ['coordinador', 'admin', 'auditor'],
-  );
-
-  static const levantamiento = ActivityType(
-    id: 'LEV',
-    label: 'Levantamiento',
-    icon: Icons.draw,
+  static const socializacion = ActivityType(
+    id: 'SOC',
+    label: 'Socialización',
+    icon: Icons.share,
     defaultRisk: 'medio',
     requiresEvidence: true,
-    description: 'Levantamiento topográfico o de información',
+    description: 'Presentación y sensibilización comunitaria',
     allowedRoles: ['operativo', 'coordinador', 'admin'],
+  );
+
+  static const acompaniamiento = ActivityType(
+    id: 'AIN',
+    label: 'Acompañamiento Institucional',
+    icon: Icons.assistant_direction,
+    defaultRisk: 'medio',
+    requiresEvidence: true,
+    description: 'Supervisión y documentación interinstitucional',
+    allowedRoles: ['coordinador', 'admin'],
   );
 
   // ============================================================
@@ -130,10 +110,8 @@ class ActivityCatalog {
     reunion,
     asamblea,
     consulta,
-    supervision,
-    capacitacion,
-    inspeccion,
-    levantamiento,
+    socializacion,
+    acompaniamiento,
   ];
 
   // ============================================================

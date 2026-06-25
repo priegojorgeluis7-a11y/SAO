@@ -505,6 +505,9 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
 
   List<String> _assigneeIds = const [];
   String? _frontId;
+  // Multi-front selection (NUEVO)
+  List<String> _selectedFrontIds = [];
+  bool _allFronts = false;
   String? _activityTypeCode;
   String? _selectedEstado;
   String? _selectedMunicipio;
@@ -898,7 +901,8 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
           _tipoLugar => _lugarController.text.trim().isNotEmpty,
           _ => false,
         };
-        final hasFront = _frontId != null && _frontId!.trim().isNotEmpty;
+        // Multi-front: valid if _allFronts=true OR _selectedFrontIds not empty OR legacy _frontId
+        final hasFront = _allFronts || _selectedFrontIds.isNotEmpty || (_frontId != null && _frontId!.trim().isNotEmpty);
         final requiresEstado = _estadoOptions.isNotEmpty;
         final requiresMunicipio = _municipioOptions.isNotEmpty;
         final hasEstado = !requiresEstado || _selectedEstado != null;
@@ -1016,8 +1020,10 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
             _activityTypeManualController.text.trim().isEmpty) {
           return 'Selecciona o escribe un tipo de actividad.';
         }
-        if (_frontId == null || _frontId!.trim().isEmpty) {
-          return 'Selecciona ${frontTerminology(widget.projectId)}.';
+        // Multi-front: valid if _allFronts=true OR _selectedFrontIds not empty OR legacy _frontId
+        final hasFront = _allFronts || _selectedFrontIds.isNotEmpty || (_frontId != null && _frontId!.trim().isNotEmpty);
+        if (!hasFront) {
+          return 'Selecciona al menos un ${frontTerminology(widget.projectId)} o marca "Todos".';
         }
         if (_tipoUbicacion == _tipoPuntual && _parsePkMeters(_pkController.text) == null) {
           return 'Captura PK valido.';
@@ -1229,26 +1235,98 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
             onPressed: _submitting ? null : _addCustomActivityDialog,
           ),
         const SizedBox(height: 10),
-        DropdownButtonFormField<String>(
-          initialValue: _frontId,
-          decoration: InputDecoration(
-            labelText: frontTerminology(widget.projectId, capitalize: true),
-            border: const OutlineInputBorder(),
+        // ── Multi-front selector ──────────────────────────────────────────
+        Container(
+          width: double.infinity,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: SaoColors.border),
           ),
-          items: _fronts
-              .map(
-                (item) => DropdownMenuItem(
-                  value: item.id,
-                  child: Text(item.name),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header: "Todos" checkbox
+              CheckboxListTile(
+                value: _allFronts,
+                dense: true,
+                controlAffinity: ListTileControlAffinity.leading,
+                title: Text(
+                  'Todos los ${frontTerminology(widget.projectId, plural: true)}',
+                  style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
-              )
-              .toList(),
-          onChanged: _submitting
-              ? null
-              : (value) => setState(() {
-                    _frontId = value;
-                    _syncCoverageForFront(value);
-                  }),
+                subtitle: _allFronts
+                    ? const Text('Se asignará a todos los frentes disponibles',
+                        style: TextStyle(fontSize: 11, color: SaoColors.success))
+                    : Text(
+                        _selectedFrontIds.isEmpty
+                            ? 'O selecciona frentes específicos'
+                            : '${_selectedFrontIds.length} frente(s) seleccionado(s)',
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                onChanged: _submitting
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _allFronts = value ?? false;
+                          if (_allFronts) {
+                            _selectedFrontIds = [];
+                            _frontId = null;
+                            _syncCoverageForFront(null);
+                          }
+                        });
+                      },
+              ),
+              if (!_allFronts) ...[
+                const Divider(height: 1),
+                // Individual front checkboxes
+                SizedBox(
+                  height: 160,
+                  child: _fronts.isEmpty
+                      ? const Center(
+                          child: Text('No hay frentes disponibles',
+                              style: TextStyle(color: SaoColors.gray500)))
+                      : ListView.builder(
+                          itemCount: _fronts.length,
+                          itemBuilder: (context, index) {
+                            final front = _fronts[index];
+                            final selected = _selectedFrontIds.contains(front.id);
+                            return CheckboxListTile(
+                              value: selected,
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              controlAffinity: ListTileControlAffinity.leading,
+                              title: Text(front.name),
+                              subtitle: Text(front.code,
+                                  style: const TextStyle(fontSize: 10,
+                                      color: SaoColors.gray500)),
+                              onChanged: _submitting
+                                  ? null
+                                  : (value) {
+                                      setState(() {
+                                        final current = _selectedFrontIds.toList();
+                                        if (value == true) {
+                                          if (!current.contains(front.id)) {
+                                            current.add(front.id);
+                                          }
+                                        } else {
+                                          current.remove(front.id);
+                                        }
+                                        _selectedFrontIds = current;
+                                        // Sync coverage for first selected front
+                                        if (_selectedFrontIds.isNotEmpty) {
+                                          _syncCoverageForFront(_selectedFrontIds.first);
+                                        } else {
+                                          _syncCoverageForFront(null);
+                                        }
+                                      });
+                                    },
+                            );
+                          },
+                        ),
+                ),
+              ],
+            ],
+          ),
         ),
         const SizedBox(height: 10),
         if (_estadoOptions.isEmpty)
@@ -1884,6 +1962,9 @@ class _CreateAssignmentDialogState extends ConsumerState<_CreateAssignmentDialog
         endAt: endAt,
         title: effectiveTitle,
         frontId: _frontId,
+        // Multi-front selection (NUEVO)
+        frontIds: _selectedFrontIds,
+        allFronts: _allFronts,
         estado: _selectedEstado,
         municipio: _selectedMunicipio,
         colonia: _coloniaController.text.trim().isNotEmpty ? _coloniaController.text.trim() : null,

@@ -847,68 +847,99 @@ bool _isWithinSelectedRange(String rawDate, ReportDateRange range) {
 }
 
 /// Carga actividades aprobadas para el resumen PDF del dashboard.
-/// No realiza hidratación individual por ítem para mantener rendimiento.
+/// Realiza paginación completa para obtener todas las actividades,
+/// no solo la primera página.
 Future<List<ReportActivityItem>> loadApprovedActivitiesForPdf({
   required String projectId,
   required DateTime dateFrom,
   required DateTime dateTo,
-  int limit = 100,
+  int limit = 200,
 }) async {
   const client = BackendApiClient();
   final dateRange = ReportDateRange(start: dateFrom, end: dateTo);
+  final allItems = <ReportActivityItem>[];
+  
+  // Intentar primero con reports/activities (paginación completa)
   try {
-    final queryParams = [
-      'project_id=${Uri.encodeQueryComponent(projectId)}',
-      'date_from=${Uri.encodeQueryComponent(dateFrom.toUtc().toIso8601String())}',
-      'date_to=${Uri.encodeQueryComponent(dateTo.toUtc().toIso8601String())}',
-      'include_already_reported=true',
-      'page_size=200',
-    ];
-    final decoded =
-        await client.getJson('/api/v1/reports/activities?${queryParams.join("&")}');
-    if (decoded is Map<String, dynamic>) {
+    int currentPage = 1;
+    bool hasNext = true;
+    while (hasNext && currentPage <= 20 && allItems.length < limit) {
+      final queryParams = [
+        'project_id=${Uri.encodeQueryComponent(projectId)}',
+        'date_from=${Uri.encodeQueryComponent(dateFrom.toUtc().toIso8601String())}',
+        'date_to=${Uri.encodeQueryComponent(dateTo.toUtc().toIso8601String())}',
+        'include_already_reported=true',
+        'page_size=200',
+        'page=$currentPage',
+      ];
+      final decoded =
+          await client.getJson('/api/v1/reports/activities?${queryParams.join("&")}');
+      if (decoded is! Map<String, dynamic>) break;
+      
       final items = (decoded['items'] as List<dynamic>? ?? [])
           .whereType<Map<String, dynamic>>()
           .map((e) => ReportActivityItem.fromJson(e))
           .where((item) => item.isApprovedForReport)
           .where((item) => _matchesSelectedProject(item, projectId))
           .where((item) => _isWithinSelectedRange(item.createdAt, dateRange))
-          .take(limit)
           .toList(growable: false);
-      if (items.isNotEmpty) return items;
+      
+      if (items.isEmpty) break;
+      allItems.addAll(items);
+      
+      hasNext = decoded['meta']?['has_next'] == true || 
+                (decoded['has_next'] == true);
+      currentPage++;
+    }
+    
+    if (allItems.isNotEmpty) {
+      allItems.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return allItems.take(limit).toList(growable: false);
     }
   } catch (_) {}
-  // Fallback: completed-activities list
+  
+  // Fallback: completed-activities list (paginación completa)
   try {
-    final queryParams = [
-      'project_id=${Uri.encodeQueryComponent(projectId)}',
-      'page=1',
-      'page_size=$limit',
-    ];
-    final decoded = await client.getJson(
-        '/api/v1/completed-activities?${queryParams.join("&")}');
-    if (decoded is! Map<String, dynamic>) return [];
-    final items = (decoded['items'] as List<dynamic>? ?? [])
-        .whereType<Map<String, dynamic>>()
-        .map((raw) {
-          final normalized = Map<String, dynamic>.from(raw);
-          normalized['status'] ??= 'APROBADO';
-          normalized['review_status'] ??= 'APPROVED';
-          normalized['front_name'] ??= normalized['front'];
-          normalized['activity_title'] ??= normalized['title'];
-          normalized['created_at'] =
-              normalized['created_at'] ?? normalized['reviewed_at'] ?? '';
-          return ReportActivityItem.fromJson(normalized);
-        })
-        .where((item) => _matchesSelectedProject(item, projectId))
-        .where((item) => item.isApprovedForReport)
-        .where((item) => _isWithinSelectedRange(item.createdAt, dateRange))
-        .take(limit)
-        .toList(growable: false);
-    items.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return items;
+    int currentPage = 1;
+    bool hasNext = true;
+    while (hasNext && currentPage <= 20 && allItems.length < limit) {
+      final queryParams = [
+        'project_id=${Uri.encodeQueryComponent(projectId)}',
+        'page=$currentPage',
+        'page_size=200',
+      ];
+      final decoded = await client.getJson(
+          '/api/v1/completed-activities?${queryParams.join("&")}');
+      if (decoded is! Map<String, dynamic>) break;
+      
+      final items = (decoded['items'] as List<dynamic>? ?? [])
+          .whereType<Map<String, dynamic>>()
+          .map((raw) {
+            final normalized = Map<String, dynamic>.from(raw);
+            normalized['status'] ??= 'APROBADO';
+            normalized['review_status'] ??= 'APPROVED';
+            normalized['front_name'] ??= normalized['front'];
+            normalized['activity_title'] ??= normalized['title'];
+            normalized['created_at'] =
+                normalized['created_at'] ?? normalized['reviewed_at'] ?? '';
+            return ReportActivityItem.fromJson(normalized);
+          })
+          .where((item) => _matchesSelectedProject(item, projectId))
+          .where((item) => item.isApprovedForReport)
+          .where((item) => _isWithinSelectedRange(item.createdAt, dateRange))
+          .toList(growable: false);
+      
+      if (items.isEmpty) break;
+      allItems.addAll(items);
+      
+      hasNext = decoded['has_next'] == true;
+      currentPage++;
+    }
+    
+    allItems.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return allItems.take(limit).toList(growable: false);
   } catch (_) {
-    return [];
+    return allItems;
   }
 }
 

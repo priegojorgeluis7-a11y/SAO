@@ -126,6 +126,7 @@ class _HomePageState extends ConsumerState<HomePage>
 
   // ====== Estado de ejecución usando ExecutionState ======
   bool _isAdminViewer = false;
+  bool _canViewStats = false;
   bool _canViewOnlineUsers = false;
   bool _hasPrivilegedAssignmentTransferAccess = false;
   // Default: filterrar por asignado al usuario (seguro por defecto) hasta que se resuelva el rol.
@@ -700,6 +701,8 @@ class _HomePageState extends ConsumerState<HomePage>
         normalizedRoleName == 'COORD' ||
         normalizedRoleName == 'COORDINATOR' ||
         normalizedRoleName == 'SUPERVISOR';
+    final isSupervisorByRole =
+      localUser?.roleId == 3 || normalizedRoleName == 'SUPERVISOR';
     final email = user.email.trim().toLowerCase();
     final isAdminByEmail =
         email == 'admin@sao.mx' || email.startsWith('admin.');
@@ -721,11 +724,15 @@ class _HomePageState extends ConsumerState<HomePage>
     );
     final isSupervisorByAuthRole = authRoles.contains('SUPERVISOR');
 
-    final isSupervisorByRole =
-        localUser?.roleId == 3 || normalizedRoleName == 'SUPERVISOR';
     final nextCanViewOnlineUsers =
         isAdminByRole || isAdminByEmail || isSupervisorByRole ||
         isSupervisorByAuthRole;
+    final nextCanViewStats =
+      isAdminByRole ||
+      isAdminByEmail ||
+      isAdminByAuthRole ||
+      isSupervisorByRole ||
+      isSupervisorByAuthRole;
 
     if (!mounted) return;
     final nextIsAdmin = isAdminByRole || isAdminByEmail || isAdminByAuthRole;
@@ -745,12 +752,14 @@ class _HomePageState extends ConsumerState<HomePage>
     }
     final changed =
         nextIsAdmin != _isAdminViewer ||
+        nextCanViewStats != _canViewStats ||
         nextCanViewOnlineUsers != _canViewOnlineUsers ||
         nextIsOperative != _isOperativeViewer ||
         nextHasPrivilegedAssignmentTransferAccess !=
             _hasPrivilegedAssignmentTransferAccess;
     setState(() {
       _isAdminViewer = nextIsAdmin;
+      _canViewStats = nextCanViewStats;
       _canViewOnlineUsers = nextCanViewOnlineUsers;
       _hasPrivilegedAssignmentTransferAccess =
           nextHasPrivilegedAssignmentTransferAccess;
@@ -3512,46 +3521,48 @@ class _HomePageState extends ConsumerState<HomePage>
                       ),
                     ),
                     const SizedBox(width: 10),
-                    Expanded(
-                      child: GestureDetector(
-                        onTap: () => context.push('/admin/stats'),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 14,
-                            vertical: 12,
-                          ),
-                          decoration: BoxDecoration(
-                            color: SaoColors.actionPrimary,
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: const Row(
-                            children: [
-                              Icon(
-                                Icons.bar_chart_rounded,
-                                color: SaoColors.onPrimary,
-                                size: 20,
-                              ),
-                              SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  'Estadísticas',
-                                  style: TextStyle(
-                                    color: SaoColors.onPrimary,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: 13,
+                    if (_canViewStats) ...[
+                      Expanded(
+                        child: GestureDetector(
+                          onTap: () => context.push('/admin/stats'),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 14,
+                              vertical: 12,
+                            ),
+                            decoration: BoxDecoration(
+                              color: SaoColors.actionPrimary,
+                              borderRadius: BorderRadius.circular(14),
+                            ),
+                            child: const Row(
+                              children: [
+                                Icon(
+                                  Icons.bar_chart_rounded,
+                                  color: SaoColors.onPrimary,
+                                  size: 20,
+                                ),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'Estadísticas',
+                                    style: TextStyle(
+                                      color: SaoColors.onPrimary,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              Icon(
-                                Icons.chevron_right_rounded,
-                                color: SaoColors.onPrimary,
-                                size: 18,
-                              ),
-                            ],
+                                Icon(
+                                  Icons.chevron_right_rounded,
+                                  color: SaoColors.onPrimary,
+                                  size: 18,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
+                    ],
                     if (_canViewOnlineUsers) ...[
                       const SizedBox(width: 10),
                       Expanded(

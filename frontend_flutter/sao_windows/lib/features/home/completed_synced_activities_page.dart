@@ -194,17 +194,16 @@ class _CompletedSyncedActivitiesPageState
       }
 
       final rows = await _dao.listHomeActivitiesByProject(kAllProjects);
-      final candidateRows = rows.where((row) {
-        if (_isAdminViewer) {
-          return _isHistoryVisible(row);
-        }
-        return _isOwnedByCurrentUser(
-          row,
-          currentUserId: currentUserId,
-          currentUserEmail: currentUserEmail,
-          currentUserName: currentUserName,
-        );
-      }).toList();
+      final candidateRows = rows
+          .where(
+            (row) => _isOwnedByCurrentUser(
+              row,
+              currentUserId: currentUserId,
+              currentUserEmail: currentUserEmail,
+              currentUserName: currentUserName,
+            ),
+          )
+          .toList();
 
       final historyRows = candidateRows.toList()
         ..sort(
@@ -568,23 +567,6 @@ class _CompletedSyncedActivitiesPageState
     return nextAction == 'ESPERAR_DECISION_COORDINACION' ||
         nextAction == 'CERRADA_APROBADA' ||
         nextAction == 'COMPLETAR_WIZARD';
-  }
-
-  bool _isHistoryVisible(HomeActivityRecord row) {
-    if (_isRejectedForCorrection(row)) {
-      return true;
-    }
-
-    final status = row.activity.status.trim().toUpperCase();
-    if (status == 'REVISION_PENDIENTE' || status == 'RECHAZADA') {
-      return true;
-    }
-
-    if (status != 'SYNCED') {
-      return false;
-    }
-
-    return _hasMeaningfulHistorySignal(row);
   }
 
   bool _isOwnedByCurrentUser(

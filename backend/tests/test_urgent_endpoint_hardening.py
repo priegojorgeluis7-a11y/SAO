@@ -123,6 +123,88 @@ def test_dashboard_kpis_treats_approve_review_as_completed(monkeypatch):
     assert payload["kpis"]["pending_review"] == 0
 
 
+class _DashboardFakeSnapshot:
+    def __init__(self, payload):
+        self._payload = payload
+
+    def to_dict(self):
+        return dict(self._payload or {})
+
+
+class _DashboardFakeQuery:
+    def __init__(self, collection):
+        self._collection = collection
+        self._filters = []
+
+    def where(self, field, op, value):
+        self._filters.append((field, op, value))
+        return self
+
+    def stream(self):
+        self._collection.stream_calls += 1
+        rows = []
+        for payload in self._collection._docs.values():
+            match = True
+            for field, op, expected in self._filters:
+                if op == "==" and payload.get(field) != expected:
+                    match = False
+                    break
+            if match:
+                rows.append(_DashboardFakeSnapshot(payload))
+        return iter(rows)
+
+
+class _DashboardFakeCollection:
+    def __init__(self, docs):
+        self._docs = docs
+        self.stream_calls = 0
+
+    def where(self, field, op, value):
+        return _DashboardFakeQuery(self).where(field, op, value)
+
+    def stream(self):
+        self.stream_calls += 1
+        return iter(_DashboardFakeSnapshot(payload) for payload in self._docs.values())
+
+
+class _DashboardFakeClient:
+    def __init__(self, activities_docs):
+        self.activities_collection = _DashboardFakeCollection(activities_docs)
+
+    def collection(self, name):
+        if name != "activities":
+            raise AssertionError(f"Unexpected collection: {name}")
+        return self.activities_collection
+
+
+def test_dashboard_kpis_reuses_cached_firestore_reads(monkeypatch):
+    fake_client = _DashboardFakeClient(
+        {
+            "a1": {
+                "uuid": "a1",
+                "project_id": "TMQ",
+                "execution_state": "COMPLETADA",
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc),
+                "deleted_at": None,
+            }
+        }
+    )
+
+    monkeypatch.setattr(dashboard_kpis_api, "get_firestore_client", lambda: fake_client)
+    monkeypatch.setattr(dashboard_kpis_api, "verify_project_access", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(dashboard_kpis_api, "user_has_permission", lambda *_args, **_kwargs: True)
+
+    current_user = SimpleNamespace(project_ids=["TMQ"], roles=["OPERATIVO"], permission_scopes=[])
+
+    first = dashboard_kpis_api.get_operational_kpis(project_id="TMQ", current_user=current_user)
+    second = dashboard_kpis_api.get_operational_kpis(project_id="TMQ", current_user=current_user)
+
+    assert first["completed_today"] == 1
+    assert second["completed_today"] == 1
+    assert fake_client.activities_collection.stream_calls == 1
+
+
 def test_reports_activities_paginates_and_preserves_meta(monkeypatch):
     fake_client = _FakeFirestoreClient()
     project_id = "TMQ"
@@ -242,7 +324,9 @@ def test_reports_activities_ignores_front_todos_and_recent_review_date(monkeypat
             "activity_type_code": "INSP_CIVIL",
             "execution_state": "COMPLETADA",
             "review_decision": "APPROVE",
-            "created_at": now - timedelta(days=20),
+            # _report_dt now uses created_at as the primary date for filtering.
+            # Set created_at within the date range so the activity is found.
+            "created_at": now - timedelta(hours=12),
             "updated_at": now,
             "last_reviewed_at": now,
         }

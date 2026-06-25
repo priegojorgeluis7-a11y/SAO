@@ -82,6 +82,9 @@ def _default_bundle(project_id: str, version_id: str, now: datetime) -> dict[str
         {"id": "REU_SEG", "activity_id": "REU", "name": "Seguimiento / Evaluación", "description": "Revisión de cumplimiento de acuerdos.", "active": True, "order": 3},
         {"id": "REU_INF", "activity_id": "REU", "name": "Informativa", "description": "Presentación de avances.", "active": True, "order": 4},
         {"id": "REU_MES", "activity_id": "REU", "name": "Mesa Técnica", "description": "Análisis puntual de temas técnicos/sociales.", "active": True, "order": 5},
+        {"id": "REU_MAS", "activity_id": "REU", "name": "Mesa de Atención Social", "description": "Atención a temas sociales comunitarios.", "active": True, "order": 6},
+        {"id": "REU_ODT", "activity_id": "REU", "name": "Revisión de ODTs", "description": "Revisión de Órdenes de Trabajo.", "active": True, "order": 7},
+
         {"id": "ASP_1AP", "activity_id": "ASP", "name": "1ª Asamblea Protocolizada (1AP)", "description": "Convocatoria inicial y presentación del proyecto.", "active": True, "order": 0},
         {"id": "ASP_1AP_PER", "activity_id": "ASP", "name": "1ª Asamblea Protocolizada Permanente", "description": "Continúa otro día (con quórum legal).", "active": True, "order": 1},
         {"id": "ASP_2AP", "activity_id": "ASP", "name": "2ª Asamblea Protocolizada (2AP)", "description": "Con quórum legal para acuerdos.", "active": True, "order": 2},
@@ -383,8 +386,13 @@ def main() -> int:
     source_project = args.source_project_id.strip().upper()
 
     _ensure_project_doc(client, template_project, "Proyecto 0 - Catalogo Base", now)
-    _ensure_project_doc(client, "TMQ", "Tren Mexico-Queretaro", now)
+    _ensure_project_doc(client, "TMQ", "Tren México-Querétaro", now)
     _ensure_project_doc(client, "TAP", "Tren AIFA-Pachuca", now)
+    _ensure_project_doc(client, "TQI", "Tren Querétaro-Irapuato", now)
+    _ensure_project_doc(client, "TSNL", "Tren Suburbano Nuevo León", now)
+    _ensure_project_doc(client, "TQSL", "Tren Querétaro-San Luis Potosí", now)
+    _ensure_project_doc(client, "TSLS", "Tren Saltillo-San Luis Potosí", now)
+
 
     source_bundle, source_label = _pick_source_bundle(client, template_project, source_project)
     if source_bundle is None:
@@ -399,11 +407,20 @@ def main() -> int:
     template_version = _ensure_catalog(client, template_project, source_bundle, args.force)
     tmq_version = _ensure_catalog(client, "TMQ", source_bundle, args.force)
     tap_version = _ensure_catalog(client, "TAP", source_bundle, args.force)
+    tqi_version = _ensure_catalog(client, "TQI", source_bundle, args.force)
+    tsnl_version = _ensure_catalog(client, "TSNL", source_bundle, args.force)
+    tqsl_version = _ensure_catalog(client, "TQSL", source_bundle, args.force)
+    tsls_version = _ensure_catalog(client, "TSLS", source_bundle, args.force)
 
     logging.info("Template project ensured: %s version=%s", template_project, template_version)
     logging.info("Project ensured: TMQ version=%s", tmq_version)
     logging.info("Project ensured: TAP version=%s", tap_version)
+    logging.info("Project ensured: TQI version=%s", tqi_version)
+    logging.info("Project ensured: TSNL version=%s", tsnl_version)
+    logging.info("Project ensured: TQSL version=%s", tqsl_version)
+    logging.info("Project ensured: TSLS version=%s", tsls_version)
     logging.info("Firestore base catalogs are ready.")
+
     return 0
 
 

@@ -155,6 +155,153 @@ def test_list_assignments_single_project_does_not_scan_other_projects(monkeypatc
     assert [item.id for item in result] == [tmq_assignment_id]
 
 
+def test_list_assignments_single_project_recovers_legacy_project_aliases(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    assignee_id = str(uuid4())
+    assignment_id = str(uuid4())
+
+    fake_client.collection('activities').document(assignment_id).set(
+        {
+            'uuid': assignment_id,
+            # Legacy shape: project saved under camelCase and lowercase.
+            'projectId': 'tap',
+            'assigned_to_user_id': assignee_id,
+            'activity_type_code': 'INSP_CIVIL',
+            'title': 'Actividad TAP legado',
+            'execution_state': 'PENDIENTE',
+            'pk_start': 20,
+            'assignment_start_at': datetime(2026, 4, 27, 17, 0, tzinfo=timezone.utc).isoformat(),
+            'assignment_end_at': datetime(2026, 4, 27, 18, 0, tzinfo=timezone.utc).isoformat(),
+        }
+    )
+
+    monkeypatch.setattr(assignments_api, 'get_firestore_client', lambda: fake_client)
+    monkeypatch.setattr(
+        assignments_api,
+        'list_firestore_users',
+        lambda: [
+            SimpleNamespace(id=assignee_id, full_name='Usuario TAP', email='tap@example.com'),
+        ],
+        raising=False,
+    )
+    monkeypatch.setattr(assignments_api, 'user_has_any_role', lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        assignments_api,
+        'resolve_user_project_access',
+        lambda *_args, **_kwargs: (False, {'TAP'}),
+    )
+
+    result = assignments_api.list_assignments(
+        project_id='TAP',
+        from_dt=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        to_dt=datetime(2026, 4, 28, 0, 0, tzinfo=timezone.utc),
+        include_all=True,
+        current_user=SimpleNamespace(id=str(uuid4())),
+    )
+
+    assert len(result) == 1
+    assert result[0].id == assignment_id
+    assert result[0].project_id == 'TAP'
+
+
+def test_list_assignments_all_projects_returns_real_project_id_not_todos(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    assignee_id = str(uuid4())
+    assignment_id = str(uuid4())
+
+    fake_client.collection('projects').document('TMQ').set({'id': 'TMQ', 'code': 'TMQ'})
+    fake_client.collection('activities').document(assignment_id).set(
+        {
+            'uuid': assignment_id,
+            'project_id': 'TMQ',
+            'assigned_to_user_id': assignee_id,
+            'activity_type_code': 'INSP_CIVIL',
+            'title': 'Actividad TMQ en vista TODOS',
+            'execution_state': 'PENDIENTE',
+            'pk_start': 10,
+            'assignment_start_at': datetime(2026, 4, 27, 15, 0, tzinfo=timezone.utc).isoformat(),
+            'assignment_end_at': datetime(2026, 4, 27, 16, 0, tzinfo=timezone.utc).isoformat(),
+        }
+    )
+
+    monkeypatch.setattr(assignments_api, 'get_firestore_client', lambda: fake_client)
+    monkeypatch.setattr(
+        assignments_api,
+        'list_firestore_users',
+        lambda: [SimpleNamespace(id=assignee_id, full_name='Usuario TMQ', email='tmq@example.com')],
+        raising=False,
+    )
+    monkeypatch.setattr(assignments_api, 'user_has_any_role', lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        assignments_api,
+        'resolve_user_project_access',
+        lambda *_args, **_kwargs: (True, set()),
+    )
+
+    result = assignments_api.list_assignments(
+        project_id='TODOS',
+        from_dt=datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc),
+        to_dt=datetime(2026, 4, 28, 0, 0, tzinfo=timezone.utc),
+        include_all=True,
+        current_user=SimpleNamespace(id=str(uuid4())),
+    )
+
+    assert len(result) == 1
+    assert result[0].id == assignment_id
+    assert result[0].project_id == 'TMQ'
+
+
+def test_list_assignments_long_title_uses_safe_legacy_title(monkeypatch):
+    fake_client = _FakeFirestoreClient()
+    project_id = 'TSNL'
+    assignee_id = str(uuid4())
+    assignment_id = str(uuid4())
+    long_title = (
+        'Reunión con Municipio de Monterrey, ATTRAPI obras, consorcio constructor'
+    )
+
+    fake_client.collection('activities').document(assignment_id).set(
+        {
+            'uuid': assignment_id,
+            'project_id': project_id,
+            'assigned_to_user_id': assignee_id,
+            'activity_type_code': 'REU',
+            'title': long_title,
+            'execution_state': 'PENDIENTE',
+            'pk_start': 10,
+            'assignment_start_at': datetime(2026, 5, 29, 17, 0, tzinfo=timezone.utc).isoformat(),
+            'assignment_end_at': datetime(2026, 5, 29, 18, 0, tzinfo=timezone.utc).isoformat(),
+        }
+    )
+
+    monkeypatch.setattr(assignments_api, 'get_firestore_client', lambda: fake_client)
+    monkeypatch.setattr(
+        assignments_api,
+        'list_firestore_users',
+        lambda: [SimpleNamespace(id=assignee_id, full_name='Usuario TSNL', email='tsnl@example.com')],
+        raising=False,
+    )
+    monkeypatch.setattr(assignments_api, 'user_has_any_role', lambda *args, **kwargs: True)
+    monkeypatch.setattr(
+        assignments_api,
+        'resolve_user_project_access',
+        lambda *_args, **_kwargs: (False, {project_id}),
+    )
+
+    result = assignments_api.list_assignments(
+        project_id=project_id,
+        from_dt=datetime(2026, 5, 29, 0, 0, tzinfo=timezone.utc),
+        to_dt=datetime(2026, 5, 30, 0, 0, tzinfo=timezone.utc),
+        include_all=True,
+        current_user=SimpleNamespace(id=str(uuid4())),
+    )
+
+    assert len(result) == 1
+    assert result[0].id == assignment_id
+    assert result[0].title == 'REU'
+    assert len(result[0].title) <= 40
+
+
 def test_list_assignments_include_all_returns_canceled_items(monkeypatch):
     fake_client = _FakeFirestoreClient()
     project_id = 'TMQ'
@@ -261,7 +408,16 @@ def test_create_assignment_writes_audit_with_assignment_context(monkeypatch):
     fake_client = _FakeFirestoreClient()
     assignee_id = str(uuid4())
     actor_id = str(uuid4())
+    front_id = str(uuid4())
     audit_calls = []
+
+    # Create a dummy front for the project
+    fake_client.collection('fronts').document(front_id).set({
+        'id': front_id,
+        'name': 'Frente Test TMQ',
+        'code': 'FT_TMQ',
+        'project_id': 'TMQ',
+    })
 
     monkeypatch.setattr(assignments_api, 'get_firestore_client', lambda: fake_client)
     monkeypatch.setattr(assignments_api, '_next_project_sync_version', lambda *_args, **_kwargs: 7)
@@ -290,6 +446,7 @@ def test_create_assignment_writes_audit_with_assignment_context(monkeypatch):
             assignee_user_ids=[str(uuid4())],
             activity_type_code='INSP_CIVIL',
             title='Asignación con auditoría',
+            front_ids=[front_id],
             start_at=datetime(2026, 4, 16, 12, 0, tzinfo=timezone.utc),
             end_at=datetime(2026, 4, 16, 13, 0, tzinfo=timezone.utc),
         ),
@@ -301,7 +458,8 @@ def test_create_assignment_writes_audit_with_assignment_context(monkeypatch):
         ),
     )
 
-    assert result.project_id == 'TMQ'
+    assert len(result) >= 1
+    assert result[0].project_id == 'TMQ'
     assert len(audit_calls) == 1
     assert audit_calls[0]['action'] == 'ASSIGNMENT_CREATED'
     assert audit_calls[0]['entity'] == 'activity'
@@ -312,6 +470,15 @@ def test_create_assignment_writes_audit_with_assignment_context(monkeypatch):
 def test_create_assignment_accepts_catalog_activities_list_shape(monkeypatch):
     fake_client = _FakeFirestoreClient()
     assignee_id = str(uuid4())
+    front_id = str(uuid4())
+
+    # Create a dummy front for the project
+    fake_client.collection('fronts').document(front_id).set({
+        'id': front_id,
+        'name': 'Frente TAP',
+        'code': 'FT_TAP',
+        'project_id': 'TAP',
+    })
 
     fake_client.collection('catalog_current').document('TAP').set(
         {
@@ -353,6 +520,7 @@ def test_create_assignment_accepts_catalog_activities_list_shape(monkeypatch):
             assignee_user_id=assignee_id,
             activity_type_code='CAM',
             title='Caminamiento TAP',
+            front_ids=[front_id],
             start_at=datetime(2026, 4, 27, 9, 0, tzinfo=timezone.utc),
             end_at=datetime(2026, 4, 27, 11, 0, tzinfo=timezone.utc),
         ),
@@ -364,8 +532,9 @@ def test_create_assignment_accepts_catalog_activities_list_shape(monkeypatch):
         ),
     )
 
-    assert result.project_id == 'TAP'
-    assert result.title == 'Caminamiento TAP'
+    assert len(result) >= 1
+    assert result[0].project_id == 'TAP'
+    assert result[0].title == 'Caminamiento TAP'
     stored_docs = list(fake_client.collection('activities').stream())
     assert len(stored_docs) == 1
     assert stored_docs[0].to_dict()['activity_type_code'] == 'CAM'
@@ -374,6 +543,15 @@ def test_create_assignment_accepts_catalog_activities_list_shape(monkeypatch):
 def test_create_assignment_accepts_catalog_bundle_effective_entities_shape(monkeypatch):
     fake_client = _FakeFirestoreClient()
     assignee_id = str(uuid4())
+    front_id = str(uuid4())
+
+    # Create a dummy front for the project
+    fake_client.collection('fronts').document(front_id).set({
+        'id': front_id,
+        'name': 'Frente TAP Bundle',
+        'code': 'FT_TAP_B',
+        'project_id': 'TAP',
+    })
 
     fake_client.collection('catalog_current').document('TAP').set(
         {
@@ -424,6 +602,7 @@ def test_create_assignment_accepts_catalog_bundle_effective_entities_shape(monke
             assignee_user_id=assignee_id,
             activity_type_code='CAM',
             title='Caminamiento TAP Bundle',
+            front_ids=[front_id],
             start_at=datetime(2026, 4, 27, 9, 0, tzinfo=timezone.utc),
             end_at=datetime(2026, 4, 27, 11, 0, tzinfo=timezone.utc),
         ),
@@ -435,13 +614,23 @@ def test_create_assignment_accepts_catalog_bundle_effective_entities_shape(monke
         ),
     )
 
-    assert result.project_id == 'TAP'
-    assert result.title == 'Caminamiento TAP Bundle'
+    assert len(result) >= 1
+    assert result[0].project_id == 'TAP'
+    assert result[0].title == 'Caminamiento TAP Bundle'
 
 
 def test_create_assignment_does_not_fail_when_catalog_lookup_misses_type(monkeypatch, caplog):
     fake_client = _FakeFirestoreClient()
     assignee_id = str(uuid4())
+    front_id = str(uuid4())
+
+    # Create a dummy front for the project
+    fake_client.collection('fronts').document(front_id).set({
+        'id': front_id,
+        'name': 'Frente TAP Catalog',
+        'code': 'FT_TAP_C',
+        'project_id': 'TAP',
+    })
 
     fake_client.collection('catalog_current').document('TAP').set(
         {
@@ -481,6 +670,7 @@ def test_create_assignment_does_not_fail_when_catalog_lookup_misses_type(monkeyp
                 assignee_user_id=assignee_id,
                 activity_type_code='REU',
                 title='Reunión TAP sin bloqueo',
+                front_ids=[front_id],
                 start_at=datetime(2026, 4, 27, 12, 0, tzinfo=timezone.utc),
                 end_at=datetime(2026, 4, 27, 13, 0, tzinfo=timezone.utc),
             ),
@@ -492,8 +682,9 @@ def test_create_assignment_does_not_fail_when_catalog_lookup_misses_type(monkeyp
             ),
         )
 
-    assert result.project_id == 'TAP'
-    assert result.title == 'Reunión TAP sin bloqueo'
+    assert len(result) >= 1
+    assert result[0].project_id == 'TAP'
+    assert result[0].title == 'Reunión TAP sin bloqueo'
     assert 'Assignment activity_type_code not present in resolved catalog' in caplog.text
 
 

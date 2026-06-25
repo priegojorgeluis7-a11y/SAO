@@ -468,7 +468,15 @@ def _mutable_activity_fields(
     *,
     wizard_payload: dict[str, object] | None,
 ) -> dict:
-    """Return the mutable activity fields shared across create/update/undelete branches."""
+    """Return the mutable activity fields shared across create/update/undelete branches.
+    
+    NOTE: review_decision, review_comment, review_reject_reason_code, and review_status
+    are intentionally NOT included here. These fields are set exclusively by the
+    coordinator via the review endpoint and must NEVER be overwritten by a sync push
+    from the mobile client. The only exception is _should_reset_review_metadata(),
+    which explicitly clears them when the operativo re-submits corrections after a
+    CHANGES_REQUIRED or REJECT decision.
+    """
     participant_user_ids = [str(user_id) for user_id in (item.participant_user_ids or [])]
     if item.assigned_to_user_id:
         assignee = str(item.assigned_to_user_id)
@@ -495,8 +503,23 @@ def _mutable_activity_fields(
 
 
 def _should_reset_review_metadata(existing: dict, item: "SyncPushActivityItem") -> bool:
-    """Clear stale coordinator rejection metadata when the operativo re-submits corrections."""
+    """Clear stale coordinator rejection metadata when the operativo re-submits corrections.
+    
+    Only resets when:
+    1. The existing decision is CHANGES_REQUIRED or REJECT (not APPROVE/APPROVE_EXCEPTION)
+    2. The incoming state indicates the operativo is re-submitting (REVISION_PENDIENTE or COMPLETADA)
+    
+    If the activity was already APPROVED or APPROVE_EXCEPTION, the review decision is
+    NEVER reset — the coordinator's approval is final and must be explicitly changed
+    via the review endpoint.
+    """
     existing_decision = str(existing.get("review_decision") or "").strip().upper()
+    
+    # CRITICAL: Never reset APPROVE or APPROVE_EXCEPTION decisions.
+    # These are set exclusively by the coordinator via the review endpoint.
+    if existing_decision in {"APPROVE", "APPROVE_EXCEPTION", "APPROVED"}:
+        return False
+    
     if existing_decision not in {"CHANGES_REQUIRED", "REQUEST_CHANGES", "REQUIRES_CHANGES", "REJECT"}:
         return False
 
@@ -855,6 +878,7 @@ def _firestore_push_item(
                 "review_decision": None,
                 "review_comment": None,
                 "review_reject_reason_code": None,
+                "review_status": None,
             }
         )
     if batch is None:

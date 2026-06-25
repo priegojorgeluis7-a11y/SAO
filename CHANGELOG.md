@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [9.0.0] - 2026-06-25
+
+### Added
+
+- **Optimización de costos Cloud Run/Firestore**
+  - Índices de Firestore actualizados para mejor rendimiento
+  - Queries optimizadas en reports.py y assignments.py
+  - Módulo de caché implementado para reducir lecturas
+
+- **Compilaciones actualizadas**
+  - Android AAB (56.8 MB) - Google Play Store
+  - Android APK (35.7 MB) - Pruebas
+  - iOS (30.4 MB) - con dSYMs configurados
+  - macOS Desktop (67.2 MB)
+
+- **Mejoras iOS**
+  - Podfile actualizado para generar dSYMs en todos los pods
+  - Configuración de Debug Information Format para release
+
+### Fixed
+
+- **Errores menores de compilación y warnings**
+
+---
+
 ## [1.0.10] - 2026-05-22
 
 ### Fixed

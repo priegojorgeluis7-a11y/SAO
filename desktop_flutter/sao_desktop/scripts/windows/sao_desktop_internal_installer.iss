@@ -1,5 +1,7 @@
 #define MyAppName "SAO Desktop"
-#define MyAppVersion "1.0.1"
+#ifndef MyAppVersion
+	#define MyAppVersion "0.0.0"
+#endif
 #define MyAppPublisher "SAO"
 #define MyAppExeName "sao_desktop.exe"
 #define MyAppId "SAODesktopInternal"

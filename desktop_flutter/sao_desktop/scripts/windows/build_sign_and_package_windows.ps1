@@ -29,6 +29,22 @@ function Resolve-Tool {
     throw "$CommandName not found."
 }
 
+function Get-AppVersionFromPubspec {
+    param([string]$ProjectPath)
+
+    $pubspec = Join-Path $ProjectPath "pubspec.yaml"
+    if (-not (Test-Path $pubspec)) {
+        throw "pubspec.yaml not found at: $pubspec"
+    }
+
+    $match = Select-String -Path $pubspec -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+    if (-not $match) {
+        throw "Could not parse app version from pubspec.yaml"
+    }
+
+    return $match.Matches[0].Groups[1].Value
+}
+
 Push-Location $ProjectRoot
 try {
     $signScript = Join-Path $PWD "scripts\windows\build_and_sign_windows.ps1"
@@ -50,8 +66,10 @@ try {
         throw "Installer script not found: $InstallerScript"
     }
 
+    $appVersion = Get-AppVersionFromPubspec -ProjectPath $PWD
+
     Write-Host "Creating internal installer..." -ForegroundColor Cyan
-    & $iscc $InstallerScript
+    & $iscc "/DMyAppVersion=$appVersion" $InstallerScript
     if ($LASTEXITCODE -ne 0) {
         throw "Installer build failed with exit code $LASTEXITCODE"
     }

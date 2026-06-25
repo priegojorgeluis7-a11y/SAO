@@ -2,6 +2,7 @@
 """KPI endpoints - operational metrics desacoplado de review queue"""
 
 import logging
+from functools import lru_cache
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -12,6 +13,223 @@ from typing import Any
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard-kpis"])
 logger = logging.getLogger(__name__)
+
+
+def _cache_bucket(now: datetime, window_seconds: int = 300) -> int:
+    return int(now.timestamp()) // window_seconds
+
+
+def _normalize_scope_key(project_ids: list[str]) -> tuple[str, ...]:
+    return tuple(sorted({str(pid).strip().upper() for pid in project_ids if str(pid).strip()}))
+
+
+def _clone_kpi_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    cloned = dict(payload)
+    backlog = cloned.get("backlog_by_state")
+    if isinstance(backlog, dict):
+        cloned["backlog_by_state"] = dict(backlog)
+    trend = cloned.get("trend")
+    if isinstance(trend, list):
+        cloned["trend"] = [dict(item) if isinstance(item, dict) else item for item in trend]
+    return cloned
+
+
+@lru_cache(maxsize=256)
+def _cached_operational_kpis(scope_key: tuple[str, ...], bucket: int) -> dict[str, Any]:
+    client = get_firestore_client()
+    now = datetime.fromtimestamp(bucket * 300, tz=timezone.utc)
+    today_midnight = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
+    yesterday = today_midnight - timedelta(days=1)
+
+    if not scope_key:
+        return {
+            "timestamp": now.isoformat(),
+            "project_id": "ALL",
+            "completed_today": 0,
+            "pending_today": 0,
+            "review_queue_count": 0,
+            "overdue_review_count": 0,
+            "backlog_by_state": {
+                "PENDIENTE": 0,
+                "EN_CURSO": 0,
+                "REVISION_PENDIENTE": 0,
+                "COMPLETADA": 0,
+            },
+            "completion_rate": 0.0,
+            "sla_review_hours": 24,
+            "cache_seconds": 300,
+        }
+
+    all_activities = []
+    for pid in scope_key:
+        docs = list(client.collection("activities").where("project_id", "==", pid).stream())
+        for doc in docs:
+            payload = doc.to_dict() or {}
+            if payload.get("deleted_at") is not None:
+                continue
+            all_activities.append(payload)
+
+    _seen_groups: set[str] = set()
+    _seen_legacy: set[str] = set()
+    _deduped: list[dict[str, Any]] = []
+    for _a in all_activities:
+        _gid = str(_a.get("activity_group_id") or "").strip()
+        if _gid:
+            if _gid in _seen_groups:
+                continue
+            _seen_groups.add(_gid)
+        else:
+            _start_at = str(_a.get("assignment_start_at") or "").strip()
+            if _start_at:
+                _lkey = "|".join([
+                    str(_a.get("project_id") or ""),
+                    str(_a.get("activity_type_code") or ""),
+                    _start_at,
+                    str(_a.get("assignment_end_at") or ""),
+                    str(_a.get("created_by_user_id") or ""),
+                    str(_a.get("front_id") or ""),
+                    str(_a.get("pk_start") or ""),
+                ])
+                if _lkey in _seen_legacy:
+                    continue
+                _seen_legacy.add(_lkey)
+        _deduped.append(_a)
+    all_activities = _deduped
+
+    if not all_activities:
+        return {
+            "timestamp": now.isoformat(),
+            "project_id": ",".join(scope_key) if len(scope_key) > 1 else scope_key[0],
+            "completed_today": 0,
+            "pending_today": 0,
+            "review_queue_count": 0,
+            "overdue_review_count": 0,
+            "backlog_by_state": {
+                "PENDIENTE": 0,
+                "EN_CURSO": 0,
+                "REVISION_PENDIENTE": 0,
+                "COMPLETADA": 0,
+            },
+            "completion_rate": 0.0,
+            "sla_review_hours": 24,
+            "cache_seconds": 300,
+        }
+
+    completed_today = 0
+    pending_today = 0
+    review_queue = 0
+    overdue_review = 0
+    backlog_by_state = {
+        "PENDIENTE": 0,
+        "EN_CURSO": 0,
+        "REVISION_PENDIENTE": 0,
+        "COMPLETADA": 0,
+    }
+    total_activities = len(all_activities)
+
+    sla_review_hours = 24
+    sla_threshold = now - timedelta(hours=sla_review_hours)
+
+    for activity in all_activities:
+        state = activity.get("execution_state", "PENDIENTE")
+        created_at_str = activity.get("created_at")
+        updated_at_str = activity.get("updated_at")
+
+        if state in backlog_by_state:
+            backlog_by_state[state] += 1
+
+        try:
+            if isinstance(created_at_str, str):
+                created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
+            else:
+                created_at = created_at_str
+        except (ValueError, TypeError, AttributeError):
+            created_at = now
+
+        try:
+            if isinstance(updated_at_str, str):
+                updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
+            else:
+                updated_at = updated_at_str
+        except (ValueError, TypeError, AttributeError):
+            updated_at = now
+
+        if state == "COMPLETADA" and updated_at >= yesterday:
+            completed_today += 1
+
+        if state in {"PENDIENTE", "EN_CURSO"} and created_at >= yesterday:
+            pending_today += 1
+
+        # Una actividad en REVISION_PENDIENTE solo cuenta como pendiente de revisión
+        # si NO tiene una decisión de revisión ya tomada (APPROVE/APPROVE_EXCEPTION).
+        # Si ya fue aprobada (incluso con excepción), no debe aparecer en la cola.
+        review_decision = str(activity.get("review_decision") or "").strip().upper()
+        if state == "REVISION_PENDIENTE" and review_decision not in {"APPROVE", "APPROVE_EXCEPTION", "APPROVED"}:
+            review_queue += 1
+            if created_at < sla_threshold:
+                overdue_review += 1
+
+    completion_rate = (completed_today / total_activities * 100) if total_activities > 0 else 0.0
+
+    return {
+        "timestamp": now.isoformat(),
+        "project_id": ",".join(scope_key) if len(scope_key) > 1 else scope_key[0],
+        "completed_today": completed_today,
+        "pending_today": pending_today,
+        "review_queue_count": review_queue,
+        "overdue_review_count": overdue_review,
+        "backlog_by_state": backlog_by_state,
+        "completion_rate": round(completion_rate, 2),
+        "total_activities": total_activities,
+        "sla_review_hours": sla_review_hours,
+        "sla_threshold_timestamp": sla_threshold.isoformat(),
+        "cache_seconds": 300,
+    }
+
+
+@lru_cache(maxsize=256)
+def _cached_daily_kpi_trend(scope_key: tuple[str, ...], days: int, bucket: int) -> dict[str, Any]:
+    client = get_firestore_client()
+    now = datetime.fromtimestamp(bucket * 300, tz=timezone.utc)
+
+    if not scope_key:
+        return {"project_id": "ALL", "days": days, "trend": []}
+
+    daily_trend = []
+    for day_offset in range(days):
+        day = datetime(now.year, now.month, now.day, tzinfo=timezone.utc) - timedelta(days=day_offset)
+        day_start = day
+        day_end = day + timedelta(days=1)
+        completed_count = 0
+        pending_count = 0
+
+        for pid in scope_key:
+            docs = list(
+                client.collection("activities")
+                .where("project_id", "==", pid)
+                .where("updated_at", ">=", day_start.isoformat())
+                .where("updated_at", "<", day_end.isoformat())
+                .stream()
+            )
+
+            for doc in docs:
+                activity = doc.to_dict() or {}
+                if activity.get("deleted_at") is not None:
+                    continue
+                state = activity.get("execution_state", "PENDIENTE")
+                if state == "COMPLETADA":
+                    completed_count += 1
+                elif state in {"PENDIENTE", "EN_CURSO"}:
+                    pending_count += 1
+
+        daily_trend.append({
+            "date": day.date().isoformat(),
+            "completed": completed_count,
+            "pending": pending_count,
+            "total": completed_count + pending_count,
+        })
+
+    return {"project_id": ",".join(scope_key) if len(scope_key) > 1 else scope_key[0], "days": days, "trend": daily_trend}
 
 
 @router.get("/kpis/operational", status_code=status.HTTP_200_OK)
@@ -40,10 +258,7 @@ def get_operational_kpis(
     - Cache hint (how long data can be cached)
     """
     try:
-        client = get_firestore_client()
         now = datetime.now(timezone.utc)
-        today_midnight = datetime(now.year, now.month, now.day, tzinfo=timezone.utc)
-        yesterday = today_midnight - timedelta(days=1)
 
         # ===== DETERMINE SCOPE =====
         # If project_id provided, query that project
@@ -62,7 +277,7 @@ def get_operational_kpis(
             if has_global_scope:
                 project_ids = [
                     str((doc.to_dict() or {}).get("id") or doc.id).strip().upper()
-                    for doc in client.collection("projects").stream()
+                    for doc in get_firestore_client().collection("projects").stream()
                     if str((doc.to_dict() or {}).get("id") or doc.id).strip()
                 ]
             else:
@@ -77,151 +292,11 @@ def get_operational_kpis(
                 detail="No accessible projects",
             )
 
-        # ===== QUERY ACTIVITIES =====
-        all_activities = []
-        for pid in project_ids:
-            docs = list(
-                client.collection("activities")
-                .where("project_id", "==", pid)
-                .stream()
-            )
-            for doc in docs:
-                payload = doc.to_dict() or {}
-                if payload.get("deleted_at") is not None:
-                    continue
-                all_activities.append(payload)
-
-        # Deduplicate multi-responsible activities: each activity_group counts as 1.
-        # For new activities: use activity_group_id.
-        # For legacy activities (no activity_group_id): use composite key.
-        _seen_groups: set[str] = set()
-        _seen_legacy: set[str] = set()
-        _deduped: list = []
-        for _a in all_activities:
-            _gid = str(_a.get("activity_group_id") or "").strip()
-            if _gid:
-                if _gid in _seen_groups:
-                    continue
-                _seen_groups.add(_gid)
-            else:
-                _start_at = str(_a.get("assignment_start_at") or "").strip()
-                if _start_at:
-                    _lkey = "|".join([
-                        str(_a.get("project_id") or ""),
-                        str(_a.get("activity_type_code") or ""),
-                        _start_at,
-                        str(_a.get("assignment_end_at") or ""),
-                        str(_a.get("created_by_user_id") or ""),
-                        str(_a.get("front_id") or ""),
-                        str(_a.get("pk_start") or ""),
-                    ])
-                    if _lkey in _seen_legacy:
-                        continue
-                    _seen_legacy.add(_lkey)
-            _deduped.append(_a)
-        all_activities = _deduped
-
-        if not all_activities:
-            return {
-                "timestamp": now.isoformat(),
-                "project_id": project_id,
-                "completed_today": 0,
-                "pending_today": 0,
-                "review_queue_count": 0,
-                "overdue_review_count": 0,
-                "backlog_by_state": {
-                    "PENDIENTE": 0,
-                    "EN_CURSO": 0,
-                    "REVISION_PENDIENTE": 0,
-                    "COMPLETADA": 0,
-                },
-                "completion_rate": 0.0,
-                "sla_review_hours": 24,
-                "cache_seconds": 300,
-            }
-
-        # ===== CALCULATE METRICS =====
-        completed_today = 0
-        pending_today = 0
-        review_queue = 0
-        overdue_review = 0
-        backlog_by_state = {
-            "PENDIENTE": 0,
-            "EN_CURSO": 0,
-            "REVISION_PENDIENTE": 0,
-            "COMPLETADA": 0,
-        }
-        total_activities = len(all_activities)
-
-        sla_review_hours = 24
-        sla_threshold = now - timedelta(hours=sla_review_hours)
-
-        for activity in all_activities:
-            state = activity.get("execution_state", "PENDIENTE")
-            created_at_str = activity.get("created_at")
-            updated_at_str = activity.get("updated_at")
-
-            # Count by state
-            if state in backlog_by_state:
-                backlog_by_state[state] += 1
-
-            # Parse timestamps
-            try:
-                if isinstance(created_at_str, str):
-                    created_at = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-                else:
-                    created_at = created_at_str
-            except (ValueError, TypeError, AttributeError):
-                created_at = now
-
-            try:
-                if isinstance(updated_at_str, str):
-                    updated_at = datetime.fromisoformat(updated_at_str.replace("Z", "+00:00"))
-                else:
-                    updated_at = updated_at_str
-            except (ValueError, TypeError, AttributeError):
-                updated_at = now
-
-            # Completed today?
-            if state == "COMPLETADA" and updated_at >= yesterday:
-                completed_today += 1
-
-            # Pending today? (still PENDIENTE or EN_CURSO as of today)
-            if state in {"PENDIENTE", "EN_CURSO"} and created_at >= yesterday:
-                pending_today += 1
-
-            # Review queue?
-            if state == "REVISION_PENDIENTE":
-                review_queue += 1
-
-                # Overdue?
-                if created_at < sla_threshold:
-                    overdue_review += 1
-
-        # Completion rate
-        completion_rate = (completed_today / total_activities * 100) if total_activities > 0 else 0.0
-
-        logger.info(
-            f"KPIs computed: project={project_id}, "
-            f"completed_today={completed_today}, pending_today={pending_today}, "
-            f"review_queue={review_queue}, overdue={overdue_review}"
-        )
-
-        # ===== RESPONSE =====
-        return {
-            "timestamp": now.isoformat(),
-            "project_id": project_id or "ALL",
-            "completed_today": completed_today,
-            "pending_today": pending_today,
-            "review_queue_count": review_queue,
-            "overdue_review_count": overdue_review,
-            "backlog_by_state": backlog_by_state,
-            "completion_rate": round(completion_rate, 2),
-            "total_activities": total_activities,
-            "sla_review_hours": sla_review_hours,
-            "sla_threshold_timestamp": sla_threshold.isoformat(),
-            "cache_seconds": 300,  # Hint: frontend can cache for 5 min
-        }
+        scope_key = _normalize_scope_key(project_ids)
+        bucket = _cache_bucket(now)
+        payload = _cached_operational_kpis(scope_key, bucket)
+        logger.info("KPIs computed: project=%s scope_size=%d bucket=%d", project_id or "ALL", len(scope_key), bucket)
+        return _clone_kpi_payload(payload)
 
     except HTTPException:
         raise
@@ -250,7 +325,6 @@ def get_daily_kpi_trend(
     - Useful for charts: completion trend, backlog evolution
     """
     try:
-        client = get_firestore_client()
         now = datetime.now(timezone.utc)
 
         if project_id:
@@ -260,49 +334,10 @@ def get_daily_kpi_trend(
             if not project_ids:
                 return {"error": "No accessible projects", "trend": []}
 
-        daily_trend = []
-
-        for day_offset in range(days):
-            day = datetime(
-                now.year, now.month, now.day, tzinfo=timezone.utc
-            ) - timedelta(days=day_offset)
-            day_start = day
-            day_end = day + timedelta(days=1)
-
-            completed_count = 0
-            pending_count = 0
-
-            for pid in project_ids:
-                docs = list(
-                    client.collection("activities")
-                    .where("project_id", "==", pid)
-                    .where("updated_at", ">=", day_start.isoformat())
-                    .where("updated_at", "<", day_end.isoformat())
-                    .stream()
-                )
-
-                for doc in docs:
-                    activity = doc.to_dict() or {}
-                    if activity.get("deleted_at") is not None:
-                        continue
-                    state = activity.get("execution_state", "PENDIENTE")
-                    if state == "COMPLETADA":
-                        completed_count += 1
-                    elif state in {"PENDIENTE", "EN_CURSO"}:
-                        pending_count += 1
-
-            daily_trend.append({
-                "date": day.date().isoformat(),
-                "completed": completed_count,
-                "pending": pending_count,
-                "total": completed_count + pending_count,
-            })
-
-        return {
-            "project_id": project_id or "ALL",
-            "days": days,
-            "trend": daily_trend,
-        }
+        scope_key = _normalize_scope_key(project_ids)
+        bucket = _cache_bucket(now)
+        payload = _cached_daily_kpi_trend(scope_key, days, bucket)
+        return _clone_kpi_payload(payload)
 
     except Exception as e:
         logger.error(f"Error computing daily KPI trend: {e}")

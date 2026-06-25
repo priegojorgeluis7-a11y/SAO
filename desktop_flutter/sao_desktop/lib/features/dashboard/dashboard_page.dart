@@ -770,7 +770,7 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
         projectId: projectId,
         dateFrom: dateFrom,
         dateTo: dateTo,
-        limit: 100,
+        limit: 200,
       );
       // KPIs: cargar TODAS las actividades del proyecto (paginadas) y filtrar
       // por el mismo campo de fecha que usa el cuerpo del PDF (created_at).
@@ -1092,8 +1092,8 @@ class _DashboardPageState extends ConsumerState<DashboardPage> {
 
     // ── Rasterizar PDFs locales para incrustar ────────────────────────────
     // Limitado a primera página (portada) a 96 DPI para evitar OOM.
-    // Se procesan máximo 10 PDFs por exportación.
-    const _kMaxRasterized = 10;
+    // Se procesan hasta 200 PDFs por exportación para cubrir proyectos grandes.
+    const _kMaxRasterized = 200;
     final Map<String, List<pw.MemoryImage>> rasterizedPages = {};
     for (final entry in localPdfPaths.entries) {
       if (rasterizedPages.length >= _kMaxRasterized) break;

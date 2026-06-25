@@ -14,7 +14,7 @@ from app.core.firestore import get_firestore_client
 router = APIRouter(prefix="/completed-activities", tags=["completed-activities"])
 logger = logging.getLogger(__name__)
 
-_APPROVED_DECISIONS = {"APPROVE", "APPROVE_EXCEPTION"}
+_APPROVED_DECISIONS = {"APPROVE", "APPROVE_EXCEPTION", "APPROVED"}
 
 _VIEWER_ROLES = ["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO", "LECTOR"]
 _WRITER_ROLES = ["ADMIN", "COORD", "SUPERVISOR", "OPERATIVO"]
@@ -598,7 +598,7 @@ def list_completed_activities(
     usuario: str | None = Query(None, description="Filtrar por nombre del responsable (búsqueda parcial)"),
     q: str | None = Query(None, description="Búsqueda libre en título, PK y frente"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(50, ge=1, le=200),
+    page_size: int = Query(50, ge=1, le=500),
     _current_user: Any = Depends(require_any_role(_VIEWER_ROLES)),
 ):
     """Returns approved activities with optional filters including responsible user."""

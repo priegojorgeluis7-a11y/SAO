@@ -47,6 +47,21 @@ function Find-Tool {
     return $null
 }
 
+function Get-AppVersionFromPubspec {
+    param([string]$PubspecPath)
+
+    if (-not (Test-Path $PubspecPath)) {
+        throw "No se encontro pubspec.yaml en: $PubspecPath"
+    }
+
+    $match = Select-String -Path $PubspecPath -Pattern '^version:\s*([0-9]+\.[0-9]+\.[0-9]+)' | Select-Object -First 1
+    if (-not $match) {
+        throw "No se pudo leer version semantica desde pubspec.yaml"
+    }
+
+    return $match.Matches[0].Groups[1].Value
+}
+
 Push-Location $ProjectRoot
 try {
     Write-Host ""
@@ -56,6 +71,9 @@ try {
     Write-Host "  Backend URL : $BackendUrl"
     Write-Host "  Project root: $ProjectRoot"
     Write-Host ""
+
+    $appVersion = Get-AppVersionFromPubspec -PubspecPath (Join-Path $ProjectRoot "pubspec.yaml")
+    Write-Host "  App version : $appVersion"
 
     # ── 1. Verificar Flutter ──────────────────────────────────────────────────
     $flutter = Find-Tool "flutter"
@@ -100,7 +118,7 @@ try {
 
     New-Item -ItemType Directory -Force -Path (Join-Path $ProjectRoot $OutputDir) | Out-Null
 
-    & $InnoSetupCompiler $issScript
+    & $InnoSetupCompiler "/DMyAppVersion=$appVersion" $issScript
     if ($LASTEXITCODE -ne 0) { throw "Inno Setup falló con código $LASTEXITCODE" }
 
     $installerPath = Join-Path $ProjectRoot "$OutputDir\SAO_Desktop_Internal_Setup.exe"
