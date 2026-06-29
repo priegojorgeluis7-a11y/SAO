@@ -51,9 +51,11 @@ def _review_status_from_activity(doc: dict) -> str:
         return "CHANGES_REQUIRED"
     if str(doc.get("execution_state") or "") == "REVISION_PENDIENTE":
         return "PENDING_REVIEW"
-    # Si la actividad está completada pero sin decisión, no está pendiente de revisión
+    # Si la actividad está completada pero sin decisión de revisión, se considera
+    # aprobada para efectos de generación de reportes (son actividades terminadas
+    # que pueden generar PDF).
     if str(doc.get("execution_state") or "") == "COMPLETADA":
-        return "NOT_REVIEWED"
+        return "APPROVED"
     return "NOT_REVIEWED"
 
 
@@ -216,8 +218,16 @@ def list_report_activities(
     user_ids: set[str] = set()
     _APPROVED_DECISIONS = {"APPROVE", "APPROVE_EXCEPTION", "APPROVED"}
     for doc in docs:
-        # Only include approved activities for all roles — this endpoint is for reporting.
-        if str(doc.get("review_decision") or "").upper() not in _APPROVED_DECISIONS:
+        # Include activities that are:
+        # 1. Already approved (review_decision in APPROVED_DECISIONS)
+        # 2. OR completed but not yet reviewed (execution_state == COMPLETADA without review_decision)
+        review_decision = str(doc.get("review_decision") or "").upper()
+        execution_state = str(doc.get("execution_state") or "").upper()
+        is_completed_not_reviewed = (
+            execution_state == "COMPLETADA" 
+            and review_decision not in {"APPROVE", "APPROVE_EXCEPTION", "APPROVED", "REJECTED", "CHANGES_REQUIRED"}
+        )
+        if review_decision not in _APPROVED_DECISIONS and not is_completed_not_reviewed:
             continue
         # OPERATIVO ownership guard: must also be a participant.
         if is_operativo:

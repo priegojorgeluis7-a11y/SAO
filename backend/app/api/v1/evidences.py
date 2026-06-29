@@ -201,6 +201,10 @@ def _normalize_object_path(raw_value: Any) -> str:
     value = str(raw_value or "").strip()
     if not value:
         return ""
+    
+    # Also treat the literal string "None" as empty
+    if value.lower() == "none":
+        return ""
 
     if value.startswith("gs://"):
         bucket_and_path = value[len("gs://") :]
@@ -399,8 +403,29 @@ def get_download_url(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"Missing permission: activity.view for project: {project_id}",
         )
-    object_path = _resolve_evidence_object_path(payload)
-    if not object_path:
+    
+    # Try to resolve object_path from confirmed fields first
+    object_path = str(payload.get("object_path") or payload.get("gcs_path") or payload.get("storage_path") or "").strip()
+    
+    # If no confirmed object_path, check if pending_object_path has an existing file
+    if not object_path or object_path.lower() == "none":
+        pending_object_path = str(payload.get("pending_object_path") or "").strip()
+        if pending_object_path and pending_object_path.lower() != "none":
+            # Verify the file actually exists in storage
+            if _object_exists(pending_object_path):
+                object_path = pending_object_path
+                # Auto-confirm: update object_path to mark upload as complete
+                client.collection("evidences").document(str(evidence_id)).set(
+                    {
+                        "object_path": object_path,
+                        "pending_object_path": None,
+                        "uploaded_at": _utc_now(),
+                        "sync_version": int(payload.get("sync_version") or 0) + 1,
+                    },
+                    merge=True,
+                )
+    
+    if not object_path or object_path.lower() == "none":
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Evidence file not available yet")
 
     legacy_backfill = {}

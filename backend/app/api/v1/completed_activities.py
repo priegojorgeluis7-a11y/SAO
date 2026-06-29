@@ -473,7 +473,10 @@ def _evidence_count_map(client, activity_ids: set[str]) -> dict[str, int]:
         for doc in client.collection("evidences").where("activity_id", "==", activity_id).stream():
             ev = doc.to_dict() or {}
             gcs_path = str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or "").strip()
-            if gcs_path and not _is_document_evidence(ev):
+            # Skip if gcs_path is empty or literally "None" (from None values)
+            if not gcs_path or gcs_path.lower() == "none":
+                continue
+            if not _is_document_evidence({**ev, "gcs_path": gcs_path}):
                 count += 1
         result[activity_id] = count
     return result
@@ -488,7 +491,10 @@ def _document_count_map(client, activity_ids: set[str]) -> dict[str, int]:
         for doc in client.collection("evidences").where("activity_id", "==", activity_id).stream():
             ev = doc.to_dict() or {}
             gcs_path = str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or "").strip()
-            if gcs_path and _is_document_evidence(ev):
+            # Skip if gcs_path is empty or literally "None" (from None values)
+            if not gcs_path or gcs_path.lower() == "none":
+                continue
+            if _is_document_evidence({**ev, "gcs_path": gcs_path}):
                 count += 1
         result[activity_id] = count
     return result
@@ -631,7 +637,12 @@ def list_completed_activities(
         if not _user_can_access_completed_project(_current_user, doc.get("project_id")):
             continue
         decision = str(doc.get("review_decision") or "").upper()
-        if decision not in _APPROVED_DECISIONS:
+        execution_state = str(doc.get("execution_state") or "").upper()
+        is_completed_not_reviewed = (
+            execution_state == "COMPLETADA" 
+            and decision not in {"APPROVE", "APPROVE_EXCEPTION", "APPROVED", "REJECTED", "CHANGES_REQUIRED"}
+        )
+        if decision not in _APPROVED_DECISIONS and not is_completed_not_reviewed:
             continue
         activity_id = str(doc.get("uuid") or "")
         if not activity_id:
@@ -839,7 +850,12 @@ def get_filter_options(
         if not _user_can_access_completed_project(_current_user, doc.get("project_id")):
             continue
         decision = str(doc.get("review_decision") or "").upper()
-        if decision not in _APPROVED_DECISIONS:
+        execution_state = str(doc.get("execution_state") or "").upper()
+        is_completed_not_reviewed = (
+            execution_state == "COMPLETADA" 
+            and decision not in {"APPROVE", "APPROVE_EXCEPTION", "APPROVED", "REJECTED", "CHANGES_REQUIRED"}
+        )
+        if decision not in _APPROVED_DECISIONS and not is_completed_not_reviewed:
             continue
 
         docs.append(doc)
@@ -958,7 +974,7 @@ def get_completed_activity_detail(
     for row in evidence_rows:
         ev = row["payload"]
         gcs_path = str(ev.get("gcs_path") or ev.get("storage_path") or ev.get("object_path") or "").strip()
-        if not gcs_path:
+        if not gcs_path or gcs_path.lower() == "none":
             continue  # skip evidencias sin archivo adjunto
         ts = ev.get("uploaded_at") or ev.get("created_at")
         uploader_uid = str(
@@ -976,7 +992,9 @@ def get_completed_activity_detail(
             "uploaded_at":   _iso(ts),
             "uploader_name": _resolve_uploader_name(ev, users_map, uploader_uid),
         }
-        if _is_document_evidence(ev):
+        # Use the normalized gcs_path for document classification to avoid issues
+        # with None values in the original payload
+        if _is_document_evidence({**ev, "gcs_path": gcs_path}):
             documents.append(entry)
         else:
             evidences.append(entry)

@@ -1,4 +1,4 @@
-﻿"""Activities API endpoints"""
+"""Activities API endpoints"""
 
 import json
 import logging
@@ -308,8 +308,6 @@ async def list_activities(
         normalized_project_id = str(doc_project_id or "").strip().upper()
         if not normalized_project_id:
             return False
-        if _is_legacy_sql_test_principal(current_user):
-            return True
         cached = permission_cache.get(normalized_project_id)
         if cached is not None:
             return cached
