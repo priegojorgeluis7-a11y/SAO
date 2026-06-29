@@ -53,9 +53,9 @@ def _normalize_execution_state(value: Any) -> str:
 
 def _normalize_review_decision(value: Any) -> str:
     decision = str(value or "").strip().upper()
-    if decision in {"APPROVED", "OK"}:
+    if decision in {"APPROVED", "APROBADO", "OK"}:
         return "APPROVE"
-    if decision in {"REJECTED", "NO"}:
+    if decision in {"REJECTED", "RECHAZADO", "NO"}:
         return "REJECT"
     if decision in {"NEEDS_FIX", "REQUIERE_CAMBIOS"}:
         return "CHANGES_REQUIRED"
