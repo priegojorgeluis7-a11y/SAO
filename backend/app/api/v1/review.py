@@ -90,19 +90,18 @@ def _safe_dt(value: object, fallback: datetime) -> datetime:
 
 
 def _should_include_in_review_queue(execution_state: str | None, review_status: str, evidence_count: int) -> bool:
-    # Keep rejected activities visible in review queue/history views.
+    # EXCLUDE activities that are already approved - they go to reports for PDF generation
+    # Activities with APPROVED status should never appear in the validation queue
+    if review_status == "APPROVED":
+        return False
+    # Keep rejected activities visible in review queue/history views
     if review_status == "REJECTED":
         return True
     if review_status == "CHANGES_REQUIRED":
         return True
-    # Include activities that are COMPLETADA but not yet reviewed (review_status is NOT_REVIEWED)
-    # These are pending review activities that need to be shown in the queue.
+    # Include activities that are COMPLETADA but not yet reviewed
     normalized_state = _normalize_execution_state(execution_state)
     if normalized_state == COMPLETADA:
-        # Excluir actividades ya aprobadas - pasan a reportes para generar PDF
-        # Las actividades con APPROVED ya no deben aparecer en la cola de validación
-        if review_status == "APPROVED":
-            return False
         return True
     # Include activities in PENDIENTE state (not yet completed, pending review)
     if normalized_state == "PENDIENTE":
