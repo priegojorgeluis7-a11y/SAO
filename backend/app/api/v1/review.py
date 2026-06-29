@@ -104,6 +104,9 @@ def _should_include_in_review_queue(execution_state: str | None, review_status: 
         if review_status == "APPROVED":
             return False
         return True
+    # Include activities in PENDIENTE state (not yet completed, pending review)
+    if normalized_state == "PENDIENTE":
+        return True
     if review_status != "PENDING_REVIEW":
         return False
     return normalized_state in {REVISION_PENDIENTE, COMPLETADA}
