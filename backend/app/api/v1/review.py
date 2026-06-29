@@ -94,9 +94,10 @@ def _should_include_in_review_queue(execution_state: str | None, review_status: 
     # Activities with APPROVED status should never appear in the validation queue
     if review_status == "APPROVED":
         return False
-    # Keep rejected activities visible in review queue/history views
+    # EXCLUDE rejected activities - they are already processed
+    # Once rejected, the activity needs correction from the mobile app
     if review_status == "REJECTED":
-        return True
+        return False
     if review_status == "CHANGES_REQUIRED":
         return True
     # Include activities that are COMPLETADA but not yet reviewed
