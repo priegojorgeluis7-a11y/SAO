@@ -30,7 +30,10 @@ from app.services.notification_service import create_user_notification
 from app.services.audit_redaction import sanitize_audit_details
 from app.services.audit_service import write_firestore_audit_log
 from app.services.firestore_identity_service import get_firestore_user_by_id
-from app.api.v1.evidences import _resolve_evidence_object_path as _resolve_ev_path
+from app.api.v1.evidences import (
+    _resolve_evidence_object_path as _resolve_ev_path,
+    _object_exists,
+)
 
 router = APIRouter(prefix="/review", tags=["review"])
 logger = logging.getLogger(__name__)
@@ -92,9 +95,17 @@ def _should_include_in_review_queue(execution_state: str | None, review_status: 
         return True
     if review_status == "CHANGES_REQUIRED":
         return True
+    # Include activities that are COMPLETADA but not yet reviewed (review_status is NOT_REVIEWED)
+    # These are pending review activities that need to be shown in the queue.
+    normalized_state = _normalize_execution_state(execution_state)
+    if normalized_state == COMPLETADA:
+        # Excluir actividades ya aprobadas - pasan a reportes para generar PDF
+        # Las actividades con APPROVED ya no deben aparecer en la cola de validación
+        if review_status == "APPROVED":
+            return False
+        return True
     if review_status != "PENDING_REVIEW":
         return False
-    normalized_state = _normalize_execution_state(execution_state)
     return normalized_state in {REVISION_PENDIENTE, COMPLETADA}
 
 
@@ -645,31 +656,100 @@ def review_activity_evidences(
         raise api_error(status_code=status.HTTP_400_BAD_REQUEST, code="REVIEW_INVALID_ACTIVITY_ID", message="Invalid activity id")
 
     client = get_firestore_client()
-    # Query evidences for this activity from Firestore.
-    evidences_docs = [
-        d.to_dict() or {}
-        for d in client.collection("evidences")
-            .where("activity_id", "==", str(activity_uuid))
+
+    # ── Step 1: Resolve the activity document to get all IDs ────────────────────
+    # Some activities were created with different document IDs vs uuid field.
+    # We need to query by both to find all associated evidences.
+    activity_doc_ref = client.collection("activities").document(str(activity_uuid))
+    activity_snap = activity_doc_ref.get()
+    
+    # Collect all possible activity IDs to search for evidences
+    activity_ids_to_search: set[str] = {str(activity_uuid)}
+    
+    if not activity_snap.exists:
+        # Fallback: search by uuid field in case document ID differs
+        docs_by_uuid = list(
+            client.collection("activities")
+            .where("uuid", "==", str(activity_uuid))
+            .limit(1)
             .stream()
-    ]
+        )
+        if docs_by_uuid:
+            activity_snap = docs_by_uuid[0]
+    
+    if activity_snap.exists:
+        activity_payload = activity_snap.to_dict() or {}
+        # Add server_id (legacy ID) if present
+        server_id = str(activity_payload.get("server_id") or "").strip()
+        if server_id:
+            activity_ids_to_search.add(server_id)
+        # Add document ID if it differs from uuid
+        if activity_snap.id != str(activity_uuid):
+            activity_ids_to_search.add(activity_snap.id)
+
+    # ── Step 2: Query evidences for all activity IDs ───────────────────────────
+    seen_evidence_ids: set[str] = set()
+    evidences_docs: list[dict[str, Any]] = []
+    
+    for candidate_id in activity_ids_to_search:
+        if not candidate_id:
+            continue
+        for doc in client.collection("evidences").where("activity_id", "==", candidate_id).stream():
+            doc_id = str(doc.id)
+            if doc_id in seen_evidence_ids:
+                continue
+            seen_evidence_ids.add(doc_id)
+            evidences_docs.append(doc.to_dict() or {})
+
     # Only return evidences that have actually been uploaded (have valid object_path).
     # Do NOT create fallback evidences from wizard_payload; if no evidences exist in Firestore,
     # the activity either has no evidence or evidence was not yet uploaded properly.
     evidences_docs.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)))
+    
+    def _compute_evidence_status_and_resolve(row: dict[str, Any], evidence_ref) -> tuple[str, str | None]:
+        """
+        Determine evidence status and auto-confirm pending uploads.
+        Returns (status, gcsKey).
+        If pending_object_path has a file in GCS, auto-confirm by copying to object_path.
+        """
+        # Check if there's a confirmed object_path (upload complete)
+        object_path = _resolve_ev_path(row)
+        if object_path:
+            return "UPLOADED", object_path
+        
+        # Check if upload was initiated but not completed (pending_object_path exists)
+        pending = str(row.get("pending_object_path") or "").strip()
+        if pending and pending.lower() != "none":
+            # Normalize the pending path for GCS check
+            from app.api.v1.evidences import _normalize_object_path
+            normalized_pending = _normalize_object_path(pending)
+            if normalized_pending and _object_exists(normalized_pending):
+                # Auto-confirm: copy pending_object_path to object_path
+                now = datetime.now(timezone.utc)
+                evidence_ref.set({
+                    "object_path": pending,  # Keep original path format
+                    "updated_at": now,
+                }, merge=True)
+                logger.info(f"AUTO-CONFIRMED evidence upload: doc_id={evidence_ref.id}, pending={pending}")
+                return "UPLOADED", pending
+        
+        return "PENDING", None
+    
     return [
         ReviewEvidenceOut(
             id=UUID(str(row.get("id"))),
             takenAt=_safe_dt(row.get("created_at"), datetime.now(timezone.utc)),
-            lat=None,
-            lng=None,
-            accuracy=None,
-            device=None,
+            lat=row.get("latitude"),
+            lng=row.get("longitude"),
+            accuracy=row.get("accuracy"),
+            device=row.get("device"),
             description=row.get("caption") or row.get("description") or row.get("descripcion"),
-            gcsKey=_resolve_ev_path(row) or None,
-            status="UPLOADED" if _resolve_ev_path(row) else "PENDING",
+            gcsKey=gcsKey,
+            status=status,
         )
         for row in evidences_docs
-        if row.get("id") and _resolve_ev_path(row)
+        if row.get("id")
+        for status, gcsKey in [_compute_evidence_status_and_resolve(row, client.collection("evidences").document(row.get("id")))]
     ]
 
 
