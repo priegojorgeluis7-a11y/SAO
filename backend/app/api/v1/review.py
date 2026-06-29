@@ -878,7 +878,8 @@ def review_decision(
 
     # Guard: no permitir revisar actividades en estado inválido
     current_state = _normalize_execution_state(activity_payload.get("execution_state"))
-    _REVIEWABLE_STATES = {REVISION_PENDIENTE, COMPLETADA}
+    # Allow reviewing activities in PENDIENTE, REVISION_PENDIENTE, or COMPLETADA states
+    _REVIEWABLE_STATES = {REVISION_PENDIENTE, COMPLETADA, "PENDIENTE"}
     if current_state not in _REVIEWABLE_STATES:
         raise api_error(
             status_code=status.HTTP_409_CONFLICT,
