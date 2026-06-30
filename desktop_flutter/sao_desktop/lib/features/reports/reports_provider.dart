@@ -981,26 +981,58 @@ Future<List<ReportActivityItem>> _loadFromBackend(ReportFilters filters) async {
   const client = BackendApiClient();
 
   try {
-    final queryParams = <String>[
-      'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
-      'date_from=${Uri.encodeQueryComponent(filters.dateRange.start.toUtc().toIso8601String())}',
-      'date_to=${Uri.encodeQueryComponent(filters.dateRange.end.toUtc().toIso8601String())}',
-      'include_already_reported=${filters.includeAlreadyReported ? "true" : "false"}',
-    ];
-    if (!_isAllFrontsFilter(filters.frontName)) {
-      queryParams.add('front=${Uri.encodeQueryComponent(filters.frontName)}');
+    // Collect all items from all pages to ensure we get all approved activities
+    final allItems = <ReportActivityItem>[];
+    int currentPage = 1;
+    bool hasNext = true;
+    const maxPages = 20; // Safety limit to prevent infinite loops
+    const maxItems = 1000; // Safety limit for total items
+
+    while (hasNext && currentPage <= maxPages && allItems.length < maxItems) {
+      final queryParams = <String>[
+        'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
+        'date_from=${Uri.encodeQueryComponent(filters.dateRange.start.toUtc().toIso8601String())}',
+        'date_to=${Uri.encodeQueryComponent(filters.dateRange.end.toUtc().toIso8601String())}',
+        'include_already_reported=${filters.includeAlreadyReported ? "true" : "false"}',
+        'page=$currentPage',
+        'page_size=200',
+      ];
+      if (!_isAllFrontsFilter(filters.frontName)) {
+        queryParams.add('front=${Uri.encodeQueryComponent(filters.frontName)}');
+      }
+
+      final path = '/api/v1/reports/activities?${queryParams.join('&')}';
+      final decoded = await client.getJson(path);
+      
+      if (decoded is! Map<String, dynamic>) {
+        break;
+      }
+      
+      final items = decoded['items'] as List<dynamic>? ?? const [];
+      
+      if (items.isEmpty) {
+        break;
+      }
+
+      final pageItems = items
+          .whereType<Map<String, dynamic>>()
+          .map((e) => ReportActivityItem.fromJson(e))
+          .toList();
+      
+      allItems.addAll(pageItems);
+
+      // Check if there are more pages
+      final meta = decoded['meta'] as Map<String, dynamic>?;
+      hasNext = meta?['has_next'] == true || decoded['has_next'] == true;
+      currentPage++;
     }
 
-    final path = '/api/v1/reports/activities?${queryParams.join('&')}';
-    final decoded = await client.getJson(path);
-    if (decoded is! Map<String, dynamic>) {
+    if (allItems.isEmpty) {
       return _loadFromCompletedActivities(client, filters);
     }
-    final items = decoded['items'] as List<dynamic>? ?? const [];
 
-    final reportItems = items
-        .whereType<Map<String, dynamic>>()
-        .map((e) => ReportActivityItem.fromJson(e))
+    // Apply all filters after collecting all items
+    final reportItems = allItems
         .where((item) => _matchesSelectedProject(item, filters.projectId))
         .where((item) => item.isApprovedForReport)
         .where((item) => _isWithinSelectedRange(item.createdAt, filters.dateRange))
@@ -1029,33 +1061,56 @@ Future<List<ReportActivityItem>> _loadFromCompletedActivities(
   ReportFilters filters,
 ) async {
   try {
-    final queryParams = <String>[
-      'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
-      'page=1',
-      'page_size=200',
-    ];
-    if (!_isAllFrontsFilter(filters.frontName)) {
-      queryParams.add('frente=${Uri.encodeQueryComponent(filters.frontName)}');
+    // Collect all items from all pages for complete results
+    final allItems = <ReportActivityItem>[];
+    int currentPage = 1;
+    bool hasNext = true;
+    const maxPages = 20; // Safety limit
+    const maxItems = 1000; // Safety limit
+
+    while (hasNext && currentPage <= maxPages && allItems.length < maxItems) {
+      final queryParams = <String>[
+        'project_id=${Uri.encodeQueryComponent(filters.projectId)}',
+        'page=$currentPage',
+        'page_size=200',
+      ];
+      if (!_isAllFrontsFilter(filters.frontName)) {
+        queryParams.add('frente=${Uri.encodeQueryComponent(filters.frontName)}');
+      }
+
+      final decoded = await client.getJson(
+        '/api/v1/completed-activities?${queryParams.join('&')}',
+      );
+      if (decoded is! Map<String, dynamic>) break;
+      
+      final items = decoded['items'] as List<dynamic>? ?? const [];
+      if (items.isEmpty) break;
+
+      final pageItems = items
+          .whereType<Map<String, dynamic>>()
+          .map((raw) {
+            final normalized = Map<String, dynamic>.from(raw);
+            normalized['status'] ??= 'APROBADO';
+            normalized['review_status'] ??= 'APPROVED';
+            normalized['front_name'] ??= normalized['front'];
+            normalized['activity_title'] ??= normalized['title'];
+            normalized['created_at'] =
+                normalized['created_at'] ?? normalized['reviewed_at'] ?? '';
+            return ReportActivityItem.fromJson(normalized);
+          })
+          .toList();
+      
+      allItems.addAll(pageItems);
+      
+      // Check if there are more pages
+      hasNext = decoded['has_next'] == true;
+      currentPage++;
     }
 
-    final decoded = await client.getJson(
-      '/api/v1/completed-activities?${queryParams.join('&')}',
-    );
-    if (decoded is! Map<String, dynamic>) return [];
-    final items = decoded['items'] as List<dynamic>? ?? const [];
+    if (allItems.isEmpty) return [];
 
-    final baseItems = items
-        .whereType<Map<String, dynamic>>()
-        .map((raw) {
-          final normalized = Map<String, dynamic>.from(raw);
-          normalized['status'] ??= 'APROBADO';
-          normalized['review_status'] ??= 'APPROVED';
-          normalized['front_name'] ??= normalized['front'];
-          normalized['activity_title'] ??= normalized['title'];
-          normalized['created_at'] =
-              normalized['created_at'] ?? normalized['reviewed_at'] ?? '';
-          return ReportActivityItem.fromJson(normalized);
-        })
+    // Apply all filters after collecting all items
+    final baseItems = allItems
         .where((item) => filters.includeAlreadyReported || !item.hasReport)
         .where((item) => _matchesSelectedProject(item, filters.projectId))
         .where((item) => item.isApprovedForReport)

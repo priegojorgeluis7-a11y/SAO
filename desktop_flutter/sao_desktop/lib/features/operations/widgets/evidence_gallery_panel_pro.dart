@@ -432,13 +432,19 @@ class _EvidenceGalleryPanelProState extends State<EvidenceGalleryPanelPro> {
     if (lowerPath.isEmpty || lowerPath.startsWith('pending://')) {
       return true;
     }
-    // Synthetic placeholder IDs (ev-{activityId}-{index}) are created locally
+    // Synthetic placeholder IDs (ev-{activityId}-{number}) are created locally
     // when the activity list endpoint returns only an evidence_count. They don't
     // correspond to real Firestore documents so they can never be resolved.
-    // Keep this narrow to avoid classifying real ids like "ev-remote" as pending.
+    // Use exact match pattern to avoid false positives on real UUID-based IDs
+    // that happen to start with similar characters.
+    final syntheticPattern = 'ev-${evidence.activityId}-';
     if (lowerPath.startsWith('backend://') &&
-        evidence.id.startsWith('ev-${evidence.activityId}-')) {
-      return true;
+        evidence.id.startsWith(syntheticPattern)) {
+      // Verify it's truly synthetic: ID should be exactly prefix + digits only
+      final afterPrefix = evidence.id.substring(syntheticPattern.length);
+      if (RegExp(r'^\d+$').hasMatch(afterPrefix)) {
+        return true;
+      }
     }
     if (lowerPath.startsWith('backend://') ||
         lowerPath.startsWith('http://') ||

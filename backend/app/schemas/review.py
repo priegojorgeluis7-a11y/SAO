@@ -4,6 +4,30 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ReviewEvidenceSummary(BaseModel):
+    """Resumen de evidencia para incluir en la cola de revisión."""
+    id: UUID
+    takenAt: datetime
+    lat: float | None = None
+    lng: float | None = None
+    description: str | None = None
+    gcsKey: str | None = None
+    status: str
+
+
+class ReviewEvidenceOut(BaseModel):
+    """Evidencia completa con metadatos adicionales para detalle de actividad."""
+    id: UUID
+    takenAt: datetime
+    lat: float | None = None
+    lng: float | None = None
+    accuracy: float | None = None
+    device: str | None = None
+    description: str | None = None
+    gcsKey: str | None = None
+    status: str
+
+
 class ReviewQueueItemOut(BaseModel):
     id: UUID
     pk: str
@@ -24,6 +48,7 @@ class ReviewQueueItemOut(BaseModel):
     has_conflicts: bool
     severity: str
     evidence_count: int
+    evidences: list[ReviewEvidenceSummary] = Field(default_factory=list, description="Lista de evidencias/fotografías de la actividad")
     conflict_count: int
     lat: float | None = None
     lon: float | None = None
@@ -67,18 +92,7 @@ class ReviewActivityOut(BaseModel):
     quality_flags: dict[str, bool]
     changeset: list[ReviewChangeFieldOut]
     history: list[dict]
-
-
-class ReviewEvidenceOut(BaseModel):
-    id: UUID
-    takenAt: datetime
-    lat: float | None = None
-    lng: float | None = None
-    accuracy: float | None = None
-    device: str | None = None
-    description: str | None = None
-    gcsKey: str | None = None
-    status: str
+    evidences: list[ReviewEvidenceOut] = Field(default_factory=list, description="Lista de evidencias/fotografías de la actividad")
 
 
 class ReviewFieldResolutionIn(BaseModel):

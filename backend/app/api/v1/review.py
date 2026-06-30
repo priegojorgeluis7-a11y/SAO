@@ -16,6 +16,7 @@ from app.schemas.review import (
     ReviewDecisionOut,
     ReviewEvidenceOut,
     ReviewEvidencePatchIn,
+    ReviewEvidenceSummary,
     ReviewEvidenceValidateIn,
     ReviewQueueCountersOut,
     ReviewQueueItemOut,
@@ -89,7 +90,76 @@ def _safe_dt(value: object, fallback: datetime) -> datetime:
     return fallback
 
 
-def _should_include_in_review_queue(execution_state: str | None, review_status: str, review_decision: str | None, evidence_count: int) -> bool:
+def _is_activity_synced(activity_payload: dict) -> bool:
+    """
+    Check if an activity has been fully synchronized to the server.
+    Returns False only for activities with explicit sync errors or that are explicitly marked as local-only.
+    Most existing activities will pass this check.
+    """
+    # Only exclude activities with explicit sync errors
+    if activity_payload.get("sync_error"):
+        return False
+    if activity_payload.get("last_sync_error"):
+        return False
+    if activity_payload.get("sync_failed"):
+        return False
+    
+    # Only exclude activities explicitly marked as local only
+    sync_state = str(activity_payload.get("sync_state") or "").strip().upper()
+    if sync_state == "LOCAL_ONLY":
+        return False
+    
+    return True
+
+
+def _is_form_complete(activity_payload: dict) -> bool:
+    """
+    Check if the activity's wizard_payload has all required fields filled.
+    Returns True if the form is considered complete enough for review.
+    This is a lenient check - most existing activities will pass.
+    """
+    wizard_payload = activity_payload.get("wizard_payload")
+    if not isinstance(wizard_payload, dict):
+        # Fallback: check top-level fields
+        return _required_fields_ok(activity_payload)
+    
+    # Check context fields (required wizard data)
+    context_payload = wizard_payload.get("context")
+    if isinstance(context_payload, dict):
+        required_context_keys = ("activity_type", "subcategory", "topic", "purpose")
+        present = 0
+        for key in required_context_keys:
+            value = context_payload.get(key)
+            if isinstance(value, dict):
+                # If it's a dict, it should have an id or name
+                if str(value.get("id") or value.get("name") or "").strip():
+                    present += 1
+            elif str(value or "").strip():
+                present += 1
+        
+        # Form is complete if at least 2 of 4 context fields are filled (lenient)
+        if present < 2:
+            return False
+    
+    # Check notes/description field
+    notes = wizard_payload.get("notes")
+    description = wizard_payload.get("description")
+    top_level_description = activity_payload.get("description")
+    if not (str(notes or "").strip() or str(description or "").strip() or str(top_level_description or "").strip()):
+        # Lenient: allow activities without explicit description if they have other content
+        # Only check if there's literally no description anywhere
+        pass
+    
+    return True
+
+
+def _should_include_in_review_queue(
+    execution_state: str | None,
+    review_status: str,
+    review_decision: str | None,
+    evidence_count: int,
+    activity_payload: dict | None = None,
+) -> bool:
     # EXCLUDE activities that are already approved - they go to reports for PDF generation
     # Activities with APPROVED status should never appear in the validation queue
     if review_status == "APPROVED":
@@ -105,6 +175,25 @@ def _should_include_in_review_queue(execution_state: str | None, review_status: 
         return False
     if normalized_decision == "REJECT":
         return False
+    
+    # ── NEW: Filter for activities that are synced and have complete data ──────────
+    if activity_payload is not None:
+        # Only include activities that have been synchronized to the server
+        # Exclude LOCAL_ONLY, READY_TO_SYNC, and activities with pending changes
+        if not _is_activity_synced(activity_payload):
+            return False
+        
+        # Only include activities that have filled the wizard form
+        # Exclude activities with incomplete or missing wizard_payload
+        if not _is_form_complete(activity_payload):
+            return False
+        
+        # Only include activities that have at least one evidence uploaded
+        # Exclude activities without any evidences
+        if evidence_count == 0:
+            return False
+    # ── END NEW ──────────────────────────────────────────────────────────────────
+    
     if review_status == "CHANGES_REQUIRED":
         return True
     # Include activities that are COMPLETADA but not yet reviewed
@@ -312,6 +401,50 @@ def _wizard_payload_evidence_count(activity_payload: dict[str, Any]) -> int:
     return len(_wizard_payload_evidence_rows(activity_payload))
 
 
+def _fetch_evidence_rows_for_activities(client, activity_ids: set[str]) -> dict[str, list[dict[str, Any]]]:
+    """
+    Fetch all evidence documents for a set of activity IDs.
+    Returns a dict mapping activity_id -> list of evidence payloads.
+    Only returns evidences with valid gcs_path that have been uploaded.
+    """
+    result: dict[str, list[dict[str, Any]]] = {aid: [] for aid in activity_ids if aid}
+    
+    if not activity_ids:
+        return result
+    
+    # Firestore IN queries support up to 30 values per query
+    chunk_size = 30
+    normalized_ids = [aid for aid in activity_ids if aid]
+    
+    for i in range(0, len(normalized_ids), chunk_size):
+        chunk = normalized_ids[i : i + chunk_size]
+        for snap in client.collection("evidences").where("activity_id", "in", chunk).stream():
+            payload = snap.to_dict() or {}
+            # Only include evidences that have been uploaded (have valid gcs_path)
+            gcs_path = str(payload.get("gcs_path") or payload.get("object_path") or payload.get("storage_path") or "").strip()
+            if not gcs_path or gcs_path.lower() == "none":
+                continue
+            activity_id = str(payload.get("activity_id") or "").strip()
+            if activity_id in result:
+                result[activity_id].append(payload)
+    
+    return result
+
+
+def _build_evidence_summary(row: dict[str, Any]) -> "ReviewEvidenceSummary":
+    """Build a ReviewEvidenceSummary from an evidence payload."""
+    gcs_path = str(row.get("gcs_path") or row.get("object_path") or row.get("storage_path") or "").strip()
+    return ReviewEvidenceSummary(
+        id=UUID(str(row.get("id") or row.get("uuid") or "00000000-0000-0000-0000-000000000000")),
+        takenAt=_safe_dt(row.get("created_at") or row.get("uploaded_at"), datetime.now(timezone.utc)),
+        lat=row.get("latitude") or row.get("lat"),
+        lng=row.get("longitude") or row.get("lng"),
+        description=row.get("caption") or row.get("description") or row.get("descripcion"),
+        gcsKey=gcs_path if gcs_path and gcs_path.lower() != "none" else None,
+        status="UPLOADED" if gcs_path and gcs_path.lower() != "none" else "PENDING",
+    )
+
+
 def _required_fields_ok(activity_payload: dict[str, Any]) -> bool:
     title_ok = bool(str(activity_payload.get("title") or "").strip())
     description_ok = bool(str(activity_payload.get("description") or "").strip())
@@ -456,7 +589,7 @@ def review_queue(
         execution_state = _normalize_execution_state(activity.get("execution_state"))
         review_decision = _normalize_review_decision(activity.get("review_decision"))
         status_value = _review_status_from_firestore(activity)
-        if not _should_include_in_review_queue(execution_state, status_value, activity.get("review_decision"), evidence_count):
+        if not _should_include_in_review_queue(execution_state, status_value, activity.get("review_decision"), evidence_count, activity):
             continue
         missing_evidence = evidence_count == 0
         catalog_change_pending = bool(activity.get("catalog_changed", False)) or bool(
@@ -536,6 +669,42 @@ def review_queue(
     items.sort(key=lambda x: x.updated_at, reverse=True)
     start = (page - 1) * page_size
     paged_items = items[start : start + page_size]
+    
+    # ── Fetch evidences for paged items ────────────────────────────────────────
+    # Only fetch evidences for the activities in the current page to optimize performance.
+    paged_activity_ids = {str(item.id) for item in paged_items}
+    evidence_rows_by_activity = _fetch_evidence_rows_for_activities(client, paged_activity_ids)
+    
+    # Also check for legacy activity IDs (server_id) and document IDs
+    for item in paged_items:
+        activity_payload = next(
+            (act for act in scoped_activities if str(act.get("uuid") or "") == str(item.id)),
+            {}
+        )
+        legacy_id = str(activity_payload.get("server_id") or "").strip()
+        if legacy_id and legacy_id != str(item.id):
+            legacy_evidence_rows = _fetch_evidence_rows_for_activities(client, {legacy_id})
+            if legacy_id in legacy_evidence_rows:
+                existing_ids = {e.id for e in item.evidences}
+                for row in legacy_evidence_rows[legacy_id]:
+                    try:
+                        summary = _build_evidence_summary(row)
+                        if summary.id not in existing_ids:
+                            item.evidences.append(summary)
+                            existing_ids.add(summary.id)
+                    except Exception:
+                        pass
+    
+    # Populate evidences for each item
+    for item in paged_items:
+        activity_uuid_str = str(item.id)
+        if activity_uuid_str in evidence_rows_by_activity:
+            for row in evidence_rows_by_activity[activity_uuid_str]:
+                try:
+                    item.evidences.append(_build_evidence_summary(row))
+                except Exception:
+                    pass
+
     return ReviewQueueResponse(
         items=paged_items,
         counters=ReviewQueueCountersOut(
@@ -638,6 +807,74 @@ def review_activity_detail(
         }
         for row in history_rows[:20]
     ]
+    
+    # ── Step 3: Fetch evidences for all activity IDs ───────────────────────────
+    # Collect all possible activity IDs to search for evidences
+    activity_ids_to_search: set[str] = {str(activity_uuid)}
+    server_id = str(activity.get("server_id") or "").strip()
+    if server_id:
+        activity_ids_to_search.add(server_id)
+    if activity_snap.id != str(activity_uuid):
+        activity_ids_to_search.add(activity_snap.id)
+    
+    # Query evidences for all activity IDs
+    seen_evidence_ids: set[str] = set()
+    evidences_docs: list[dict[str, Any]] = []
+    
+    for candidate_id in activity_ids_to_search:
+        if not candidate_id:
+            continue
+        for doc in client.collection("evidences").where("activity_id", "==", candidate_id).stream():
+            doc_id = str(doc.id)
+            if doc_id in seen_evidence_ids:
+                continue
+            seen_evidence_ids.add(doc_id)
+            evidences_docs.append(doc.to_dict() or {})
+    
+    evidences_docs.sort(key=lambda row: _safe_dt(row.get("created_at"), datetime.now(timezone.utc)))
+    
+    # Transform evidences to ReviewEvidenceOut format with auto-confirm logic
+    def _compute_evidence_status_and_resolve_detail(row: dict[str, Any], evidence_ref) -> tuple[str, str | None]:
+        """
+        Determine evidence status and auto-confirm pending uploads.
+        Returns (status, gcsKey).
+        """
+        object_path = _resolve_ev_path(row)
+        if object_path:
+            return "UPLOADED", object_path
+        
+        pending = str(row.get("pending_object_path") or "").strip()
+        if pending and pending.lower() != "none":
+            from app.api.v1.evidences import _normalize_object_path
+            normalized_pending = _normalize_object_path(pending)
+            if normalized_pending and _object_exists(normalized_pending):
+                now = datetime.now(timezone.utc)
+                evidence_ref.set({
+                    "object_path": pending,
+                    "updated_at": now,
+                }, merge=True)
+                logger.info(f"AUTO-CONFIRMED evidence upload in detail: doc_id={evidence_ref.id}, pending={pending}")
+                return "UPLOADED", pending
+        
+        return "PENDING", None
+    
+    evidence_list: list[ReviewEvidenceOut] = [
+        ReviewEvidenceOut(
+            id=UUID(str(row.get("id"))),
+            takenAt=_safe_dt(row.get("created_at"), datetime.now(timezone.utc)),
+            lat=row.get("latitude"),
+            lng=row.get("longitude"),
+            accuracy=row.get("accuracy"),
+            device=row.get("device"),
+            description=row.get("caption") or row.get("description") or row.get("descripcion"),
+            gcsKey=gcsKey,
+            status=status,
+        )
+        for row in evidences_docs
+        if row.get("id")
+        for status, gcsKey in [_compute_evidence_status_and_resolve_detail(row, client.collection("evidences").document(row.get("id")))]
+    ]
+    
     return ReviewActivityOut(
         id=activity_uuid,
         project_id=str(activity.get("project_id") or ""),
@@ -652,6 +889,7 @@ def review_activity_detail(
         quality_flags=quality_flags,
         changeset=changeset,
         history=history,
+        evidences=evidence_list,
     )
 
 

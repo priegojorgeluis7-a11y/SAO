@@ -35,6 +35,8 @@ class AgendaItem {
   final String? effectiveVersionId;
   final String projectCode;  // TAP, TMQ, SNL
   final String frente;
+  final List<String> frenteIds;  // NUEVO: Lista de IDs de frentes seleccionados
+  final bool allFronts;          // NUEVO: Flag para asignar a todos los frentes
   final String municipio;
   final String estado;
   final int? pk;
@@ -64,6 +66,8 @@ class AgendaItem {
     this.effectiveVersionId,
     required this.projectCode,
     required this.frente,
+    this.frenteIds = const [],    // NUEVO
+    this.allFronts = false,       // NUEVO
     required this.municipio,
     required this.estado,
     this.pk,
@@ -93,6 +97,8 @@ class AgendaItem {
     String? effectiveVersionId,
     String? projectCode,
     String? frente,
+    List<String>? frenteIds,
+    bool? allFronts,
     String? municipio,
     String? estado,
     int? pk,
@@ -122,6 +128,8 @@ class AgendaItem {
       effectiveVersionId: effectiveVersionId ?? this.effectiveVersionId,
       projectCode: projectCode ?? this.projectCode,
       frente: frente ?? this.frente,
+      frenteIds: frenteIds ?? this.frenteIds,
+      allFronts: allFronts ?? this.allFronts,
       municipio: municipio ?? this.municipio,
       estado: estado ?? this.estado,
       pk: pk ?? this.pk,

@@ -26,6 +26,8 @@ class AgendaAssignmentFactory {
     String? lugar,
     LocationType locationType = LocationType.pk,
     List<String> coResponsableIds = const [],
+    List<String> frenteIds = const [],  // NUEVO
+    bool allFronts = false,             // NUEVO
   }) {
     _ensureValid('projectCode', projectCode);
     _ensureValid('activityId', activity.id);
@@ -41,6 +43,8 @@ class AgendaAssignmentFactory {
       effectiveVersionId: effectiveVersionId,
       projectCode: projectCode,
       frente: frente,
+      frenteIds: frenteIds,
+      allFronts: allFronts,
       municipio: municipio?.trim() ?? '',
       estado: estado?.trim() ?? '',
       pk: pk,

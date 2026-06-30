@@ -227,7 +227,8 @@ def list_report_activities(
             execution_state == "COMPLETADA" 
             and review_decision not in {"APPROVE", "APPROVE_EXCEPTION", "APPROVED", "REJECTED", "CHANGES_REQUIRED"}
         )
-        if review_decision not in _APPROVED_DECISIONS and not is_completed_not_reviewed:
+        # Include activities that are approved OR completed without explicit rejection
+        if review_decision not in _APPROVED_DECISIONS and review_decision != "CHANGES_REQUIRED" and not is_completed_not_reviewed:
             continue
         # OPERATIVO ownership guard: must also be a participant.
         if is_operativo:

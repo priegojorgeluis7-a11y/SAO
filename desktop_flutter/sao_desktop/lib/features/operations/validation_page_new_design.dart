@@ -99,7 +99,12 @@ class _ValidationPageNewDesignState
       if (!mounted) return;
       final currentProjectId =
           ref.read(operationsProjectFilterProvider).trim().toUpperCase();
-      if (currentProjectId != initialProjectId) {
+      // Initialize operationsProjectFilterProvider from activeProjectIdProvider
+      // if it's empty or different from the active project
+      if (currentProjectId.isEmpty && initialProjectId.isNotEmpty) {
+        ref.read(operationsProjectFilterProvider.notifier).state =
+            initialProjectId;
+      } else if (currentProjectId != initialProjectId && initialProjectId.isNotEmpty) {
         ref.read(operationsProjectFilterProvider.notifier).state =
             initialProjectId;
       }

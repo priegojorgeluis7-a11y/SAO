@@ -67,7 +67,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
   String? _activitiesError;
 
   List<FrontOption> _frontOptions = const [];
-  FrontOption? _selectedFront;
+  List<FrontOption> _selectedFronts = [];  // NUEVO: Lista para selección múltiple
+  bool _allFronts = false;                  // NUEVO: Flag "todos los frentes"
   bool _loadingFronts = true;
   String? _frontsError;
   String _frontFreeText = '';
@@ -325,7 +326,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         _loadingFronts = false;
         _frontsError = 'No hay proyecto seleccionado para cargar $_frontLabelPlural.';
         _frontOptions = const [];
-        _selectedFront = null;
+        _selectedFronts = [];
+        _allFronts = false;
       });
       return;
     }
@@ -369,7 +371,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       if (!mounted) return;
       setState(() {
         _frontOptions = fronts;
-        _selectedFront = fronts.isNotEmpty ? fronts.first : null;
+        _selectedFronts = fronts.isNotEmpty ? [fronts.first] : [];
+        _allFronts = false;
         _frontFreeText = '';
         _frontController.text = '';
         _loadingFronts = false;
@@ -382,7 +385,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
       setState(() {
         _frontsError = 'No se pudieron cargar los $_frontLabelPlural del proyecto.';
         _frontOptions = const [];
-        _selectedFront = null;
+        _selectedFronts = [];
+        _allFronts = false;
         _loadingFronts = false;
       });
     }
@@ -940,7 +944,8 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
                 _loadingFronts = true;
                 _frontsError = null;
                 _frontOptions = const [];
-                _selectedFront = null;
+                _selectedFronts = [];
+                _allFronts = false;
                 _loadingStates = true;
                 _loadingMunicipios = false;
                 _stateOptions = const [];
@@ -975,30 +980,7 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
             ),
           )
         else if (_frontOptions.isNotEmpty)
-          DropdownButtonFormField<FrontOption>(
-            initialValue: _selectedFront,
-            isExpanded: true,
-            decoration: InputDecoration(
-              labelText: _frontLabel,
-              border: const OutlineInputBorder(),
-            ),
-            items: _frontOptions
-                .map(
-                  (front) => DropdownMenuItem<FrontOption>(
-                    value: front,
-                    child: Text(
-                      front.label,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) {
-              setState(() {
-                _selectedFront = value;
-              });
-            },
-          )
+          _buildMultiFrontSelector()
         else
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1360,9 +1342,11 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
         return _selectedResourceId != null;
       case 1:
         final hasProject = _selectedProject != null;
-        final hasFront = _frontOptions.isEmpty
-            ? _frontFreeText.trim().isNotEmpty
-            : _selectedFront != null;
+        // Validación de frente: acepta texto libre O selección múltiple O "todos"
+        final hasFrontFreeText = _frontFreeText.trim().isNotEmpty;
+        final hasFrontSelected = _selectedFronts.isNotEmpty;
+        final hasAllFronts = _allFronts;
+        final hasFront = _frontOptions.isEmpty ? hasFrontFreeText : (hasFrontSelected || hasAllFronts);
         final hasEstado = _stateOptions.isEmpty || _selectedEstado != null;
         final hasMunicipio = _municipioOptions.isEmpty || _selectedMunicipio != null;
         return hasProject &&
@@ -1520,14 +1504,23 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
     );
 
     final projectCode = (_selectedProject?.code ?? _selectedProject?.id ?? widget.projectId ?? '').trim();
-    final frontName = (_selectedFront?.name ?? _frontFreeText).trim();
+
+    // Construir información de frentes seleccionados
+    final frenteIds = _selectedFronts.map((f) => f.id).toList();
+    final frenteName = _allFronts
+        ? 'TODOS'
+        : (_selectedFronts.isNotEmpty
+            ? _selectedFronts.map((f) => f.name).join(', ')
+            : _frontFreeText.trim());
 
     final baseItem = _assignmentFactory.build(
       id: DateTime.now().millisecondsSinceEpoch.toString(),
       resourceId: _selectedResourceId!,
       activity: effectiveActivity,
       projectCode: projectCode,
-      frente: frontName,
+      frente: frenteName,
+      frenteIds: frenteIds,
+      allFronts: _allFronts,
       start: _startTime!,
       end: _endTime!,
       pk: (_locationType == LocationType.pk && _pk.isNotEmpty) ? _parsePk(_pk) : null,
@@ -1633,6 +1626,172 @@ class _DispatcherBottomSheetState extends State<DispatcherBottomSheet> {
           ],
         ),
       ),
+    );
+  }
+
+  /// Selector de frentes con selección múltiple y opción "Todos los frentes"
+  Widget _buildMultiFrontSelector() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                _frontLabel,
+                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+              ),
+            ),
+            // Opción "Todos los frentes"
+            if (_frontOptions.length > 1)
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (_allFronts) {
+                      _allFronts = false;
+                      // Restaurar selección anterior (primero por defecto)
+                      _selectedFronts = _frontOptions.isNotEmpty ? [_frontOptions.first] : [];
+                    } else {
+                      _allFronts = true;
+                      _selectedFronts = [];
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: _allFronts ? SaoColors.actionPrimary : SaoColors.gray100,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: _allFronts ? SaoColors.actionPrimary : SaoColors.gray300,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _allFronts ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                        size: 16,
+                        color: _allFronts ? Colors.white : SaoColors.gray600,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Todos',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _allFronts ? Colors.white : SaoColors.gray600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (!_allFronts)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _frontOptions.map((front) {
+              final isSelected = _selectedFronts.any((f) => f.id == front.id);
+              return GestureDetector(
+                onTap: () {
+                  setState(() {
+                    if (isSelected) {
+                      _selectedFronts = _selectedFronts.where((f) => f.id != front.id).toList();
+                    } else {
+                      _selectedFronts = [..._selectedFronts, front];
+                    }
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected ? SaoColors.actionPrimary.withValues(alpha: 0.12) : SaoColors.gray50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: isSelected ? SaoColors.actionPrimary : SaoColors.gray300,
+                      width: isSelected ? 2 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        isSelected ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                        size: 18,
+                        color: isSelected ? SaoColors.actionPrimary : SaoColors.gray500,
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        front.label,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                          color: isSelected ? SaoColors.actionPrimary : SaoColors.gray700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        if (_allFronts)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: SaoColors.actionPrimary.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.actionPrimary.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.public_rounded, size: 18, color: SaoColors.actionPrimary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'La actividad se asignará a los ${_frontOptions.length} $_frontLabelPlural disponibles del proyecto.',
+                    style: SaoTypography.caption.copyWith(
+                      color: SaoColors.actionPrimary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else if (_selectedFronts.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: SaoColors.info.withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: SaoColors.info.withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.layers_rounded, size: 16, color: SaoColors.info),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${_selectedFronts.length} $_frontLabelLower${_selectedFronts.length > 1 ? 's' : ''} seleccionad${_selectedFronts.length > 1 ? 'os' : 'o'}: ${_selectedFronts.map((f) => f.name).join(", ")}',
+                    style: SaoTypography.caption.copyWith(
+                      color: SaoColors.info,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

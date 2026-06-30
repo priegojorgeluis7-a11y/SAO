@@ -415,14 +415,18 @@ class ActivityRepository {
                     DateTime.tryParse((raw['takenAt'] ?? '').toString()) ??
                     fallback;
                 final gcsKey = (raw['gcsKey'] ?? '').toString().trim();
-                final statusToken = (raw['status'] ?? '').toString().trim().toUpperCase();
+                // Use gcsKey to determine if evidence is available on server.
+                // gcsKey is populated by backend using _resolve_ev_path which checks
+                // object_path, gcs_path, storage_path, pending_object_path in order.
+                // If gcsKey has a valid path, the evidence is available.
+                final hasServerFile = gcsKey.isNotEmpty && gcsKey.toLowerCase() != 'null';
                 final fileType = gcsKey.toLowerCase().endsWith('.pdf')
                     ? 'DOCUMENT'
                     : 'IMAGE';
                 return Evidence(
                   id: evidenceId,
                   activityId: activityId,
-                  filePath: statusToken == 'UPLOADED'
+                  filePath: hasServerFile
                       ? 'backend://evidence/$evidenceId'
                       : 'pending://evidence/$evidenceId',
                   fileType: fileType,
