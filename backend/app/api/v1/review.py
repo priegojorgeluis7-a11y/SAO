@@ -89,7 +89,7 @@ def _safe_dt(value: object, fallback: datetime) -> datetime:
     return fallback
 
 
-def _should_include_in_review_queue(execution_state: str | None, review_status: str, evidence_count: int) -> bool:
+def _should_include_in_review_queue(execution_state: str | None, review_status: str, review_decision: str | None, evidence_count: int) -> bool:
     # EXCLUDE activities that are already approved - they go to reports for PDF generation
     # Activities with APPROVED status should never appear in the validation queue
     if review_status == "APPROVED":
@@ -97,6 +97,13 @@ def _should_include_in_review_queue(execution_state: str | None, review_status: 
     # EXCLUDE rejected activities - they are already processed
     # Once rejected, the activity needs correction from the mobile app
     if review_status == "REJECTED":
+        return False
+    # EXCLUDE activities with APPROVE/REJECT decisions even if review_status is not set
+    # This handles legacy data where review_status was not populated
+    normalized_decision = _normalize_review_decision(review_decision)
+    if normalized_decision in {"APPROVE", "APPROVE_EXCEPTION"}:
+        return False
+    if normalized_decision == "REJECT":
         return False
     if review_status == "CHANGES_REQUIRED":
         return True
@@ -449,7 +456,7 @@ def review_queue(
         execution_state = _normalize_execution_state(activity.get("execution_state"))
         review_decision = _normalize_review_decision(activity.get("review_decision"))
         status_value = _review_status_from_firestore(activity)
-        if not _should_include_in_review_queue(execution_state, status_value, evidence_count):
+        if not _should_include_in_review_queue(execution_state, status_value, activity.get("review_decision"), evidence_count):
             continue
         missing_evidence = evidence_count == 0
         catalog_change_pending = bool(activity.get("catalog_changed", False)) or bool(
