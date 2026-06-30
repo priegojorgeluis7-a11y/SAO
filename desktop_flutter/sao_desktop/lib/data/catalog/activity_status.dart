@@ -8,6 +8,7 @@ class ActivityStatus {
   static const String approved = 'APPROVED';
   static const String rejected = 'REJECTED';
   static const String needsFix = 'NEEDS_FIX';
+  static const String changesRequired = 'CHANGES_REQUIRED';
   static const String corrected = 'CORRECTED';
   static const String conflict = 'CONFLICT';
 
@@ -34,6 +35,10 @@ class ActivityStatus {
       
       case needsFix:
         return 'Necesita corrección';
+
+      case changesRequired:
+      case 'changes_required':
+        return 'Cambios requeridos';
 
       case corrected:
       case 'CORREGIDA':
@@ -65,6 +70,11 @@ class ActivityStatus {
       case 'needs_fix':
         return needsFix;
 
+      case 'changes_required':
+      case 'cambios_requeridos':
+      case 'requiere_cambios':
+        return changesRequired;
+
       case 'corrected':
       case 'corregida':
         return corrected;
@@ -83,6 +93,7 @@ class ActivityStatus {
     approved,
     rejected,
     needsFix,
+    changesRequired,
     corrected,
     conflict,
   ];
